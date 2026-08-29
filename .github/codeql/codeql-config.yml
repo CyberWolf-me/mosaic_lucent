@@ -1,0 +1,17 @@
+# CodeQL scan configuration, referenced by .github/workflows/codeql.yml.
+name: "Lucent CodeQL config"
+
+# security-extended adds the lower-precision security queries on top of the
+# default suite. Worth the extra noise here: this codebase deliberately routes
+# model-supplied strings into an SVG attribute sink and a print document, and
+# those flow shapes are exactly what the extended suite is better at.
+queries:
+  - uses: security-extended
+
+paths-ignore:
+  # Vendored design prototype (JSX, never built and never served). Kept verbatim
+  # so it can be diffed against the port in packages/web, so alerts about it are
+  # not actionable.
+  - reference
+  # Build output, in case a scan ever runs on a dirty tree.
+  - "**/dist"

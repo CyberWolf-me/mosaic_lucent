@@ -1,0 +1,88 @@
+import { describe, it, expect } from "vitest";
+import { summarizeWorkspace } from "@lucent/ai";
+import type { GenerateResult, LLMProvider } from "@lucent/ai";
+import { createWorkspace } from "@lucent/core";
+import type { Operation } from "@lucent/core";
+import { handleGenerate } from "../src/generate.js";
+
+/**
+ * M5: the bounded repair round. A batch that fails validation goes back to
+ * the provider exactly once — with its own output and the validator's errors
+ * — and the corrected batch rides the same filter/stamp/validate path as the
+ * first. These tests script the provider so the round is observable: how many
+ * calls happened, what the second call was asked, and what the response says.
+ */
+
+const emptySummary = summarizeWorkspace(createWorkspace());
+
+const BAD_BATCH: Operation[] = [
+  { op: "CONNECT_NODES", source: "ghost", target: "phantom", relationship: "x" },
+];
+const GOOD_BATCH: Operation[] = [
+  { op: "CREATE_NODE", id: "fixed", nodeType: "step", label: "Fixed" },
+];
+
+/** Provider that fails validation on the first call, answers a script after. */
+function scriptedProvider(responses: GenerateResult[]): LLMProvider & {
+  calls: Array<{ message: string }>;
+} {
+  const calls: Array<{ message: string }> = [];
+  return {
+    name: "scripted",
+    calls,
+    async generateOperations(request: { message: string }) {
+      calls.push({ message: request.message });
+      const next = responses[calls.length - 1];
+      if (!next) throw new Error("script exhausted");
+      return next;
+    },
+  } as never;
+}
+
+describe("bounded repair round", () => {
+  it("retries once with the rejected batch in the prompt, then succeeds", async () => {
+    const provider = scriptedProvider([
+      { operations: BAD_BATCH, usage: { inputTokens: 10, outputTokens: 5 } },
+      {
+        operations: GOOD_BATCH,
+        explanation: "fixed it",
+        usage: { inputTokens: 20, outputTokens: 8 },
+      },
+    ]);
+    const result = await handleGenerate(provider, { message: "add a node", summary: emptySummary });
+    expect(result.status).toBe(200);
+    expect(provider.calls).toHaveLength(2);
+    // The repair prompt carries the validator's complaints and the batch.
+    expect(provider.calls[1]!.message).toContain("rejected by the validator");
+    expect(provider.calls[1]!.message).toContain("ghost");
+    const body = result.body as { operations: unknown[] };
+    expect(body.operations).toHaveLength(1);
+    // Metering sums BOTH calls: a repair round is real spend.
+    expect(result.completion?.usage).toEqual({ inputTokens: 30, outputTokens: 13 });
+  });
+
+  it("answers 422 with repaired:true when the repair also fails validation", async () => {
+    const provider = scriptedProvider([{ operations: BAD_BATCH }, { operations: BAD_BATCH }]);
+    const result = await handleGenerate(provider, { message: "x", summary: emptySummary });
+    expect(result.status).toBe(422);
+    expect(provider.calls).toHaveLength(2); // exactly one repair round, no more
+    expect((result.body as { repaired?: boolean }).repaired).toBe(true);
+  });
+
+  it("a provider failure inside the repair round is not a 502", async () => {
+    const provider = scriptedProvider([{ operations: BAD_BATCH }]);
+    const result = await handleGenerate(provider, { message: "x", summary: emptySummary });
+    // The first call succeeded; the honest answer is the validation failure,
+    // with the original errors, not a provider error.
+    expect(result.status).toBe(422);
+    expect((result.body as { repaired?: boolean }).repaired).toBe(false);
+    expect((result.body as { errors: unknown[] }).errors.length).toBeGreaterThan(0);
+  });
+
+  it("never retries a batch that passed validation", async () => {
+    const provider = scriptedProvider([{ operations: GOOD_BATCH }]);
+    const result = await handleGenerate(provider, { message: "x", summary: emptySummary });
+    expect(result.status).toBe(200);
+    expect(provider.calls).toHaveLength(1);
+  });
+});

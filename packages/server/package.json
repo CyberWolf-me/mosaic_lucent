@@ -1,0 +1,37 @@
+{
+  "name": "@lucent/server",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./src/index.ts",
+  "scripts": {
+    "dev": "tsx watch --conditions=development src/main.ts",
+    "prestart": "npm run build -w @lucent/core -w @lucent/ai -w @lucent/server",
+    "start": "node dist/main.js",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.test.json --noEmit",
+    "test": "vitest run",
+    "smoke": "tsx --conditions=development scripts/smoke.ts",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "tsx --conditions=development src/db/migrate.ts"
+  },
+  "dependencies": {
+    "@lucent/ai": "*",
+    "@lucent/core": "*",
+    "@xmldom/xmldom": "^0.9.12",
+    "drizzle-orm": "^0.45.2",
+    "pg": "^8.13.1",
+    "ws": "^8.21.3",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@types/pg": "^8.11.10",
+    "@types/ws": "^8.18.1",
+    "drizzle-kit": "^0.30.1",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.8"
+  }
+}

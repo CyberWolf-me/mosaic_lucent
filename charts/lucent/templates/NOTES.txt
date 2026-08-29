@@ -1,0 +1,39 @@
+Lucent has been installed.
+
+Release name:    {{ .Release.Name }}
+Namespace:       {{ .Release.Namespace }}
+Image tag:       {{ .Values.image.tag | default .Chart.AppVersion }}
+
+1. Visit the app:
+   {{- if .Values.ingress.enabled }}
+   {{- range .Values.ingress.hosts }}
+   https://{{ .host }}{{ (index .paths 0).path }}
+   {{- end }}
+   {{- else }}
+   kubectl port-forward svc/{{ include "lucent.fullname" . }} 8080:{{ .Values.service.port }}
+   then open http://localhost:8080
+   {{- end }}
+
+2. Watch rollout:
+   kubectl rollout status deployment/{{ include "lucent.fullname" . }} -n {{ .Release.Namespace }}
+
+3. Verify health:
+   kubectl exec deploy/{{ include "lucent.fullname" . }} -- curl -sf http://localhost:4387/health
+
+{{- if .Values.existingSecret }}
+
+Required Secret keys (configure these first):
+{{- range $k, $_ := .Values.env }}
+  - {{ $k }}
+{{- end }}
+{{- end }}
+
+{{- if and .Values.postgres.enabled (not .Values.postgres.existingSecret) }}
+
+WARNING: postgres.enabled=true but no password Secret is set.
+Run `helm upgrade` with `--set postgres.existingSecret=<name>` and a key
+matching `postgres.existingSecretPasswordKey`, or the server will not boot.
+{{- end }}
+
+See docs/runbooks/deploy.md and docs/runbooks/upgrade.md before changing
+the release.

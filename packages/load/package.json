@@ -1,0 +1,12 @@
+{
+  "name": "@lucent/load",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "k6 load profiles for the Lucent server. Operator tools, not part of npm test.",
+  "scripts": {
+    "editors": "k6 run editors-one-board.js",
+    "boards": "k6 run boards-1k.js",
+    "cold-open": "k6 run cold-open-5k.js"
+  }
+}

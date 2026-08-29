@@ -1,0 +1,73 @@
+name: load
+
+# The k6 gate (H). Scheduled, not per-push: a load profile needs an idle
+# runner to produce comparable numbers, and a PR does not need to wait for
+# one. `workflow_dispatch` lets an operator run it on demand — that is the
+# real audience for the thresholds.
+on:
+  schedule:
+    # 06:20 UTC daily — off the top of the hour so shared runners are quiet.
+    - cron: "20 6 * * *"
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - run: npm ci
+
+      - name: Build server
+        run: npm run build -w @lucent/core -w @lucent/ai -w @lucent/server
+
+      # k6's official image, pinned: a k6 release is a measurement change.
+      - uses: grafana/setup-k6-action@v1
+        with:
+          k6-version: v1.4.0
+
+      - name: Boot backend (mock provider, free-tier gates live)
+        run: |
+          LUCENT_PORT=4387 LUCENT_REQUIRE_AUTH=1 LUCENT_WEB_ORIGIN=http://127.0.0.1:4387 \
+            node packages/server/dist/main.js > server.log 2>&1 &
+          for i in $(seq 1 60); do
+            if curl -sf http://127.0.0.1:4387/health > /dev/null; then echo up; exit 0; fi
+            sleep 1
+          done
+          cat server.log; exit 1
+
+      # One short run per profile: enough to fail on a pathological regression
+      # (a p(95) blown past the threshold), cheap enough to run daily. The
+      # editors profile exercises the room; the boards profile the REST read
+      # path. cold-open needs the big-board seed and is the heaviest — a short
+      # duration is the point.
+      - name: k6 — editors on one board
+        run: k6 run -e DURATION=30s -e EDITORS=20 packages/load/editors-one-board.js
+        env:
+          LUCENT_BASE_URL: http://127.0.0.1:4387
+      - name: k6 — boards listing
+        run: k6 run -e DURATION=30s -e READERS=10 -e BOARDS=90 packages/load/boards-1k.js
+        env:
+          LUCENT_BASE_URL: http://127.0.0.1:4387
+      # The heaviest profile last: it seeds a 5,000-node board before reading
+      # it, so a failure here would otherwise mask which of the earlier
+      # profiles (if any) had already degraded the server. Its own thresholds
+      # gate it: p(95) cold open < 1s, p(95) small-board open < 250ms — the
+      # numbers docs/checklist.md's "large boards remain usable" item cites.
+      # Shorter than the others (15s) because the seed itself is expensive
+      # and the read path it measures is steady-state after ~2s.
+      - name: k6 — cold open of a 5k-node board
+        run: k6 run -e DURATION=15s -e READERS=6 -e NODES=5000 packages/load/cold-open-5k.js
+        env:
+          LUCENT_BASE_URL: http://127.0.0.1:4387
+
+      - name: Server log on failure
+        if: ${{ !cancelled() }}
+        run: tail -n 200 server.log

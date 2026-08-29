@@ -1,0 +1,315 @@
+import type { Operation, Shape } from "@lucent/core";
+import { shapeId } from "../shapes.js";
+import { alignPositions, distributePositions, type AlignMode } from "../board/geometry.js";
+
+/**
+ * Floating inspector for the current shape selection (docs/13 Tier 2). Edits
+ * fill/stroke color, brings shapes forward/back (z-order), and duplicates —
+ * each as an UPDATE_SHAPE / CREATE_SHAPE operation so it persists and undoes.
+ */
+
+const FILLS = [
+  "oklch(0.90 0.11 92)",
+  "oklch(0.86 0.08 235)",
+  "oklch(0.86 0.10 10)",
+  "oklch(0.87 0.09 145)",
+  "var(--canvas-2)",
+];
+
+export function ShapeInspector({
+  shapes,
+  selectedIds,
+  onApply,
+  onSelect,
+}: {
+  shapes: Record<string, Shape>;
+  selectedIds: Set<string>;
+  onApply: (ops: Operation[], label: string) => void;
+  onSelect: (ids: Set<string>) => void;
+}) {
+  const ids = [...selectedIds].filter((id) => shapes[id]);
+  if (ids.length === 0) return null;
+
+  const setFill = (fill: string) =>
+    onApply(
+      ids.map((id) => ({ op: "UPDATE_SHAPE", id, style: { fill } })),
+      "Recolor shape",
+    );
+
+  const setStroke = (stroke: string) =>
+    onApply(
+      ids.map((id) => ({ op: "UPDATE_SHAPE", id, style: { stroke } })),
+      "Restyle stroke",
+    );
+
+  const bringOrder = (dir: 1 | -1) => {
+    const zs = Object.values(shapes).map((s) => s.z ?? 0);
+    const edge = dir === 1 ? Math.max(0, ...zs) + 1 : Math.min(0, ...zs) - 1;
+    onApply(
+      ids.map((id, i) => ({ op: "UPDATE_SHAPE", id, z: edge + i * dir })),
+      dir === 1 ? "Bring to front" : "Send to back",
+    );
+  };
+
+  const duplicate = () => {
+    const ops: Operation[] = [];
+    const newIds = new Set<string>();
+    for (const id of ids) {
+      const s = shapes[id]!;
+      const nid = shapeId();
+      newIds.add(nid);
+      ops.push({
+        op: "CREATE_SHAPE",
+        id: nid,
+        kind: s.kind,
+        position: { x: s.position.x + 24, y: s.position.y + 24 },
+        size: s.size,
+        ...(s.rotation !== undefined ? { rotation: s.rotation } : {}),
+        ...(s.text !== undefined ? { text: s.text } : {}),
+        ...(s.path !== undefined ? { path: s.path } : {}),
+        ...(s.style ? { style: s.style } : {}),
+        z: (s.z ?? 0) + 1,
+      });
+    }
+    onApply(ops, `Duplicate ${ids.length} shape${ids.length > 1 ? "s" : ""}`);
+    onSelect(newIds);
+  };
+
+  const setFontSize = (fontSize: number) =>
+    onApply(
+      ids.map((id) => ({ op: "UPDATE_SHAPE", id, style: { fontSize } })),
+      "Text size",
+    );
+
+  const toggleBold = () => {
+    const anyBold = ids.some((id) => (shapes[id]?.style?.fontWeight ?? 400) >= 600);
+    onApply(
+      ids.map((id) => ({ op: "UPDATE_SHAPE", id, style: { fontWeight: anyBold ? 400 : 700 } })),
+      "Bold text",
+    );
+  };
+
+  const setAlign = (align: "left" | "center" | "right") =>
+    onApply(
+      ids.map((id) => ({ op: "UPDATE_SHAPE", id, style: { align } })),
+      "Align text",
+    );
+
+  /** Text colour. The model and renderer already supported style.color; only the
+   * control was missing, so text was stuck on the default ink. */
+  const setColor = (color: string) =>
+    onApply(
+      ids.map((id) => ({ op: "UPDATE_SHAPE", id, style: { color } })),
+      "Text colour",
+    );
+
+  /** Corner radius — turns a rectangle into a rounded rectangle. */
+  const setRadius = (radius: number) =>
+    onApply(
+      ids.map((id) => ({ op: "UPDATE_SHAPE", id, style: { radius } })),
+      "Corner radius",
+    );
+
+  const selectedShapes = ids.map((id) => shapes[id]!);
+  const anyLocked = selectedShapes.some((s) => s.locked);
+
+  const toggleLock = () =>
+    onApply(
+      ids.map((id) => ({ op: "UPDATE_SHAPE", id, locked: !anyLocked })),
+      anyLocked ? "Unlock" : "Lock",
+    );
+
+  const align = (mode: AlignMode) => {
+    const pos = alignPositions(selectedShapes, mode);
+    const ops = Object.entries(pos).map(([id, p]) => ({
+      op: "UPDATE_SHAPE" as const,
+      id,
+      position: p,
+    }));
+    if (ops.length) onApply(ops, "Align shapes");
+  };
+  const distribute = (axis: "h" | "v") => {
+    const pos = distributePositions(selectedShapes, axis);
+    const ops = Object.entries(pos).map(([id, p]) => ({
+      op: "UPDATE_SHAPE" as const,
+      id,
+      position: p,
+    }));
+    if (ops.length) onApply(ops, "Distribute shapes");
+  };
+
+  const anyGrouped = selectedShapes.some((s) => s.groupId);
+  const groupShapes = () => {
+    if (ids.length < 2) return;
+    onApply(
+      [{ op: "GROUP_SHAPES", groupId: `grp_${Date.now().toString(36)}`, ids }],
+      "Group shapes",
+    );
+  };
+  const ungroupShapes = () => {
+    const gids = new Set(selectedShapes.map((s) => s.groupId).filter(Boolean) as string[]);
+    if (gids.size === 0) return;
+    onApply(
+      [...gids].map((groupId) => ({ op: "UNGROUP_SHAPES" as const, groupId })),
+      "Ungroup shapes",
+    );
+  };
+
+  return (
+    <div className="shape-inspector">
+      <div className="insp-label">{ids.length > 1 ? `${ids.length} selected` : "Shape"}</div>
+      <div className="insp-group">
+        <span className="insp-cap">Fill</span>
+        <div className="insp-swatches">
+          {FILLS.map((c) => (
+            <button
+              key={c}
+              className="insp-swatch"
+              style={{ background: c }}
+              onClick={() => setFill(c)}
+              title="Fill"
+              aria-label={`Fill ${c}`}
+            />
+          ))}
+        </div>
+      </div>
+      <div className="insp-group">
+        <span className="insp-cap">Stroke</span>
+        <div className="insp-swatches">
+          {[
+            "var(--ink-0)",
+            "var(--amber-2)",
+            "var(--sig-blue)",
+            "var(--sig-green)",
+            "var(--sig-red)",
+          ].map((c) => (
+            <button
+              key={c}
+              className="insp-swatch"
+              style={{ background: c }}
+              onClick={() => setStroke(c)}
+              title="Stroke"
+              aria-label={`Stroke ${c}`}
+            />
+          ))}
+        </div>
+      </div>
+      <div className="insp-group">
+        <span className="insp-cap">Text</span>
+        <div className="segmented">
+          <button onClick={toggleBold} style={{ fontWeight: 700 }} aria-label="Bold" title="Bold">
+            B
+          </button>
+          <button onClick={() => setFontSize(12)} aria-label="Small text" title="Small">
+            S
+          </button>
+          <button onClick={() => setFontSize(16)} aria-label="Medium text" title="Medium">
+            M
+          </button>
+          <button onClick={() => setFontSize(22)} aria-label="Large text" title="Large">
+            L
+          </button>
+        </div>
+        <div className="segmented" style={{ marginTop: 6 }}>
+          <button onClick={() => setAlign("left")} aria-label="Align left" title="Align left">
+            ◧
+          </button>
+          <button onClick={() => setAlign("center")} aria-label="Align center" title="Align center">
+            ▣
+          </button>
+          <button onClick={() => setAlign("right")} aria-label="Align right" title="Align right">
+            ◨
+          </button>
+        </div>
+        <div className="insp-swatches" style={{ marginTop: 6 }}>
+          {["#1a1a1a", "#ffffff", "var(--sig-blue)", "var(--sig-red)", "var(--sig-green)"].map(
+            (c) => (
+              <button
+                key={c}
+                className="insp-swatch"
+                style={{ background: c }}
+                onClick={() => setColor(c)}
+                title="Text colour"
+                aria-label={`Text colour ${c}`}
+              />
+            ),
+          )}
+        </div>
+      </div>
+      <div className="insp-group">
+        <span className="insp-cap">Corners</span>
+        <div className="segmented">
+          <button onClick={() => setRadius(0)} title="Square corners">
+            ▢
+          </button>
+          <button onClick={() => setRadius(8)} title="Rounded">
+            ▣
+          </button>
+          <button onClick={() => setRadius(22)} title="Very rounded">
+            ◍
+          </button>
+        </div>
+      </div>
+      {ids.length > 1 && (
+        <div className="insp-group">
+          <span className="insp-cap">Align</span>
+          <div className="segmented">
+            <button onClick={() => align("left")} title="Align left">
+              ⇤
+            </button>
+            <button onClick={() => align("hcenter")} title="Center horizontally">
+              ⇔
+            </button>
+            <button onClick={() => align("right")} title="Align right">
+              ⇥
+            </button>
+          </div>
+          <div className="segmented" style={{ marginTop: 6 }}>
+            <button onClick={() => align("top")} title="Align top">
+              ⤒
+            </button>
+            <button onClick={() => align("vcenter")} title="Center vertically">
+              ⇕
+            </button>
+            <button onClick={() => align("bottom")} title="Align bottom">
+              ⤓
+            </button>
+          </div>
+          {ids.length > 2 && (
+            <div className="segmented" style={{ marginTop: 6 }}>
+              <button onClick={() => distribute("h")} title="Distribute horizontally">
+                ↔ Even
+              </button>
+              <button onClick={() => distribute("v")} title="Distribute vertically">
+                ↕ Even
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+      <div className="insp-sep" />
+      <button className="insp-btn" onClick={() => bringOrder(1)}>
+        Front
+      </button>
+      <button className="insp-btn" onClick={() => bringOrder(-1)}>
+        Back
+      </button>
+      <button className="insp-btn" onClick={duplicate}>
+        Duplicate
+      </button>
+      {ids.length > 1 && !anyGrouped && (
+        <button className="insp-btn" onClick={groupShapes}>
+          Group
+        </button>
+      )}
+      {anyGrouped && (
+        <button className="insp-btn" onClick={ungroupShapes}>
+          Ungroup
+        </button>
+      )}
+      <button className="insp-btn" onClick={toggleLock}>
+        {anyLocked ? "Unlock" : "Lock"}
+      </button>
+    </div>
+  );
+}

@@ -1,0 +1,5 @@
+-- 0014_should_be_noop: journal marker with no schema change.
+-- The SCIM migration (0013) left the drizzle snapshot and schema.ts in
+-- agreement; this file exists so the journal never names a migration that is
+-- not on disk, and so a future `drizzle-kit generate` diffs from a settled
+-- state. Kept empty on purpose.

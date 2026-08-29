@@ -1,0 +1,98 @@
+import type { RegisterRoutes } from "./context.js";
+
+/**
+ * Board meeting routes (E3 / R3):
+ *
+ *   POST /api/boards/:id/meetings      save a diarised transcript (editor)
+ *   GET  /api/boards/:id/meetings      list a board's meetings (viewer)
+ *   GET  /api/boards/:id/meetings/:mid one transcript (viewer)
+ *
+ * Reads are viewer-floor because the transcript is board state, same as the
+ * workspace; writes are editor-floor because a transcript records what was
+ * said in the meeting — a viewer could fabricate minutes.
+ *
+ * The CSRF guard runs first on the POST: a browser session is the expected
+ * caller for capture, and bearer clients (the MCP client, API keys) pass
+ * through it by design, as everywhere else.
+ */
+export const registerMeetingRoutes: RegisterRoutes = (router, s) => {
+  const { send, requireUser, requireBoardRole, readBody, meetings } = s;
+
+  router.post("/api/boards/:id/meetings", async (ctx) => {
+    const { req, res } = ctx;
+    const boardId = ctx.param("id");
+    // Guard before store check: a 503 for an unconfigured store must not
+    // become an oracle over which boards exist.
+    const guard = await requireBoardRole(req, res, boardId, "editor", "/api/boards/:id/meetings");
+    if (!guard.ok) return;
+    if (!meetings) return send(res, 503, { error: "meeting transcripts are not configured" });
+
+    let body: {
+      turns?: unknown;
+      startedAt?: unknown;
+      endedAt?: unknown;
+    };
+    try {
+      const raw = await readBody(req);
+      body = raw ? (JSON.parse(raw) as typeof body) : {};
+    } catch (err) {
+      send(res, 400, { error: "bad request", detail: (err as Error).message });
+      return;
+    }
+
+    const startedAt =
+      typeof body.startedAt === "number" && Number.isFinite(body.startedAt) && body.startedAt > 0
+        ? body.startedAt
+        : Date.now();
+    const endedAt =
+      typeof body.endedAt === "number" && Number.isFinite(body.endedAt) && body.endedAt >= startedAt
+        ? body.endedAt
+        : null;
+
+    // Imported here rather than module scope so this route file needs no
+    // runtime dependency on the meetings domain beyond the store interface.
+    const { validateTurns } = await import("../meetings.js");
+    const checked = validateTurns(body.turns);
+    if (!checked.ok) {
+      send(res, 400, { error: checked.error });
+      return;
+    }
+
+    const saved = await meetings.insert({
+      boardId,
+      orgId: guard.board.orgId,
+      startedAt,
+      endedAt,
+      turns: checked.turns,
+      createdBy: guard.user.id,
+      createdAt: Date.now(),
+    });
+    send(res, 201, saved);
+  });
+
+  router.get("/api/boards/:id/meetings", async (ctx) => {
+    const { req, res } = ctx;
+    const boardId = ctx.param("id");
+    const guard = await requireBoardRole(req, res, boardId, "viewer", "/api/boards/:id/meetings");
+    if (!guard.ok) return;
+    if (!meetings) return send(res, 503, { error: "meeting transcripts are not configured" });
+    const rows = await meetings.forBoard(boardId);
+    send(res, 200, { meetings: rows });
+  });
+
+  router.get("/api/boards/:id/meetings/:mid", async (ctx) => {
+    const { req, res } = ctx;
+    const boardId = ctx.param("id");
+    const mid = ctx.param("mid");
+    const guard = await requireBoardRole(req, res, boardId, "viewer", "/api/boards/:id/meetings/:mid");
+    if (!guard.ok) return;
+    if (!meetings) return send(res, 503, { error: "meeting transcripts are not configured" });
+    const row = await meetings.get(boardId, mid);
+    if (!row) {
+      send(res, 404, { error: "meeting not found" });
+      return;
+    }
+    send(res, 200, row);
+  });
+
+};

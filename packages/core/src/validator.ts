@@ -1,0 +1,235 @@
+import type { Workspace } from "./model.js";
+import { edgeId } from "./model.js";
+import type { Operation } from "./operations.js";
+import { isUnauthored } from "./authorship.js";
+import { isImageDataUrl } from "./schemaPrimitives.js";
+
+/**
+ * Semantic validation: schema parsing (operations.ts) guarantees shape, but not
+ * that an operation makes sense against the *current* workspace (e.g. connecting
+ * a node that doesn't exist). This layer catches those before the reducer runs,
+ * so the canvas never enters an inconsistent state. See docs/09 section 4/8.
+ *
+ * Authorship is one of those semantics (M0.4). `by` is optional in the schema
+ * because no client can be trusted to pick it, and every write path is supposed
+ * to call `stampAuthorship` before validating. "Supposed to" is what failed: the
+ * MCP path shipped without it, and the reducer's `"me"` fallback made an
+ * authorless comment look like a real one, so nothing complained. Refusing an
+ * unauthored authored op here turns that convention into an invariant — a new
+ * write path that forgets to stamp fails on its first comment with a message
+ * that names the fix, instead of quietly attributing board content to nobody.
+ */
+
+export interface ValidationError {
+  index: number;
+  op: Operation["op"];
+  message: string;
+}
+
+export function validateOperations(workspace: Workspace, ops: Operation[]): ValidationError[] {
+  const errors: ValidationError[] = [];
+
+  // Simulate presence as ops are applied in order, so an op can reference an
+  // entity created by an earlier op in the same batch.
+  const nodes = new Set(Object.keys(workspace.nodes));
+  const groups = new Set(Object.keys(workspace.groups));
+  const edges = new Set(Object.keys(workspace.edges));
+  const wireframes = new Set(Object.keys(workspace.wireframes));
+  const shapes = new Set(Object.keys(workspace.shapes));
+  // Locked shapes (M0.5): the validator refuses to mutate or remove them
+  // unless the op is explicitly clearing `locked`. The previous behaviour
+  // treated `locked` as advisory only, which let a model move, recolor or
+  // delete shapes the user had pinned.
+  const lockedShapes = new Set(
+    Object.values(workspace.shapes)
+      .filter((s) => s.locked)
+      .map((s) => s.id),
+  );
+  const shapeLinks = new Set(Object.keys(workspace.shapeLinks));
+  const votes = new Set(Object.keys(workspace.votes ?? {}));
+  const reactions = new Set(Object.keys(workspace.reactions ?? {}));
+  const comments = new Set(Object.keys(workspace.comments ?? {}));
+  // Thread roots only: a reply must attach to a root, not to another reply.
+  const commentRoots = new Set(
+    Object.values(workspace.comments ?? {})
+      .filter((c) => !c.parentId)
+      .map((c) => c.id),
+  );
+
+  ops.forEach((op, index) => {
+    const err = (message: string) => errors.push({ index, op: op.op, message });
+
+    // Checked ahead of the switch so all four annotation ops are covered by one
+    // rule, reading the same list `stampAuthorship` does (authorship.ts).
+    if (isUnauthored(op)) {
+      err(`${op.op} "${op.id}" has no author; stamp authorship before validating`);
+    }
+
+    switch (op.op) {
+      case "CREATE_NODE":
+        if (nodes.has(op.id)) err(`node "${op.id}" already exists`);
+        if (op.groupId && !groups.has(op.groupId)) err(`group "${op.groupId}" does not exist`);
+        nodes.add(op.id);
+        break;
+      case "DELETE_NODE":
+        if (!nodes.has(op.id)) err(`node "${op.id}" does not exist`);
+        nodes.delete(op.id);
+        break;
+      case "CHANGE_TEXT":
+      case "CHANGE_NODE_TYPE":
+      case "MOVE_NODE":
+        if (!nodes.has(op.id)) err(`node "${op.id}" does not exist`);
+        break;
+      case "SET_ISSUE":
+        if (!nodes.has(op.id)) err(`node "${op.id}" does not exist`);
+        // A parent must be a real node, so epic→story links never dangle.
+        if (op.issue?.parentId && !nodes.has(op.issue.parentId))
+          err(`parent issue "${op.issue.parentId}" does not exist`);
+        break;
+      case "UPDATE_ISSUE":
+        if (!nodes.has(op.id)) err(`node "${op.id}" does not exist`);
+        if (op.parentId && !nodes.has(op.parentId))
+          err(`parent issue "${op.parentId}" does not exist`);
+        break;
+      case "CONNECT_NODES": {
+        if (!nodes.has(op.source)) err(`source node "${op.source}" does not exist`);
+        if (!nodes.has(op.target)) err(`target node "${op.target}" does not exist`);
+        if (op.source === op.target) err(`cannot connect node "${op.source}" to itself`);
+        edges.add(edgeId(op.source, op.target, op.relationship));
+        break;
+      }
+      case "DISCONNECT_NODES": {
+        const id = edgeId(op.source, op.target, op.relationship);
+        if (!edges.has(id)) err(`edge ${id} does not exist`);
+        edges.delete(id);
+        break;
+      }
+      case "CREATE_GROUP":
+        if (groups.has(op.id)) err(`group "${op.id}" already exists`);
+        // Children may be created later in the same batch (a node's own
+        // groupId also links it), so we don't require them to pre-exist.
+        groups.add(op.id);
+        break;
+      case "DELETE_GROUP":
+        if (!groups.has(op.id)) err(`group "${op.id}" does not exist`);
+        groups.delete(op.id);
+        break;
+      case "CREATE_DIAGRAM":
+      case "TRANSFORM_DIAGRAM":
+        break;
+      case "CREATE_WIREFRAME":
+        if (wireframes.has(op.id)) err(`wireframe "${op.id}" already exists`);
+        wireframes.add(op.id);
+        break;
+      case "DELETE_WIREFRAME":
+        if (!wireframes.has(op.id)) err(`wireframe "${op.id}" does not exist`);
+        wireframes.delete(op.id);
+        break;
+      case "CREATE_SHAPE":
+        if (shapes.has(op.id)) err(`shape "${op.id}" already exists`);
+        // An inline base64 image is how pasted and generated images travel, but
+        // only an image shape renders `src` in an <img>: on an embed the same
+        // field reaches an iframe, so it stays http(s)-only there.
+        if (op.src && op.kind !== "image" && isImageDataUrl(op.src)) {
+          err(`a data URL src is only allowed on an image shape, not "${op.kind}"`);
+        }
+        shapes.add(op.id);
+        // A new shape may declare itself locked at creation. Treating that the
+        // same as a post-creation update keeps the lock-state invariant
+        // uniform across all paths that introduce a shape.
+        if (op.locked === true) lockedShapes.add(op.id);
+        break;
+      case "UPDATE_SHAPE": {
+        if (!shapes.has(op.id)) err(`shape "${op.id}" does not exist`);
+        // Locked shapes may only be updated to clear their own lock; anything
+        // else is a move/recolour/relabel the AI should not perform.
+        const isLocked = lockedShapes.has(op.id);
+        const clearsLock = op.locked === false;
+        if (isLocked && !clearsLock) {
+          err(`shape "${op.id}" is locked; clear the lock before further edits`);
+        }
+        if (op.locked === true) lockedShapes.add(op.id);
+        else if (clearsLock) lockedShapes.delete(op.id);
+        break;
+      }
+      case "DELETE_SHAPE": {
+        if (!shapes.has(op.id)) err(`shape "${op.id}" does not exist`);
+        if (lockedShapes.has(op.id)) err(`shape "${op.id}" is locked`);
+        shapes.delete(op.id);
+        lockedShapes.delete(op.id);
+        break;
+      }
+      case "CONNECT_SHAPES":
+        if (shapeLinks.has(op.id)) err(`shape link "${op.id}" already exists`);
+        if (!shapes.has(op.source)) err(`shape link source "${op.source}" does not exist`);
+        if (!shapes.has(op.target)) err(`shape link target "${op.target}" does not exist`);
+        shapeLinks.add(op.id);
+        break;
+      case "UPDATE_LINK":
+        if (!shapeLinks.has(op.id)) err(`shape link "${op.id}" does not exist`);
+        break;
+      case "DISCONNECT_SHAPES":
+        if (!shapeLinks.has(op.id)) err(`shape link "${op.id}" does not exist`);
+        shapeLinks.delete(op.id);
+        break;
+      case "GROUP_SHAPES":
+        for (const id of op.ids) {
+          if (!shapes.has(id)) err(`shape "${id}" does not exist`);
+          if (lockedShapes.has(id)) err(`shape "${id}" is locked`);
+        }
+        break;
+      case "UNGROUP_SHAPES":
+        break;
+
+      // Votes and reactions attach to either a node or a shape.
+      case "ADD_VOTE":
+        if (votes.has(op.id)) err(`vote "${op.id}" already exists`);
+        if (!nodes.has(op.targetId) && !shapes.has(op.targetId))
+          err(`vote target "${op.targetId}" does not exist`);
+        votes.add(op.id);
+        break;
+      case "REMOVE_VOTE":
+        if (!votes.has(op.id)) err(`vote "${op.id}" does not exist`);
+        votes.delete(op.id);
+        break;
+      case "CLEAR_VOTES":
+        if (op.targetId !== undefined && !nodes.has(op.targetId) && !shapes.has(op.targetId))
+          err(`vote target "${op.targetId}" does not exist`);
+        break;
+      case "ADD_REACTION":
+        if (reactions.has(op.id)) err(`reaction "${op.id}" already exists`);
+        if (!nodes.has(op.targetId) && !shapes.has(op.targetId))
+          err(`reaction target "${op.targetId}" does not exist`);
+        reactions.add(op.id);
+        break;
+      case "REMOVE_REACTION":
+        if (!reactions.has(op.id)) err(`reaction "${op.id}" does not exist`);
+        reactions.delete(op.id);
+        break;
+
+      // Comment threads anchor to a node or shape; replies attach to a root.
+      case "ADD_COMMENT":
+        if (comments.has(op.id)) err(`comment "${op.id}" already exists`);
+        if (!nodes.has(op.targetId) && !shapes.has(op.targetId))
+          err(`comment target "${op.targetId}" does not exist`);
+        comments.add(op.id);
+        commentRoots.add(op.id);
+        break;
+      case "REPLY_COMMENT":
+        if (comments.has(op.id)) err(`comment "${op.id}" already exists`);
+        if (!commentRoots.has(op.parentId)) err(`comment thread "${op.parentId}" does not exist`);
+        comments.add(op.id);
+        break;
+      case "RESOLVE_COMMENT":
+        if (!commentRoots.has(op.id)) err(`comment thread "${op.id}" does not exist`);
+        break;
+      case "DELETE_COMMENT":
+        if (!comments.has(op.id)) err(`comment "${op.id}" does not exist`);
+        comments.delete(op.id);
+        commentRoots.delete(op.id);
+        break;
+    }
+  });
+
+  return errors;
+}

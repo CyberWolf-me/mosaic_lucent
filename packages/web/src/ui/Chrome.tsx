@@ -1,0 +1,738 @@
+import { useEffect, useRef, useState } from "react";
+import { Ico } from "./icons.js";
+import { CommandOverlay } from "./CommandOverlay.js";
+import { NotificationTray } from "./NotificationTray.js";
+import { ProfileMenu } from "./ProfileMenu.js";
+import { getSessionUser } from "../session.js";
+import { useWorkspace, type View } from "../workspace.js";
+import {
+  createShareLink,
+  listMembers,
+  removeMember,
+  revokeShareLinks,
+  setMemberRole,
+  type BoardMemberSummary,
+  type ShareRole,
+} from "../boards.js";
+
+/** Top bar, left rail, command overlay, and badges. Ported from chrome.jsx. */
+
+export interface Crumb {
+  label: string;
+  current?: boolean;
+  view?: View;
+}
+
+export function TopBar({
+  crumbs,
+  actions,
+  meta,
+  onOpenSettings,
+}: {
+  crumbs: Crumb[];
+  actions?: React.ReactNode;
+  /** Optional right-side stamp: a small mono label, like the corner of a sheet. */
+  meta?: React.ReactNode;
+  onOpenSettings: (section?: string) => void;
+}) {
+  const { setView, readOnly } = useWorkspace();
+  const [share, setShare] = useState(false);
+  return (
+    <div className="top-bar">
+      <button
+        className="brand"
+        onClick={() => setView("dashboard")}
+        title="Home"
+        style={{ background: "none", border: 0, padding: 0, cursor: "pointer" }}
+      >
+        <div className="logo" />
+        <span>Lucent</span>
+      </button>
+      <span className="crumb-sep">/</span>
+      {crumbs.map((c, i) => (
+        <span key={i} style={{ display: "contents" }}>
+          {c.view ? (
+            <button
+              className={`crumb ${c.current ? "current" : ""}`}
+              onClick={() => setView(c.view!)}
+              style={{ background: "none", border: 0, cursor: "pointer" }}
+            >
+              {c.label}
+            </button>
+          ) : (
+            <span className={`crumb ${c.current ? "current" : ""}`}>{c.label}</span>
+          )}
+          {i < crumbs.length - 1 && <span className="crumb-sep">/</span>}
+        </span>
+      ))}
+      {meta && <div className="spacer" />}
+      {meta}
+      <div className="spacer" />
+      <div className="actions">
+        {/* Outside the `actions ?? …` fallback on purpose: notifications are
+            account-scoped, so a view that supplies its own action cluster must
+            not be a view where they disappear. */}
+        <NotificationTray />
+        {actions ?? (
+          <>
+            {readOnly && (
+              <span className="view-only-chip" role="status" aria-label="View only">
+                <Ico.Eye /> View only
+              </span>
+            )}
+            <button
+              className="icon-btn"
+              onClick={() => setShare(true)}
+              aria-label="Share workspace"
+            >
+              <Ico.Share /> Share
+            </button>
+            <button
+              className="icon-btn"
+              onClick={() => setView("meeting")}
+              title="Meeting mode"
+              aria-label="Meeting mode"
+            >
+              <Ico.Present /> Present
+            </button>
+            <button
+              className="icon-btn"
+              onClick={() => setView("admin")}
+              title="Workspace admin"
+              aria-label="Workspace admin"
+            >
+              Admin
+            </button>
+            <button
+              className="icon-btn"
+              onClick={() => setView("analytics")}
+              title="Workspace analytics"
+              aria-label="Workspace analytics"
+            >
+              Analytics
+            </button>
+            <div style={{ width: 8 }} />
+            <ProfileMenu onOpenSettings={onOpenSettings} />
+          </>
+        )}
+      </div>
+      {share && <ShareDialog onClose={() => setShare(false)} />}
+    </div>
+  );
+}
+
+function ShareDialog({ onClose }: { onClose: () => void }) {
+  const { syncStatus, syncRole, boardId, peers, startSharing } = useWorkspace();
+  const [copied, setCopied] = useState(false);
+  const [copyFailed, setCopyFailed] = useState(false);
+  const [sharing, setSharing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const signedIn = getSessionUser() !== null;
+
+  // The role a newly minted link will grant. Editor is the useful default for
+  // "come work on this with me"; viewer is there for a read-only walkthrough.
+  const [linkRole, setLinkRole] = useState<ShareRole>("editor");
+  const [invite, setInvite] = useState<{ token: string; role: ShareRole } | null>(null);
+  const [minting, setMinting] = useState(false);
+  const [members, setMembers] = useState<BoardMemberSummary[]>([]);
+  const isOwner = syncRole === "owner";
+
+  // Load the member list whenever the dialog opens on a shared board, so role
+  // changes and removals act on current data rather than a stale snapshot.
+  useEffect(() => {
+    if (!boardId) return;
+    let cancelled = false;
+    void listMembers(boardId).then((res) => {
+      if (!cancelled && res) setMembers(res.members);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [boardId]);
+
+  const refreshMembers = async () => {
+    if (!boardId) return;
+    const res = await listMembers(boardId);
+    if (res) setMembers(res.members);
+  };
+
+  // An invite URL carries the board id *and* the token: the id alone is not a
+  // capability, so a bare ?board= link 404s for anyone who isn't a member.
+  const shareUrl =
+    typeof window !== "undefined"
+      ? boardId
+        ? `${window.location.origin}${window.location.pathname}?board=${encodeURIComponent(boardId)}${
+            invite ? `&invite=${encodeURIComponent(invite.token)}` : ""
+          }`
+        : window.location.href
+      : "";
+
+  const copy = async () => {
+    setCopyFailed(false);
+    try {
+      await navigator.clipboard.writeText(shareUrl);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1400);
+    } catch {
+      // Clipboard access needs a secure context and permission; say so instead
+      // of showing a false success.
+      setCopyFailed(true);
+      setTimeout(() => setCopyFailed(false), 2200);
+    }
+  };
+
+  const share = async () => {
+    setSharing(true);
+    setError(null);
+    const id = await startSharing();
+    setSharing(false);
+    if (!id)
+      setError("Couldn't publish the board. Check you're signed in and the server is running.");
+  };
+
+  /** Mint a fresh link. The previous token stays valid until it's revoked. */
+  const mintLink = async () => {
+    if (!boardId) return;
+    setMinting(true);
+    setError(null);
+    const link = await createShareLink(boardId, linkRole);
+    setMinting(false);
+    if (!link) {
+      setError("Couldn't create an invite link. Only the board owner can share it.");
+      return;
+    }
+    setInvite({ token: link.token, role: link.role });
+  };
+
+  const revokeAll = async () => {
+    if (!boardId) return;
+    const revoked = await revokeShareLinks(boardId);
+    setInvite(null);
+    setError(
+      revoked > 0
+        ? null
+        : "There were no live links to revoke. People who already joined keep their access.",
+    );
+  };
+
+  return (
+    <>
+      <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 200 }} />
+      <div
+        style={{
+          position: "fixed",
+          top: 62,
+          right: 20,
+          zIndex: 201,
+          width: 320,
+          padding: 16,
+          background: "oklch(from var(--canvas-2) l c h / 0.95)",
+          border: "1px solid var(--stroke-2)",
+          borderRadius: "var(--r-lg)",
+          boxShadow: "var(--elev-3)",
+          backdropFilter: "blur(20px)",
+          color: "var(--ink-0)",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+          <Ico.Share />
+          <div style={{ fontSize: 13, fontVariationSettings: "'wght' 550" }}>Share workspace</div>
+          <div style={{ flex: 1 }} />
+          <button
+            onClick={onClose}
+            style={{ padding: 4, color: "var(--ink-3)" }}
+            aria-label="Close share dialog"
+          >
+            <Ico.X />
+          </button>
+        </div>
+
+        {boardId ? (
+          <>
+            <div
+              style={{
+                display: "flex",
+                gap: 6,
+                alignItems: "center",
+                padding: "8px 10px",
+                background: "var(--canvas-2)",
+                border: "1px solid var(--stroke-1)",
+                borderRadius: 6,
+                marginBottom: 12,
+              }}
+            >
+              <span
+                className="mono"
+                style={{
+                  flex: 1,
+                  fontSize: 11,
+                  color: "var(--ink-2)",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {shareUrl}
+              </span>
+              <button
+                onClick={copy}
+                style={{
+                  fontSize: 11,
+                  padding: "4px 10px",
+                  borderRadius: "var(--r-sm)",
+                  background: copied
+                    ? "oklch(0.78 0.11 155 / 0.15)"
+                    : copyFailed
+                      ? "oklch(0.72 0.15 25 / 0.15)"
+                      : "var(--ink-0)",
+                  color: copied
+                    ? "var(--sig-green)"
+                    : copyFailed
+                      ? "var(--sig-red)"
+                      : "var(--canvas-0)",
+                  fontVariationSettings: "'wght' 550",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 4,
+                }}
+              >
+                {copied ? (
+                  <>
+                    <Ico.Check /> Copied
+                  </>
+                ) : copyFailed ? (
+                  "Blocked"
+                ) : (
+                  "Copy"
+                )}
+              </button>
+            </div>
+            <div style={{ fontSize: 12, color: "var(--ink-2)", lineHeight: 1.5 }}>
+              {syncStatus === "online"
+                ? `Live · ${peers.length === 0 ? "no one else here yet" : `${peers.length} other${peers.length > 1 ? "s" : ""} on this board`}${syncRole ? ` · you are ${syncRole}` : ""}.`
+                : syncStatus === "connecting"
+                  ? "Connecting to the board…"
+                  : "Offline — reconnecting when the server is reachable."}
+              {!invite &&
+                isOwner &&
+                " Create an invite link below — a bare board link won't let anyone in."}
+            </div>
+
+            {isOwner && (
+              <div
+                style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid var(--stroke-1)" }}
+              >
+                <div
+                  style={{
+                    fontSize: 11,
+                    color: "var(--ink-3)",
+                    textTransform: "uppercase",
+                    letterSpacing: "0.05em",
+                    marginBottom: 8,
+                  }}
+                >
+                  Invite link
+                </div>
+                <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
+                  <div className="segmented" style={{ flex: 1 }}>
+                    <button
+                      className={linkRole === "editor" ? "active" : ""}
+                      onClick={() => setLinkRole("editor")}
+                    >
+                      Can edit
+                    </button>
+                    <button
+                      className={linkRole === "viewer" ? "active" : ""}
+                      onClick={() => setLinkRole("viewer")}
+                    >
+                      Can view
+                    </button>
+                  </div>
+                  <button
+                    className="btn"
+                    onClick={() => void mintLink()}
+                    disabled={minting}
+                    style={{ fontSize: 11.5, whiteSpace: "nowrap" }}
+                  >
+                    {minting ? "…" : invite ? "New link" : "Create link"}
+                  </button>
+                </div>
+                {invite && (
+                  <div
+                    style={{
+                      fontSize: 11.5,
+                      color: "var(--ink-2)",
+                      lineHeight: 1.45,
+                      marginBottom: 8,
+                    }}
+                  >
+                    The link above now grants{" "}
+                    <strong>{invite.role === "editor" ? "edit" : "view"}</strong> access. Anyone who
+                    opens it joins the board; revoking stops new joins but keeps people who already
+                    joined.
+                  </div>
+                )}
+                <button
+                  onClick={() => void revokeAll()}
+                  style={{ fontSize: 11, color: "var(--sig-red)", padding: "2px 0" }}
+                >
+                  Revoke all links
+                </button>
+              </div>
+            )}
+
+            {members.length > 0 && (
+              <div
+                style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid var(--stroke-1)" }}
+              >
+                <div
+                  style={{
+                    fontSize: 11,
+                    color: "var(--ink-3)",
+                    textTransform: "uppercase",
+                    letterSpacing: "0.05em",
+                    marginBottom: 8,
+                  }}
+                >
+                  People with access ({members.length})
+                </div>
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 6,
+                    maxHeight: 160,
+                    overflowY: "auto",
+                  }}
+                >
+                  {members.map((m) => (
+                    <div
+                      key={m.userId}
+                      style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 11.5 }}
+                    >
+                      <span
+                        className="mono"
+                        style={{
+                          flex: 1,
+                          color: "var(--ink-2)",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                        }}
+                      >
+                        {m.userId}
+                      </span>
+                      {isOwner ? (
+                        <>
+                          <select
+                            value={m.role}
+                            aria-label={`Role for ${m.userId}`}
+                            onChange={(e) => {
+                              const role = e.target.value as ShareRole;
+                              void setMemberRole(m.boardId, m.userId, role).then(refreshMembers);
+                            }}
+                            style={{
+                              fontSize: 11,
+                              background: "var(--canvas-2)",
+                              color: "var(--ink-1)",
+                              border: "1px solid var(--stroke-1)",
+                              borderRadius: "var(--r-xs)",
+                              padding: "2px 4px",
+                            }}
+                          >
+                            <option value="editor">Can edit</option>
+                            <option value="viewer">Can view</option>
+                          </select>
+                          <button
+                            onClick={() =>
+                              void removeMember(m.boardId, m.userId).then(refreshMembers)
+                            }
+                            aria-label={`Remove ${m.userId}`}
+                            style={{ color: "var(--ink-3)", padding: 2 }}
+                          >
+                            <Ico.X />
+                          </button>
+                        </>
+                      ) : (
+                        <span style={{ color: "var(--ink-3)" }}>{m.role}</span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </>
+        ) : (
+          <>
+            <div style={{ fontSize: 12, color: "var(--ink-2)", lineHeight: 1.5, marginBottom: 12 }}>
+              {signedIn
+                ? "This board is local to your browser. Publish it to collaborate live — others open the link and see your cursor and edits as they happen."
+                : "Sign in first: a shared board lives on the server, so it needs an account to own it."}
+            </div>
+            <button
+              className="btn amber"
+              style={{ width: "100%" }}
+              onClick={() => void share()}
+              disabled={!signedIn || sharing}
+            >
+              {sharing ? "Publishing…" : "Publish & start collaborating"}
+            </button>
+          </>
+        )}
+        {error && (
+          <div style={{ fontSize: 11.5, color: "var(--sig-red)", lineHeight: 1.45, marginTop: 10 }}>
+            {error}
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
+const RAIL_ITEMS: { id: string; icon: keyof typeof Ico; label: string; view: View }[] = [
+  { id: "projects", icon: "Folder", label: "Projects", view: "dashboard" },
+  { id: "canvas", icon: "Layers", label: "Canvas", view: "canvas" },
+  { id: "sequence", icon: "Flow", label: "Sequence", view: "sequence" },
+  { id: "er", icon: "Mind", label: "ER diagram", view: "er" },
+  { id: "board", icon: "Grid", label: "Board", view: "board" },
+  { id: "document", icon: "Book", label: "Document", view: "document" },
+  { id: "meeting", icon: "Journey", label: "Meeting", view: "meeting" },
+  { id: "wireframe", icon: "Grid", label: "Wireframe", view: "wireframe" },
+];
+
+export function LeftRail({
+  side = "left",
+  onOpenSettings,
+}: {
+  side?: "left" | "right";
+  onOpenSettings?: (section?: string) => void;
+}) {
+  const { view, setView, newProject, workspace } = useWorkspace();
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [confirmNew, setConfirmNew] = useState(false);
+
+  // Does the current board hold work worth warning about before replacing it?
+  const hasWork =
+    Object.keys(workspace.nodes).length > 0 ||
+    Object.keys(workspace.shapes).length > 0 ||
+    Object.keys(workspace.wireframes).length > 0;
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      const typing = t?.tagName === "INPUT" || t?.tagName === "TEXTAREA";
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setSearchOpen(true);
+      }
+      // Escape shouldn't close search while the user is mid-word in the field's
+      // sibling inputs elsewhere on the page.
+      if (e.key === "Escape" && !typing) setSearchOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  return (
+    <>
+      <div className={`left-rail ${side === "right" ? "on-right" : ""}`}>
+        {RAIL_ITEMS.map((it) => {
+          const Icon = Ico[it.icon];
+          return (
+            <button
+              key={it.id}
+              className={`rail-btn ${view === it.view ? "active" : ""}`}
+              title={it.label}
+              onClick={() => setView(it.view)}
+            >
+              <Icon />
+            </button>
+          );
+        })}
+        <div style={{ flex: 1 }} />
+        <button className="rail-btn" title="History" onClick={() => setView("history")}>
+          <Ico.History />
+        </button>
+        <button className="rail-btn" title="Search · ⌘K" onClick={() => setSearchOpen(true)}>
+          <Ico.Search />
+        </button>
+        <div className="rail-divider" />
+        {/* Kept at the bottom, away from the view switcher: this replaces the
+            current board, and sitting directly above "Canvas"/"Wireframe" made it
+            easy to wipe a board while reaching for a view. */}
+        <button
+          className="rail-btn"
+          title="New workspace"
+          onClick={() => (hasWork ? setConfirmNew(true) : newProject())}
+        >
+          <Ico.Plus />
+        </button>
+      </div>
+      {confirmNew && (
+        <ConfirmNewWorkspace
+          onCancel={() => setConfirmNew(false)}
+          onConfirm={() => {
+            setConfirmNew(false);
+            newProject();
+          }}
+        />
+      )}
+      {searchOpen && (
+        <CommandOverlay onClose={() => setSearchOpen(false)} onOpenSettings={onOpenSettings} />
+      )}
+    </>
+  );
+}
+
+/** Guard before replacing the current board. `newProject` is not undoable via
+ * canvas history, so a mis-click used to lose the whole board silently. */
+function ConfirmNewWorkspace({
+  onCancel,
+  onConfirm,
+}: {
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const cancelRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    // Move focus into the dialog so keyboard/AT users land on it, and Escape
+    // cancels. Focus the safe "Keep working here" action, not the destructive one.
+    cancelRef.current?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onCancel();
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onCancel]);
+
+  return (
+    <>
+      <div className="modal-scrim" onClick={onCancel} />
+      <div
+        className="confirm-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Start a new workspace"
+      >
+        <div className="confirm-title">Start a new workspace?</div>
+        <div className="confirm-body">
+          This board stays saved in Projects, but the canvas will be cleared and you'll start from
+          an empty board.
+        </div>
+        <div className="confirm-actions">
+          <button ref={cancelRef} className="btn ghost" onClick={onCancel}>
+            Keep working here
+          </button>
+          <button className="btn amber" onClick={onConfirm}>
+            New workspace
+          </button>
+        </div>
+      </div>
+    </>
+  );
+}
+
+export function ZoomBadge({
+  zoom,
+  onZoomIn,
+  onZoomOut,
+  onReset,
+  onFit,
+  overviewOn,
+  onToggleOverview,
+}: {
+  zoom: number;
+  onZoomIn?: () => void;
+  onZoomOut?: () => void;
+  onReset?: () => void;
+  onFit?: () => void;
+  /** Current overview (minimap) visibility, when the toggle is offered. */
+  overviewOn?: boolean;
+  onToggleOverview?: () => void;
+}) {
+  return (
+    <div
+      className="chrome-badge"
+      style={{
+        position: "absolute",
+        bottom: 20,
+        left: 20,
+        zIndex: 25,
+        display: "flex",
+        alignItems: "center",
+        gap: 6,
+        padding: "6px 12px",
+        borderRadius: 999,
+        fontSize: 11,
+        fontFamily: "var(--font-mono)",
+        userSelect: "none",
+      }}
+    >
+      <button
+        style={{ padding: "0 4px", fontSize: 14, lineHeight: 1 }}
+        onClick={onZoomOut}
+        title="Zoom out"
+      >
+        −
+      </button>
+      <button
+        onClick={onReset}
+        style={{ color: "var(--ink-1)", minWidth: 42, textAlign: "center" }}
+      >
+        {Math.round(zoom)}%
+      </button>
+      <button
+        style={{ padding: "0 4px", fontSize: 14, lineHeight: 1 }}
+        onClick={onZoomIn}
+        title="Zoom in"
+      >
+        +
+      </button>
+      {onFit && (
+        <button style={{ padding: "0 6px", fontSize: 11 }} onClick={onFit} title="Zoom to fit">
+          Fit
+        </button>
+      )}
+      {onToggleOverview && (
+        <button
+          style={{
+            padding: "0 6px",
+            fontSize: 11,
+            color: overviewOn ? "var(--ink-0)" : "var(--ink-3)",
+          }}
+          onClick={onToggleOverview}
+          title={overviewOn ? "Hide board overview" : "Show board overview"}
+        >
+          Map
+        </button>
+      )}
+    </div>
+  );
+}
+
+export function StatusBadge({ children }: { children: React.ReactNode }) {
+  return (
+    <div
+      className="chrome-badge"
+      style={{
+        position: "absolute",
+        bottom: 20,
+        right: 20,
+        zIndex: 25,
+        display: "flex",
+        alignItems: "center",
+        gap: 8,
+        padding: "6px 12px",
+        borderRadius: 999,
+        fontSize: 11,
+        fontFamily: "var(--font-mono)",
+        letterSpacing: "0.03em",
+        whiteSpace: "nowrap",
+      }}
+    >
+      {children}
+    </div>
+  );
+}

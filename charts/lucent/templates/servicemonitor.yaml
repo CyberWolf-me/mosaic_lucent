@@ -1,0 +1,14 @@
+{{- if .Values.serviceMonitor.enabled -}}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "lucent.fullname" . }}
+  labels: {{- include "lucent.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels: {{- include "lucent.selectorLabels" . | nindent 6 }}
+  endpoints:
+    - port: http
+      path: /metrics/prometheus
+      interval: {{ .Values.serviceMonitor.interval }}
+{{- end }}

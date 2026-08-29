@@ -1,0 +1,15 @@
+apiVersion: v2
+name: lucent
+description: AI-Native Voice Visual Workspace server + web
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - collaborative
+  - ai
+  - diagrams
+maintainers:
+  - name: Lucent
+home: https://github.com/lucent/lucent
+sources:
+  - https://github.com/lucent/lucent

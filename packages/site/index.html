@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Lucent — describe it, see it</title>
+    <meta
+      name="description"
+      content="Lucent turns what you say into a structured, editable visual workspace. Voice or text in; a semantic diagram you can keep talking to out."
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="nav">
+      <strong class="brand">Lucent</strong>
+      <nav>
+        <a href="#product">Product</a>
+        <a href="#how">How it works</a>
+        <a href="#pricing">Pricing</a>
+        <a href="#security">Security</a>
+      </nav>
+      <a class="cta" href="#start">Start sketching</a>
+    </header>
+
+    <main>
+      <section class="hero">
+        <h1>Describe it, see it.</h1>
+        <p>
+          Lucent is an AI-native visual workspace. Say what you're building by voice or text, and an
+          editable, structured diagram appears — then keep talking to refine it. Flowcharts,
+          architecture, user journeys, mind maps: one semantic model underneath, many renderings on
+          top.
+        </p>
+        <div class="hero-cta">
+          <a class="cta big" href="#start">Try the demo</a>
+          <span class="muted">No account needed for the offline demo.</span>
+        </div>
+        <dl class="facts">
+          <div>
+            <dt>Your words</dt>
+            <dd>“Design an e-commerce flow with Stripe payments.”</dd>
+          </div>
+          <div>
+            <dt>Lucent builds</dt>
+            <dd>An eight-node flowchart, connected and laid out, in seconds.</dd>
+          </div>
+          <div>
+            <dt>Then you say</dt>
+            <dd>“Add authentication before checkout.” — and it's placed for you.</dd>
+          </div>
+        </dl>
+      </section>
+
+      <section id="product">
+        <h2>A canvas with meaning, not just shapes.</h2>
+        <p>
+          Every object on a Lucent board knows what it is. That is what lets the AI edit rather than
+          regenerate, what keeps the board editable when the conversation ends, and what lets one
+          diagram become a presentation, a wireframe, or a document without a rebuild.
+        </p>
+        <ul class="features">
+          <li>
+            <strong>Talk, don't draw.</strong> The primary interaction is describing; manual editing
+            is always there when you want it.
+          </li>
+          <li>
+            <strong>Every AI action is reversible.</strong> An operation log with undo/redo — treat
+            your board's history like Git.
+          </li>
+          <li>
+            <strong>One model, many views.</strong> Mind map to flowchart to architecture to
+            wireframe: transformations, not re-authoring.
+          </li>
+          <li>
+            <strong>Real-time multiplayer.</strong> Server-authoritative rooms with live cursors and
+            comments; the log is the source of truth.
+          </li>
+          <li>
+            <strong>Bring your own model key.</strong> Deploy with our provider budget, or let each
+            user bring their own.
+          </li>
+        </ul>
+      </section>
+
+      <section id="how">
+        <h2>How it works</h2>
+        <ol class="steps">
+          <li>
+            <strong>Describe</strong> — type or talk. Speech goes through transcription into the
+            same text pipeline.
+          </li>
+          <li>
+            <strong>Structured operations</strong> — the AI emits validated operations (create node,
+            connect, transform), never pixels or coordinates.
+          </li>
+          <li>
+            <strong>Layout</strong> — a deterministic engine places the graph. Models are bad at
+            coordinates; we don't ask them.
+          </li>
+          <li>
+            <strong>Refine</strong> — every follow-up references the board's real state, so “make it
+            simpler” works.
+          </li>
+        </ol>
+      </section>
+
+      <section id="pricing">
+        <h2>Pricing</h2>
+        <div class="tiers">
+          <div class="tier">
+            <h3>Free</h3>
+            <p class="price">$0</p>
+            <ul>
+              <li>3 boards</li>
+              <li>50 AI generations / month</li>
+              <li>PNG export</li>
+            </ul>
+          </div>
+          <div class="tier featured">
+            <h3>Pro</h3>
+            <p class="price">$12<span>/mo</span></p>
+            <ul>
+              <li>Unlimited boards</li>
+              <li>500 AI generations / month</li>
+              <li>Every export format</li>
+              <li>Version history</li>
+            </ul>
+          </div>
+          <div class="tier">
+            <h3>Team</h3>
+            <p class="price">$10<span>/seat</span></p>
+            <ul>
+              <li>Everything in Pro</li>
+              <li>Realtime collaboration</li>
+              <li>Team template library</li>
+            </ul>
+          </div>
+          <div class="tier">
+            <h3>Enterprise</h3>
+            <p class="price">Custom</p>
+            <ul>
+              <li>SSO (Google, GitHub, SAML)</li>
+              <li>SCIM provisioning</li>
+              <li>Usage analytics &amp; SLOs</li>
+              <li>BYO model keys</li>
+            </ul>
+          </div>
+        </div>
+        <p class="muted">
+          Per-seat allowances scale with the plan; see the in-app Plan &amp; usage pane for your
+          live numbers.
+        </p>
+      </section>
+
+      <section id="security">
+        <h2>Your boards are your data.</h2>
+        <p>
+          Board content is never used to train models. Provider keys live only on the server. Every
+          request is tenant-scoped, every operation is validated before it touches your board, and a
+          deployment can run on your own infrastructure with Postgres-backed persistence.
+        </p>
+      </section>
+
+      <section id="start" class="start">
+        <h2>Start sketching</h2>
+        <p>
+          Run the open-source stack locally in three commands — the offline demo needs no AI key at
+          all:
+        </p>
+        <pre><code>npm install
+npm run start -w @lucent/server
+npm run dev -w @lucent/web</code></pre>
+        <p class="muted">Then open <code>http://localhost:5173</code> and describe something.</p>
+      </section>
+    </main>
+
+    <footer>
+      <span>© 2026 Lucent</span>
+      <span class="muted">An AI-native voice visual workspace.</span>
+    </footer>
+  </body>
+</html>

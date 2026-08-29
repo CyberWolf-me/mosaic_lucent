@@ -1,0 +1,59 @@
+import { describe, it, expect } from "vitest";
+import { createWorkspace, applyOperations } from "@lucent/core";
+import type { Operation } from "@lucent/core";
+import { boardToMarkdown, boardToCsv, parseCsv, csvToStickyOps } from "../src/board/serialize.js";
+
+function ecommerce() {
+  const ops: Operation[] = [
+    { op: "CREATE_NODE", id: "user", nodeType: "actor", label: "Customer" },
+    { op: "CREATE_NODE", id: "checkout", nodeType: "screen", label: "Checkout" },
+    { op: "CONNECT_NODES", source: "user", target: "checkout", relationship: "uses" },
+    {
+      op: "CREATE_SHAPE",
+      id: "s1",
+      kind: "sticky",
+      position: { x: 0, y: 0 },
+      size: { width: 100, height: 60 },
+      text: "Ship faster",
+    },
+  ];
+  return applyOperations(createWorkspace({ name: "Shop" }), ops);
+}
+
+describe("board serialize (Phase B)", () => {
+  it("exports Markdown with nodes, connections, and notes", () => {
+    const md = boardToMarkdown(ecommerce());
+    expect(md).toContain("# Shop");
+    expect(md).toContain("**Customer**");
+    expect(md).toContain("Customer → Checkout");
+    expect(md).toContain("- Ship faster");
+  });
+
+  it("exports CSV with node rows and outgoing edges", () => {
+    const csv = boardToCsv(ecommerce());
+    expect(csv.split("\n")[0]).toBe("id,type,label,connects_to");
+    expect(csv).toContain("user,actor,Customer,Checkout");
+  });
+
+  it("parses CSV including quoted cells with commas and newlines", () => {
+    const rows = parseCsv(`a,b\n"x,y","line1\nline2"`);
+    expect(rows).toEqual([
+      ["a", "b"],
+      ["x,y", "line1\nline2"],
+    ]);
+  });
+
+  it("turns CSV into a grid of sticky CREATE_SHAPE ops", () => {
+    const ops = csvToStickyOps("Task,Owner\nDesign,Alex");
+    const kinds = ops.map((o) => (o as { op: string }).op);
+    expect(kinds.every((k) => k === "CREATE_SHAPE")).toBe(true);
+    // 2 header cells + 2 data cells = 4 stickies
+    expect(ops).toHaveLength(4);
+  });
+
+  it("round-trips a CSV import into a usable workspace", () => {
+    const ops = csvToStickyOps("A,B\nC,D");
+    const ws = applyOperations(createWorkspace(), ops);
+    expect(Object.keys(ws.shapes)).toHaveLength(4);
+  });
+});

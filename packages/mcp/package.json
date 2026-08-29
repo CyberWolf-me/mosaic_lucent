@@ -1,0 +1,30 @@
+{
+  "name": "@lucent/mcp",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "bin": {
+    "lucent-mcp": "./dist/main.js"
+  },
+  "scripts": {
+    "prestart": "npm run build -w @lucent/core -w @lucent/mcp",
+    "start": "node dist/main.js",
+    "dev": "tsx --conditions=development src/main.ts",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage"
+  },
+  "dependencies": {
+    "@lucent/core": "*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@vitest/coverage-v8": "^2.1.9",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.8",
+    "@lucent/server": "*"
+  }
+}

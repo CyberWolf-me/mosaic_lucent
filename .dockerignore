@@ -1,0 +1,27 @@
+node_modules
+**/node_modules
+**/dist
+packages/*/coverage
+.vscode
+.idea
+.DS_Store
+*.log
+.env
+.env.*
+!.env.example
+.git
+.gitignore
+.zcode
+docs/**/*.png
+docs/**/*.jpg
+docs/**/*.gif
+# Tests and fixtures ship with the source but the prod server doesn't run
+# them. Drop them to keep the image small.
+**/*.test.ts
+**/*.test.tsx
+**/*.spec.ts
+**/*.spec.tsx
+**/test
+**/tests
+**/fixtures
+**/__snapshots__

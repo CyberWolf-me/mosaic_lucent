@@ -1,0 +1,124 @@
+# Lucent chart values (M6/F2 — private deployment).
+#
+# Each value has a sensible default but is exposed so an operator's deployment
+# can override without forking the chart. Comments name the env var the
+# container expects, so this file is the single source of truth for "what
+# env this deployment runs on".
+#
+# Sensitive values (DB URL, Stripe key, etc.) are NOT in this file — they
+# come from a Secret referenced via `existingSecret`.
+
+replicaCount: 2
+
+image:
+  repository: lucent/server
+  pullPolicy: IfNotPresent
+  # Pinned by CI to <git-sha>. Never `latest`. See docs/runbooks/deploy.md.
+  tag: ""
+
+imagePullSecrets: []
+
+# Pod-level resource budgets. The defaults target a moderate single-room
+# workload; scale up or carve separate pools for heavy enterprise tenants.
+resources:
+  limits:
+    cpu: "1"
+    memory: "512Mi"
+  requests:
+    cpu: "200m"
+    memory: "256Mi"
+
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 4387
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: lucent.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+# Single source of truth for environment variables. Operators can either:
+#   (a) populate the inline `env` map, OR
+#   (b) set `existingSecret` to a pre-created Secret whose keys are the env
+#       names listed below.
+#
+# The defaults that are safe to ship in cleartext (web origin, log level)
+# live here; secrets (database url, LLM keys, Stripe key, SCIM token) come
+# from the Secret.
+existingSecret: ""
+env:
+  NODE_ENV: production
+  LUCENT_LOG_LEVEL: info
+  LUCENT_WEB_ORIGIN: "https://lucent.example.com"
+  LUCENT_REQUIRE_AUTH: "1"
+  LUCENT_TRUST_PROXY: "1"
+  # Set LUCENT_DATABASE_URL through the secret in production — the value
+  # below is only here so a `helm install` against no Secret does not boot.
+  LUCENT_DATABASE_URL: "postgres://lucent:lucent@localhost:5432/lucent"
+  # Postgres advisory-lock migrations handle this; we still set a generous
+  # timeout so a slow boot does not crash-loop the pod.
+  LUCENT_AI_TIMEOUT_MS: "90000"
+
+# Self-test on every pod start. The chart's pre-install/pre-upgrade hooks
+# run migrations on a leader-elected pod, but a per-pod ping is what tells
+# Kubernetes the deployment is healthy.
+livenessProbe:
+  httpGet:
+    path: /health
+    port: 4387
+  initialDelaySeconds: 10
+  periodSeconds: 30
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+readinessProbe:
+  httpGet:
+    path: /health
+    port: 4387
+  initialDelaySeconds: 3
+  periodSeconds: 10
+  timeoutSeconds: 3
+  failureThreshold: 3
+
+# Postgres dependency. We do not ship a Postgres chart here — operators
+# typically use their cloud-managed instance (RDS / Cloud SQL / Crunchy).
+# The values below document what Lucent expects the database to provide.
+postgres:
+  # Leave empty for local dev. In production, set via `--set`
+  # or an external Secret + Vault. Chart does NOT manage Postgres.
+  enabled: false
+  host: postgres
+  port: 5432
+  database: lucent
+  # Username/secret name. Password lives in a Secret.
+  username: lucent
+  existingSecret: ""
+  existingSecretPasswordKey: password
+
+# Web sidecar: serves the static SPA out of the same image's `dist/web/`.
+# Operator can set `image` separately if they prefer, but v1 ships both
+# from a single image.
+web:
+  enabled: true
+  # Mounted at /app in the image, served by the server's static handler
+  # when present. Set `LUCENT_STATIC_ROOT` to override the path.
+  staticRoot: /app/dist
+
+# Pod disruption budget. Defaults to minAvailable=1 so a node drain during
+# a rolling update never brings the deployment below a single ready pod.
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+# ServiceMonitor for Prometheus. Disabled by default; set to true in
+# clusters where the Prometheus operator is installed.
+serviceMonitor:
+  enabled: false
+  interval: 30s

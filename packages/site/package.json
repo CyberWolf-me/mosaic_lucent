@@ -1,0 +1,9 @@
+{
+  "name": "@lucent/site",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The Lucent marketing site. Static HTML + CSS, no build step — any static host serves the directory as-is, and the app copy lives next to the product it describes.",
+  "scripts": {
+    "serve": "npx serve . -l 4173"
+  }
+}

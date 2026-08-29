@@ -1,0 +1,40 @@
+name: Bug report
+description: Something behaves differently from what the code claims
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: Observed behaviour versus expected. Paste exact error text.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. npm run dev
+        2. Create a board, invite a second user as viewer
+        3. ...
+    validations:
+      required: true
+  - type: dropdown
+    id: store
+    attributes:
+      label: Persistence
+      options:
+        - In-memory (no LUCENT_DATABASE_URL)
+        - Postgres
+        - Not sure
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+  - type: textarea
+    id: context
+    attributes:
+      label: Logs
+      description: Server output with the request id, if you have it. Never paste secrets or board content.

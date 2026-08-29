@@ -1,0 +1,134 @@
+groups:
+  - name: lucent-server.rules
+    rules:
+      # Tier-1 page: the primary product-side alarm. Fires when the 5-minute
+      # success rate is below 97% (= 3x the SLO budget consumption rate at the
+      # 30-day window). 5-minute window keeps short blips from paging; pages
+      # when the burn rate is sustained.
+      - alert: LucentApiHighErrorRate
+        expr: |
+          sum(rate(lucent_http_requests_total{status=~"5.."}[5m]))
+          / sum(rate(lucent_http_requests_total[5m])) > 0.03
+        for: 5m
+        labels:
+          severity: page
+          slo: api_availability
+        annotations:
+          summary: "API error rate > 3% over 5 minutes"
+          runbook_url: "https://github.com/lucent/lucent/blob/main/docs/runbooks/oncall.md"
+          description: |
+            5xx share is over 3% sustained 5 minutes. That is ~3x the SLO budget
+            burn rate (SLO: 99.9% / 30d; 3% / 5m = fast-burn).
+            Customer impact: failed requests for paid users. Treat as a page.
+
+      # Tier-1 ticket: realtime stability degraded. The SLO is "99.5% of
+      # connections stay connected 5 minutes", measured via the connection
+      # duration histogram.
+      - alert: LucentRealtimeConnectionDrops
+        expr: |
+          histogram_quantile(
+            0.05,
+            sum by (le) (rate(lucent_realtime_connection_duration_seconds_bucket[15m]))
+          ) < 120
+        for: 15m
+        labels:
+          severity: page
+          slo: realtime_reachability
+        annotations:
+          summary: "5th percentile realtime connection duration < 2 minutes"
+          runbook_url: "https://github.com/lucent/lucent/blob/main/docs/runbooks/oncall.md"
+          description: |
+            Reconnect storm; collaborative editing is degraded for some users.
+            When it correlates with `LucentApiHighErrorRate`, jump straight to
+            incident.md — they likely share a root cause.
+
+      # Tier-1 ticket: AI generation latency. P95 over the rolling 7d window
+      # has a 30s ceiling; we page on a much shorter (1h) breach so the user
+      # doesn't have to wait days for the SLO to register.
+      - alert: LucentGenerationSlow
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by (le) (rate(lucent_http_request_duration_seconds_bucket{path="/api/generate"}[1h]))
+          ) > 30
+        for: 15m
+        labels:
+          severity: page
+          slo: ai_generation_latency
+        annotations:
+          summary: "P95 /api/generate latency over 30s for 15+ minutes"
+          runbook_url: "https://github.com/lucent/lucent/blob/main/docs/runbooks/oncall.md"
+          description: |
+            Slow generations are a different product. The first line of
+            investigation is the upstream model provider's status page.
+
+      # Tier-2 ticket: error budget burn. Fast-burn = 4x the long-run budget
+      # consumption, which means the 30-day window closes inside a week.
+      # This is the "stop feature work, fix the burn" signal.
+      - alert: LucentErrorBudgetFastBurn
+        expr: |
+          (sum(rate(lucent_http_requests_total{status!~"2..|3..|4.."}[1h]))
+           / sum(rate(lucent_http_requests_total[1h]))) > 4 * 0.001
+        for: 30m
+        labels:
+          severity: ticket
+          slo: api_availability
+        annotations:
+          summary: "Error budget fast-burn (1h window)"
+          description: |
+            We are on track to exhaust the 30-day API availability budget inside
+            a week. Pause new feature work; route all hands to the source of
+            the errors.
+
+      # Tier-1 page: migration safety. The advisory lock failure path means a
+      # multi-instance rolling restart could race migrations.
+      - alert: LucentMigrationFailed
+        expr: increase(lucent_migration_failures_total[5m]) > 0
+        for: 1m
+        labels:
+          severity: page
+          slo: migration_safety
+        annotations:
+          summary: "Migration failed on a pod in the last 5 minutes"
+          runbook_url: "https://github.com/lucent/lucent/blob/main/docs/runbooks/oncall.md"
+          description: |
+            Migrations are forward-only and the safety net is the
+            pg_advisory_lock. A failure is rare; the immediate question is
+            whether the rest of the cluster has caught up. If two pods failed
+            the same migration, the lock is failing; page the on-call SRE.
+
+      # Tier-3 ticket: cold-start health. A pod that stays in "ready but slow"
+      # state suggests an event-loop block.
+      - alert: LucentColdStartSlow
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by (le) (rate(lucent_http_request_duration_seconds_bucket{path="/health"}[10m]))
+          ) > 0.2
+        for: 30m
+        labels:
+          severity: ticket
+          slo: cold_start_latency
+        annotations:
+          summary: "/health P95 latency over 200ms for 30+ minutes"
+          description: |
+            Health is fast on a healthy container; slow /health is a
+            event-loop-blocked pod. Check the pod's CPU and recent logs;
+            the chart's resources.limits may be too low.
+
+      # Tier-3 ticket: asset upload success rate. Currently below 99%?
+      # Surface that as a ticket so the next SRE can decide whether to
+      # promote to a page.
+      - alert: LucentAssetUploadFailures
+        expr: |
+          sum(rate(lucent_http_requests_total{path="/api/assets",method="POST",status=~"5.."}[1h]))
+          / sum(rate(lucent_http_requests_total{path="/api/assets",method="POST"}[1h])) > 0.01
+        for: 1h
+        labels:
+          severity: ticket
+          slo: asset_upload_success
+        annotations:
+          summary: "POST /api/assets failure rate > 1% over 1h"
+          description: |
+            Asset uploads are tier 3 today (no baseline). If this fires
+            often, the SLO needs tightening and the alert needs promoting.

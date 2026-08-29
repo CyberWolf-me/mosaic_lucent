@@ -1,0 +1,244 @@
+import { randomBytes } from "node:crypto";
+import type { OauthConfig } from "./oauth.js";
+
+/**
+ * Configuration read from the environment. Centralised so the secure-by-default
+ * behaviour (M0.3) is uniform: every env flag is parsed in one place, every
+ * default is documented here, and tests can construct a Config directly
+ * without touching process.env.
+ *
+ * Defaults are deliberately conservative everywhere, including dev: a flag
+ * whose safe value depends on NODE_ENV is a flag that will one day be wrong in
+ * production, because NODE_ENV is the single easiest variable to forget.
+ * `LUCENT_REQUIRE_AUTH=0` and `LUCENT_TRUST_PROXY=1` are the explicit,
+ * per-deployment escape hatches.
+ */
+
+export interface Config {
+  host: string;
+  port: number;
+  webOrigin: string;
+  databaseUrl: string | undefined;
+  requireAuth: boolean;
+  /** True only when explicitly enabled; controls X-Forwarded-For trust. */
+  trustProxy: boolean;
+  /** Maximum size of a workspace JSON blob accepted on POST /api/boards. */
+  maxWorkspaceBytes: number;
+  /** When true /metrics includes telemetry message bodies. */
+  metricsVerbose: boolean;
+  /** Per-IP+email login/signup limiter. */
+  authLimiter: { perWindow: number; windowMs: number };
+  /** Hard cap on AI provider calls. */
+  aiTimeoutMs: number;
+  /** Ticket TTL for the WebSocket auth handshake. */
+  realtimeTicketTtlMs: number;
+  /** M1.3: which Mailer transport to use. */
+  mail: {
+    transport: MailTransport;
+    smtpUrl: string | undefined;
+    smtpUser: string | undefined;
+    smtpPassword: string | undefined;
+    fromAddress: string;
+    /** HTTP transport settings; see `email/index.ts` for each default. */
+    httpEndpoint: string | undefined;
+    httpApiKey: string | undefined;
+    httpAuthHeader: string | undefined;
+    httpAuthScheme: string | undefined;
+    httpTimeoutMs: number | undefined;
+  };
+  /**
+   * M4.3: Stripe billing. Both keys unset means billing stays off: the
+   * entitlement gates still run (they read the plan catalogue), but there is
+   * no Stripe client, no checkout/portal routes and no webhook receiver. A
+   * half configuration is refused at boot rather than half-served.
+   */
+  billing: {
+    stripeSecretKey: string | undefined;
+    stripeWebhookSecret: string | undefined;
+  };
+  /**
+   * M5/E1: bring-your-own-key. Off by default — when on, an authenticated
+   * caller may present their own provider API key per request (headers
+   * x-lucent-provider-key/-provider/-model) and the server routes that one
+   * call through it. The key is used once and dropped; it is never persisted
+   * or logged.
+   */
+  allowByoKeys: boolean;
+  /**
+   * M1.8: federated sign-in. A provider is on only when BOTH its client id
+   * and secret are set; the routes 503 for anything else. Unset here means
+   * the AuthView hides the button entirely — an enabled-but-unconfigured
+   * provider is a dead end for the user, so it never renders as one.
+   */
+  oauth: OauthConfig;
+  /**
+   * M5/E3: LiveKit voice. All three keys set means `POST /api/livekit/token`
+   * mints per-room, per-user access tokens (the client already implements
+   * the route contract — see packages/web/src/stt/livekit.ts `fetchToken`).
+   * Anything unset means the route answers 503 and the web falls back to
+   * on-device STT, which is the no-vendor default the product ships with.
+   */
+  livekit: {
+    apiKey: string | undefined;
+    apiSecret: string | undefined;
+    url: string | undefined;
+  };
+}
+
+export interface ConfigEnv {
+  LUCENT_HOST?: string;
+  LUCENT_PORT?: string;
+  LUCENT_WEB_ORIGIN?: string;
+  LUCENT_DATABASE_URL?: string;
+  LUCENT_REQUIRE_AUTH?: string;
+  LUCENT_TRUST_PROXY?: string;
+  LUCENT_MAX_WORKSPACE_BYTES?: string;
+  LUCENT_METRICS_VERBOSE?: string;
+  LUCENT_AUTH_LIMIT_PER_WINDOW?: string;
+  LUCENT_AUTH_LIMIT_WINDOW_MS?: string;
+  LUCENT_AI_TIMEOUT_MS?: string;
+  LUCENT_REALTIME_TICKET_TTL_MS?: string;
+  LUCENT_SESSION_SECRET?: string;
+  LUCENT_LIVEKIT_API_KEY?: string;
+  LUCENT_LIVEKIT_API_SECRET?: string;
+  LUCENT_LIVEKIT_URL?: string;
+  LUCENT_MAIL_TRANSPORT?: string;
+  LUCENT_MAIL_ENDPOINT?: string;
+  LUCENT_MAIL_API_KEY?: string;
+  LUCENT_MAIL_AUTH_HEADER?: string;
+  LUCENT_MAIL_AUTH_SCHEME?: string;
+  LUCENT_MAIL_TIMEOUT_MS?: string;
+  LUCENT_SMTP_URL?: string;
+  LUCENT_SMTP_USER?: string;
+  LUCENT_SMTP_PASSWORD?: string;
+  LUCENT_MAIL_FROM?: string;
+  LUCENT_STRIPE_SECRET_KEY?: string;
+  LUCENT_STRIPE_WEBHOOK_SECRET?: string;
+  LUCENT_OAUTH_GOOGLE_CLIENT_ID?: string;
+  LUCENT_OAUTH_GOOGLE_CLIENT_SECRET?: string;
+  LUCENT_OAUTH_GITHUB_CLIENT_ID?: string;
+  LUCENT_OAUTH_GITHUB_CLIENT_SECRET?: string;
+  LUCENT_ALLOW_BYO_KEYS?: string;
+  NODE_ENV?: string;
+}
+
+/**
+ * The mail transports `selectMailer` can build. Anything unrecognised collapses
+ * to the console transport, which never leaves the process - a typo in this key
+ * must not silently post user email addresses at a provider.
+ */
+export const MAIL_TRANSPORTS = ["console", "smtp", "http"] as const;
+export type MailTransport = (typeof MAIL_TRANSPORTS)[number];
+
+const mailTransport = (value: string | undefined): MailTransport =>
+  MAIL_TRANSPORTS.find((transport) => transport === value) ?? "console";
+
+/** Like `num`, but absent or invalid means "let the consumer own the default". */
+const optionalNum = (value: string | undefined) => {
+  const parsed = Number(value);
+  return value !== undefined && Number.isFinite(parsed) && parsed > 0
+    ? Math.floor(parsed)
+    : undefined;
+};
+
+const num = (value: string | undefined, fallback: number) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : fallback;
+};
+
+/** True for any environment where accidentally weak defaults would be a security incident. */
+function isProduction(env: ConfigEnv): boolean {
+  return env.NODE_ENV === "production";
+}
+
+export function readConfig(env: ConfigEnv = process.env): Config {
+  // Authentication is on unless someone switches it off in so many words.
+  // This used to key off NODE_ENV, which meant a container started without
+  // NODE_ENV=production served every board to anyone who could reach the port
+  // - and made the dev and production request paths diverge, so an
+  // authorization bug could not show up locally. `LUCENT_REQUIRE_AUTH=0` is
+  // the deliberate opt-out for solo localhost work; main.ts logs a warning
+  // whenever it is taken.
+  const requireAuth = env.LUCENT_REQUIRE_AUTH !== "0";
+
+  return {
+    host: env.LUCENT_HOST ?? "127.0.0.1",
+    port: num(env.LUCENT_PORT, 4387),
+    webOrigin: env.LUCENT_WEB_ORIGIN ?? "http://localhost:5173",
+    databaseUrl: env.LUCENT_DATABASE_URL || undefined,
+    requireAuth,
+    trustProxy: env.LUCENT_TRUST_PROXY === "1",
+    maxWorkspaceBytes: num(env.LUCENT_MAX_WORKSPACE_BYTES, 8 * 1024 * 1024),
+    metricsVerbose: env.LUCENT_METRICS_VERBOSE === "1",
+    authLimiter: {
+      perWindow: num(env.LUCENT_AUTH_LIMIT_PER_WINDOW, 10),
+      windowMs: num(env.LUCENT_AUTH_LIMIT_WINDOW_MS, 5 * 60_000),
+    },
+    aiTimeoutMs: num(env.LUCENT_AI_TIMEOUT_MS, 90_000),
+    realtimeTicketTtlMs: num(env.LUCENT_REALTIME_TICKET_TTL_MS, 60_000),
+    mail: {
+      transport: mailTransport(env.LUCENT_MAIL_TRANSPORT),
+      smtpUrl: env.LUCENT_SMTP_URL,
+      smtpUser: env.LUCENT_SMTP_USER,
+      smtpPassword: env.LUCENT_SMTP_PASSWORD,
+      fromAddress: env.LUCENT_MAIL_FROM ?? "noreply@lucent.local",
+      httpEndpoint: env.LUCENT_MAIL_ENDPOINT,
+      httpApiKey: env.LUCENT_MAIL_API_KEY,
+      httpAuthHeader: env.LUCENT_MAIL_AUTH_HEADER,
+      httpAuthScheme: env.LUCENT_MAIL_AUTH_SCHEME,
+      httpTimeoutMs: optionalNum(env.LUCENT_MAIL_TIMEOUT_MS),
+    },
+    billing: {
+      stripeSecretKey: env.LUCENT_STRIPE_SECRET_KEY || undefined,
+      stripeWebhookSecret: env.LUCENT_STRIPE_WEBHOOK_SECRET || undefined,
+    },
+    allowByoKeys: env.LUCENT_ALLOW_BYO_KEYS === "1",
+    oauth: oauthFromEnv(env),
+    livekit: {
+      apiKey: env.LUCENT_LIVEKIT_API_KEY || undefined,
+      apiSecret: env.LUCENT_LIVEKIT_API_SECRET || undefined,
+      url: env.LUCENT_LIVEKIT_URL || undefined,
+    },
+  };
+}
+
+/**
+ * A provider exists only when both halves are set. One half alone is worse
+ * than none — the button would render and the flow would die at the token
+ * exchange — so a half-configuration collapses to "off" and the env var is
+ * named loudly here for whoever is debugging why the button is missing.
+ */
+function oauthFromEnv(env: ConfigEnv): OauthConfig {
+  const googleId = env.LUCENT_OAUTH_GOOGLE_CLIENT_ID || undefined;
+  const googleSecret = env.LUCENT_OAUTH_GOOGLE_CLIENT_SECRET || undefined;
+  const githubId = env.LUCENT_OAUTH_GITHUB_CLIENT_ID || undefined;
+  const githubSecret = env.LUCENT_OAUTH_GITHUB_CLIENT_SECRET || undefined;
+  const oauth: OauthConfig = {};
+  if (googleId && googleSecret) oauth.google = { clientId: googleId, clientSecret: googleSecret };
+  else if (googleId || googleSecret) {
+    console.error(
+      "[lucent] oauth: set BOTH LUCENT_OAUTH_GOOGLE_CLIENT_ID and LUCENT_OAUTH_GOOGLE_CLIENT_SECRET; Google sign-in stays off",
+    );
+  }
+  if (githubId && githubSecret) oauth.github = { clientId: githubId, clientSecret: githubSecret };
+  else if (githubId || githubSecret) {
+    console.error(
+      "[lucent] oauth: set BOTH LUCENT_OAUTH_GITHUB_CLIENT_ID and LUCENT_OAUTH_GITHUB_CLIENT_SECRET; GitHub sign-in stays off",
+    );
+  }
+  return oauth;
+}
+
+/** Dev-only fallback for the HMAC secret. Production throws. */
+export function sessionSecret(env: ConfigEnv = process.env): string {
+  const secret = env.LUCENT_SESSION_SECRET;
+  if (secret && secret.length >= 16) return secret;
+  if (isProduction(env)) {
+    throw new Error(
+      "LUCENT_SESSION_SECRET must be set in production (>=16 chars). " +
+        "Without it every session token is invalidated on restart.",
+    );
+  }
+  // Dev fallback: tokens won't survive a restart, which is fine locally.
+  return randomBytes(32).toString("hex");
+}

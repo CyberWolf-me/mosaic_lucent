@@ -1,0 +1,31 @@
+name: Feature request
+description: Propose a capability, with the problem it solves
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What can you not do today? Who is blocked, and how often?
+    validations:
+      required: true
+  - type: textarea
+    id: shape
+    attributes:
+      label: Proposed shape
+      description: >
+        If this needs a new semantic operation, say which one and what it must
+        guarantee. Operations are a contract shared by the UI, the AI and every
+        stored op log.
+  - type: dropdown
+    id: milestone
+    attributes:
+      label: Closest milestone
+      options:
+        - M2 organizations and admin
+        - M3 scale-out, assets, durability
+        - M4 monetization
+        - M5 AI as the product
+        - M6 enterprise readiness
+        - M7 growth surface
+        - Unsure

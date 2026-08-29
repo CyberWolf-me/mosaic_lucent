@@ -1,0 +1,65 @@
+name: lucent
+# Lucent local stack (M0.6). One server + one Postgres; the server migrates
+# on boot so a fresh `docker compose up` is the only setup needed.
+#
+# Bring up:  docker compose up
+# Tear down: docker compose down -v   (drop the volume too if you want a
+#           clean database for the next run)
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: lucent
+      POSTGRES_PASSWORD: lucent
+      POSTGRES_DB: lucent
+    # Named volume so the DB survives container restarts.
+    volumes:
+      - lucent_pgdata:/var/lib/postgresql/data
+    # Healthcheck gates the server's startup; the server only waits because
+    # `migrate()` will fail loudly otherwise. This still saves the user from a
+    # race on first boot.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lucent -d lucent"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    ports:
+      - "5432:5432"
+
+  server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # Bind to all interfaces so the host browser can reach the container.
+      LUCENT_HOST: 0.0.0.0
+      LUCENT_PORT: "4387"
+      # The image serves the built web app same-origin from this port, so the
+      # CORS allowlist, the CSRF Origin check and the links in verification /
+      # reset / invite emails all have to name :4387. The default (:5173) is
+      # the Vite dev server, which is not what runs here.
+      LUCENT_WEB_ORIGIN: http://localhost:4387
+      # Wire Postgres. The password matches the postgres service above; this
+      # is the dev compose file, not a production template.
+      LUCENT_DATABASE_URL: postgres://lucent:lucent@postgres:5432/lucent
+      # Required in production. The compose file ships a placeholder so the
+      # container at least starts; replace in a real deploy.
+      LUCENT_SESSION_SECRET: change-me-32-bytes-minimum-aaaaaaaaaaaaaaaaaa
+    ports:
+      - "4387:4387"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:4387/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+volumes:
+  lucent_pgdata:

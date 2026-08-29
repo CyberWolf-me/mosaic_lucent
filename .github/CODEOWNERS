@@ -1,0 +1,27 @@
+# Review ownership. Team slugs must exist in the GitHub org before these take
+# effect; until then this file documents intent and CI does not enforce it.
+
+# Everything, unless a more specific rule below matches.
+*                                   @lucent/maintainers
+
+# The operation vocabulary and reducer are the product's contract: a change here
+# ripples through the AI schema, the web client and every stored op log.
+/packages/core/src/operations.ts     @lucent/core-owners
+/packages/core/src/reducer.ts        @lucent/core-owners
+/packages/core/src/validator.ts      @lucent/core-owners
+/packages/core/src/workspaceSchema.ts @lucent/core-owners
+
+# Authentication, sessions, CSRF, tenancy guards and the migration history.
+/packages/server/src/accounts.ts     @lucent/security-owners
+/packages/server/src/auth.ts         @lucent/security-owners
+/packages/server/src/sessions.ts     @lucent/security-owners
+/packages/server/src/csrf.ts         @lucent/security-owners
+/packages/server/src/identity.ts     @lucent/security-owners
+/packages/server/migrations/         @lucent/security-owners @lucent/maintainers
+
+# Prompts and provider wiring: a prompt change is a product change.
+/packages/ai/                        @lucent/ai-owners
+
+# Decisions and runbooks.
+/docs/adr/                           @lucent/maintainers
+/docs/runbooks/                      @lucent/maintainers

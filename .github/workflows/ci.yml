@@ -1,0 +1,279 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+# The default GITHUB_TOKEN is read-only for everything these jobs do. CodeQL
+# needs security-events: write and therefore lives in its own workflow.
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+
+    # The server's Postgres-backed store tests need a real database: the
+    # workspace column is JSONB and the email uniqueness check is a functional
+    # index, neither of which an in-process fake reproduces faithfully.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: lucent
+          POSTGRES_PASSWORD: lucent
+          POSTGRES_DB: lucent_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U lucent"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      LUCENT_TEST_DATABASE_URL: postgres://lucent:lucent@localhost:5432/lucent_test
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      # Migrations are committed as generated SQL, so CI never runs codegen.
+      - name: Apply migrations
+        run: npm run db:migrate -w @lucent/server
+        env:
+          LUCENT_DATABASE_URL: ${{ env.LUCENT_TEST_DATABASE_URL }}
+
+      - name: Test
+        run: npm test
+
+      # Coverage floors (H): per-package, ratcheted. Each package's
+      # vitest.config.ts states its own floor next to the measured baseline
+      # and the reasoning for that number; this step is the enforcement, not
+      # the policy. The server and web suites stay floor-free for now — the
+      # Postgres-gated skips and the browser-only surface would make a single
+      # number there a lie in one direction or the other.
+      - name: Coverage floors
+        run: |
+          npm run test:coverage -w @lucent/core
+          npm run test:coverage -w @lucent/ai
+          npm run test:coverage -w @lucent/mcp
+          npm run test:coverage -w @lucent/i18n
+
+      - name: Build web
+        run: npm run build -w @lucent/web
+
+      # The eval gate, surfaced as its own step rather than buried inside
+      # `npm test` (the golden-set vitest already runs it there). The
+      # MockProvider must score 1.0 on the golden set; with a provider key
+      # (eval-secret, never the deploy key) the same command scores the real
+      # model without changing the gate's meaning.
+      - name: Eval gate (golden set vs MockProvider)
+        run: npm run evals -w @lucent/ai
+
+  # Style and static analysis. Separate from `verify` on purpose: this job
+  # needs no database and no build, so it finishes in about a minute, and a red
+  # `lint` check next to a green `verify` says "formatting or a lint rule" at a
+  # glance instead of "something in the test job".
+  lint:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      # Runs even when eslint failed, so one push surfaces both lists. The job
+      # still fails; this only stops the author from fixing lint, pushing, and
+      # then discovering the formatting diff.
+      - name: Check formatting
+        if: ${{ !cancelled() }}
+        run: npm run format:check
+
+      # The Helm chart renders with no cluster and no values; a syntax or
+      # helper error should fail the PR, not the deploy.
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.16.2
+      - name: Lint Helm chart
+        run: helm lint charts/lucent --strict
+
+  # Dependency and secret hygiene. Separate because it is the only job whose
+  # verdict changes without a commit: an advisory published overnight turns it
+  # red on an untouched branch, and that must not read as a broken test.
+  audit:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Before any install: gitleaks walks the filesystem, and a populated
+      # node_modules turns a four-second scan into minutes of vendored false
+      # positives.
+      #
+      # Run from gitleaks' own image rather than gitleaks-action, which wants a
+      # GITLEAKS_LICENSE for organization-owned repositories. Pinned to an exact
+      # tag because a detector release is a rule change, and a rule change
+      # should arrive as a commit here rather than as a surprise red build.
+      - name: Secret scan
+        run: |
+          docker run --rm -v "${{ github.workspace }}:/scan:ro" \
+            ghcr.io/gitleaks/gitleaks:v8.30.1 \
+            dir /scan --no-banner --redact --verbose
+
+      # No `cache: npm` and no `npm ci`: --package-lock-only below builds the
+      # dependency tree from package-lock.json, so nothing is installed.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      # The gate is the tree that actually ships, so it mirrors the run stage's
+      # install exactly: the Dockerfile does `npm ci --omit=dev -w @lucent/server`
+      # and this audits that same resolution. Unscoped, npm audit builds its tree
+      # from every workspace manifest in package-lock.json, which drags
+      # @lucent/web's browser dependencies (sharp, via @huggingface/transformers)
+      # into a verdict about a server image that never installs them -- a red gate
+      # asserting something untrue about the artifact. Scoped, it reports only what
+      # ships. --omit=dev keeps a Vite dev-server advisory from blocking a release
+      # it cannot reach; high and critical in a runtime dependency block the build.
+      #
+      # Red as of this change, on a real advisory: drizzle-orm 0.38.4 is subject
+      # to GHSA-gpj5-g38j-94v9, SQL injection through improperly escaped dynamic
+      # identifiers. Fix it; do not lower the floor and do not add an allowlist.
+      # The bump to 0.45.2 is breaking and has to move two pins together --
+      # package.json's exact devDependency, which is what holds the lockfile at
+      # 0.38.4, and packages/server/package.json's caret range, which on a 0.x
+      # version admits only 0.38.x -- followed by an install and a pass over the
+      # pg-* store suites. Triage when this was written: packages/server is the
+      # only workspace importing drizzle-orm, and no sql.identifier() or sql.raw()
+      # call site exists in it, so the vulnerable path is unreached and the
+      # upgrade can be scheduled rather than rushed. Re-check that before
+      # relying on it.
+      - name: Audit shipped dependencies
+        run: npm audit --package-lock-only --omit=dev -w @lucent/server --audit-level=high
+
+      # Everything the gate deliberately excludes, still printed: the dev
+      # toolchain (vitest, drizzle-kit, eslint) and every workspace's runtime
+      # tree, @lucent/web's included. Those advisories are reachable on a
+      # developer machine, on a runner, or in a browser bundle, but not by the
+      # server image, so they are read and fixed deliberately rather than by
+      # blocking whoever pushed next. Scoping the gate above must not mean nobody
+      # sees them -- read the log.
+      - name: Audit the whole tree (informational)
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        run: npm audit --package-lock-only --audit-level=low
+
+  # The image is its own artifact: multi-stage build, prod-only install,
+  # non-root user, tini as PID 1, healthcheck. None of that is exercised by the
+  # `verify` job's `npm run build -w @lucent/web`, so "the app builds" and "the
+  # image builds and boots" are separate verdicts.
+  build-image:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # NODE_VERSION matches the setup-node version the other jobs use, so the
+      # image runs the runtime the tests ran on.
+      - name: Build image
+        run: docker build --build-arg NODE_VERSION=22 --tag lucent:ci-${{ github.sha }} .
+
+      # An image that builds but cannot start is a false green. No
+      # LUCENT_DATABASE_URL, so this boots the in-memory store path (ADR 0006)
+      # and needs no service container; LUCENT_HOST=0.0.0.0 because the server
+      # binds 127.0.0.1 by default, which inside a container the runner cannot
+      # reach. No LUCENT_AI_PROVIDER either: the default is the mock provider, so
+      # the smoke test needs no API key.
+      #
+      # Keep the session secret at 16 characters or more. The image bakes
+      # NODE_ENV=production, and sessionSecret() in packages/server/src/config.ts
+      # throws below that floor rather than falling back, so a trimmed string here
+      # fails the job with a config error that looks nothing like one.
+      #
+      # Expect a few `curl: (52) Empty reply from server` lines in the first
+      # second: docker publishes the port before Node listens on it. The loop
+      # retries through them, so they are noise in a green log, not a failure.
+      - name: Smoke-test the image
+        run: |
+          docker run -d --name lucent-smoke \
+            -p 4387:4387 \
+            -e LUCENT_HOST=0.0.0.0 \
+            -e LUCENT_SESSION_SECRET=ci-smoke-not-a-real-secret \
+            lucent:ci-${{ github.sha }}
+          for i in $(seq 1 45); do
+            if curl -fsS http://127.0.0.1:4387/health > /dev/null; then
+              echo "served /health after ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::image did not serve /health within 45s"
+          docker logs lucent-smoke
+          exit 1
+
+      - name: Remove the smoke container
+        if: always()
+        run: docker rm -f lucent-smoke
+
+  # The browser smoke (H): the plan-promised Playwright suite. Boots the real
+  # stack — built backend on 4390 with the mock provider forced, Vite dev
+  # server on 5199 — and walks the first-minute story (signup → describe →
+  # generation paints the canvas) with an axe scan on each screen.
+  # Chromium-only: the suite is a smoke, not a browser matrix.
+  e2e:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - run: npm ci
+
+      - name: Build server (dist for the e2e webServer)
+        run: npm run build -w @lucent/core -w @lucent/ai -w @lucent/server
+
+      - uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 5
+          max_attempts: 3
+          command: npx playwright install --with-deps chromium
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/pw-browsers
+
+      - name: Playwright + axe smoke
+        run: npm run test:e2e -w @lucent/web
+        env:
+          CI: "1"
+          PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/pw-browsers
+
+      - name: Upload traces on failure
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-traces
+          path: packages/web/test-results/
+          retention-days: 7

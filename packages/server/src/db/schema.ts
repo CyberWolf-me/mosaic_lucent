@@ -1,0 +1,1042 @@
+import { sql } from "drizzle-orm";
+import { bigint, boolean, index, jsonb, pgTable, primaryKey, text, uniqueIndex } from "drizzle-orm/pg-core";
+
+/**
+ * Postgres schema for the Lucent server (docs/06).
+ *
+ * The Workspace object from `@lucent/core` lives in `boards.workspace` as a
+ * single JSONB blob — the schema is owned by core's zod union, not by SQL.
+ * Everything else (users, orgs, memberships, op_log) is plain relational data.
+ *
+ * `lower(email)` is exposed via a functional unique index, which is how
+ * Postgres enforces case-insensitive uniqueness without a generated column.
+ */
+
+export const users = pgTable(
+  "users",
+  {
+    id: text("id").primaryKey(),
+    email: text("email").notNull(),
+    name: text("name").notNull(),
+    passwordHash: text("password_hash").notNull(),
+    /**
+     * Monotonic counter for bulk-invalidation: every session is stamped with
+     * the user's tokenVersion at creation, and `authenticate` rejects sessions
+     * stamped with a version below the user's current value. A single UPDATE
+     * (`token_version = token_version + 1`) then invalidates every live
+     * session without enumerating them. Reserved for M1 ("Sign out
+     * everywhere"); other code paths ignore it today.
+     */
+    tokenVersion: bigint("token_version", { mode: "number" }).notNull().default(0),
+    /**
+     * M1.4: when set, the user has confirmed control of their email. Gates
+     * `POST /api/boards/:id/share` — a board owner cannot mint public share
+     * links until they've verified. `null` is the same as `false`; the
+     * column exists so future flows (audit log, "trust level") can read it
+     * without an extra join.
+     */
+    emailVerifiedAt: bigint("email_verified_at", { mode: "number" }),
+    createdAt: bigint("created_at", { mode: "number" }).notNull(),
+  },
+  (t) => ({
+    emailLowerIdx: uniqueIndex("users_email_lower_idx").on(sql`lower(${t.email})`),
+  }),
+);
+
+export const organizations = pgTable("organizations", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  createdAt: bigint("created_at", { mode: "number" }).notNull(),
+});
+
+export const memberships = pgTable(
+  "memberships",
+  {
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    orgId: text("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    role: text("role", { enum: ["owner", "editor", "viewer"] }).notNull(),
+  },
+  (t) => ({ pk: primaryKey({ columns: [t.userId, t.orgId] }) }),
+);
+
+export const boards = pgTable(
+  "boards",
+  {
+    id: text("id").primaryKey(),
+    /**
+     * Tenant boundary (M2.1). Every board lives in exactly one org. Set on
+     * insert; not user-mutable. Cross-tenant leakage tests rely on the FK
+     * to organizations + the `boards_org_idx` index below.
+     */
+    orgId: text("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    ownerId: text("owner_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    /** The full Workspace object, as emitted by `createWorkspace()` in core. */
+    workspace: jsonb("workspace").notNull(),
+    createdAt: bigint("created_at", { mode: "number" }).notNull(),
+    updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
+  },
+  (t) => ({
+    ownerIdx: index("boards_owner_idx").on(t.ownerId, t.updatedAt),
+    orgIdx: index("boards_org_idx").on(t.orgId, t.updatedAt),
+  }),
+);
+
+/**
+ * Per-board operation log. The board's authoritative state is the workspace
+ * snapshot; the log is what makes collaboration restart-safe — a reconnecting
+ * client gets `catchup = log.since(fromSeq)` and the room is rebuilt from this
+ * on first join. Without it, a restart would replay the whole snapshot as a
+ * diff that no client has applied.
+ */
+export const opLog = pgTable(
+  "op_log",
+  {
+    boardId: text("board_id")
+      .notNull()
+      .references(() => boards.id, { onDelete: "cascade" }),
+    seq: bigint("seq", { mode: "number" }).notNull(),
+    ops: jsonb("ops").notNull(),
+    by: text("by").notNull(),
+    label: text("label").notNull(),
+    at: bigint("at", { mode: "number" }).notNull(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.boardId, t.seq] }),
+    // Retention (M3) prunes by age: `board_id = $1 AND at < $2`. The primary key
+    // leads with board_id but continues on seq, so an age sweep on a busy board
+    // would filter every entry it owns on the heap. Ordering by `at` is also how
+    // "what happened here recently" is answered without reading the whole log.
+    boardAtIdx: index("op_log_board_at_idx").on(t.boardId, t.at),
+  }),
+);
+
+export type DbUser = typeof users.$inferSelect;
+export type DbBoard = typeof boards.$inferSelect;
+export type DbOpEntry = typeof opLog.$inferSelect;
+export type DbOrganization = typeof organizations.$inferSelect;
+export type DbMembership = typeof memberships.$inferSelect;
+
+/**
+ * Board access control. Before this table a board id was the only capability:
+ * `GET /api/boards/:id` compared `ownerId` and 404'd everyone else, so the
+ * sharing described in docs/12 could not work. Membership is explicit, and the
+ * owner needs no row (`boards.owner_id` is authoritative for the owner role).
+ */
+export const boardMembers = pgTable(
+  "board_members",
+  {
+    boardId: text("board_id")
+      .notNull()
+      .references(() => boards.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    role: text("role", { enum: ["owner", "editor", "viewer"] }).notNull(),
+    invitedBy: text("invited_by"),
+    createdAt: bigint("created_at", { mode: "number" }).notNull(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.boardId, t.userId] }),
+    userIdx: index("board_members_user_idx").on(t.userId),
+  }),
+);
+
+/**
+ * Revocable share links. The token is the capability, the row carries the role
+ * it grants, and revoking is a write rather than a hope that nobody kept the
+ * URL. Redeeming a link creates a `board_members` row, so access survives the
+ * link being revoked for the people who already joined.
+ */
+export const boardShareLinks = pgTable(
+  "board_share_links",
+  {
+    token: text("token").primaryKey(),
+    boardId: text("board_id")
+      .notNull()
+      .references(() => boards.id, { onDelete: "cascade" }),
+    role: text("role", { enum: ["editor", "viewer"] }).notNull(),
+    createdBy: text("created_by").notNull(),
+    createdAt: bigint("created_at", { mode: "number" }).notNull(),
+    expiresAt: bigint("expires_at", { mode: "number" }),
+    revokedAt: bigint("revoked_at", { mode: "number" }),
+  },
+  (t) => ({ boardIdx: index("board_share_links_board_idx").on(t.boardId) }),
+);
+
+export type DbBoardMember = typeof boardMembers.$inferSelect;
+export type DbBoardShareLink = typeof boardShareLinks.$inferSelect;
+
+/**
+ * Browser session table (M1). The bearer token (M0) is kept for the MCP
+ * client and API keys, but browsers land here: opaque random ids in an
+ * httpOnly/Secure/SameSite=Lax cookie, looked up against a row that can be
+ * revoked at any time. `expiresAt` is the absolute ceiling; `lastSeenAt`
+ * drives sliding-window refresh on each authenticated request. `revokedAt`
+ * is the explicit kill switch for "Sign out" and "Sign out everywhere".
+ *
+ * `token_version` is the snapshot of the user's tokenVersion at creation:
+ * if the user bumps their version (a single UPDATE on `users`), every live
+ * session below the new value is rejected at lookup without scanning the
+ * table. The index covers the per-user device list.
+ */
+export const sessions = pgTable(
+  "sessions",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    tokenVersion: bigint("token_version", { mode: "number" }).notNull(),
+    createdAt: bigint("created_at", { mode: "number" }).notNull(),
+    lastSeenAt: bigint("last_seen_at", { mode: "number" }).notNull(),
+    expiresAt: bigint("expires_at", { mode: "number" }).notNull(),
+    revokedAt: bigint("revoked_at", { mode: "number" }),
+    userAgent: text("user_agent"),
+    ip: text("ip"),
+  },
+  (t) => ({ userIdx: index("sessions_user_idx").on(t.userId) }),
+);
+
+export type DbSession = typeof sessions.$inferSelect;
+
+/**
+ * Single-use verification tokens (M1.4).
+ *
+ * The token row stores a SHA-256 hash of the random token, not the token
+ * itself: a database dump or a leaked SQL backup reveals only hashes, and an
+ * attacker who can read the table still can't present the token to the API.
+ * `consumedAt` is set on first use; a second attempt with the same id is
+ * rejected at lookup.
+ *
+ * One table for both email-verification and password-reset would save
+ * columns; they're separate because the columns they will grow (audit log
+ * on resets, rate-limit metadata on verifications) differ enough that
+ * merging them would force one to grow into the other.
+ */
+export const emailVerifications = pgTable(
+  "email_verifications",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    tokenHash: text("token_hash").notNull(),
+    createdAt: bigint("created_at", { mode: "number" }).notNull(),
+    expiresAt: bigint("expires_at", { mode: "number" }).notNull(),
+    consumedAt: bigint("consumed_at", { mode: "number" }),
+  },
+  (t) => ({
+    userIdx: index("email_verifications_user_idx").on(t.userId),
+    tokenHashIdx: uniqueIndex("email_verifications_token_hash_idx").on(t.tokenHash),
+  }),
+);
+
+export const passwordResets = pgTable(
+  "password_resets",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    tokenHash: text("token_hash").notNull(),
+    createdAt: bigint("created_at", { mode: "number" }).notNull(),
+    expiresAt: bigint("expires_at", { mode: "number" }).notNull(),
+    consumedAt: bigint("consumed_at", { mode: "number" }),
+  },
+  (t) => ({
+    userIdx: index("password_resets_user_idx").on(t.userId),
+    tokenHashIdx: uniqueIndex("password_resets_token_hash_idx").on(t.tokenHash),
+  }),
+);
+
+export type DbEmailVerification = typeof emailVerifications.$inferSelect;
+export type DbPasswordReset = typeof passwordResets.$inferSelect;
+
+/**
+ * TOTP credential (M1.6). One row per user that has enrolled. The secret is
+ * the raw 20-byte HMAC key, base32-encoded — at rest it lives in the same
+ * column as the password hash (scrypt would be pointless, the value has to
+ * match what the authenticator app expects). Disclosure of this column
+ * effectively bypasses 2FA; that risk is documented in the threat model and
+ * the DB is expected to be encrypted at rest.
+ */
+export const totpCredentials = pgTable("totp_credentials", {
+  userId: text("user_id")
+    .primaryKey()
+    .references(() => users.id, { onDelete: "cascade" }),
+  /** Base32-encoded shared secret. */
+  secret: text("secret").notNull(),
+  /** ms since epoch when enrollment completed. */
+  enrolledAt: bigint("enrolled_at", { mode: "number" }).notNull(),
+  /** Most-recent TOTP counter value successfully consumed. Anti-replay. */
+  lastCounter: bigint("last_counter", { mode: "number" }).notNull().default(0),
+});
+
+/**
+ * Recovery codes (M1.6). Each row is one single-use code, hashed with scrypt
+ * before insert. The user types one when their authenticator is unavailable;
+ * `consumedAt` is set on first match.
+ */
+export const recoveryCodes = pgTable(
+  "recovery_codes",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    codeHash: text("code_hash").notNull(),
+    createdAt: bigint("created_at", { mode: "number" }).notNull(),
+    consumedAt: bigint("consumed_at", { mode: "number" }),
+  },
+  (t) => ({ userIdx: index("recovery_codes_user_idx").on(t.userId) }),
+);
+
+export type DbTotpCredential = typeof totpCredentials.$inferSelect;
+export type DbRecoveryCode = typeof recoveryCodes.$inferSelect;
+
+/**
+ * Account deletion queue (M1.7).
+ *
+ * GDPR's right-to-erasure gives a grace period before data is actually
+ * removed. `requestedAt` is when the user clicked "Delete my account";
+ * `executesAt` is when the row + dependent data is purged. `cancelledAt`
+ * flips non-null when the user signs back in during the grace window.
+ *
+ * Until `executesAt` passes, the user can't log in but their data is
+ * intact; on first login attempt after the grace we wipe everything
+ * (boards, memberships, sessions, op log cascades) and remove the row.
+ */
+export const accountDeletions = pgTable("account_deletions", {
+  userId: text("user_id")
+    .primaryKey()
+    .references(() => users.id, { onDelete: "cascade" }),
+  requestedAt: bigint("requested_at", { mode: "number" }).notNull(),
+  executesAt: bigint("executes_at", { mode: "number" }).notNull(),
+  cancelledAt: bigint("cancelled_at", { mode: "number" }),
+});
+
+export type DbAccountDeletion = typeof accountDeletions.$inferSelect;
+
+/**
+ * Pending org invites (M2.4).
+ *
+ * An invite is a single-use capability that adds the bearer to the target
+ * org with the granted role when redeemed. The token column is the SHA-256
+ * hash of the random token (see `tokens.ts`); the raw token is only ever
+ * in the email body or the URL the invitee clicks.
+ *
+ * `consumedAt` is non-null after the invitee accepts; `revokedAt` is set by
+ * the inviter when they rescind. An invite is "live" when both are null
+ * and `expiresAt` is in the future.
+ */
+export const orgInvites = pgTable(
+  "org_invites",
+  {
+    id: text("id").primaryKey(),
+    orgId: text("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    email: text("email").notNull(),
+    role: text("role", { enum: ["editor", "viewer"] }).notNull(),
+    tokenHash: text("token_hash").notNull(),
+    invitedBy: text("invited_by")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    createdAt: bigint("created_at", { mode: "number" }).notNull(),
+    expiresAt: bigint("expires_at", { mode: "number" }).notNull(),
+    consumedAt: bigint("consumed_at", { mode: "number" }),
+    revokedAt: bigint("revoked_at", { mode: "number" }),
+  },
+  (t) => ({
+    orgIdx: index("org_invites_org_idx").on(t.orgId, t.expiresAt),
+    tokenHashIdx: uniqueIndex("org_invites_token_hash_idx").on(t.tokenHash),
+  }),
+);
+
+export type DbOrgInvite = typeof orgInvites.$inferSelect;
+
+/**
+ * Audit log (M2.5 / M6.3). Every state change an administrator could be asked
+ * to account for lands here: role grants, invites, share links, board deletes,
+ * plan changes, exports.
+ *
+ * Deliberately NOT a foreign key to `users`: the actor may later delete their
+ * account, and an audit trail that disappears with the actor is not an audit
+ * trail. `actorEmail` is denormalised at write time for the same reason - the
+ * record has to stay readable on its own. `metadata` carries the shape-specific
+ * detail (old and new role, invite email, link token prefix) as JSONB so a new
+ * action type needs no migration.
+ *
+ * The `(org_id, at DESC)` index is the only access pattern the console needs:
+ * one org's history, newest first, paginated by `at`.
+ */
+export const auditLog = pgTable(
+  "audit_log",
+  {
+    id: text("id").primaryKey(),
+    orgId: text("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    actorId: text("actor_id"),
+    actorEmail: text("actor_email"),
+    /** Dotted action name, e.g. `board.member.role_changed`. */
+    action: text("action").notNull(),
+    targetType: text("target_type"),
+    targetId: text("target_id"),
+    metadata: jsonb("metadata"),
+    ip: text("ip"),
+    userAgent: text("user_agent"),
+    at: bigint("at", { mode: "number" }).notNull(),
+  },
+  (t) => ({
+    orgAtIdx: index("audit_log_org_at_idx").on(t.orgId, t.at),
+    actorIdx: index("audit_log_actor_idx").on(t.actorId),
+    targetIdx: index("audit_log_target_idx").on(t.targetType, t.targetId),
+  }),
+);
+
+export type DbAuditEntry = typeof auditLog.$inferSelect;
+
+/**
+ * Federated identities (M1.8). One row per external account linked to a user,
+ * so a person can sign in with Google today and GitHub tomorrow and land on
+ * the same Lucent account.
+ *
+ * Linking is by VERIFIED email only: an unverified email from a provider would
+ * let anyone who can create an account at that provider with a chosen address
+ * take over a Lucent account. `email` records what the provider asserted at
+ * link time, for the audit trail - it is not used for lookup after linking.
+ */
+export const oauthAccounts = pgTable(
+  "oauth_accounts",
+  {
+    provider: text("provider", { enum: ["google", "github"] }).notNull(),
+    /** The provider's own stable user id (`sub` for OIDC), never the email. */
+    providerAccountId: text("provider_account_id").notNull(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    email: text("email"),
+    createdAt: bigint("created_at", { mode: "number" }).notNull(),
+    lastLoginAt: bigint("last_login_at", { mode: "number" }),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.provider, t.providerAccountId] }),
+    userIdx: index("oauth_accounts_user_idx").on(t.userId),
+  }),
+);
+
+export type DbOauthAccount = typeof oauthAccounts.$inferSelect;
+
+/**
+ * In-app notifications (M2.6). Written when someone is invited, mentioned in a
+ * comment, or given access to a board. `readAt` is per-row rather than a
+ * high-water mark so "mark this one read" works.
+ *
+ * `orgId` is nullable because an account-level notification (email verified,
+ * subscription past due) belongs to no single org.
+ */
+export const notifications = pgTable(
+  "notifications",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    orgId: text("org_id").references(() => organizations.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull(),
+    title: text("title").notNull(),
+    body: text("body"),
+    /** Relative app path the notification points at, e.g. `/?board=b_1`. */
+    link: text("link"),
+    metadata: jsonb("metadata"),
+    createdAt: bigint("created_at", { mode: "number" }).notNull(),
+    readAt: bigint("read_at", { mode: "number" }),
+  },
+  (t) => ({ userIdx: index("notifications_user_idx").on(t.userId, t.createdAt) }),
+);
+
+export type DbNotification = typeof notifications.$inferSelect;
+
+/**
+ * Per-user delivery preferences (M2.6). A row exists only when the user has
+ * changed something; absence means "the default for this kind", which keeps a
+ * new notification kind from needing a backfill.
+ */
+export const notificationPrefs = pgTable(
+  "notification_prefs",
+  {
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull(),
+    inApp: text("in_app", { enum: ["on", "off"] })
+      .notNull()
+      .default("on"),
+    email: text("email", { enum: ["on", "off"] })
+      .notNull()
+      .default("on"),
+    updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
+  },
+  (t) => ({ pk: primaryKey({ columns: [t.userId, t.kind] }) }),
+);
+
+export type DbNotificationPref = typeof notificationPrefs.$inferSelect;
+
+/**
+ * Plan catalogue (M4.1). One row per sellable tier.
+ *
+ * `src/plans.ts` is the source of truth for every number in the product — the
+ * gates read it and `seedPlans()` writes it here. The table exists for the
+ * three things a code constant cannot do: it joins (the pricing page and the
+ * admin console read a plan without a deploy), it maps a tier to the Stripe
+ * price that charges for it, and it can hold a tier the code does not know
+ * about — which is how an Enterprise contract with negotiated caps becomes
+ * real, because `entitlement()` falls back to this row's `limits` for any code
+ * that is not a built-in tier.
+ *
+ * `limits` is the `PlanLimits` object from plans.ts, re-parsed through
+ * `planLimitsSchema` on read: JSONB written by an older build is untrusted
+ * input like any other.
+ */
+export const plans = pgTable("plans", {
+  /** Machine code: `free`, `pro`, `team`, `enterprise`, or a contract id. */
+  code: text("code").primaryKey(),
+  displayName: text("display_name").notNull(),
+  /** Sort order, so "is this an upgrade?" is a comparison and not a lookup. */
+  rank: bigint("rank", { mode: "number" }).notNull().default(0),
+  limits: jsonb("limits").notNull(),
+  /**
+   * List price in minor units, per seat per interval. Stripe stays
+   * authoritative for what a customer is actually charged — coupons,
+   * grandfathered prices and negotiated terms all live there. These columns
+   * are what a pricing page renders; `null` means "contact us".
+   */
+  priceCents: bigint("price_cents", { mode: "number" }),
+  annualPriceCents: bigint("annual_price_cents", { mode: "number" }),
+  currency: text("currency").notNull().default("usd"),
+  /** Stripe price ids: per-deployment configuration, never hard-coded. */
+  stripePriceId: text("stripe_price_id"),
+  stripeAnnualPriceId: text("stripe_annual_price_id"),
+  updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
+});
+
+/**
+ * One subscription per org (M4.1). `org_id` is the primary key rather than a
+ * surrogate id: "which plan is this org on" must have exactly one answer, and a
+ * second row would make every gate ambiguous. Subscription *history* is the
+ * audit log plus Stripe's own record, not extra rows here.
+ *
+ * `status` mirrors Stripe's vocabulary verbatim so a webhook can be written
+ * through without translation. Which of those values still entitles the org is
+ * a product decision rather than a schema one and lives in
+ * `ENTITLING_STATUSES` (entitlements.ts): `past_due` keeps working through
+ * dunning, `unpaid` and `canceled` fall back to Free.
+ */
+export const subscriptions = pgTable(
+  "subscriptions",
+  {
+    orgId: text("org_id")
+      .primaryKey()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    /**
+     * FK to the catalogue, so an org can never sit on a plan nobody defined.
+     * The built-in tiers are seeded at boot, which also makes this the check
+     * that catches a webhook carrying a price id we do not know.
+     */
+    plan: text("plan")
+      .notNull()
+      .references(() => plans.code),
+    status: text("status", {
+      enum: [
+        "trialing",
+        "active",
+        "past_due",
+        "canceled",
+        "unpaid",
+        "incomplete",
+        "incomplete_expired",
+        "paused",
+      ],
+    }).notNull(),
+    /** Paid seats. Compared against `memberships` by the seat gate, not by SQL. */
+    seats: bigint("seats", { mode: "number" }).notNull().default(1),
+    /** Current billing period, epoch ms. Metered counters reset at `periodEnd`. */
+    periodStart: bigint("period_start", { mode: "number" }),
+    periodEnd: bigint("period_end", { mode: "number" }),
+    /** Set once the customer asks to cancel; access continues until `periodEnd`. */
+    cancelAt: bigint("cancel_at", { mode: "number" }),
+    trialEndsAt: bigint("trial_ends_at", { mode: "number" }),
+    stripeCustomerId: text("stripe_customer_id"),
+    stripeSubscriptionId: text("stripe_subscription_id"),
+    createdAt: bigint("created_at", { mode: "number" }).notNull(),
+    updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
+  },
+  (t) => ({
+    // Unique so a webhook can resolve the org from either Stripe id and can
+    // never find two. Postgres allows repeated NULLs in a unique index, so the
+    // orgs that never reached checkout (every Free org) do not collide.
+    stripeCustomerIdx: uniqueIndex("subscriptions_stripe_customer_idx").on(t.stripeCustomerId),
+    stripeSubscriptionIdx: uniqueIndex("subscriptions_stripe_subscription_idx").on(
+      t.stripeSubscriptionId,
+    ),
+    // The dunning sweep and the expiring-trials job both read by status and
+    // period end; without this they scan every subscriber to find the few.
+    statusIdx: index("subscriptions_status_idx").on(t.status, t.periodEnd),
+  }),
+);
+
+/**
+ * Metering (M4.2). Append-only: one row per billable act, written by the gate
+ * that authorised it. The number a gate compares against a limit is a SUM over
+ * this table rather than a counter column — a counter cannot be recomputed
+ * after a bug, and "revenue reconciles against usage_events" (the M4 exit
+ * criterion) means being able to re-derive every total from the events.
+ *
+ * `id` is the idempotency key, not a surrogate: callers pass a deterministic id
+ * derived from the request and the store inserts ON CONFLICT DO NOTHING, so a
+ * retried write bills once.
+ *
+ * `kind` is text and `metadata` is JSONB so metering a new thing (tokens per
+ * model, exported bytes) needs no migration.
+ */
+export const usageEvents = pgTable(
+  "usage_events",
+  {
+    id: text("id").primaryKey(),
+    orgId: text("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull(),
+    /** Whole units of `kind`: generations, voice minutes, bytes. */
+    quantity: bigint("quantity", { mode: "number" }).notNull().default(1),
+    at: bigint("at", { mode: "number" }).notNull(),
+    metadata: jsonb("metadata"),
+  },
+  (t) => ({
+    // The gate's query, exactly: one org, one kind, a time range. Leading
+    // (org_id, kind) makes it an index range scan, and `at` last keeps the
+    // month-to-date window inside that scan instead of a filter above it.
+    orgKindAtIdx: index("usage_events_org_kind_at_idx").on(t.orgId, t.kind, t.at),
+    // The rollup job and the Stripe push read the mirror image — one day
+    // across every org — which the index above cannot serve, since its leading
+    // column is the org.
+    atIdx: index("usage_events_at_idx").on(t.at),
+  }),
+);
+
+/**
+ * Daily rollups (M4.2). Derived data: `rollupDay()` recomputes a whole UTC day
+ * from `usage_events`, so a rollup can always be discarded and rebuilt.
+ *
+ * Deliberately *not* what a gate reads. Entitlement decisions sum the events,
+ * because a rollup for the current day is stale by construction and a limit
+ * that lags by up to 24 hours is a limit that can be overrun. Rollups serve the
+ * two consumers that want coarse data: the usage meters in settings (one row
+ * per day per kind instead of a scan over every event) and the metered line
+ * items pushed to Stripe at the end of a period.
+ *
+ * `events` is how many source rows are behind `quantity` — the number that
+ * turns reconciliation into a check rather than a hope.
+ */
+export const usageRollups = pgTable(
+  "usage_rollups",
+  {
+    orgId: text("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    /**
+     * UTC calendar day, `YYYY-MM-DD`. Text rather than an epoch because every
+     * support question about usage starts with a date.
+     */
+    day: text("day").notNull(),
+    kind: text("kind").notNull(),
+    quantity: bigint("quantity", { mode: "number" }).notNull(),
+    events: bigint("events", { mode: "number" }).notNull(),
+    updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.orgId, t.day, t.kind] }),
+    // The PK covers "this org, this range of days" (the dashboard). The Stripe
+    // push wants one day across every org, which needs its own index.
+    dayIdx: index("usage_rollups_day_idx").on(t.day),
+  }),
+);
+
+export type DbPlan = typeof plans.$inferSelect;
+export type DbSubscription = typeof subscriptions.$inferSelect;
+export type DbUsageEvent = typeof usageEvents.$inferSelect;
+export type DbUsageRollup = typeof usageRollups.$inferSelect;
+
+/**
+ * Periodic workspace snapshots (M3). A cache over the op log, never a second
+ * source of truth: deleting every row here costs a slower cold start and
+ * nothing else, which is precisely what makes pruning the log safe.
+ *
+ * Two problems, one table. A cold room replays the whole log to reach current
+ * state, so a board with 50k entries pays 50k applications on the first join;
+ * with a snapshot at seq 49,900 it replays 100. And retention cannot delete an
+ * entry that some cold start still needs, so the prune floor is the latest
+ * snapshot's seq — no snapshot, no pruning.
+ *
+ * Keyed `(board_id, seq)` rather than one row per board: keeping the last few
+ * makes a snapshot written from a corrupt in-memory workspace recoverable by
+ * dropping it, and makes "state at seq N" answerable for the version history
+ * docs/13 wants. The retention sweep is what keeps the count bounded.
+ */
+export const boardSnapshots = pgTable(
+  "board_snapshots",
+  {
+    boardId: text("board_id")
+      .notNull()
+      .references(() => boards.id, { onDelete: "cascade" }),
+    /** The op-log seq this workspace is the state *after*. */
+    seq: bigint("seq", { mode: "number" }).notNull(),
+    /** Same JSONB shape as `boards.workspace` — core's zod union owns it. */
+    workspace: jsonb("workspace").notNull(),
+    createdAt: bigint("created_at", { mode: "number" }).notNull(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.boardId, t.seq] }),
+  }),
+);
+
+/**
+ * Live presence across instances (M3, docs/adr/0004). The interface and the
+ * reasoning live in src/presence.ts; this is only its table.
+ *
+ * A durable table for state that is ephemeral by definition looks wrong until
+ * you ask what the alternative is: presence has to be readable by the instance
+ * that does *not* hold the socket, and Postgres is already there (ADR 0004).
+ * The TTL is what keeps it honest — `peers()` filters on `updated_at` as well
+ * as sweeping it, so a crashed instance's rows stop being believed immediately
+ * rather than when a timer next runs.
+ *
+ * Keyed `(board_id, user_id)`, matching the client's peer map: two tabs are one
+ * participant and the last touch wins, including the `instance_id` that says
+ * whose process owes the row its liveness touches.
+ */
+export const presence = pgTable(
+  "presence",
+  {
+    boardId: text("board_id")
+      .notNull()
+      .references(() => boards.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** Which instance holds this participant's socket. Never crosses the wire. */
+    instanceId: text("instance_id").notNull(),
+    name: text("name").notNull(),
+    color: text("color").notNull(),
+    /** `{x, y}` in content coordinates, or NULL for off-canvas. */
+    cursor: jsonb("cursor"),
+    /** Selected object ids, as a JSON array. */
+    selection: jsonb("selection").notNull(),
+    updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.boardId, t.userId] }),
+    // The sweep's only query is `updated_at <= $1` across every board, which the
+    // board-leading primary key cannot serve at all.
+    updatedIdx: index("presence_updated_idx").on(t.updatedAt),
+  }),
+);
+
+export type DbBoardSnapshot = typeof boardSnapshots.$inferSelect;
+export type DbPresence = typeof presence.$inferSelect;
+
+/**
+ * Uploaded binaries, out of the workspace graph (M3).
+ *
+ * Images used to travel as data URLs inside `boards.workspace`, which put the
+ * same bytes in the JSONB row, in every WS frame that carried the op, and in
+ * localStorage — a 2 MB screenshot pasted twice is 8 MB of the things that are
+ * hardest to make bigger. The rows here are the metadata; `src/assets.ts` owns
+ * the bytes behind an `AssetStore` (disk in dev, S3/R2 in prod).
+ *
+ * Two decisions that shape everything downstream:
+ *
+ *  - **`(org_id, checksum)` is unique**, so the same file uploaded twice in an
+ *    org is one row and one billable object. That is what makes copy/paste and
+ *    duplicate-board free, and it is why `storage.bytes` can be a plain SUM
+ *    over this table without double-counting.
+ *  - **`board_id` is provenance, not ownership** (`ON DELETE SET NULL`). It
+ *    records where an asset first entered, because dedupe means a second board
+ *    can reference the same row and deleting the first board must not break it.
+ *    Reachability is a property of the op log, not of this column, so reclaiming
+ *    space is a sweep over unreferenced rows rather than a cascade.
+ */
+export const assets = pgTable(
+  "assets",
+  {
+    id: text("id").primaryKey(),
+    orgId: text("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    /** Where it was first uploaded. NULL once that board is gone. */
+    boardId: text("board_id").references(() => boards.id, { onDelete: "set null" }),
+    /** Validated against an allowlist at upload; never echoed back unchecked. */
+    mime: text("mime").notNull(),
+    /** Object size. The `storage.bytes` gate is a SUM of this per org. */
+    bytes: bigint("bytes", { mode: "number" }).notNull(),
+    /** SHA-256 of the bytes, hex. The dedupe key and the integrity check. */
+    checksum: text("checksum").notNull(),
+    /** Key in the backing store, opaque to callers. */
+    storageKey: text("storage_key").notNull(),
+    /** Key of the generated thumbnail, or NULL when one could not be made. */
+    thumbKey: text("thumb_key"),
+    width: bigint("width", { mode: "number" }),
+    height: bigint("height", { mode: "number" }),
+    createdBy: text("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: bigint("created_at", { mode: "number" }).notNull(),
+  },
+  (t) => ({
+    // Dedupe, and the leading column also serves "everything this org stores".
+    orgChecksumIdx: uniqueIndex("assets_org_checksum_idx").on(t.orgId, t.checksum),
+    boardIdx: index("assets_board_idx").on(t.boardId),
+    // The orphan sweep reads oldest-first across every org.
+    createdIdx: index("assets_created_idx").on(t.createdAt),
+  }),
+);
+
+export type DbAsset = typeof assets.$inferSelect;
+
+/**
+ * Stripe webhook deliveries (M4.3). The idempotency ledger, not an event store.
+ *
+ * Stripe retries a delivery until it gets a 2xx, and it can deliver the same
+ * event more than once even after success. A webhook that grants seats or flips
+ * a subscription to `active` therefore has to be exactly-once *in effect*, and
+ * the only durable way to get that is to write the event id and let the unique
+ * primary key refuse the second attempt.
+ *
+ * `status` distinguishes the four honest outcomes: `received` (claimed, still
+ * running — a crash leaves this and the sweep retries it), `processed`,
+ * `ignored` (an event type we do not act on, recorded so the ledger explains
+ * itself), and `failed` with `error` and `attempts` so a delivery that keeps
+ * losing is visible rather than silently dropped.
+ *
+ * `org_id` is nullable on purpose: an event that arrives before we can resolve
+ * its customer must still be recorded, or the retry would process twice.
+ */
+export const stripeEvents = pgTable(
+  "stripe_events",
+  {
+    /** Stripe's `evt_…` id. The idempotency key, hence the primary key. */
+    id: text("id").primaryKey(),
+    type: text("type").notNull(),
+    /** Resolved from the payload's customer, when it resolves at all. */
+    orgId: text("org_id").references(() => organizations.id, { onDelete: "set null" }),
+    /** Stripe's `livemode`, kept so test traffic is never mistaken for revenue. */
+    livemode: text("livemode", { enum: ["live", "test"] }).notNull(),
+    status: text("status", { enum: ["received", "processed", "ignored", "failed"] })
+      .notNull()
+      .default("received"),
+    attempts: bigint("attempts", { mode: "number" }).notNull().default(0),
+    /** Last failure message, truncated by the writer. NULL while healthy. */
+    error: text("error"),
+    receivedAt: bigint("received_at", { mode: "number" }).notNull(),
+    processedAt: bigint("processed_at", { mode: "number" }),
+  },
+  (t) => ({
+    // The retry sweep's query: everything not finished, oldest first.
+    statusIdx: index("stripe_events_status_idx").on(t.status, t.receivedAt),
+    orgIdx: index("stripe_events_org_idx").on(t.orgId),
+  }),
+);
+
+export type DbStripeEvent = typeof stripeEvents.$inferSelect;
+
+/**
+ * Org-scoped template library (M2.6, team libraries). Templates are
+ * reusable batches of operations owned by an org: an editor with access can
+ * apply them onto any of their boards the same way the built-in
+ * `TEMPLATES` in `packages/web/src/templates.ts` are applied today.
+ *
+ * Stored as JSONB ops rather than a workspace row so a template can be
+ * applied to a board of any size: the apply path re-stamps node ids so two
+ * inserts of the same template do not collide the way a workspace copy
+ * would (`templates.ts:11-18` already documents this constraint).
+ *
+ * Org-scoped rather than global so a Free org cannot pollute another's
+ * gallery, and so the deletion cascade is the same one a board already
+ * rides (`organizations ON DELETE CASCADE`).
+ */
+export const teamTemplates = pgTable(
+  "team_templates",
+  {
+    id: text("id").primaryKey(),
+    orgId: text("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    kind: text("kind").notNull(),
+    description: text("description"),
+    ops: jsonb("ops").notNull(),
+    /** Null when the creator has been deleted; the row stays for history. */
+    createdBy: text("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: bigint("created_at", { mode: "number" }).notNull(),
+    updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
+  },
+  (t) => ({
+    orgIdx: index("team_templates_org_idx").on(t.orgId, t.createdAt),
+    orgKindIdx: index("team_templates_org_kind_idx").on(t.orgId, t.kind),
+  }),
+);
+
+export type DbTeamTemplate = typeof teamTemplates.$inferSelect;
+export type DbNewTeamTemplate = typeof teamTemplates.$inferInsert;
+
+/**
+ * SCIM 2.0 identity mapping (M6 / F1).
+ *
+ * Each row pairs an IdP-issued external id with a Lucent user id. PATCH with
+ * `active: false` does not delete the row in v1 (auditing), but the
+ * deprovision route (`DELETE /scim/v2/Users/:id`) does — and either way the
+ * user's sessions are dropped via `tokenVersion` bump, which is the actual
+ * access revocation. The row is the *provisioning* record; the session
+ * invalidation is the *access* record.
+ *
+ * `idp` is free-text today ("okta", "azure-ad", …) so a deployment with more
+ * than one IdP can scope each external id. v1 ships a single IdP per
+ * deployment; the column is here so the second IdP is a config change, not a
+ * migration.
+ *
+ * The unique index is `(idp, external_id)` so the same external id cannot be
+ * claimed by two Lucent users. The user_id index is for `DELETE` and
+ * `deactivate` lookups on the Lucent-side primary key.
+ */
+export const scimIdentities = pgTable(
+  "scim_identities",
+  {
+    idp: text("idp").notNull(),
+    externalId: text("external_id").notNull(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    createdAt: bigint("created_at", { mode: "number" }).notNull(),
+  },
+  (t) => ({
+    pairUnique: uniqueIndex("scim_identities_idp_extid_uniq").on(t.idp, t.externalId),
+    userIdx: index("scim_identities_user_idx").on(t.userId),
+  }),
+);
+
+export type DbScimIdentity = typeof scimIdentities.$inferSelect;
+export type DbNewScimIdentity = typeof scimIdentities.$inferInsert;
+
+/**
+ * Meeting transcripts (E3 / R3): one row per recorded meeting on a board.
+ *
+ * `turns` is the whole diarised transcript as a JSONB array —
+ * `[{speaker, at, text, kind?}]` — rather than a turn-per-row table, for the
+ * same reason the board workspace is one JSONB blob: a transcript is read
+ * and written as a unit, never queried by turn, and the meeting flow (M5)
+ * treats it as one document. The `kind` classification (problem/hypothesis/
+ * solution/decision/action/requirement) rides each turn because that is the
+ * extraction's own data — rebuilding it from text later would be lossy.
+ *
+ * Cascades: a deleted board takes its meetings; a deleted org takes the
+ * board anyway; the creator going away keeps the row (history) and nulls
+ * `created_by`, matching the team-template convention.
+ */
+export const meetingTranscripts = pgTable(
+  "meeting_transcripts",
+  {
+    id: text("id").primaryKey(),
+    boardId: text("board_id")
+      .notNull()
+      .references(() => boards.id, { onDelete: "cascade" }),
+    orgId: text("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    startedAt: bigint("started_at", { mode: "number" }).notNull(),
+    endedAt: bigint("ended_at", { mode: "number" }),
+    turns: jsonb("turns").notNull(),
+    /** Null when the creator has been deleted; the transcript stays. */
+    createdBy: text("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: bigint("created_at", { mode: "number" }).notNull(),
+  },
+  (t) => ({
+    boardStartedIdx: index("meeting_transcripts_board_started_idx").on(t.boardId, t.startedAt),
+  }),
+);
+
+export type DbMeetingTranscript = typeof meetingTranscripts.$inferSelect;
+export type DbNewMeetingTranscript = typeof meetingTranscripts.$inferInsert;
+
+/**
+ * Per-org SSO connections (F1 / ADR 0013). One row per IdP an org trusts;
+ * in practice one, but `(org_id, idp_entity_id)` unique rather than
+ * `org_id` unique so a migration-period org can carry a second IdP while
+ * the first is retired.
+ *
+ * `x509CertPem` is the trust anchor: signature verification only ever
+ * succeeds against this certificate, so an org's owner pasting a new cert
+ * is the only way trust changes — exactly the property an enterprise buyer
+ * audits.
+ *
+ * `enforceSso` is the password-login switch: when on, an email on a
+ * claimed domain is refused password sign-in and pointed at SSO. Stored
+ * per connection (not per claim) because it is an org policy, and the
+ * connection is the org's IdP record.
+ */
+export const ssoConnections = pgTable(
+  "sso_connections",
+  {
+    id: text("id").primaryKey(),
+    orgId: text("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    idpEntityId: text("idp_entity_id").notNull(),
+    acsUrl: text("acs_url").notNull(),
+    x509CertPem: text("x509_cert_pem").notNull(),
+    nameIdFormat: text("name_id_format")
+      .notNull()
+      .default("urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress"),
+    enforceSso: boolean("enforce_sso").notNull().default(false),
+    createdAt: bigint("created_at", { mode: "number" }).notNull(),
+  },
+  (t) => ({
+    orgIdpUnique: uniqueIndex("sso_connections_org_idp_uniq").on(t.orgId, t.idpEntityId),
+  }),
+);
+
+/**
+ * Domain claims (F1): proof an org owns an email domain, so SSO applies to
+ * its users automatically. `token` is the TXT-record challenge; `verifiedAt`
+ * null until the DNS check passes — a claim row that has not verified gates
+ * nothing.
+ */
+export const domainClaims = pgTable(
+  "domain_claims",
+  {
+    id: text("id").primaryKey(),
+    orgId: text("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    domain: text("domain").notNull(),
+    token: text("token").notNull(),
+    verifiedAt: bigint("verified_at", { mode: "number" }),
+    createdAt: bigint("created_at", { mode: "number" }).notNull(),
+  },
+  (t) => ({
+    domainUnique: uniqueIndex("domain_claims_domain_uniq").on(t.domain),
+    orgIdx: index("domain_claims_org_idx").on(t.orgId),
+  }),
+);
+
+export type DbSsoConnection = typeof ssoConnections.$inferSelect;
+export type DbNewSsoConnection = typeof ssoConnections.$inferInsert;
+export type DbDomainClaim = typeof domainClaims.$inferSelect;
+export type DbNewDomainClaim = typeof domainClaims.$inferInsert;

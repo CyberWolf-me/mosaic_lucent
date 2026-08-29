@@ -1,0 +1,78 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "lucent.fullname" . }}
+  labels: {{- include "lucent.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels: {{- include "lucent.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "lucent.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      # Spread pods across nodes and zones when the cluster allows it. The
+      # soft anti-affinity lets single-node dev clusters schedule anyway.
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels: {{- include "lucent.selectorLabels" . | nindent 18 }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: lucent
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 4387
+              protocol: TCP
+          env:
+            {{- range $k, $v := .Values.env }}
+            - name: {{ $k }}
+              value: {{ $v | quote }}
+            {{- end }}
+            {{- if .Values.existingSecret }}
+            {{- range $k, $_ := .Values.env }}
+            - name: {{ $k }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $.Values.existingSecret }}
+                  key: {{ $k }}
+                  optional: true
+            {{- end }}
+            {{- end }}
+            {{- if .Values.postgres.enabled }}
+            - name: LUCENT_DATABASE_URL
+              value: "postgres://{{ .Values.postgres.username }}:{{ (.Values.postgres.existingSecret | default "") | default "REPLACE_ME" }}@{{ .Values.postgres.host }}:{{ .Values.postgres.port }}/{{ .Values.postgres.database }}"
+            {{- end }}
+            - name: LUCENT_STATIC_ROOT
+              value: {{ .Values.web.staticRoot | quote }}
+          {{- if .Values.web.enabled }}
+          volumeMounts:
+            - name: web-dist
+              mountPath: /app/dist
+              readOnly: true
+          {{- end }}
+          livenessProbe: {{- toYaml .Values.livenessProbe | nindent 12 }}
+          readinessProbe: {{- toYaml .Values.readinessProbe | nindent 12 }}
+          resources: {{- toYaml .Values.resources | nindent 12 }}
+      {{- if .Values.web.enabled }}
+      volumes:
+        - name: web-dist
+          emptyDir: {}
+      {{- end }}

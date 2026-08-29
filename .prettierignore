@@ -1,0 +1,28 @@
+# Prettier's scope is everything this repo writes by hand, so the list below is
+# only what is installed, generated, vendored, or local tool state.
+#
+# Documentation is deliberately absent from this file: docs/**/*.md and the
+# root Markdown files are formatted like source and gated by
+# `npm run format:check` in CI. A doc that drifts out of format is a doc that
+# nobody has run a tool over in a while.
+
+# Installed and built output.
+node_modules
+dist
+coverage
+
+# Generated: npm writes the lockfile, drizzle-kit writes the migration SQL.
+package-lock.json
+packages/server/migrations
+
+# Helm chart templates are Go templates, not YAML — Prettier cannot parse the
+# `{{ }}` actions and `.tpl` has no parser at all. `helm lint --strict` in the
+# CI `lint` job is what validates this directory instead.
+charts/lucent/templates
+
+# Vendored design prototype, kept verbatim so it can be diffed against the
+# port in packages/web.
+reference
+
+# Local editor/agent state, not repo content.
+.zcode

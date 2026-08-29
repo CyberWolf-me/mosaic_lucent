@@ -1,0 +1,54 @@
+name: CodeQL
+
+# Its own workflow rather than a job in ci.yml, for three reasons: it needs
+# `security-events: write` while ci.yml's token is read-only, its output is an
+# alert in the Security tab rather than a pass/fail read from the checks list,
+# and it runs on a schedule so a query published next month still gets pointed
+# at today's code.
+#
+# Requires code scanning to be enabled for the repository — free for public
+# repositories, part of Advanced Security for private ones. Until it is enabled
+# the init step fails loudly rather than silently passing.
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+  schedule:
+    # Mondays, 04:27 UTC. Off the hour on purpose: scheduled runs cluster on
+    # :00 and sit in a queue.
+    - cron: "27 4 * * 1"
+
+# Deliberately narrower than ci.yml's `branches: ["**"]`: feature branches are
+# covered by the pull_request trigger, and a full suite on every branch push
+# costs minutes for a result nobody reads twice.
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: Analyze JavaScript/TypeScript
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    permissions:
+      # Uploading the SARIF results is what needs write access.
+      security-events: write
+      # Private repositories also need this to attach results to the run.
+      actions: read
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: javascript-typescript
+          config-file: ./.github/codeql/codeql-config.yml
+
+      # No autobuild step: javascript-typescript is analysed from source, so
+      # running the Vite build here would cost minutes and change nothing.
+      - uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:javascript-typescript"
