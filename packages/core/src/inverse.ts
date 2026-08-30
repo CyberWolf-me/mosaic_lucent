@@ -165,6 +165,17 @@ export function inverseOperations(ops: readonly Operation[], before: Workspace):
           id: gone.id,
           label: gone.label,
           children: [...gone.children],
+          ...(gone.kind ? { kind: gone.kind } : {}),
+        });
+        break;
+      }
+      case "SET_GROUP_KIND": {
+        // Restore the prior kind, including absent (null clears the region).
+        const prev = walking.groups[op.id]?.kind;
+        inverses.unshift({
+          op: "SET_GROUP_KIND",
+          id: op.id,
+          kind: prev ?? null,
         });
         break;
       }

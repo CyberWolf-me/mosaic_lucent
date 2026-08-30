@@ -88,4 +88,60 @@ export const GOLDEN_SET: readonly GoldenCase[] = [
     minOperations: 0,
     forbidOperations: [{ op: "MOVE_NODE", id: "payments" }],
   },
+
+  {
+    id: "parallel-diagram-refusal",
+    // Found by the live test pass: a request about an UNRELATED system must
+    // not be merged into a populated board. The prompt's new rule says answer
+    // with no ops and point at a new board, so the client can offer the
+    // one-click action. Zero ops IS the correct answer here.
+    message: "Build a marketing analytics pipeline with event tracking",
+    summary: seeded,
+    minOperations: 0,
+    forbidOperations: [{ op: "CREATE_NODE" }],
+    explanationIncludes: "own board",
+  },
+  {
+    id: "unrelated-on-empty-board-builds",
+    // The same words on an EMPTY board are just the next thing to build: a
+    // connected seed flow, not a refusal. A populated-board-only rule would
+    // strand a fresh user whose first diagram happens to name a system in
+    // the match list.
+    message: "Build a marketing analytics pipeline with event tracking",
+    summary: empty,
+    minOperations: 5,
+    expectOperations: [
+      { op: "CONNECT_NODES", relationship: "starts" },
+      { op: "CONNECT_NODES", relationship: "yields" },
+    ],
+    forbidOperations: [{ op: "DELETE_NODE" }],
+  },
+
+  {
+    id: "parallel-diagram-refusal",
+    // Found by the live test pass: a request about an UNRELATED system must
+    // not be merged into a populated board. The prompt's new rule says answer
+    // with no ops and point at a new board, so the client can offer the
+    // one-click action. Zero ops IS the correct answer here.
+    message: "Build a marketing analytics pipeline with event tracking",
+    summary: seeded,
+    minOperations: 0,
+    forbidOperations: [{ op: "CREATE_NODE" }],
+    explanationIncludes: "own board",
+  },
+  {
+    id: "unrelated-on-empty-board-builds",
+    // The same words on an EMPTY board are just the next thing to build: a
+    // connected seed flow, not a refusal. A populated-board-only rule would
+    // strand a fresh user whose first diagram happens to name a system in
+    // the match list.
+    message: "Build a marketing analytics pipeline with event tracking",
+    summary: empty,
+    minOperations: 5,
+    expectOperations: [
+      { op: "CONNECT_NODES", relationship: "starts" },
+      { op: "CONNECT_NODES", relationship: "yields" },
+    ],
+    forbidOperations: [{ op: "DELETE_NODE" }],
+  },
 ];

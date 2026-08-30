@@ -1,5 +1,14 @@
 import { sql } from "drizzle-orm";
-import { bigint, boolean, index, jsonb, pgTable, primaryKey, text, uniqueIndex } from "drizzle-orm/pg-core";
+import {
+  bigint,
+  boolean,
+  index,
+  jsonb,
+  pgTable,
+  primaryKey,
+  text,
+  uniqueIndex,
+} from "drizzle-orm/pg-core";
 
 /**
  * Postgres schema for the Lucent server (docs/06).

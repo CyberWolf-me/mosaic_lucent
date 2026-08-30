@@ -333,3 +333,95 @@ describe("sessions: in-memory store properties", () => {
     expect(list).toHaveLength(1);
   });
 });
+
+// ---- logout vs the bearer credential (found by the live test pass) --------
+//
+// The login response mints a 7-day bearer token next to the session cookie.
+// Logout used to revoke only the cookie: the browser's own sign-out was safe
+// (the client also wipes localStorage), but any copy of the token outside
+// that one tab stayed fully authenticated for its remaining lifetime — and
+// "sign out everywhere"'s tokenVersion bump never reached the bearer path
+// either, because authenticate() did not compare `ver`. These tests pin the
+// fixed contract on all three paths.
+describe("logout and tokenVersion vs bearer tokens (live-test regression)", () => {
+  it("logout invalidates the outstanding bearer token, not just the cookie", async () => {
+    const store = new InMemoryUserStore();
+    const sessions = new InMemorySessionStore();
+    const c = ctx(store, sessions);
+    const signup = await handleSignup(c, {
+      email: "bearer1@example.com",
+      password: "password123",
+      name: "Bearer One",
+    });
+    const cookie = setCookieValue(signup.headers?.["set-cookie"]);
+    const token = (signup.body as { token: string }).token;
+
+    // Pre-condition: the bearer authenticates.
+    const before = await authenticate(c, null, token);
+    expect(before?.email).toBe("bearer1@example.com");
+
+    const result = await handleLogout(c, `lucent_session=${cookie}`);
+    expect(result.status).toBe(204);
+
+    // The bug: this used to still resolve. Logout bumped tokenVersion, and
+    // the bearer path compares the token's `ver` against the live row.
+    const after = await authenticate(c, null, token);
+    expect(after).toBeUndefined();
+  });
+
+  it("sign-out everywhere kills bearer tokens too (ver enforcement)", async () => {
+    const store = new InMemoryUserStore();
+    const sessions = new InMemorySessionStore();
+    const c = ctx(store, sessions);
+    const signup = await handleSignup(c, {
+      email: "bearer2@example.com",
+      password: "password123",
+      name: "Bearer Two",
+    });
+    const token = (signup.body as { token: string }).token;
+    const before = await authenticate(c, null, token);
+    expect(before?.email).toBe("bearer2@example.com");
+
+    await handleSignoutAll(c, null, token);
+    const after = await authenticate(c, null, token);
+    expect(after).toBeUndefined();
+  });
+
+  it("a fresh login after logout mints a token that works again", async () => {
+    const store = new InMemoryUserStore();
+    const sessions = new InMemorySessionStore();
+    const c = ctx(store, sessions);
+    const signup = await handleSignup(c, {
+      email: "bearer3@example.com",
+      password: "password123",
+      name: "Bearer Three",
+    });
+    const cookie = setCookieValue(signup.headers?.["set-cookie"]);
+    await handleLogout(c, `lucent_session=${cookie}`);
+
+    // Fresh login: the new token carries the bumped version.
+    const login = await handleLogin(c, {
+      email: "bearer3@example.com",
+      password: "password123",
+    });
+    const fresh = (login.body as { token: string }).token;
+    const authed = await authenticate(c, null, fresh);
+    expect(authed?.email).toBe("bearer3@example.com");
+  });
+
+  it("a stale ver-0 token is refused once the user has bumped", async () => {
+    const store = new InMemoryUserStore();
+    const sessions = new InMemorySessionStore();
+    const c = ctx(store, sessions);
+    const signup = await handleSignup(c, {
+      email: "bearer4@example.com",
+      password: "password123",
+      name: "Bearer Four",
+    });
+    const token = (signup.body as { token: string }).token;
+    const user = (signup.body as { user: { id: string } }).user;
+    // An explicit bump — the "sign out everywhere" lever.
+    await store.bumpTokenVersion(user.id, Date.now());
+    expect(await authenticate(c, null, token)).toBeUndefined();
+  });
+});

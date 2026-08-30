@@ -114,6 +114,9 @@ export function validateOperations(workspace: Workspace, ops: Operation[]): Vali
         if (!groups.has(op.id)) err(`group "${op.id}" does not exist`);
         groups.delete(op.id);
         break;
+      case "SET_GROUP_KIND":
+        if (!groups.has(op.id)) err(`group "${op.id}" does not exist`);
+        break;
       case "CREATE_DIAGRAM":
       case "TRANSFORM_DIAGRAM":
         break;

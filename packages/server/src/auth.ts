@@ -42,6 +42,15 @@ export interface TokenPayload {
   iat: number;
   /** Expiry, seconds. */
   exp: number;
+  /**
+   * The user's `tokenVersion` when this token was minted. Absent on tokens
+   * issued before the field existed. The bearer-auth path compares it to the
+   * live row, so `bumpTokenVersion` — "sign out everywhere", logout, a
+   * password reset — invalidates outstanding bearer tokens without a
+   * session store to enumerate. Without this field there is nothing to
+   * compare and a stateless token could only ever expire.
+   */
+  ver?: number;
 }
 
 const base64url = (buf: Buffer) =>
@@ -54,9 +63,14 @@ const fromBase64url = (s: string) => Buffer.from(s.replace(/-/g, "+").replace(/_
  * and verifiable without a session store — the tradeoff is that it can't be
  * revoked before expiry, which is acceptable for short-lived tokens.
  */
-export function issueToken(userId: string, secret: string, ttlSeconds = 7 * 24 * 3600): string {
+export function issueToken(
+  userId: string,
+  secret: string,
+  ttlSeconds = 7 * 24 * 3600,
+  tokenVersion = 0,
+): string {
   const now = Math.floor(Date.now() / 1000);
-  const payload: TokenPayload = { userId, iat: now, exp: now + ttlSeconds };
+  const payload: TokenPayload = { userId, iat: now, exp: now + ttlSeconds, ver: tokenVersion };
   const body = base64url(Buffer.from(JSON.stringify(payload), "utf8"));
   const sig = base64url(createHmac("sha256", secret).update(body).digest());
   return `${body}.${sig}`;

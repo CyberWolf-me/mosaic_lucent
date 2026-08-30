@@ -167,10 +167,23 @@ const operationSchema = z.discriminatedUnion("op", [
     id: z.string().min(1),
     label: z.string(),
     children: z.array(z.string().min(1)).default([]),
+    /** Declares this group a diagram region rendered as the given kind. */
+    kind: diagramKind.optional(),
   }),
   z.object({
     op: z.literal("DELETE_GROUP"),
     id: z.string().min(1),
+  }),
+  /**
+   * Change or clear a region's kind — "turn the pricing section into an org
+   * chart" without touching any other diagram on the board. `kind: null`
+   * dissolves the region back into the board-wide layout. Semantics (nodes,
+   * edges, membership) are untouched; only the rendering lens changes.
+   */
+  z.object({
+    op: z.literal("SET_GROUP_KIND"),
+    id: z.string().min(1),
+    kind: diagramKind.nullable(),
   }),
   z.object({
     op: z.literal("CREATE_DIAGRAM"),

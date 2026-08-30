@@ -14,6 +14,20 @@ const LAST_OPEN_KEY = "lucent.lastProject";
 export interface ChatEntry {
   role: "user" | "ai" | "error";
   text: string;
+  /**
+   * True when the AI judged this request to be about a different system than
+   * the board shows (the prompt's parallel-diagram rule) and described what it
+   * would build instead. The chat entry then carries a one-click "create that
+   * board" affordance. Set only on `role: "ai"` entries; optional so older
+   * saved conversations keep parsing.
+   */
+  suggestNewBoard?: boolean;
+  /**
+   * On a `suggestNewBoard` entry: the user's original prompt that the AI
+   * answered, so the action can re-run it on the fresh board without the
+   * renderer needing access to the surrounding chat history.
+   */
+  originPrompt?: string;
 }
 
 export interface ProjectMeta {
@@ -82,17 +96,25 @@ export function loadProject(id: string): ProjectData | null {
   try {
     const raw = localStorage.getItem(PROJECT_PREFIX + id);
     if (!raw) return null;
-    const data = JSON.parse(raw) as ProjectData;
+    const data = JSON.parse(raw) as Partial<ProjectData>;
+    // A record without a workspace is a half-finished save (found by the live
+    // test pass: the new-board action switched projects before any autosave
+    // had written the new one). Loading it whole would hand `undefined` to
+    // every reader of `.workspace`; treat it as absent so the caller falls
+    // back to an empty board rather than crashing on it.
+    if (!data || !data.id || !data.workspace) return null;
     // Back-compat: fill in fields added after older projects were saved.
-    if (data.workspace) {
-      if (!data.workspace.wireframes) data.workspace = { ...data.workspace, wireframes: {} };
-      if (!data.workspace.shapes) data.workspace = { ...data.workspace, shapes: {} };
-      if (!data.workspace.shapeLinks) data.workspace = { ...data.workspace, shapeLinks: {} };
-      if (!data.workspace.votes) data.workspace = { ...data.workspace, votes: {} };
-      if (!data.workspace.reactions) data.workspace = { ...data.workspace, reactions: {} };
-      if (!data.workspace.comments) data.workspace = { ...data.workspace, comments: {} };
+    const ws = data.workspace;
+    if (ws) {
+      if (!ws.wireframes) data.workspace = { ...ws, wireframes: {} };
+      if (!ws.shapes) data.workspace = { ...data.workspace, shapes: {} };
+      if (!ws.shapeLinks) data.workspace = { ...data.workspace, shapeLinks: {} };
+      if (!ws.votes) data.workspace = { ...data.workspace, votes: {} };
+      if (!ws.reactions) data.workspace = { ...data.workspace, reactions: {} };
+      if (!ws.comments) data.workspace = { ...data.workspace, comments: {} };
     }
-    return data;
+    data.chat = Array.isArray(data.chat) ? data.chat : [];
+    return data as ProjectData;
   } catch {
     return null;
   }

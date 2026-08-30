@@ -149,6 +149,13 @@ export interface WorkspaceState {
   applyManual: (ops: Operation[], label: string) => boolean;
 
   /**
+   * Parallel diagrams: create a fresh board and run `prompt` against it. The
+   * current board is untouched — this is the action behind the AI's "this
+   * looks like a new board" reply.
+   */
+  startNewBoardFor: (prompt: string) => void;
+
+  /**
    * Resolve a user id to a display name. Combines the local signed-in user,
    * peer presence, and a fallback to the raw id so unknown authors don't
    * disappear from comment threads (M0.4).
@@ -502,8 +509,23 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         );
         setStreamChars(0);
         // Answer-only reply (a question about the board): no ops, just explain.
+        // A "this belongs on its own board" reply (the prompt's parallel-diagram
+        // rule) is the other case that arrives with no ops — the explanation says
+        // the topic looks unrelated, and the entry is marked so the chat can
+        // offer the one-click "build it on a new board".
         if (result.operations.length === 0) {
-          setChat([...withUser, { role: "ai", text: result.explanation ?? "(no answer)" }]);
+          const explanation = result.explanation ?? "(no answer)";
+          const suggestsBoard =
+            Object.keys(workspace.nodes).length > 0 &&
+            /own board|separate board|new board/i.test(explanation);
+          setChat([
+            ...withUser,
+            {
+              role: "ai",
+              text: explanation,
+              ...(suggestsBoard ? { suggestNewBoard: true, originPrompt: text } : {}),
+            },
+          ]);
           return;
         }
         const errors = validateOperations(workspace, result.operations);
@@ -643,6 +665,53 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     setTick((t) => t + 1);
     setLastOpenProject(id);
   }, []);
+
+  /**
+   * Parallel diagrams: open a FRESH board and immediately send `prompt` to it,
+   * leaving the current board exactly as it is. This is the one-click path for
+   * the AI's "this looks like a new board" reply — the user described a
+   * different system, and the product's answer is a new workspace, not a
+   * merge into the diagram they were reading.
+   *
+   * Two invariants, both learned from the live test pass:
+   *   1. A valid project record is written SYNCHRONOUSLY before anything
+   *      else runs. The first cut relied on the autosave, which races: the
+   *      last-open pointer moved to an id whose record did not exist yet, and
+   *      a reload in that window crashed the boot restore on
+   *      `restored.workspace`.
+   *   2. `send` closes over the CURRENT workspace and chat, so calling it in
+   *      the same tick would send the OLD board's context. The prompt is
+   *      parked in a ref that an effect consumes after the fresh workspace
+   *      state has landed.
+   */
+  const pendingNewBoardPrompt = useRef<string | null>(null);
+  const startNewBoardFor = useCallback((prompt: string) => {
+    const id = newProjectId();
+    const name = prompt.slice(0, 40).trim() || "New board";
+    const fresh = createWorkspace();
+    // Same synchronous write openProject's import path uses: the record
+    // exists, well-formed, before the pointer moves to it.
+    saveProject({ id, name, workspace: fresh, chat: [] });
+    historyRef.current = new OperationHistory(fresh, "initial");
+    setProjectId(id);
+    setProjectName(name);
+    setWorkspace(fresh);
+    setChat([]);
+    setProposal(null);
+    setView("canvas");
+    setLastOpenProject(id);
+    pendingNewBoardPrompt.current = prompt;
+    setTick((t) => t + 1);
+  }, []);
+
+  useEffect(() => {
+    const prompt = pendingNewBoardPrompt.current;
+    if (!prompt) return;
+    pendingNewBoardPrompt.current = null;
+    // The fresh workspace is now current; send from THIS render's closures.
+    void send(prompt);
+    // `send` is stable per workspace state and runs once per parked prompt.
+  }, [workspace, send]);
 
   /**
    * Load a board from an imported JSON file into a new project.
@@ -795,6 +864,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     nameFor,
     applyManual,
     newProject,
+    startNewBoardFor,
     openProject,
     importWorkspace,
   };

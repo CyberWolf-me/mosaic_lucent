@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import { Ico } from "./icons.js";
 import { AllowanceNote } from "./Paywall.js";
 import type { ChatEntry } from "../persistence.js";
+import { useWorkspace } from "../workspace.js";
 
 /**
  * Floating conversational pill ported from reference/components/ai_pill.jsx.
@@ -222,7 +223,29 @@ function ConvoTurn({ entry }: { entry: ChatEntry }) {
         >
           {entry.text}
         </div>
+        {!isUser && entry.suggestNewBoard && entry.originPrompt && (
+          <NewBoardAction prompt={entry.originPrompt} />
+        )}
       </div>
     </div>
+  );
+}
+
+/**
+ * The one-click parallel-diagram affordance: opens a fresh board and runs the
+ * original prompt against it, leaving the board the user was reading exactly
+ * as it was. Lives here rather than in the entry body so the entry stays
+ * presentation-only and the action owns its own wiring.
+ */
+function NewBoardAction({ prompt }: { prompt: string }) {
+  const { startNewBoardFor } = useWorkspace();
+  return (
+    <button
+      className="btn amber"
+      style={{ marginTop: 8, padding: "0 12px", height: 28, fontSize: 12 }}
+      onClick={() => startNewBoardFor(prompt)}
+    >
+      <Ico.Layers /> Build this on a new board
+    </button>
   );
 }

@@ -1,0 +1,51 @@
+name: release
+
+# Changesets release flow (H): on every push to main, the changesets action
+# either (a) opens/updates one "Version Packages" PR when pending changesets
+# exist, or (b) publishes and tags when that PR merges. The M5–M7 changeset
+# already in .changeset/ is what the first run will pick up.
+#
+# `npm` publishing is off (every workspace is `private: true`) — the release
+# artifact this repo ships is the git tag plus the changelog, consumed by the
+# image build. If a workspace ever goes public, `publish` below is the line
+# to change, and `.changeset/config.json`'s `access` is already "public".
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The full history matters: changesets reads every commit message
+          # with a changeset reference when assembling the changelog.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - run: npm ci
+
+      # The version PR runs no tests of its own — CI has already gated every
+      # commit that reached main, and re-running the suite on a version bump
+      # would only re-prove what passed an hour ago. The publish step below
+      # is the one place the "tag exists and the tree is green" invariant
+      # matters, and the tag comes from this same job.
+      - uses: changesets/action@v1
+        with:
+          # No `version`/`publish` overrides: every workspace is private, so
+          # the release artifact is the version PR → merge → tag → changelog.
+          # If a workspace goes public later, `publish: npm run publish` plus
+          # an NPM_TOKEN secret is the entire change.
+          publish: ""
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

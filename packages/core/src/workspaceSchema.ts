@@ -124,6 +124,18 @@ const groupSchema = z.object({
   id: z.string().min(1),
   label: z.string(),
   children: z.array(z.string().min(1)),
+  /** Diagram regions (per-group kind); absent on every pre-region board. */
+  kind: z
+    .enum([
+      "flowchart",
+      "architecture",
+      "mindmap",
+      "journey",
+      "decisiontree",
+      "process",
+      "orgchart",
+    ])
+    .optional(),
 });
 
 const commentSchema = z.object({

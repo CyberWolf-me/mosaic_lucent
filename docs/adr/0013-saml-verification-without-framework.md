@@ -5,7 +5,7 @@
 **Context**
 
 Per-org SSO (M6/F1) needs SAML 2.0 — the enterprise IdPs that matter
-(Okta, Azure AD/Entra, Ping) all speak it, and several expose *only*
+(Okta, Azure AD/Entra, Ping) all speak it, and several expose _only_
 SAML applications. The browser side of SAML is redirects and a form POST;
 the load-bearing part is the server's job: parse the IdP's XML Response,
 canonicalize the signed element, verify the RSA signature against the
@@ -29,17 +29,17 @@ client is hand-rolled form-encoding plus fetch rather than the Stripe SDK
 (`billing/stripe.ts`) — because the surface actually needed is one thin
 slice of what the library drags in. Here the slice is:
 
-  parse Response → find the Signature on the **Response element** →
-  canonicalize the signed content per exc-c14n → verify RSA-SHA256
-  against the org's stored certificate → read NameID + attribute values.
+parse Response → find the Signature on the **Response element** →
+canonicalize the signed content per exc-c14n → verify RSA-SHA256
+against the org's stored certificate → read NameID + attribute values.
 
 What a framework buys beyond that — service-provider metadata generation,
- dozens of binding idioms, refresh flows, an abstraction for "many
- IdPs" — is surface this product does not need: Lucent is the SP, there
- is exactly one ACS endpoint shape, and the org's IdP metadata arrives
- as operator-pasted values rather than a metadata exchange.
+dozens of binding idioms, refresh flows, an abstraction for "many
+IdPs" — is surface this product does not need: Lucent is the SP, there
+is exactly one ACS endpoint shape, and the org's IdP metadata arrives
+as operator-pasted values rather than a metadata exchange.
 
-What a framework *costs* is the specific thing that matters here: SAML
+What a framework _costs_ is the specific thing that matters here: SAML
 libraries accrue their own CVE history (xml-encryption, signature-
 wrapping bypasses), and a signature-wrapping bug in a dependency is one
 we cannot read, only patch. The signature-wrapping defense in this
@@ -74,9 +74,9 @@ standalone package exists and the algorithm for the subset SAML uses
 
 **Alternatives rejected**
 
-- *samlify / passport-saml*: the framework cost above, plus passport-
+- _samlify / passport-saml_: the framework cost above, plus passport-
   saml's express-era middleware assumptions against a framework-free
   server.
-- *Fully hand-rolled parsing*: XML parsing is where hand-rolling buys
+- _Fully hand-rolled parsing_: XML parsing is where hand-rolling buys
   nothing and risks everything (entity expansion, encoding quirks). A
   maintained parser is strictly better there.

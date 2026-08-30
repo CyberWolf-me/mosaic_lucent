@@ -16,7 +16,7 @@ import type { RegisterRoutes } from "./context.js";
  * through it by design, as everywhere else.
  */
 export const registerMeetingRoutes: RegisterRoutes = (router, s) => {
-  const { send, requireUser, requireBoardRole, readBody, meetings } = s;
+  const { send, requireBoardRole, readBody, meetings } = s;
 
   router.post("/api/boards/:id/meetings", async (ctx) => {
     const { req, res } = ctx;
@@ -84,7 +84,13 @@ export const registerMeetingRoutes: RegisterRoutes = (router, s) => {
     const { req, res } = ctx;
     const boardId = ctx.param("id");
     const mid = ctx.param("mid");
-    const guard = await requireBoardRole(req, res, boardId, "viewer", "/api/boards/:id/meetings/:mid");
+    const guard = await requireBoardRole(
+      req,
+      res,
+      boardId,
+      "viewer",
+      "/api/boards/:id/meetings/:mid",
+    );
     if (!guard.ok) return;
     if (!meetings) return send(res, 503, { error: "meeting transcripts are not configured" });
     const row = await meetings.get(boardId, mid);
@@ -94,5 +100,4 @@ export const registerMeetingRoutes: RegisterRoutes = (router, s) => {
     }
     send(res, 200, row);
   });
-
 };

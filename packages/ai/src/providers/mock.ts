@@ -86,6 +86,48 @@ const scripts: Script[] = [
     }),
   },
   {
+    // Parallel diagrams (found by the live test pass): a request that names a
+    // system a populated board is clearly NOT about gets the no-ops answer
+    // the prompt's new rule requires, so the client can offer "build this on
+    // a new board". On an empty board the same words are just the next thing
+    // to build, so it answers with a connected seed flow instead (the same
+    // shape as the generic fallback, but named from the matched system).
+    match: (m) =>
+      /(marketing|analytics pipeline|onboarding funnel|hr system|inventory system|crm|data platform|recommendation engine|billing system|notification service)/i.test(
+        m,
+      ),
+    build: (req) => {
+      if (req.summary.nodes.length === 0) {
+        const id = slug(req.message);
+        return {
+          explanation: `Built a connected flow for "${req.message.slice(0, 40)}".`,
+          operations: [
+            { op: "CREATE_NODE", id: `${id}-request`, nodeType: "actor", label: "Trigger" },
+            { op: "CREATE_NODE", id: `${id}-step`, nodeType: "step", label: "Core process" },
+            { op: "CREATE_NODE", id: `${id}-outcome`, nodeType: "goal", label: "Outcome" },
+            {
+              op: "CONNECT_NODES",
+              source: `${id}-request`,
+              target: `${id}-step`,
+              relationship: "starts",
+            },
+            {
+              op: "CONNECT_NODES",
+              source: `${id}-step`,
+              target: `${id}-outcome`,
+              relationship: "yields",
+            },
+          ] as Operation[],
+        };
+      }
+      return {
+        explanation:
+          'That looks like a separate system rather than part of this board — mixing unrelated systems into one diagram makes both unreadable. It belongs on its own board; use "New workspace" (or the button below) and describe it there.',
+        operations: [],
+      };
+    },
+  },
+  {
     // "wireframe / mockup / UI" -> a derived checkout wireframe (docs/05, docs/07).
     match: (m) => /wireframe|mock ?up|ui screen|checkout page|design the (ui|screen|page)/i.test(m),
     build: () => ({
@@ -168,16 +210,37 @@ export class MockProvider implements LLMProvider {
     const script = scripts.find((s) => s.match(request.message));
     if (script) return script.build(request);
 
-    // Fallback: turn the message into a single labelled node.
+    // Fallback: a small CONNECTED flow built from the request, not one
+    // orphan note. The single-note fallback is what the live test pass
+    // surfaced: an unrecognized prompt dropped a disconnected card with the
+    // whole message as its label, stacked on an existing node — the exact
+    // "nodes not connected, can't tell what does what" complaint. A mock's
+    // job is to look like the product's real answer shape, and real answers
+    // are graphs: a request, its key step, and the outcome, wired together.
     const id = slug(request.message);
+    const short = request.message.replace(/\s+/g, " ").trim().slice(0, 28);
     const operations: Operation[] = [
-      { op: "CREATE_NODE", id, nodeType: "note", label: request.message.slice(0, 60) },
+      { op: "CREATE_NODE", id: `${id}-request`, nodeType: "actor", label: short || "Request" },
+      { op: "CREATE_NODE", id: `${id}-step`, nodeType: "step", label: "Key step" },
+      { op: "CREATE_NODE", id: `${id}-outcome`, nodeType: "goal", label: "Outcome" },
+      {
+        op: "CONNECT_NODES",
+        source: `${id}-request`,
+        target: `${id}-step`,
+        relationship: "triggers",
+      },
+      {
+        op: "CONNECT_NODES",
+        source: `${id}-step`,
+        target: `${id}-outcome`,
+        relationship: "produces",
+      },
     ];
     // Guard against schema drift if Operation changes shape.
     safeParseOperations(operations);
     return {
       operations,
-      explanation: `Added a node for "${request.message.slice(0, 40)}".`,
+      explanation: `Added a connected flow for "${request.message.slice(0, 40)}".`,
     };
   }
 

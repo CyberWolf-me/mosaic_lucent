@@ -472,9 +472,24 @@ export async function handleLogout(
   cookieHeader: string | undefined | null,
 ): Promise<HandleResult> {
   const now = ctx.now ?? Date.now();
+  // Revoke the bearer credential alongside the cookie. The cookie was the
+  // visible half of the session, but the login response also minted a 7-day
+  // bearer token into localStorage (and into API clients), and clearing only
+  // the cookie left that token fully valid — "signed out" in one tab, still
+  // authenticated from any copy of the token. `bumpTokenVersion` kills it
+  // because the bearer path in `authenticate` compares `ver`; a fresh login
+  // mints at the new version, so the normal flow pays nothing.
+  //
+  // The user id has to be read BEFORE the revoke: `find` on a revoked row
+  // answers undefined, and the order was originally revoke-then-find, which
+  // made this whole block a silent no-op (caught by the regression suite).
   if (ctx.sessionStore && ctx.sessionCookie) {
     const id = getCookie(parseCookies(cookieHeader), ctx.sessionCookie.name);
     if (id) {
+      const session = await ctx.sessionStore.find(id, now);
+      if (session) {
+        await ctx.userStore.bumpTokenVersion(session.userId, now);
+      }
       await ctx.sessionStore.revoke(id, now);
     }
   }
@@ -595,14 +610,26 @@ export async function authenticate(
     }
   }
 
-  // Bearer path: programmatic clients only. Verifies the HMAC and looks up
-  // the user; same `tokenVersion` rule is not enforced here because there is
-  // no session row to compare against — bumping version still invalidates the
-  // user row's effective credential indirectly via the cookie path.
+  // Bearer path: programmatic clients only. Verifies the HMAC, loads the
+  // user, and compares the token's `ver` to the live `tokenVersion` — the
+  // stateless twin of the cookie path's rule. Without this comparison,
+  // `bumpTokenVersion` (logout, sign-out-everywhere, password reset) could
+  // never reach a bearer token: HMAC-valid until `exp`, seven days out.
+  //
+  // A token issued before `ver` existed carries none. Treating a missing
+  // `ver` as "matches everything" would leave every pre-existing token
+  // unrevocable for its remaining lifetime, so it is treated as `0` —
+  // which matches users who never bumped (every normal account) and
+  // revokes the token on the first bump for everyone else. The gap is one
+  // deployment's token lifetime at most, and the alternative is a hole
+  // that never closes.
   if (bearer) {
     const payload = verifyToken(bearer, ctx.secret);
     if (payload) {
-      return ctx.userStore.findById(payload.userId);
+      const user = await ctx.userStore.findById(payload.userId);
+      if (!user) return undefined;
+      if ((payload.ver ?? 0) !== user.tokenVersion) return undefined;
+      return user;
     }
   }
   return undefined;
@@ -614,7 +641,10 @@ export async function authSuccess(
   sessionId?: string,
 ): Promise<AuthSuccess> {
   return {
-    token: issueToken(user.id, ctx.secret),
+    // ver-carrying bearer token: "sign out everywhere" and logout both bump
+    // `tokenVersion`, and the bearer path (authenticate) compares it, so a
+    // stateless token can now be revoked the moment the user row says so.
+    token: issueToken(user.id, ctx.secret, 7 * 24 * 3600, user.tokenVersion),
     user: toPublicUser(user),
     memberships: await ctx.userStore.membershipsFor(user.id),
     sessionId,
@@ -827,7 +857,8 @@ export async function handleVerifyTwoFactorLogin(
     status: 200,
     body: {
       user: toPublicUser(user),
-      token: issueToken(user.id, ctx.secret),
+      // ver-carrying, same as authSuccess (see there for why).
+      token: issueToken(user.id, ctx.secret, 7 * 24 * 3600, user.tokenVersion),
       sessionId: session?.id,
       memberships: await ctx.userStore.membershipsFor(user.id),
     },

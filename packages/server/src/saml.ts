@@ -2,6 +2,21 @@ import { createHash, createVerify, randomBytes, timingSafeEqual } from "node:cry
 import { DOMParser, XMLSerializer } from "@xmldom/xmldom";
 
 /**
+ * The DOM types, derived from what @xmldom/xmldom actually exports. Its
+ * d.ts declares Node/Document/Element ambient *inside* its module block
+ * without re-exporting them by name, so the honest derivation is from the
+ * two classes this module uses: the parse result, and its root Element
+ * (which carries getAttribute and childNodes for every node the SAML code
+ * walks — text children included). If xmldom ever exports the interfaces
+ * directly, these aliases are the whole migration.
+ */
+type DomDocument = ReturnType<InstanceType<typeof DOMParser>["parseFromString"]>;
+type DomElement = NonNullable<DomDocument["documentElement"]>;
+// DOM Level 1 node-type constants — the only two the text reader checks.
+const TEXT_NODE = 3;
+const CDATA_NODE = 4;
+
+/**
  * SAML 2.0 Response verification (F1 / ADR 0013).
  *
  * The one job: given a base64-encoded SAMLResponse and the org's stored
@@ -63,21 +78,31 @@ export function verifySamlResponse(
     return { ok: false, status: 400, error: "SAMLResponse is not valid base64" };
   }
 
-  let doc: Document;
+  let doc: DomDocument;
   try {
     doc = new DOMParser().parseFromString(xml, "text/xml");
   } catch {
     return { ok: false, status: 400, error: "SAMLResponse is not valid XML" };
   }
 
-  const response = firstChildNamed(doc.documentElement, "Response", "samlp:Response");
+  const root = doc.documentElement;
+  if (!root) return { ok: false, status: 400, error: "empty XML document" };
+  // The Response IS the document element; the parser never hands us a
+  // wrapper. Accept it directly, and fall back to a child scan only for the
+  // XML-declaration-plus-junk shapes some IdPs emit.
+  const response = isNamed(root, "Response", "samlp:Response")
+    ? root
+    : firstChildNamed(root, "Response", "samlp:Response");
   if (!response) return { ok: false, status: 400, error: "no Response element" };
 
   // Status must be Success before anything else is read — a failed IdP auth
   // is a normal outcome, and reading identity out of an error Response is
-  // how responder confusion bugs are born.
+  // how responder confusion bugs are born. The URN ends in a capital
+  // "Success" per the SAML core spec; compared case-insensitively anyway
+  // because some IdPs are sloppy and an outcome check is not the place to
+  // be strict about spelling.
   const statusCode = findFirst(response, "StatusCode")?.getAttribute("Value") ?? "";
-  if (!statusCode.includes("success")) {
+  if (!statusCode.toLowerCase().includes("success")) {
     return { ok: false, status: 401, error: "IdP reported a failed authentication" };
   }
 
@@ -93,16 +118,25 @@ export function verifySamlResponse(
 
   // What was signed: the element the SignedInfo's Reference points at. In
   // every well-formed Response that is the Response itself (enveloped).
+  // Resolution is by walking the tree for a matching ID attribute — not
+  // `getElementById`, which in xmldom (as in most parsers) only resolves IDs
+  // declared in a DTD, which no SAML Response carries.
   const signedInfo = findFirst(sig, "SignedInfo");
-  const reference = signedInfo ? findFirst(signedInfo, "Reference") : null;
+  if (!signedInfo) return { ok: false, status: 401, error: "no SignedInfo in the signature" };
+  const reference = findFirst(signedInfo, "Reference");
   const uri = reference?.getAttribute("URI") ?? "";
-  const signedElement = uri.startsWith("#") ? doc.getElementById(uri.slice(1)) : response;
+  const signedElement: DomElement | null = resolveReferenceUri(root, uri);
   if (!signedElement) {
     return { ok: false, status: 401, error: "signature reference does not resolve" };
   }
 
   // 1. Digest: canonicalized signed content hashed with the declared algorithm.
-  const content = canonicalize(signedElement);
+  // Enveloped-signature rule (the transform every SP applies): the digest
+  // covers the signed element with the Signature subtree itself REMOVED —
+  // otherwise the signature could never verify, since it sits inside the very
+  // bytes it signs. `detachedSignatureClone` does the removal without touching
+  // the parsed document the later steps still walk.
+  const content = canonicalize(detachedSignatureClone(signedElement, sig));
   const digestAlgorithm = reference?.getAttribute("DigestAlgorithm") ?? "";
   const expectedDigest = base64(hash(content, digestAlgorithm));
   if (!timingSafeB64Equal(digestValue, expectedDigest)) {
@@ -110,8 +144,9 @@ export function verifySamlResponse(
   }
 
   // 2. Signature: canonicalized SignedInfo verified with the org's cert.
-  const signedInfoXml = canonicalize(signedInfo!);
-  const signatureAlgorithm = findFirst(signedInfo!, "SignatureMethod")?.getAttribute("Algorithm") ?? "";
+  const signedInfoXml = canonicalize(signedInfo);
+  const signatureAlgorithm =
+    findFirst(signedInfo, "SignatureMethod")?.getAttribute("Algorithm") ?? "";
   const valid = verifyWithAlgorithm(signatureAlgorithm, signedInfoXml, signatureValue, certPem);
   if (!valid) {
     return { ok: false, status: 401, error: "signature verification failed" };
@@ -153,10 +188,11 @@ export function verifySamlResponse(
     }
   }
 
+  // InResponseTo is optional: IdP-initiated flows carry none, and the ACS
+  // route's replay policy decides what that means.
+  const rawInResponseTo = response.getAttribute("InResponseTo");
   const inResponseTo =
-    response.getAttribute("InResponseTo") && response.getAttribute("InResponseTo").length > 0
-      ? response.getAttribute("InResponseTo")
-      : null;
+    rawInResponseTo !== null && rawInResponseTo.length > 0 ? rawInResponseTo : null;
 
   return { ok: true, identity: { nameId, attributes, issuer }, inResponseTo };
 }
@@ -174,27 +210,91 @@ export function verifySamlResponse(
  * This function is the seam ADR 0013 names: swapping in a dedicated c14n
  * library means changing this one function, nothing else.
  */
-export function canonicalize(node: Node): string {
+export function canonicalize(node: DomElement): string {
   // Clone so the serializer never mutates the parsed document's relationships.
   return new XMLSerializer().serializeToString(node);
 }
 
 // ---------- helpers ----------
 
-function firstChildNamed(parent: Node | null, ...names: string[]): Node | null {
+/**
+ * Child access with the element shape reasserted: xmldom's `childNodes.item`
+ * is typed Node, but every child the SAML walk ever *does* something with is
+ * an Element (text children are consumed only by `textOf`). This narrows at
+ * the one place the tree is walked, so the rest of the file deals in Elements.
+ */
+function childAt(parent: DomElement, i: number): DomElement | null {
+  const item = parent.childNodes.item(i);
+  // Node.ELEMENT_NODE === 1; anything else (text, cdata) is not a candidate
+  // for name-based walks and is skipped by returning null.
+  return item && item.nodeType === 1 ? (item as DomElement) : null;
+}
+
+/**
+ * The enveloped-signature transform: a copy of `signedElement` with the
+ * `signature` subtree removed, without mutating the parsed document (the
+ * later steps — SignedInfo canonicalization, identity extraction — walk the
+ * original, and a verifier that edits the document it is verifying is a
+ * verifier that can be steered). The clone is throwaway; only its
+ * serialized form is hashed.
+ */
+function detachedSignatureClone(signedElement: DomElement, signature: DomElement): DomElement {
+  const clone = signedElement.cloneNode(true) as unknown as DomElement;
+  // Find the Signature inside the CLONE (the passed one belongs to the
+  // original tree) and remove it.
+  const sigInClone = findFirst(clone, "Signature");
+  if (sigInClone && sigInClone.parentNode) {
+    sigInClone.parentNode.removeChild(sigInClone);
+  }
+  void signature;
+  return clone;
+}
+
+/**
+ * Resolve a SignedInfo Reference URI: `#id` finds the element with that ID
+ * attribute in the tree; an empty URI means the whole document (the
+ * Response); anything else — a fragment we do not point at, an external URL
+ * — does not resolve, which is the honest refusal: signing something we
+ * were not shown is not a state this verifier can be in.
+ */
+function resolveReferenceUri(root: DomElement, uri: string): DomElement | null {
+  if (uri === "" || uri === "#") return root;
+  if (!uri.startsWith("#")) return null;
+  const wanted = uri.slice(1);
+  const findByElementId = (el: DomElement): DomElement | null => {
+    if (el.getAttribute("ID") === wanted) return el;
+    for (let i = 0; i < el.childNodes.length; i += 1) {
+      const child = childAt(el, i);
+      if (!child) continue;
+      const hit = findByElementId(child);
+      if (hit) return hit;
+    }
+    return null;
+  };
+  return findByElementId(root);
+}
+
+function isNamed(node: DomElement, ...names: string[]): boolean {
+  const local = node.nodeName.replace(/^.*:/, "");
+  return names.includes(node.nodeName) || names.includes(local);
+}
+
+function firstChildNamed(parent: DomElement | null, ...names: string[]): DomElement | null {
   if (!parent) return null;
   for (let i = 0; i < parent.childNodes.length; i += 1) {
-    const child = parent.childNodes.item(i)!;
+    const child = childAt(parent, i);
+    if (!child) continue;
     const local = child.nodeName.replace(/^.*:/, "");
     if (names.includes(child.nodeName) || names.includes(local)) return child;
   }
   return null;
 }
 
-function childrenNamed(parent: Node, ...names: string[]): Node[] {
-  const out: Node[] = [];
+function childrenNamed(parent: DomElement, ...names: string[]): DomElement[] {
+  const out: DomElement[] = [];
   for (let i = 0; i < parent.childNodes.length; i += 1) {
-    const child = parent.childNodes.item(i)!;
+    const child = childAt(parent, i);
+    if (!child) continue;
     const local = child.nodeName.replace(/^.*:/, "");
     if (names.includes(child.nodeName) || names.includes(local)) out.push(child);
   }
@@ -202,23 +302,27 @@ function childrenNamed(parent: Node, ...names: string[]): Node[] {
 }
 
 /** Depth-first find by local name, ignoring the prefix. */
-function findFirst(parent: Node, localName: string): Node | null {
+function findFirst(parent: DomElement, localName: string): DomElement | null {
   if (parent.nodeName.replace(/^.*:/, "") === localName) return parent;
   for (let i = 0; i < parent.childNodes.length; i += 1) {
-    const hit = findFirst(parent.childNodes.item(i)!, localName);
+    const child = childAt(parent, i);
+    if (!child) continue;
+    const hit = findFirst(child, localName);
     if (hit) return hit;
   }
   return null;
 }
 
-function textOf(node: Node | null): string | null {
+function textOf(node: DomElement | null): string | null {
   if (!node) return null;
   // Element text: concatenate the direct text children (SAML values are
   // simple text, never mixed content).
   let out = "";
   for (let i = 0; i < node.childNodes.length; i += 1) {
-    const child = node.childNodes.item(i)!;
-    if (child.nodeType === 3 || child.nodeType === 4) out += child.nodeValue ?? "";
+    const child = node.childNodes.item(i);
+    if (child && (child.nodeType === TEXT_NODE || child.nodeType === CDATA_NODE)) {
+      out += child.nodeValue ?? "";
+    }
   }
   return out.trim().length > 0 ? out.trim() : null;
 }
@@ -237,7 +341,12 @@ function hash(xml: string, algorithm: string): Buffer {
   return createHash("sha256").update(xml, "utf8").digest();
 }
 
-function verifyWithAlgorithm(algorithm: string, xml: string, signatureB64: string, certPem: string): boolean {
+function verifyWithAlgorithm(
+  algorithm: string,
+  xml: string,
+  signatureB64: string,
+  certPem: string,
+): boolean {
   const lower = algorithm.toLowerCase();
   const rsaAlgo = lower.includes("sha256")
     ? "RSA-SHA256"

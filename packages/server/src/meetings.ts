@@ -73,7 +73,9 @@ export function newMeetingId(): string {
  * live here rather than zod so the store contract stays JSON-only and the
  * web's client module can mirror the same rules.
  */
-export function validateTurns(input: unknown): { ok: true; turns: MeetingTurn[] } | { ok: false; error: string } {
+export function validateTurns(
+  input: unknown,
+): { ok: true; turns: MeetingTurn[] } | { ok: false; error: string } {
   if (!Array.isArray(input)) return { ok: false, error: "turns must be an array" };
   if (input.length === 0) return { ok: false, error: "turns must not be empty" };
   if (input.length > MAX_TURNS_PER_TRANSCRIPT) {

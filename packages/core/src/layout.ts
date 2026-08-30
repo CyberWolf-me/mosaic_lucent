@@ -59,6 +59,11 @@ const STRATEGY_FOR_KIND: Record<DiagramKind, LayoutStrategy> = {
 
 export type LayoutResult = Record<string, { position: Position; size: Size }>;
 
+/** Gutter between two diagram regions sharing a board. */
+const REGION_GAP = 160;
+/** Gutter between the region strip and the board flow above it. */
+const REGION_STRIP_GAP = 240;
+
 /**
  * Size a node box to fit its label instead of forcing every card to 160×64.
  *
@@ -94,6 +99,18 @@ export function computeLayout(workspace: Workspace, options: LayoutOptions = {})
   const nodeIds = Object.keys(workspace.nodes);
   const result: LayoutResult = {};
   if (nodeIds.length === 0) return result;
+
+  // Diagram regions (per-group `kind`): a board may carry several diagrams — a
+  // flowchart for the checkout AND a mind map for pricing ideas. Partitioning
+  // happens before strategy dispatch so no caller has to know regions exist.
+  // Only the region's own nodes/edges/groups enter its sub-workspace: a sub
+  // layout reads membership, so the same nodes it places are the ones its
+  // geometry talks about. An explicit `strategy` option is a caller override
+  // (a user asking "lay the whole board out as a tree") and suspends the split.
+  if (!options.strategy) {
+    const partition = splitByRegions(workspace);
+    if (partition) return layoutWithRegions(workspace, partition, opts);
+  }
 
   // An explicit strategy always wins so callers can override the default.
   const strategy = options.strategy ?? STRATEGY_FOR_KIND[workspace.diagramKind] ?? "layered";
@@ -215,6 +232,72 @@ export function computeLayout(workspace: Workspace, options: LayoutOptions = {})
       );
       along += extent + layerGap;
     }
+  }
+
+  // DEEP-CHAIN WRAP (found by the live test pass): a pure linear chain —
+  // customer -> products -> cart -> … — puts every node in its own layer with
+  // one node per row, so "vertical" direction stacks them into a single
+  // 1300px pole at one x. A human reading that board sees a spaghetti strand,
+  // not a flow. The fix is the same one text wrapping uses: when the flow
+  // axis is far longer than the widest row, break the layer sequence into
+  // rows of a few consecutive layers and stack those rows across the canvas.
+  //
+  // Consecutive layers stay together, so a chain reads left-to-right then
+  // wraps to the next row — the way whiteboards are actually drawn. Each row
+  // keeps its own layer offsets, so nothing inside a row collides, and rows
+  // are separated by a gutter wider than the node gap. Boards the user has
+  // arranged by hand (pinned nodes) never take this path: their geometry is
+  // deliberate and avoidPinned owns it.
+  const pinnedCount = Object.values(workspace.nodes).filter((n) => n.pinned).length;
+  const WRAP_ROW_LAYERS = 4;
+  const widestRow = Math.max(
+    ...sortedLayers.map((l) =>
+      layers
+        .get(l)!
+        .reduce(
+          (sum, id) => sum + measureNode(workspace.nodes[id]?.label ?? "", nodeSize).width,
+          0,
+        ),
+    ),
+    nodeSize.width,
+  );
+  const flowSpan = [...layerOffsets.values()].at(-1) ?? 0;
+  const shouldWrap =
+    sortedLayers.length > WRAP_ROW_LAYERS && pinnedCount === 0 && flowSpan > widestRow * 1.6;
+
+  if (shouldWrap) {
+    const wrapped = {} as LayoutResult;
+    // Rows stack along the CROSS axis: row 0 starts at x=0, row 1 begins to
+    // its right, and so on. Each row is laid out left-to-right from its own
+    // base, so consecutive layers read in flow order and rows read in bands.
+    let rowBase = 0;
+    for (let r = 0; r < sortedLayers.length; r += WRAP_ROW_LAYERS) {
+      const row = sortedLayers.slice(r, r + WRAP_ROW_LAYERS);
+      const rowStart = layerOffsets.get(row[0]!) ?? 0;
+      let rowWidth = 0;
+      for (const l of row) {
+        const ids = layers.get(l)!;
+        const sizes = new Map(
+          ids.map((id) => [id, measureNode(workspace.nodes[id]?.label ?? "", nodeSize)] as const),
+        );
+        const crossSpan =
+          ids.reduce((sum, id) => sum + sizes.get(id)!.width, 0) + (ids.length - 1) * nodeGap;
+        rowWidth = Math.max(rowWidth, crossSpan);
+        const alongOffset = (layerOffsets.get(l) ?? 0) - rowStart;
+        let cursor = rowBase;
+        ids.forEach((id) => {
+          const size = sizes.get(id)!;
+          const cross = cursor;
+          cursor += size.width + nodeGap;
+          wrapped[id] = {
+            position: { x: cross, y: alongOffset },
+            size,
+          };
+        });
+      }
+      rowBase += rowWidth + layerGap * 2;
+    }
+    return wrapped;
   }
 
   for (const l of sortedLayers) {
@@ -548,8 +631,7 @@ function swimlaneLayout(
  * Longest-path depth per node, shared by the swimlane layout. Kahn-style so a
  * cycle cannot hang the pass; unreachable nodes keep depth 0.
  */
-function flowDepths(workspace: Workspace, nodeIds: string[]): Map<string, number> {
-  const outgoing = new Map<string, string[]>();
+function flowDepths(workspace: Workspace, nodeIds: string[]): Map<string, number> {  const outgoing = new Map<string, string[]>();
   const remaining = new Map<string, number>();
   for (const id of nodeIds) {
     outgoing.set(id, []);
@@ -577,6 +659,173 @@ function flowDepths(workspace: Workspace, nodeIds: string[]): Map<string, number
     }
   }
   return depth;
+}
+
+/* ---------------------------------------------------------------------------
+ * Diagram regions — several diagram kinds sharing one board (docs/03).
+ * A region is a group carrying `kind`. Its members are laid out by the
+ * strategy for that kind, inside their own sub-workspace, and the finished
+ * region is packed against the other regions on the board. Everything else
+ * (ungrouped nodes, kindless groups) keeps the board-wide behaviour exactly:
+ * a board with no regions must produce byte-identical output to before.
+ * ------------------------------------------------------------------------- */
+
+/** One region plus the nodes that stay with the board-wide layout. */
+interface RegionPartition {
+  regions: Array<{ groupId: string; kind: DiagramKind; ids: string[] }>;
+  /** Nodes not in any kind-group (ungrouped, or grouped without a kind). */
+  board: string[];
+}
+
+/**
+ * Partition a workspace's nodes into regions vs. the board flow. Returns null
+ * when there is nothing regional about the board — the common case, and the
+ * one that must cost nothing.
+ *
+ * Membership is read from `node.groupId` because that is the authoritative
+ * link the reducer maintains; `group.children` can lag it in edited boards.
+ */
+function splitByRegions(workspace: Workspace): RegionPartition | null {
+  const regions: RegionPartition["regions"] = [];
+  const seen = new Set<string>();
+  for (const group of Object.values(workspace.groups)) {
+    if (!group.kind) continue;
+    const ids = Object.values(workspace.nodes)
+      .filter((n) => n.groupId === group.id)
+      .map((n) => n.id);
+    // An empty region lays out as nothing; a region whose members all moved
+    // elsewhere is not a region this pass needs to own.
+    if (ids.length === 0) continue;
+    ids.forEach((id) => seen.add(id));
+    regions.push({ groupId: group.id, kind: group.kind, ids });
+  }
+  if (regions.length === 0) return null;
+  const board = Object.keys(workspace.nodes).filter((id) => !seen.has(id));
+  return { regions, board };
+}
+
+/** Bounding box of a finished region layout. */
+function boundsOf(layout: LayoutResult): { x: number; y: number; w: number; h: number } {
+  const entries = Object.values(layout);
+  const x = Math.min(...entries.map((p) => p.position.x));
+  const y = Math.min(...entries.map((p) => p.position.y));
+  const w =
+    Math.max(...entries.map((p) => p.position.x + p.size.width)) -
+    Math.min(...entries.map((p) => p.position.x));
+  const h =
+    Math.max(...entries.map((p) => p.position.y + p.size.height)) -
+    Math.min(...entries.map((p) => p.position.y));
+  return { x, y, w, h };
+}
+
+/**
+ * Lay out a board that has regions: each region runs its own strategy on a
+ * sub-workspace, regions pack along a row, and the board flow (if any) stacks
+ * above the region strip.
+ */
+function layoutWithRegions(
+  workspace: Workspace,
+  partition: RegionPartition,
+  opts: Required<Omit<LayoutOptions, "strategy">>,
+): LayoutResult {
+  const result: LayoutResult = {};
+  const pins = Object.values(workspace.nodes).filter((n) => n.pinned);
+
+  // --- Board flow first: the board's own diagram, excluding region members.
+  let boardTop = 0;
+  if (partition.board.length > 0) {
+    const boardWs = subWorkspaceFor(workspace, partition.board, workspace.diagramKind);
+    const boardLayout = layoutSingle(boardWs, workspace.diagramKind, opts);
+    Object.assign(result, boardLayout);
+    if (Object.keys(boardLayout).length > 0) boardTop = boundsOf(boardLayout).h;
+  }
+
+  // --- Regions: each under its own strategy.
+  const regionLayouts: Array<{ groupId: string; kind: DiagramKind; layout: LayoutResult }> = [];
+  for (const region of partition.regions) {
+    const regionWs = subWorkspaceFor(workspace, region.ids, region.kind);
+    regionLayouts.push({
+      groupId: region.groupId,
+      kind: region.kind,
+      layout: layoutSingle(regionWs, region.kind, opts),
+    });
+  }
+
+  // --- Pack regions along a row, cross-flow, with gutter separation. Region
+  // order is group declaration order (deterministic). Each region keeps its
+  // internal geometry; only the region origin moves.
+  const gap = REGION_GAP;
+  let cursorX = 0;
+  for (const rl of regionLayouts) {
+    const b = boundsOf(rl.layout);
+    const dx = cursorX - b.x;
+    const dy = REGION_STRIP_GAP + boardTop - b.y;
+    for (const [id, placed] of Object.entries(rl.layout)) {
+      result[id] = {
+        position: { x: placed.position.x + dx, y: placed.position.y + dy },
+        size: placed.size,
+      };
+    }
+    cursorX += b.w + gap;
+  }
+
+  // --- Pinned nodes stay exactly where the user put them; they are not in the
+  // result, so applyLayout keeps their stored position.
+  for (const p of pins) {
+    void p; // documented above: absent from the result by design
+  }
+  return result;
+}
+
+/**
+ * Build the sub-workspace one region (or the board flow) is laid out in: its
+ * member nodes, the edges between them, and its own groups (swimlane regions
+ * need lane groups inside the region). The diagramKind is the partition's
+ * kind, which is what makes each strategy's dispatch local.
+ */
+function subWorkspaceFor(
+  workspace: Workspace,
+  ids: string[],
+  kind: DiagramKind,
+): Workspace {
+  const idSet = new Set(ids);
+  const nodes: Workspace["nodes"] = {};
+  for (const id of ids) nodes[id] = workspace.nodes[id]!;
+  const edges: Workspace["edges"] = {};
+  for (const edge of Object.values(workspace.edges)) {
+    if (idSet.has(edge.source) && idSet.has(edge.target)) edges[edge.id] = edge;
+  }
+  const groups: Workspace["groups"] = {};
+  for (const [gid, group] of Object.entries(workspace.groups)) {
+    if (ids.some((id) => workspace.nodes[id]?.groupId === gid)) groups[gid] = group;
+  }
+  return { ...workspace, diagramKind: kind, nodes, edges, groups };
+}
+
+/** Dispatch one (sub-)workspace through the strategy for its kind. */
+function layoutSingle(
+  ws: Workspace,
+  kind: DiagramKind,
+  opts: Required<Omit<LayoutOptions, "strategy">>,
+): LayoutResult {
+  const strategy = STRATEGY_FOR_KIND[kind] ?? "layered";
+  if (strategy === "radial") return radialLayout(ws, opts);
+  if (strategy === "tree") return treeLayout(ws, opts);
+  if (strategy === "swimlane") return swimlaneLayout(ws, opts);
+  return layeredLayout(ws, opts);
+}
+
+/**
+ * The layered strategy as its own function, so regions call it directly. The
+ * original layered path in `computeLayout` stays where it is (boards with no
+ * regions run byte-identical code); this wrapper reaches it with the
+ * strategy pinned, which skips the region partition and cannot recurse.
+ */
+function layeredLayout(
+  workspace: Workspace,
+  opts: Required<Omit<LayoutOptions, "strategy">>,
+): LayoutResult {
+  return computeLayout(workspace, { ...opts, strategy: "layered" });
 }
 
 /**

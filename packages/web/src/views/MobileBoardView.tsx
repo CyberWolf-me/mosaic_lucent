@@ -45,6 +45,7 @@ export function MobileBoardView(): React.ReactElement {
   const [commentOpen, setCommentOpen] = useState(false);
   const [commentText, setCommentText] = useState("");
   const [commentTarget, setCommentTarget] = useState<string | null>(null);
+  const [presenting, setPresenting] = useState(false);
 
   useEffect(() => {
     const onResize = (): void => {
@@ -152,6 +153,15 @@ export function MobileBoardView(): React.ReactElement {
         </button>
       )}
 
+      {presenting && (
+        <MobilePresentOverlay svg={svg} workspace={workspace} onExit={() => setPresenting(false)} />
+      )}
+      {!presenting && (
+        <button className="btn mobile-present-btn" onClick={() => setPresenting(true)}>
+          Present
+        </button>
+      )}
+
       {commentOpen && !commentTarget && (
         <div className="mobile-comment-sheet" role="dialog" aria-label="Choose a comment target">
           <div className="mobile-comment-list">
@@ -199,6 +209,102 @@ export function MobileBoardView(): React.ReactElement {
           shared board · {Object.keys(workspace.nodes).length} nodes
         </footer>
       )}
+    </div>
+  );
+}
+
+/**
+ * Mobile presentation (G2's "present"): the same static SVG, fullscreen,
+ * stepping through the board's top-level frames. A frame-shaped presentation
+ * (sections in reading order) is what a phone presents — slide-like, one
+ * section per swipe. A board with no frames falls back to whole-board view
+ * with a plain step counter of 1/1, which is still a presentation: the
+ * board, large, with nothing else on screen.
+ *
+ * The SVG is cropped per frame by setting the viewBox to the frame's bounds —
+ * the renderer's own coordinate math, not a second renderer.
+ */
+function MobilePresentOverlay({
+  svg,
+  workspace,
+  onExit,
+}: {
+  svg: string;
+  workspace: import("@lucent/core").Workspace;
+  onExit: () => void;
+}): React.ReactElement {
+  const frames = useMemo(
+    () =>
+      Object.values(workspace.shapes)
+        .filter((s) => s.kind === "frame")
+        .map((s) => ({
+          id: s.id,
+          label: s.text ?? "Frame",
+          x: s.position.x,
+          y: s.position.y,
+          w: s.size.width,
+          h: s.size.height,
+        })),
+    [workspace.shapes],
+  );
+  const [step, setStep] = useState(0);
+  const slides = frames.length > 0 ? frames : null;
+  const total = slides ? slides.length : 1;
+
+  // Escape and the arrow keys: a presenter with a bluetooth clicker should
+  // get the same controls a keyboard gives the desktop present mode.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === "Escape") onExit();
+      if (e.key === "ArrowRight") setStep((s) => Math.min(total - 1, s + 1));
+      if (e.key === "ArrowLeft") setStep((s) => Math.max(0, s - 1));
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onExit, total]);
+
+  // Crop the rendered SVG by rewriting its viewBox to the current frame —
+  // one regex over the static markup the renderer already escaped, applied
+  // to the attribute only. No re-render, no second geometry implementation.
+  const cropped = useMemo(() => {
+    if (!slides) return svg;
+    const f = slides[step]!;
+    const vb = `${f.x - 24} ${f.y - 24} ${f.w + 48} ${f.h + 48}`;
+    const withViewBox = svg.replace(/viewBox="[^"]*"/, `viewBox="${vb}"`);
+    return withViewBox.replace(/<svg /, '<svg preserveAspectRatio="xMidYMid meet" ');
+  }, [svg, slides, step]);
+
+  const label = slides ? slides[step]!.label : "Board";
+
+  return (
+    <div className="mobile-present" role="region" aria-label={`Presenting ${label}`}>
+      <div className="mobile-present-stage" dangerouslySetInnerHTML={{ __html: cropped }} />
+      <div className="mobile-present-bar">
+        <button className="btn" onClick={onExit} aria-label="Exit presentation">
+          Exit
+        </button>
+        <span className="mono small" style={{ color: "var(--ink-2)" }}>
+          {step + 1} / {total} · {label}
+        </span>
+        <span style={{ display: "flex", gap: 8 }}>
+          <button
+            className="icon-btn"
+            onClick={() => setStep((s) => Math.max(0, s - 1))}
+            disabled={step === 0}
+            aria-label="Previous"
+          >
+            <Ico.Left />
+          </button>
+          <button
+            className="icon-btn"
+            onClick={() => setStep((s) => Math.min(total - 1, s + 1))}
+            disabled={step >= total - 1}
+            aria-label="Next"
+          >
+            <Ico.Right />
+          </button>
+        </span>
+      </div>
     </div>
   );
 }

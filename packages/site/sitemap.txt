@@ -1,0 +1,5 @@
+# tsv-formatted sitemap: destination, last-modified (ISO), change frequency.
+# Hand-maintained like the site itself — two pages do not need a generator,
+# and the file's honesty beats a script's staleness.
+https://lucent.example.com/	2026-08-30	monthly
+https://lucent.example.com/status.html	2026-08-30	weekly

@@ -178,9 +178,15 @@ export function createStaticHandler(options: StaticOptions): StaticHandler {
       if (req.method !== "GET" && req.method !== "HEAD") return false;
       const url = new URL(req.url ?? "/", "http://localhost");
       const pathname = url.pathname;
-      // API and WebSocket paths belong to the app, never to the filesystem.
+      // API, WebSocket and machine-facing paths belong to the app, never to
+      // the filesystem. `/scim/` is here because the SCIM dispatch runs AFTER
+      // the static handler in the request ladder, and a GET that fell through
+      // to the SPA fallback answered 200 + index.html — a wrong body AND a
+      // wrong status for a token-authenticated IdP endpoint, where the 401
+      // is the security contract (found by the live test pass).
       if (
         pathname.startsWith("/api/") ||
+        pathname.startsWith("/scim/") ||
         pathname === "/ws" ||
         pathname === "/health" ||
         pathname === "/metrics"

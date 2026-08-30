@@ -118,6 +118,7 @@ describe("schema still validates what the tool advertises", () => {
       DISCONNECT_NODES: { op: "DISCONNECT_NODES", source: "a", target: "b", relationship: "calls" },
       CREATE_GROUP: { op: "CREATE_GROUP", id: "g", label: "G", children: [] },
       DELETE_GROUP: { op: "DELETE_GROUP", id: "g" },
+      SET_GROUP_KIND: { op: "SET_GROUP_KIND", id: "g", kind: "mindmap" },
       CREATE_DIAGRAM: { op: "CREATE_DIAGRAM", kind: "flowchart" },
       TRANSFORM_DIAGRAM: { op: "TRANSFORM_DIAGRAM", to: "mindmap" },
       CREATE_WIREFRAME: { op: "CREATE_WIREFRAME", id: "w", title: "W", root: { kind: "screen" } },

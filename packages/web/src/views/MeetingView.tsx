@@ -206,7 +206,10 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
             <div>
               <div
                 className="mono small"
-                style={{ letterSpacing: "0.12em", color: recording ? "var(--sig-red)" : "var(--ink-3)" }}
+                style={{
+                  letterSpacing: "0.12em",
+                  color: recording ? "var(--sig-red)" : "var(--ink-3)",
+                }}
               >
                 {recording ? "RECORDING" : shown ? "SAVED MEETING" : "READY"}
               </div>
@@ -230,7 +233,11 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
                 </button>
               )}
               {shown && (
-                <button className="btn primary" onClick={() => onExtract(shown)} disabled={!boardId}>
+                <button
+                  className="btn primary"
+                  onClick={() => onExtract(shown)}
+                  disabled={!boardId}
+                >
                   Extract diagram <Ico.Arrow />
                 </button>
               )}
@@ -248,8 +255,8 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
             {displayTurns.length === 0 && (
               <p className="muted" style={{ fontSize: 13, padding: "24px 4px" }}>
                 Start recording to capture the meeting. Lines classify themselves as they land
-                (problem / hypothesis / solution / decision / action / requirement) and save to
-                this board.
+                (problem / hypothesis / solution / decision / action / requirement) and save to this
+                board.
               </p>
             )}
             {displayTurns.map((t, i) => (

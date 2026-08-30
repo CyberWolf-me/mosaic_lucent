@@ -5477,3 +5477,42 @@ html[data-theme="light"] .allowance-note.spent {
 .meeting-saved-row:hover {
   background: var(--canvas-3);
 }
+
+/* --- Mobile present overlay (G2) --- */
+
+.mobile-present-btn {
+  position: absolute;
+  bottom: 20px;
+  left: 14px;
+  padding: 10px 16px;
+  border-radius: 999px;
+  font-size: 13px;
+}
+.mobile-present {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: var(--canvas-0);
+  display: flex;
+  flex-direction: column;
+}
+.mobile-present-stage {
+  flex: 1;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  padding: 12px;
+}
+.mobile-present-stage svg {
+  max-width: 100%;
+  max-height: 100%;
+}
+.mobile-present-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 14px calc(10px + env(safe-area-inset-bottom));
+  background: var(--canvas-2);
+  border-top: 1px solid var(--stroke-1);
+}

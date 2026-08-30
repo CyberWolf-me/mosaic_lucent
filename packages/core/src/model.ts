@@ -94,6 +94,15 @@ export interface Group {
   label: string;
   /** Node ids belonging to this group. */
   children: string[];
+  /**
+   * When set, this group is a *diagram region*: its members are laid out by
+   * the strategy for this kind while the rest of the board keeps the board-wide
+   * `diagramKind`. Unset groups remain plain visual containers — a swimlane's
+   * lanes, an actor boundary — so existing boards change nothing. The kind is a
+   * rendering lens, not content: the same nodes can move between kinds freely
+   * (the "one model, many representations" principle, applied per region).
+   */
+  kind?: DiagramKind;
 }
 
 /**

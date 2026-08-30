@@ -104,6 +104,7 @@ import { registerNotificationRoutes } from "./routes/notifications.js";
 import { registerInviteRoutes } from "./routes/invites.js";
 import { registerBoardOpsRoutes } from "./routes/boardOps.js";
 import { registerMeetingRoutes } from "./routes/meetings.js";
+import { registerSsoRoutes } from "./routes/sso.js";
 import { mintLiveKitToken } from "./livekit.js";
 import { registerAssetRoutes } from "./routes/assets.js";
 import { registerScimRoutes } from "./routes/scim.js";
@@ -214,6 +215,12 @@ export interface AppDeps {
    * LUCENT_DATABASE_URL is set, in-memory otherwise).
    */
   meetings?: import("./meetings.js").MeetingStore;
+  /**
+   * F1: SSO connections + domain claims. When present, the admin SSO routes
+   * and the SAML ACS are real; without it they answer 503. Built by
+   * `main.ts` on the same store-per-database rule.
+   */
+  ssoStore?: import("./ssoStore.js").SsoStore;
   /**
    * M4.3: Stripe billing integration — the REST client, the endpoint signing
    * secret, the idempotency ledger and the event dispatcher, all prebuilt.
@@ -335,6 +342,20 @@ function formatDay(today: Date, deltaDays: number): string {
 }
 
 /**
+ * One CSV cell, escaped per RFC 4180: quote when the value carries a comma,
+ * a quote or any newline, doubling embedded quotes. Unquoted cells are the
+ * readable default — every field the audit emits is either a plain id, an
+ * epoch number or an email, and a CSV of nothing-but-quotes is a CSV nobody
+ * reads. The escaping covers the hostile case (an action string with a
+ * comma) rather than assuming it cannot happen.
+ */
+function csvCell(value: string | number): string {
+  const s = String(value);
+  if (/[",\r\n]/.test(s)) return `"${s.replaceAll('"', '""')}"`;
+  return s;
+}
+
+/**
  * Collapse a URL into a bounded metrics label. A raw path as a label value is
  * the standard way a /metrics endpoint becomes a memory leak — obs/metrics.ts
  * caps series per metric for exactly that reason, and folding into
@@ -393,6 +414,7 @@ export function createApp(deps: AppDeps): App {
     teamTemplates,
     billing,
     meetings,
+    ssoStore,
   } = deps;
 
   const logger = deps.logger ?? silentLogger;
@@ -1459,15 +1481,36 @@ export function createApp(deps: AppDeps): App {
     notificationStore,
     usageStore,
     meetings,
+    ssoStore,
     entitlements,
     tickets,
     usage,
     limits,
+    webOrigin: config.webOrigin,
+    sessionStore,
     send,
     sendWithHeaders,
     writeHandleResult,
     readBody,
     requestOrigin,
+    // The audit seam route modules use: the OrgStore's warn-and-continue
+    // contract (a failed audit write never 500s a succeeded mutation),
+    // delivered as a function so no route assembles the entry shape itself.
+    auditRow: async (req, actorId, orgId, action, targetId) => {
+      await orgStore
+        ?.audit({
+          orgId,
+          actorId,
+          action,
+          targetId,
+          targetType: action.split(".")[0],
+          ...requestOrigin(req),
+          at: Date.now(),
+        })
+        .catch(() => {
+          // orgs.ts's contract: audit failures warn, they never fail.
+        });
+    },
     meter,
     requireUserIfNeeded,
     requireUser,
@@ -1503,6 +1546,7 @@ export function createApp(deps: AppDeps): App {
   registerInviteRoutes(router, services);
   registerBoardOpsRoutes(router, services);
   registerMeetingRoutes(router, services);
+  registerSsoRoutes(router, services);
   /**
    * Asset gateway (M7 / M4 storage): `/api/assets/*`. The handler is built
    * here, not registered through the router, because it consumes a body-cap
@@ -1858,14 +1902,68 @@ export function createApp(deps: AppDeps): App {
       send(res, 405, { error: "method not allowed" });
       return;
     }
-    // M2.6: read recent audit entries. Owner/admin only.
-    if (req.method === "GET" && req.url?.match(/^\/api\/orgs\/[^/]+\/audit$/)) {
-      const orgId = req.url.split("?")[0]!.split("/")[3]!;
+    // M2.6 + F1: read the audit log. Owner-only. Keyset-paginated (the store
+    // plumbing existed; the route's fixed 100 was the bug — an org with a
+    // week of traffic could not page past the newest page), and CSV-exported
+    // when `?format=csv`: the format an enterprise buyer imports into their
+    // own SIEM is the format the F1 item asked for.
+    if (req.method === "GET" && /^\/api\/orgs\/[^/]+\/audit(\?.*)?$/.test(req.url ?? "")) {
+      const url = req.url!;
+      const orgId = url.split("?")[0]!.split("/")[3]!;
       const guard = await requireOrgRole(req, res, orgId, "owner", "/api/orgs/:id/audit");
       if (!guard.ok) return;
-      if (!orgStore) return send(res, 200, { entries: [] });
-      const entries = await orgStore.auditFor(orgId, 100);
-      send(res, 200, { entries });
+      if (!orgStore) return send(res, 200, { entries: [], nextCursor: null });
+
+      const params = new URLSearchParams(url.split("?")[1] ?? "");
+      // Keyset cursor: opaque to the client, structured in the store. A
+      // missing/garbage cursor means "newest first".
+      const cursorAt = Number(params.get("cursorAt"));
+      const cursorId = params.get("cursorId");
+      const cursor =
+        Number.isFinite(cursorAt) && cursorAt > 0 && cursorId
+          ? { at: cursorAt, id: cursorId }
+          : undefined;
+      const limit = Math.min(Math.max(1, Number(params.get("limit")) || 100), 200);
+
+      const entries = await orgStore.auditFor(orgId, limit, cursor);
+
+      if (params.get("format") === "csv") {
+        // Attachment export: one row per entry, the columns the SIEM wants,
+        // escaping per RFC 4180 (quote anything with a comma/quote/newline).
+        const header = "id,at,actor_id,actor_email,action,target_type,target_id,ip";
+        const rows = entries.map((e) =>
+          [
+            e.id,
+            e.at,
+            e.actorId ?? "",
+            e.actorEmail ?? "",
+            e.action,
+            e.targetType ?? "",
+            e.targetId ?? "",
+            e.ip ?? "",
+          ]
+            .map(csvCell)
+            .join(","),
+        );
+        const body = [header, ...rows].join("\r\n") + "\r\n";
+        // Raw, not via `sendWithHeaders`: that helper JSON-stringifies, and
+        // an attachment whose content-type says text/csv but whose body is a
+        // JSON-quoted string is a file no spreadsheet opens.
+        res.writeHead(200, {
+          "content-type": "text/csv; charset=utf-8",
+          "content-disposition": `attachment; filename="lucent-audit-${orgId}.csv"`,
+        });
+        res.end(body);
+        return;
+      }
+
+      // The next page's cursor: the last row this page produced. Null when
+      // the page is short — the client reads "no more" without a probe.
+      const last = entries.length === limit ? entries[entries.length - 1] : undefined;
+      send(res, 200, {
+        entries,
+        nextCursor: last ? { at: last.at, id: last.id } : null,
+      });
       return;
     }
     // --- M4.3: Stripe billing routes --------------------------------------

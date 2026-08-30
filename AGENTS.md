@@ -2,7 +2,7 @@
 
 > AI-Native Voice Visual Workspace. A conversational canvas where users describe ideas by voice or text and an AI agent constructs editable, structured visuals (flowcharts, architecture diagrams, user journeys, wireframes, mind maps).
 >
-> **Status: well past the V1 slice.** An npm-workspaces monorepo under `packages/` — five packages (`core`, `ai`, `server`, `web`, `mcp`) — implements the conversational canvas plus realtime multiplayer, auth, a full manual board, work tracking, and agent access over MCP. See `docs/checklist.md` for audited feature status and `docs/10-getting-started.md` to run it. **Persistence is Postgres-backed when `LUCENT_DATABASE_URL` is set (accounts, boards, and the realtime op log survive a restart); in-memory otherwise. Still deferred: S3 for image/asset uploads.**
+> **Status: well past the V1 slice.** An npm-workspaces monorepo under `packages/` — six packages (`core`, `ai`, `server`, `web`, `mcp`, `i18n`) — implements the conversational canvas plus realtime multiplayer, auth, a full manual board, work tracking, agent access over MCP, SAML SSO, SCIM provisioning, and meeting transcripts. See `docs/checklist.md` for audited feature status and `docs/10-getting-started.md` to run it. **Persistence is Postgres-backed when `LUCENT_DATABASE_URL` is set (accounts, boards, and the realtime op log survive a restart); in-memory otherwise. Assets upload through `POST /api/assets` to a configurable blob backend (memory / disk / S3-compatible); still deferred: a Postgres-backed asset _metadata_ store.**
 
 ## Build / test / run
 

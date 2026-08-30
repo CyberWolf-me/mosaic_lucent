@@ -37,6 +37,8 @@ import { InMemoryNotificationStore, type NotificationStore } from "./notificatio
 import { PostgresNotificationStore } from "./store/pg-notifications.js";
 import { InMemoryMeetingStore } from "./meetings.js";
 import { PostgresMeetingStore } from "./store/pg-meetings.js";
+import { InMemorySsoStore } from "./ssoStore.js";
+import { PostgresSsoStore } from "./store/pg-sso.js";
 import { InMemoryUsageStore, type UsageStore } from "./usageStore.js";
 import { PostgresUsageStore } from "./store/pg-usage.js";
 import {
@@ -122,6 +124,8 @@ function makeStores(databaseUrl: string | undefined): {
   usageStore: UsageStore;
   /** E3/R3: meeting transcripts — in-memory for dev, Postgres when configured. */
   meetings: import("./meetings.js").MeetingStore;
+  /** F1: SSO connections + domain claims, on the same store-per-database rule. */
+  ssoStore: import("./ssoStore.js").SsoStore;
   db: Db | null;
   presenceStore?: import("./presence.js").PresenceStore;
   fanout?: import("./fanout.js").Fanout;
@@ -142,6 +146,7 @@ function makeStores(databaseUrl: string | undefined): {
       notifications: new InMemoryNotificationStore(),
       usageStore: new InMemoryUsageStore(),
       meetings: new InMemoryMeetingStore(),
+      ssoStore: new InMemorySsoStore(),
       db: null,
     };
   }
@@ -159,6 +164,7 @@ function makeStores(databaseUrl: string | undefined): {
     notifications: new PostgresNotificationStore(target),
     usageStore: new PostgresUsageStore(target),
     meetings: new PostgresMeetingStore(target),
+    ssoStore: new PostgresSsoStore(target),
     db: target,
   };
 }
@@ -375,6 +381,8 @@ const { server, realtime } = createApp({
   notifications: stores.notifications,
   // E3/R3: meeting transcripts, on the same store-per-database rule as the rest.
   meetings: stores.meetings,
+  // F1: SSO connections + domain claims, same rule.
+  ssoStore: stores.ssoStore,
   // M4: wire the plan + metering store. Without it the entitlement gates fail
   // open, which is the right answer for a deployment that never configured
   // billing but the wrong one here — every plan limit would go unenforced.

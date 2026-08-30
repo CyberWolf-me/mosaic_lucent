@@ -8,6 +8,24 @@
       name="description"
       content="Lucent turns what you say into a structured, editable visual workspace. Voice or text in; a semantic diagram you can keep talking to out."
     />
+    <!-- Open Graph / Twitter: link unfurls render the pitch, not a bare URL.
+         og:image is a placeholder path — a deployment with a real domain
+         swaps in a generated 1200×630 card at build time. -->
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Lucent — describe it, see it" />
+    <meta
+      property="og:description"
+      content="Say what you're building by voice or text; an editable, structured diagram appears and keeps updating as you talk."
+    />
+    <meta property="og:image" content="/og.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Lucent — describe it, see it" />
+    <meta
+      name="twitter:description"
+      content="Say what you're building; an editable, structured diagram appears."
+    />
+    <link rel="canonical" href="https://lucent.example.com/" />
+    <link rel="sitemap" href="sitemap.txt" />
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
@@ -176,7 +194,9 @@ npm run dev -w @lucent/web</code></pre>
 
     <footer>
       <span>© 2026 Lucent</span>
-      <span class="muted">An AI-native voice visual workspace.</span>
+      <span class="muted"
+        >An AI-native voice visual workspace. <a href="status.html">Status</a></span
+      >
     </footer>
   </body>
 </html>

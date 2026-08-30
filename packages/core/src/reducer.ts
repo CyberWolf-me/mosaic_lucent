@@ -204,10 +204,25 @@ export function applyOperation(workspace: Workspace, op: Operation): Workspace {
         id: op.id,
         label: op.label,
         children: [...op.children],
+        ...(op.kind ? { kind: op.kind } : {}),
       };
       for (const child of op.children) {
         const node = next.nodes[child];
         if (node) next.nodes[child] = { ...node, groupId: op.id };
+      }
+      break;
+    }
+
+    case "SET_GROUP_KIND": {
+      const group = next.groups[op.id];
+      if (group) {
+        next.groups[op.id] =
+          op.kind === null
+            ? (() => {
+                const { kind: _dropped, ...rest } = group;
+                return rest;
+              })()
+            : { ...group, kind: op.kind };
       }
       break;
     }

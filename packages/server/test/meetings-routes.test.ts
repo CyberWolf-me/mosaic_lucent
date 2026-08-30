@@ -29,7 +29,10 @@ interface Harness {
   base: string;
   close: () => Promise<void>;
   boardStore: InMemoryBoardStore;
-  api: (path: string, init: RequestInit & { token?: string }) => Promise<{ status: number; body: any }>;
+  api: (
+    path: string,
+    init: RequestInit & { token?: string },
+  ) => Promise<{ status: number; body: any }>;
   signup: (email: string) => Promise<{ token: string; id: string }>;
   seedBoard: (token: string, name?: string) => Promise<string>;
 }
@@ -95,9 +98,7 @@ const TURNS = [
 
 describe("validateTurns", () => {
   it("accepts and trims a well-formed transcript", () => {
-    const res = validateTurns([
-      { speaker: "  Ada  ", at: 1, text: "  hi  ", kind: "action" },
-    ]);
+    const res = validateTurns([{ speaker: "  Ada  ", at: 1, text: "  hi  ", kind: "action" }]);
     expect(res.ok).toBe(true);
     if (res.ok) {
       const turn = res.turns[0]!;

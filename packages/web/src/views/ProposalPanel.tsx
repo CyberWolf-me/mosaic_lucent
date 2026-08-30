@@ -131,6 +131,12 @@ function describe(op: Operation): { op: OpBadge; title: string; sub: string } {
       return { op: "del", title: op.id, sub: "Remove group" };
     case "CREATE_DIAGRAM":
       return { op: "mod", title: op.kind, sub: "Set diagram kind" };
+    case "SET_GROUP_KIND":
+      return {
+        op: "mod",
+        title: op.id,
+        sub: op.kind ? `Region kind → ${op.kind}` : "Clear region kind",
+      };
     case "TRANSFORM_DIAGRAM":
       return { op: "move", title: op.to, sub: "Transform representation" };
     case "CREATE_WIREFRAME":

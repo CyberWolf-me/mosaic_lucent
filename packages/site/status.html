@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Lucent status</title>
+    <meta name="robots" content="noindex" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="status-page">
+      <h1>Lucent status</h1>
+      <p class="muted">
+        Live health lives at <code>/health</code> on every deployment; this page is the
+        human-maintained record of incidents and planned work. It is updated by hand — a status page
+        that reports itself green automatically is a page nobody trusts.
+      </p>
+
+      <section class="status-current">
+        <h2>Current</h2>
+        <p class="status-ok">All systems operational.</p>
+      </section>
+
+      <section class="status-history">
+        <h2>History</h2>
+        <p class="muted">No incidents recorded yet.</p>
+      </section>
+
+      <section class="status-metrics">
+        <h2>What "operational" means</h2>
+        <p class="muted">
+          The service-level objectives and their measurement live in
+          <a href="https://github.com/lucent/lucent/blob/main/docs/reliability/slo.md"
+            >docs/reliability/slo.md</a
+          >. Summary: 99.9% of API requests succeed over 30 days; 99.5% of realtime connections stay
+          connected five minutes; P95 AI generation under 30 seconds.
+        </p>
+      </section>
+    </main>
+  </body>
+</html>

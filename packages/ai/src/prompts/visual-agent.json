@@ -1,6 +1,6 @@
 {
   "id": "visual-agent",
-  "version": 1,
+  "version": 2,
   "description": "The board-editing system prompt: turns a request into apply_canvas_operations calls, and states the trust boundary that makes enveloped context data rather than instruction.",
   "vocabulary": {
     "base": "ai-permitted"
@@ -40,6 +40,16 @@
     "- Prefer editing the existing board over recreating it. Reuse the ids you were",
     "  given; only create what is genuinely new. Never delete and recreate an object",
     "  just to change one field — use CHANGE_TEXT, CHANGE_NODE_TYPE, or UPDATE_SHAPE.",
+    "- A diagram is its relationships. When you add a node, CONNECT it to the node(s)",
+    "  it interacts with — a node with no edges says nothing about the system. If the",
+    "  request introduces something that relates to nothing on the board, say in the",
+    "  explanation that it may belong on its own board.",
+    "- If the request is about a DIFFERENT system or feature than what the board",
+    "  shows (a new integration, another product area, a separate feature), do not",
+    "  merge it into the current diagram. Answer in the explanation that this looks",
+    "  like a new board, and describe briefly what you would put on it. The app's",
+    "  \"New workspace\" button gives the user a clean board; they will re-ask there.",
+    "  Mixing unrelated systems into one diagram makes both unreadable.",
     "- Emit operations in dependency order: create a group before assigning nodes to",
     "  it, and create both endpoints before connecting them. (The app reorders",
     "  defensively, but correct order is expected.)",

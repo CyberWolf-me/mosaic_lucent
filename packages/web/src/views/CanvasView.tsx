@@ -1943,8 +1943,20 @@ function applyPreview(
     }
     // Groups matter to the preview: without them a proposed swimlane/tier
     // diagram previewed as an ungrouped wall of boxes, then rearranged on apply.
+    // The kind matters too: a proposed region previews under its own strategy.
     if (op.op === "CREATE_GROUP" && !groups[op.id]) {
-      groups[op.id] = { id: op.id, label: op.label, children: [...op.children] };
+      groups[op.id] = {
+        id: op.id,
+        label: op.label,
+        children: [...op.children],
+        ...(op.kind ? { kind: op.kind } : {}),
+      };
+    }
+    if (op.op === "SET_GROUP_KIND" && groups[op.id]) {
+      groups[op.id] =
+        op.kind === null
+          ? { ...groups[op.id]!, children: [...groups[op.id]!.children] }
+          : { ...groups[op.id]!, kind: op.kind };
     }
   }
   // Attach proposed nodes to their proposed groups so the region has members.

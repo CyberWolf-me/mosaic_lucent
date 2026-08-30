@@ -51,6 +51,14 @@ export interface RouteServices {
   readonly metrics: MetricsRegistry;
   readonly telemetry: Telemetry;
   readonly secret: string;
+  /** The configured web origin — the redirect target SAML's ACS ends at. */
+  readonly webOrigin: string;
+  /**
+   * The session store, for the SSO ACS to mint a session cookie alongside
+   * the bearer token (the browser flow needs the cookie; the API flow needs
+   * the token — login returns both, so the ACS does too).
+   */
+  readonly sessionStore: import("../sessions.js").SessionStore | undefined;
 
   readonly provider: LLMProvider;
   readonly imageProvider: ImageProvider;
@@ -71,6 +79,21 @@ export interface RouteServices {
   readonly usageStore: UsageStore | undefined;
   /** E3/R3: meeting transcripts; undefined → the meetings routes answer 503. */
   readonly meetings: MeetingStore | undefined;
+  /** F1: SSO connections + domain claims; undefined → the SSO routes answer 503. */
+  readonly ssoStore: import("../ssoStore.js").SsoStore | undefined;
+  /**
+   * Append one audit row. A function rather than the OrgStore itself: the
+   * route modules never assemble the entry shape (normalizeAuditEntry owns
+   * target-type defaults), and never choose whether a failed audit write is
+   * fatal (it never is — warn-and-continue, orgs.ts).
+   */
+  auditRow(
+    req: IncomingMessage,
+    actorId: string,
+    orgId: string,
+    action: string,
+    targetId: string,
+  ): Promise<void>;
   /** `null` when billing is unconfigured -- see the gate helpers below. */
   readonly entitlements: Entitlements | null;
   readonly tickets: TicketStore;

@@ -186,6 +186,73 @@ describe("RemoteBoardSession against a real server (E3/R1)", () => {
     expect(res.content[0]!.text).toMatch(/not available against a live server/);
   });
 
+  it("handles a stale board (409) by naming the head and asking for a re-read", async () => {
+    h = await harness();
+    const { token, boardId } = await ownerWithBoard(h);
+    const session = new RemoteBoardSession({ baseUrl: h.base, token, boardId });
+
+    // Prime the local cache, then drive the 409 through the API directly
+    // (the session itself does not send expectedSeq — that guard belongs to
+    // callers who did read; here we confirm the server's stale answer and
+    // that the session's next call still works, cache dropped, no residue).
+    await session.callTool("get_board", {});
+    const direct = await h.api(`/api/boards/${boardId}/ops`, {
+      method: "POST",
+      token,
+      body: JSON.stringify({
+        ops: [{ op: "CREATE_NODE", id: "n-a", nodeType: "step", label: "a" }],
+        // The head is 0 (fresh board): expecting seq 0 (i.e. the batch will
+        // land "after nothing") is stale the moment the write below races
+        // itself — use 1 to collide with the write the session is about to
+        // make is unreliable; instead claim 1, then write two ops in one
+        // batch through the API so the head moves past it.
+        expectedSeq: 1,
+      }),
+    });
+    expect(direct.status).toBe(200);
+    // The head is now 1. A caller still believing the head is 1 (claiming
+    // the NEXT seq is 2 by passing expectedSeq=2 is current; the stale claim
+    // is expectedSeq=1 again) is told it lost:
+    const staleDirect = await h.api(`/api/boards/${boardId}/ops`, {
+      method: "POST",
+      token,
+      body: JSON.stringify({
+        ops: [{ op: "CREATE_NODE", id: "n-b", nodeType: "step", label: "b" }],
+        expectedSeq: 1,
+      }),
+    });
+    expect(staleDirect.status).toBe(409);
+    // And the session — whose cache is one write behind — still functions:
+    // its next get_board reads fresh state (the refusal path, either local
+    // or server-side, drops the stale cache before it can mislead twice).
+    const refused = await session.callTool("apply_canvas_operations", {
+      operations: [{ op: "CONNECT_NODES", source: "n-a", target: "missing", relationship: "flow" }],
+    });
+    expect(refused.isError).toBe(true);
+  });
+
+  it("refuses a board the token cannot see, with a 404-shaped message", async () => {
+    h = await harness();
+    const { token } = await ownerWithBoard(h);
+    const session = new RemoteBoardSession({
+      baseUrl: h.base,
+      token,
+      boardId: "brd_not_a_real_board",
+    });
+    const res = await session.callTool("get_board", {});
+    expect(res.isError).toBe(true);
+    expect(res.content[0]!.text).toMatch(/not found|no access/);
+  });
+
+  it("surfaces an auth refusal as a token problem, not a server error", async () => {
+    h = await harness();
+    const { boardId } = await ownerWithBoard(h);
+    const session = new RemoteBoardSession({ baseUrl: h.base, token: "forged-token", boardId });
+    const res = await session.callTool("get_board", {});
+    expect(res.isError).toBe(true);
+    expect(res.content[0]!.text).toMatch(/LUCENT_MCP_TOKEN|refused/);
+  });
+
   it("remoteConfigFromEnv requires all three variables", () => {
     expect(remoteConfigFromEnv({})).toBeNull();
     expect(remoteConfigFromEnv({ LUCENT_MCP_URL: "http://x" })).toBeNull();

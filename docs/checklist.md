@@ -512,3 +512,31 @@ Still open, deliberately: SSE-side LiveKit transcription and MCP over HTTP
 (E3, server-side), SAML/SSO sign-in on top of the SCIM gateway, Helm/Terraform
 packaging, and the growth-surface items (marketing site, i18n, command
 palette, mobile views).
+
+## Remaining, deliberately deferred (2026-08-30)
+
+Everything this pass committed to is built and tested. Three items remain
+open with reasons, so the next person inherits a decision rather than a
+mystery:
+
+- **Terraform (`terraform/lucent-aws/`)** — the Helm chart covers the
+  deployable surface; Terraform would duplicate it for one cloud. Revisit
+  when a second cloud or a managed-database provisioning story exists.
+- **Offline licence check** — a licence gate needs product decisions first
+  (what does it gate? who signs? what does an expiry do to a running
+  deployment?). Those are sales-conversation questions, not code.
+- **Per-org retention, legal hold, `LUCENT_REGION`, DPA/subprocessor at
+  `/legal/`** — retention exists on the op log (the sweep); generalising it
+  per-org and the legal artifacts need counsel input. The deletion cascade
+  (org → boards → op log) is tested; extending it to snapshots and object
+  storage is the documented next step when retention ships.
+
+What this pass DID land (so nobody re-audits it from scratch): MCP-to-real-
+boards (`POST /api/boards/:id/ops` + `RemoteBoardSession`, 11 tests),
+LiveKit token minting (`POST /api/livekit/token`, 7 tests), the meeting
+transcript vertical (migration 0015, stores, routes, live capture in
+MeetingView, 15 tests), SAML SSO (ADR 0013, migration 0016, `saml.ts`
+verification with signature-wrapping defense, admin + ACS routes, 16 tests
+against a mock IdP), audit CSV export + keyset pagination (3 tests), mobile
+present mode, the changesets release workflow, the public status page, site
+SEO, and the i18n package with Hungarian.
