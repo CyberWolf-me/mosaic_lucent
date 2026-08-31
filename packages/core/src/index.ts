@@ -11,3 +11,4 @@ export * from "./layout.js";
 export * from "./history.js";
 export * from "./repair.js";
 export * from "./authorship.js";
+export * from "./partial.js";

@@ -52,7 +52,12 @@ interface ChatResponse {
  * into a successful call.
  */
 const RETRYABLE_STATUS = new Set([403, 408, 425, 429, 500, 502, 503, 504]);
-const DEFAULT_TIMEOUT_MS = 90_000;
+// Per-attempt ceiling. A full-board generation (~50 ops under a 16k output
+// budget) can legitimately take over 90s to write; the old 90s per-attempt
+// cap aborted exactly the large generations the budget was raised for (M1).
+// The client's stream timeout (120s, reset per frame) remains the user-side
+// guard. 180s keeps the provider comfortably above it.
+const DEFAULT_TIMEOUT_MS = 180_000;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -103,6 +108,12 @@ export class OpenAICompatibleProvider implements LLMProvider {
       tools: [openAiToolDefinition()],
       // Ask for the tool specifically; the schema then guarantees the shape.
       tool_choice: { type: "function", function: { name: TOOL_NAME } },
+      // An explicit output budget. Without one, the gateway's default
+      // applies — often far below what a full board of operations needs —
+      // and the tool args truncate mid-JSON (unparseable) or the model
+      // self-shortens and silently drops the CONNECT_NODES, which emit last
+      // per dependency order (M1 operation reliability).
+      max_tokens: 16384,
       temperature: 0.2,
     });
 
@@ -213,6 +224,8 @@ export class OpenAICompatibleProvider implements LLMProvider {
         ],
         tools: [openAiToolDefinition()],
         tool_choice: { type: "function", function: { name: TOOL_NAME } },
+        // Same explicit budget as the non-streaming path — see the note there.
+        max_tokens: 16384,
         temperature: 0.2,
         stream: true,
         // Not every gateway honours this; absence just means no usage chunk.

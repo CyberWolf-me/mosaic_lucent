@@ -561,6 +561,14 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         }
         const explanation = result.explanation ?? `Applied ${result.operations.length} operations.`;
 
+        // Partial-application report (M1): the server may have skipped ops
+        // that failed validation while applying the rest. Attach them to the
+        // reply so the chat can show exactly what didn't land — the old
+        // all-or-nothing path lost the whole generation over one bad op.
+        const skippedNote = result.warnings?.length
+          ? { skippedOps: result.warnings.map((w) => ({ op: w.op, reason: w.reason })) }
+          : {};
+
         // Large batches on an existing diagram present as a proposal to review.
         const isLarge =
           result.operations.length > PROPOSAL_THRESHOLD && Object.keys(workspace.nodes).length > 0;
@@ -571,6 +579,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
             {
               role: "ai",
               text: `${explanation} — review ${result.operations.length} proposed changes.`,
+              ...skippedNote,
             },
           ];
           setProposal({ request: text, operations: result.operations, explanation });
@@ -580,7 +589,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           persist(workspace, conversation, projectName);
         } else {
           const next = applyOperations(workspace, result.operations);
-          const conversation: ChatEntry[] = [...withUser, { role: "ai", text: explanation }];
+          const conversation: ChatEntry[] = [
+            ...withUser,
+            { role: "ai", text: explanation, ...skippedNote },
+          ];
           setChat(conversation);
           commitAndShare(next, result.operations, explanation, conversation, projectName);
         }

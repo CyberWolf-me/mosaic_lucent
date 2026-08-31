@@ -40,7 +40,13 @@ interface AnthropicResponse {
   usage?: { input_tokens?: number; output_tokens?: number };
 }
 
-const DEFAULT_TIMEOUT_MS = 90_000;
+// Provider-call ceiling. A full-board generation (~50 ops under a 16k output
+// budget) can legitimately take over 90s to write; the old 90s cap aborted
+// exactly the large generations this output budget was raised FOR (M1), and
+// the client's own stream timeout (120s, reset per frame) is the ceiling that
+// actually protects the user. 180s keeps the provider ceiling comfortably
+// above it.
+const DEFAULT_TIMEOUT_MS = 180_000;
 // Default to a pinned dated snapshot rather than `-latest`. Anthropic retires
 // aliases periodically and a build that ships today shouldn't pin a model
 // name that won't exist tomorrow. Operators should set LUCENT_AI_MODEL when
@@ -90,8 +96,13 @@ export class AnthropicProvider implements LLMProvider {
       },
       body: JSON.stringify({
         model: this.model,
-        // A full board of operations exceeds the old 2048 ceiling.
-        max_tokens: 8192,
+        // Output budget for one full board of operations. A large generation
+        // (~20 CREATE_NODE + ~30 CONNECT_NODES) can exceed 8k JSON tokens; a
+        // truncated tool-args payload then fails to parse and the whole
+        // generation is lost — or the model self-shortens and silently drops
+        // the CONNECT_NODES, which emit last per dependency order. 16k covers
+        // a full board with headroom (M1 operation reliability).
+        max_tokens: 16384,
         system: SYSTEM_PROMPT,
         messages: [{ role: "user", content: userContent }],
         tools: [anthropicToolDefinition()],
@@ -161,7 +172,8 @@ export class AnthropicProvider implements LLMProvider {
       },
       body: JSON.stringify({
         model: this.model,
-        max_tokens: 8192,
+        // Same budget as the non-streaming path — see the note there (M1).
+        max_tokens: 16384,
         system: SYSTEM_PROMPT,
         messages: [{ role: "user", content: userContent }],
         tools: [anthropicToolDefinition()],

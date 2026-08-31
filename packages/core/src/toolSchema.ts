@@ -67,7 +67,10 @@ export function toolParametersJsonSchema(): JsonSchema {
         description:
           `Operations to apply, in dependency order (create a node before connecting it, ` +
           `create a group before assigning nodes to it). Permitted operations: ` +
-          `${AI_OPERATION_NAMES.join(", ")}. Empty when answering a question.`,
+          `${AI_OPERATION_NAMES.join(", ")}. Empty when answering a question. ` +
+          `Completeness beats polish: emit ALL the CONNECT_NODES the described ` +
+          `system implies, even if it means shorter labels — a diagram missing ` +
+          `its relationships is wrong, a diagram with terse labels is fine.`,
         items: operationJsonSchema(),
       },
       explanation: {

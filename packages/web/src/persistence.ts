@@ -28,6 +28,13 @@ export interface ChatEntry {
    * renderer needing access to the surrounding chat history.
    */
   originPrompt?: string;
+  /**
+   * Partial-application report (M1): operations the server skipped, each with
+   * the validator's own reason. The chat entry renders these under the reply
+   * so the user sees exactly which relationships didn't land ("target not
+   * found") instead of a silent gap — and can ask Lucent to fix just those.
+   */
+  skippedOps?: Array<{ op: string; reason: string }>;
 }
 
 export interface ProjectMeta {

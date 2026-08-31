@@ -6,6 +6,7 @@ import {
   validateOperations,
   createWorkspace,
   applyOperations,
+  applyValidOperations,
   repairOperations,
   isHumanOnlyOperation,
   stampAuthorship,
@@ -399,8 +400,22 @@ export interface AuthoritativeContext {
   store: BoardStore;
 }
 
-/** How many repair-message characters may describe the failing batch. */
-const REPAIR_OPS_BUDGET = 2_000;
+/**
+ * How many repair-message characters may describe the failing batch.
+ *
+ * 12,000 (M1): a large generation is a 40-50 op batch — 2,000 chars showed the
+ * model roughly its first three operations and asked it to "correct" the
+ * other 47 blind. The corrected batch predictably re-emitted shorter, and the
+ * ops that vanished were the CONNECT_NODES (emitted last, per dependency
+ * order) — the repair round was starving itself of exactly the edges it was
+ * meant to recover. 12k chars covers a full ~50-op batch; the outer
+ * `REQUEST_LIMITS.messageChars` clamp still bounds the total.
+ */
+const REPAIR_OPS_BUDGET = 12_000;
+
+/** How many validator complaints the repair message may carry (was 8: a
+ * 30-error batch left 22 errors invisible to the model). */
+const REPAIR_ERROR_BUDGET = 20;
 
 /**
  * One bounded repair round (M5): hand the provider its own rejected batch and
@@ -420,7 +435,7 @@ async function requestRepair(
 ): Promise<GenerateResult | null> {
   const opsSummary = JSON.stringify(rejected).slice(0, REPAIR_OPS_BUDGET);
   const complaints = errors
-    .slice(0, 8)
+    .slice(0, REPAIR_ERROR_BUDGET)
     .map((e) => `- ${e.message}`)
     .join("\n");
   const message = [
@@ -479,6 +494,8 @@ export async function handleGenerate(
       explanation: outcome.explanation,
       provider: outcome.provider,
       ...(outcome.boardVersion > 0 ? { boardVersion: outcome.boardVersion } : {}),
+      // Partial-application skips (M1), same as the SSE done frame.
+      ...(outcome.warnings ? { warnings: outcome.warnings } : {}),
     },
     completion: outcome.completion,
   };
@@ -499,6 +516,13 @@ export type PipelineOutcome =
       /** 0 when no authoritative board backed the request (field omitted downstream). */
       boardVersion: number;
       completion: NonNullable<HandleResult["completion"]>;
+      /**
+       * Operations that failed validation and were skipped rather than applied
+       * (partial application, M1). Empty on a clean batch. Each carries the
+       * validator's own reason so the client can show exactly what didn't
+       * land and offer to re-ask the model for just those.
+       */
+      warnings?: Array<{ op: string; reason: string }>;
     }
   | { ok: false; status: number; body: unknown };
 
@@ -592,15 +616,6 @@ async function runGeneratePipeline(
     }
   }
 
-  if (errors.length > 0) {
-    // Reject rather than apply an inconsistent batch; the client can retry.
-    return {
-      ok: false,
-      status: 422,
-      body: { error: "operations failed validation", errors, repaired },
-    };
-  }
-
   // Only the keys the provider actually reported: a model that omits usage must
   // not be metered as having used zero tokens.
   const completion: NonNullable<HandleResult["completion"]> = {
@@ -608,9 +623,33 @@ async function runGeneratePipeline(
     ...(usageFor(result, firstResult) ? { usage: usageFor(result, firstResult)! } : {}),
   };
 
+  // PARTIAL APPLICATION (M1): a batch that still fails validation after the
+  // repair round no longer dies whole. One mis-referenced edge id used to
+  // reject 39 valid ops with it — the single most damaging failure an AI
+  // canvas has, because the user loses every node over one bad relationship.
+  // `applyValidOperations` partitions the batch using the SAME validator that
+  // just ran (one canonical simulator — the applier cannot disagree with the
+  // validator), applies the valid remainder, and reports the skips.
+  const partial = errors.length > 0 ? applyValidOperations(workspace, operations) : undefined;
+  if (partial && partial.applied.length === 0) {
+    // Nothing salvageable — the honest refusal, unchanged.
+    return {
+      ok: false,
+      status: 422,
+      body: { error: "operations failed validation", errors, repaired },
+    };
+  }
+  const warnings = partial
+    ? partial.skipped.map((s) => ({ op: s.op.op, reason: s.reason }))
+    : undefined;
+  // From here on, this is what actually applies.
+  const appliedOps = partial ? partial.applied : operations;
+
   // Persist the merged board so the next request validates against the new state.
   if (authoritative && authoritativeBoard) {
-    const updated = applyOperations(workspace, operations);
+    // On a partial batch the partial result IS the new state (its workspace
+    // was produced by the same sequential application the client will run).
+    const updated = partial ? partial.workspace : applyOperations(workspace, appliedOps);
     await authoritative.store.put({
       ...authoritativeBoard,
       workspace: updated,
@@ -618,23 +657,25 @@ async function runGeneratePipeline(
     });
     return {
       ok: true,
-      operations,
+      operations: appliedOps,
       explanation: result.explanation ?? null,
       provider: provider.name,
       // The client learns the new server-side version in the same response.
       boardVersion: Date.now(),
       completion,
+      warnings,
     };
   }
 
   return {
     ok: true,
-    operations,
+    operations: appliedOps,
     explanation: result.explanation ?? null,
     provider: provider.name,
     // No authoritative board: there is no server-side version to report.
     boardVersion: 0,
     completion,
+    warnings,
   };
 }
 
@@ -673,6 +714,9 @@ export async function handleGenerateStream(
     explanation: outcome.explanation,
     provider: outcome.provider,
     boardVersion: outcome.boardVersion,
+    // Partial-application skips (M1): the client shows what didn't land and
+    // can offer to fix just those. Omitted on a clean batch.
+    ...(outcome.warnings ? { warnings: outcome.warnings } : {}),
   });
   return {
     status: 200,

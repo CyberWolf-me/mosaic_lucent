@@ -174,7 +174,12 @@ export function readConfig(env: ConfigEnv = process.env): Config {
       perWindow: num(env.LUCENT_AUTH_LIMIT_PER_WINDOW, 10),
       windowMs: num(env.LUCENT_AUTH_LIMIT_WINDOW_MS, 5 * 60_000),
     },
-    aiTimeoutMs: num(env.LUCENT_AI_TIMEOUT_MS, 90_000),
+    // Provider-call ceiling for AI generation. A full-board batch (~50 ops at
+    // a 16k output budget) can legitimately take over 90s to write; the old
+    // 90s default aborted exactly the large generations the raised output
+    // budget was for (M1). The client's per-frame-resetting stream timeout
+    // (120s) is the user-side guard, so this only needs to sit above it.
+    aiTimeoutMs: num(env.LUCENT_AI_TIMEOUT_MS, 180_000),
     realtimeTicketTtlMs: num(env.LUCENT_REALTIME_TICKET_TTL_MS, 60_000),
     mail: {
       transport: mailTransport(env.LUCENT_MAIL_TRANSPORT),

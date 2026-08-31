@@ -209,17 +209,31 @@ export function visibleNodes(
  * off-screen on opposite sides still crosses the viewport and must draw. The pad
  * covers the fan offset a parallel edge's control points add (`makePath`'s
  * spread — a cubic bezier stays inside its control hull) plus the arrow marker.
+ *
+ * `keep` forces an edge to draw wherever its (possibly dragged) endpoints are —
+ * the dragged card stays mounted through the gesture, so its connectors must
+ * stay drawn or the node visually disconnects mid-drag on a culled board.
+ * `drag` shifts the span test the same way the cards themselves are shifted
+ * while the gesture is live; without it the test ran against pre-drag
+ * positions and a connector near the viewport edge vanished mid-gesture.
  */
 export function visibleEdges(
   edges: PlacedEdge[],
   byId: ReadonlyMap<string, PlacedNode>,
   view: Rect | null,
+  keep?: ReadonlySet<string>,
+  drag?: DragDelta | null,
 ): PlacedEdge[] {
   if (!view) return edges;
+  const shift = (n: PlacedNode): PlacedNode =>
+    drag && drag.ids.has(n.id) ? { ...n, cx: n.cx + drag.dx, cy: n.cy + drag.dy } : n;
   return edges.filter((e) => {
-    const a = byId.get(e.source);
-    const b = byId.get(e.target);
-    if (!a || !b) return false;
+    const realA = byId.get(e.source);
+    const realB = byId.get(e.target);
+    if (!realA || !realB) return false;
+    if (keep?.has(e.source) || keep?.has(e.target)) return true;
+    const a = shift(realA);
+    const b = shift(realB);
     const pad = 8 + Math.ceil(e.parallelIndex / 2) * 18;
     const minX = Math.min(a.cx - a.w / 2, b.cx - b.w / 2) - pad;
     const minY = Math.min(a.cy - a.h / 2, b.cy - b.h / 2) - pad;

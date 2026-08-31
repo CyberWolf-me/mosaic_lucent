@@ -934,18 +934,59 @@ html[data-grid="none"] .canvas-grid {
   animation: emerge 0.5s var(--e-out) both;
 }
 
-/* Dash-draw animation for connectors */
+/* Connector draw-in. Every connector path carries pathLength="100", so the
+   path's own geometry is normalized to 100 dash units: dashoffset 100→0
+   always sweeps exactly the whole edge, whatever its pixel length. The
+   previous version kept `stroke-dasharray: 320` as a persistent style, so
+   any connector longer than 320px rendered as paint-gap-paint after the
+   animation — long edges drew an arrowhead with no line reaching it, which
+   read as "disconnected midway" on large AI-generated boards. With the
+   normalized units the final state (offset 0, dash 100 100) is one
+   continuous dash covering the entire path: solid at any length.
+
+   The static base (offset 0) is the SOLID state, not the hidden one: CSS
+   animations pause in backgrounded tabs, and `fill-mode: both` pins the
+   paused frame — an animation that starts invisible left a hidden tab's
+   connectors undrawn until focus returned. Animating FROM solid TO solid via
+   a short sweep keeps the static render always-legible; the sweep only
+   decorates the transition while the tab is visible and animating. */
+.connectors path.appear {
+  stroke-dasharray: 100 100;
+  stroke-dashoffset: 0;
+  animation: draw-line 0.7s var(--e-out) 0.15s both;
+}
 @keyframes draw-line {
   from {
-    stroke-dashoffset: var(--dash, 240);
+    stroke-dashoffset: 100;
+  }
+  60% {
+    stroke-dashoffset: 0;
   }
   to {
     stroke-dashoffset: 0;
   }
 }
-.connectors path.drawing {
-  stroke-dasharray: var(--dash, 240);
-  animation: draw-line 0.9s var(--e-out) both;
+
+/* Proposed (review-gate) edges are a dashed TEXTURE, not a dash animation.
+   They carry BOTH classes (dashed + appear), so the texture has to win over
+   the appear sweep — hence the doubled class selector here — and their
+   draw-in is the opacity fade below instead of a dash sweep. Same paused-tab
+   reasoning as above: the static base is fully opaque. This is the slot
+   where the old appear rule's `stroke-dasharray: 320` silently stomped the
+   fine `4 4` and made proposed edges render broken-up at any length. */
+.connectors path.dashed,
+.connectors path.dashed.appear {
+  stroke-dasharray: 4 4;
+  opacity: 1;
+  animation: connector-fade-in 0.4s var(--e-out) both;
+}
+@keyframes connector-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 /* Node emerging pulse */
@@ -1892,12 +1933,9 @@ html[data-theme="light"] .shape.diamond {
   animation: node-appear 0.42s var(--e-out) both;
 }
 
-/* Connectors draw in when they first appear. */
-.connectors path.appear {
-  stroke-dasharray: 320;
-  stroke-dashoffset: 320;
-  animation: draw-line 0.7s var(--e-out) 0.15s both;
-}
+/* Connectors draw in via the normalized rule near draw-line above. The rule
+   that used to live here set `stroke-dasharray: 320` persistently — the
+   paint-gap-paint bug on any edge longer than 320px. */
 
 /* Rail / toolbar buttons get a springy press. */
 .rail-btn,

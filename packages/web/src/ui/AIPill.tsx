@@ -226,7 +226,69 @@ function ConvoTurn({ entry }: { entry: ChatEntry }) {
         {!isUser && entry.suggestNewBoard && entry.originPrompt && (
           <NewBoardAction prompt={entry.originPrompt} />
         )}
+        {/* Partial-application report (M1): what the validator refused while
+            applying the rest. Visible but quiet — a mono list under the
+            answer, not a modal — so a skipped relationship reads as a known
+            gap, not a mystery. The ask-again affordance sends a targeted
+            fix request rather than regenerating the whole batch. */}
+        {!isUser && entry.skippedOps && entry.skippedOps.length > 0 && (
+          <SkippedOpsList skipped={entry.skippedOps} />
+        )}
       </div>
+    </div>
+  );
+}
+
+/** The skipped-ops report rendered under an AI reply. */
+function SkippedOpsList({ skipped }: { skipped: NonNullable<ChatEntry["skippedOps"]> }) {
+  const { send, setView } = useWorkspace() as unknown as {
+    send: (message: string) => Promise<void>;
+    setView: (view: string) => void;
+  };
+  return (
+    <div
+      style={{
+        marginTop: 8,
+        border: "1px solid var(--stroke-2)",
+        borderRadius: 8,
+        padding: "8px 10px",
+        background: "oklch(from var(--canvas-2) l c h / 0.6)",
+      }}
+    >
+      <div
+        style={{
+          fontSize: 10,
+          fontFamily: "var(--font-mono)",
+          letterSpacing: "0.06em",
+          textTransform: "uppercase",
+          color: "var(--amber-2)",
+          marginBottom: 4,
+        }}
+      >
+        {skipped.length} change{skipped.length > 1 ? "s" : ""} skipped
+      </div>
+      {skipped.map((s, i) => (
+        <div
+          key={i}
+          style={{ fontSize: 11.5, color: "var(--ink-3)", fontFamily: "var(--font-mono)" }}
+        >
+          {s.op} — {s.reason}
+        </div>
+      ))}
+      <button
+        className="icon-btn"
+        style={{ marginTop: 8, height: 26, padding: "0 10px" }}
+        onClick={() => {
+          setView("canvas");
+          void send(
+            `Some operations from your last batch were skipped by validation. ` +
+              `Fix only these: ${skipped.map((s) => `${s.op} (${s.reason})`).join("; ")}. ` +
+              `Do not regenerate the rest of the board — only emit corrected operations for what was skipped.`,
+          );
+        }}
+      >
+        <Ico.Sparkle /> Fix these
+      </button>
     </div>
   );
 }

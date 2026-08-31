@@ -107,7 +107,11 @@ export function DiagramLayer({
     if (dragOverride) for (const id of dragOverride.ids) keep.add(id);
   }
   const drawNodes = visibleNodes(scene.nodes, view, keep);
-  const drawEdges = visibleEdges(edges, byId, view);
+  // Edges keep the same gesture-mounted ids the cards do, and their span test
+  // runs against drag-shifted endpoints — a dragged node's connectors must
+  // follow it to the viewport edge, not vanish because the pre-drag box fell
+  // outside the cull rect (M3 follow-up found live).
+  const drawEdges = visibleEdges(edges, byId, view, keep, dragOverride);
   const groups = visibleGroups(regions, view);
 
   return (
@@ -159,6 +163,14 @@ export function DiagramLayer({
               key={e.id}
               d={makePath(a, b, e.dir, spread)}
               className={cls}
+              // Normalize the path's own length to 100 units so the draw-in
+              // animation is geometry-independent. The old animation lived on
+              // a persistent `stroke-dasharray: 320`: any connector longer
+              // than 320px kept that dash pattern AFTER the animation and
+              // rendered as paint-gap-paint — a long edge drew its arrowhead
+              // with no line reaching it. With pathLength, dash units are
+              // relative to the whole path whatever its real pixel length.
+              pathLength={100}
               markerEnd={proposed ? "url(#arr-amber)" : "url(#arr)"}
             />
           );

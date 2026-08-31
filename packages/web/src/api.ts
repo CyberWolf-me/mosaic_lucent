@@ -21,6 +21,14 @@ export interface GenerateResponse {
   provider: string;
   /** How much of the monthly allowance is left, or null when none was reported. */
   allowance: Allowance | null;
+  /**
+   * Operations the server skipped during partial application (M1): each
+   * carries the validator's own reason. Undefined on a clean batch. The
+   * chat surfaces these so the user knows what didn't land — and can ask
+   * Lucent to fix just those, instead of losing the whole generation the way
+   * the old all-or-nothing 422 did.
+   */
+  warnings?: Array<{ op: string; reason: string }>;
 }
 
 /**
@@ -479,12 +487,14 @@ export async function streamGenerate(
         operations?: Operation[];
         explanation?: string | null;
         provider?: string;
+        warnings?: Array<{ op: string; reason: string }>;
       };
       done = {
         operations: Array.isArray(body.operations) ? body.operations : [],
         explanation: body.explanation ?? null,
         provider: body.provider ?? "unknown",
         allowance: null,
+        warnings: Array.isArray(body.warnings) ? body.warnings : undefined,
       };
       return;
     }

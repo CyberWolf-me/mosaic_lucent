@@ -221,6 +221,14 @@ export interface ParseWorkspaceResult {
   workspace?: Workspace;
   /** Human-readable detail for a 400 response. */
   detail?: string;
+  /**
+   * Referential repairs made while loading, for callers that surface them.
+   * Today: edges whose source/target node id does not resolve are DROPPED
+   * rather than poisoning the board — the canvas skipped them as silent
+   * no-ops anyway, but a dropped-with-a-report load says what happened
+   * instead of leaving the user to wonder why a relationship is missing.
+   */
+  dropped?: string[];
 }
 
 /**
@@ -247,7 +255,27 @@ export function parseWorkspace(value: unknown): ParseWorkspaceResult {
     const path = first?.path?.join(".") ?? "(root)";
     return { ok: false, detail: `workspace.${path}: ${first?.message ?? "invalid"}` };
   }
-  return { ok: true, workspace: parsed.data as Workspace };
+  const workspace = parsed.data as Workspace;
+  // Referential repair: an edge pointing at a node id that doesn't exist
+  // renders as silent nothing on the canvas (its draw path bails when either
+  // endpoint is missing). The op pipeline can't produce these — the validator
+  // refuses them — but an older build's save, a hand-edited export, or a
+  // server board from a different era can carry them. Drop them at the load
+  // boundary and SAY so, rather than letting the board carry edges that look
+  // missing for no visible reason.
+  const dropped: string[] = [];
+  if (workspace.edges && Object.keys(workspace.edges).length > 0) {
+    const edges: Workspace["edges"] = {};
+    for (const [id, edge] of Object.entries(workspace.edges)) {
+      if (workspace.nodes[edge.source] && workspace.nodes[edge.target]) {
+        edges[id] = edge;
+      } else {
+        dropped.push(id);
+      }
+    }
+    if (dropped.length > 0) workspace.edges = edges;
+  }
+  return dropped.length > 0 ? { ok: true, workspace, dropped } : { ok: true, workspace };
 }
 
 /**

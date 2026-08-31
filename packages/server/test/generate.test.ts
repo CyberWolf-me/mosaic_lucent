@@ -163,6 +163,48 @@ describe("richer board context", () => {
     expect(result.status).toBe(200);
   });
 
+  it("applies the valid majority of a batch instead of rejecting it whole", async () => {
+    // PARTIAL APPLICATION (M1). One bad edge id in a 4-op batch used to 422
+    // the entire generation — every node lost over one broken relationship.
+    // The batch must now apply its 3 valid ops and report the 1 skip.
+    const result = await handleGenerate(
+      fixedProvider([
+        { op: "CREATE_NODE", id: "n1", nodeType: "service", label: "One" },
+        { op: "CREATE_NODE", id: "n2", nodeType: "service", label: "Two" },
+        { op: "CONNECT_NODES", source: "n1", target: "n2", relationship: "calls" },
+        { op: "CONNECT_NODES", source: "n1", target: "ghost-id", relationship: "calls" },
+      ]),
+      { message: "build a small service flow", summary: emptySummary },
+    );
+    expect(result.status).toBe(200);
+    const body = result.body as {
+      operations: Operation[];
+      warnings?: Array<{ op: string; reason: string }>;
+    };
+    // The three valid ops come back; the ghost connect is skipped, with the
+    // validator's reason attached for the client to surface.
+    expect(body.operations).toHaveLength(3);
+    expect(body.warnings).toHaveLength(1);
+    expect(body.warnings![0]!.op).toBe("CONNECT_NODES");
+    expect(body.warnings![0]!.reason).toContain('node "ghost-id" does not exist');
+  });
+
+  it("still refuses cleanly when NOTHING in the batch validates", async () => {
+    // Partial application is not a mask for a hopeless batch: when every op
+    // fails, the honest answer is the 422 with the validator's complaints.
+    const result = await handleGenerate(
+      fixedProvider([
+        { op: "CONNECT_NODES", source: "a", target: "b", relationship: "x" },
+        { op: "CONNECT_NODES", source: "c", target: "d", relationship: "y" },
+      ]),
+      { message: "connect some ghosts", summary: emptySummary },
+    );
+    expect(result.status).toBe(422);
+    const body = result.body as { error: string; errors: unknown[] };
+    expect(body.error).toBe("operations failed validation");
+    expect(body.errors.length).toBeGreaterThan(0);
+  });
+
   it("still rejects an edit to a shape that does not exist", async () => {
     const result = await handleGenerate(
       fixedProvider([{ op: "UPDATE_SHAPE", id: "ghost-shape", text: "nope" }]),
