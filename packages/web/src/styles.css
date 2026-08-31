@@ -5717,3 +5717,15 @@ html[data-theme="light"] .allowance-note.spent {
   border-style: dashed;
   background: transparent;
 }
+
+/* Admin header row: the same icon-btn back affordance the other view pages
+   use (Analytics, History…), so org pages read as one family. */
+.admin-head-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.admin-head-row h1 {
+  margin: 0;
+}

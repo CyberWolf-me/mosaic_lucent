@@ -47,7 +47,13 @@ import { primeCsrfToken } from "./http.js";
  *    invites dead ends in a build that otherwise sent all three emails.
  */
 function Router({ onOpenSettings }: { onOpenSettings: (section?: string) => void }) {
-  const { view } = useWorkspace();
+  const { view, setView } = useWorkspace();
+  // Org pages sit *on top of* the board, so their Back returns to the canvas
+  // — the surface the user came from. It deliberately does NOT touch the
+  // browser history stack: views are React state and never push history
+  // entries, so `window.history.back()` stepped out of the app entirely (to
+  // the sign-in page or off the site), which is what users saw.
+  const backFromOrgPage = () => setView("canvas");
   switch (view) {
     case "dashboard":
       return <DashboardView onOpenSettings={onOpenSettings} />;
@@ -66,9 +72,9 @@ function Router({ onOpenSettings }: { onOpenSettings: (section?: string) => void
     case "document":
       return <DocumentView onOpenSettings={onOpenSettings} />;
     case "admin":
-      return <AdminView onBack={() => window.history.back()} />;
+      return <AdminView onBack={backFromOrgPage} />;
     case "analytics":
-      return <AnalyticsView onBack={() => window.history.back()} />;
+      return <AnalyticsView onBack={backFromOrgPage} />;
     case "canvas":
     default:
       // G2: a phone-shaped viewport with content gets the read-only mobile

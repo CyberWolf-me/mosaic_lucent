@@ -1549,18 +1549,12 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
           </div>
           <TopBar crumbs={crumbs} meta={meta} onOpenSettings={onOpenSettings} />
           <LeftRail onOpenSettings={onOpenSettings} />
-          {/* The shape toolbar stays available on an empty board: arming a tool
-              swaps the hero for the real canvas (see drawingArmed), so drawing
-              is discoverable without first generating something. */}
-          {canEdit && (
-            <ShapeToolbar
-              activeTool={tool}
-              onSelectTool={setTool}
-              onEmbed={addEmbed}
-              onGenImage={generateImageShape}
-              orientation="left"
-            />
-          )}
+          {/* The shape toolbar is NOT on the hero. It is `position: fixed`, so
+              on the first-run page it floated over the prompt and the mode
+              cluster, reading as UI that belongs to no board — a fresh user
+              sees tools for a canvas they haven't made yet. Drawing is still
+              one click away: "start with a blank board" below arms the sticky
+              tool and swaps the hero for the real canvas. */}
           <EmptyState
             value={message}
             onChange={setMessage}

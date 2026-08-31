@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { apiFetch } from "../http.js";
+import { Ico } from "../ui/icons.js";
 
 /**
  * Admin console for an org (M2 + M3).
@@ -97,10 +98,12 @@ export function AdminView({ onBack }: { onBack: () => void }) {
   return (
     <div className="admin-view">
       <header className="admin-header">
-        <button className="link-btn" onClick={onBack} aria-label="Back to dashboard">
-          ← Back
-        </button>
-        <h1>{org?.name ?? "Workspace"}</h1>
+        <div className="admin-head-row">
+          <button className="icon-btn" onClick={onBack} aria-label="Back to canvas">
+            <Ico.Left />
+          </button>
+          <h1>{org?.name ?? "Workspace"}</h1>
+        </div>
         <div className="admin-meta">
           {org ? (
             <>
