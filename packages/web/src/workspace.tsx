@@ -527,25 +527,36 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           const suggestsBoard =
             Object.keys(workspace.nodes).length > 0 &&
             /own board|separate board|new board/i.test(explanation);
-          setChat([
+          const conversation: ChatEntry[] = [
             ...withUser,
             {
               role: "ai",
               text: explanation,
               ...(suggestsBoard ? { suggestNewBoard: true, originPrompt: text } : {}),
             },
-          ]);
+          ];
+          setChat(conversation);
+          // Zero-op replies are still turns the user asked for: a question
+          // answered, a "this belongs on its own board" refusal. Without this
+          // write they existed only in React state and vanished on reload —
+          // the user's message and the answer simply disappeared (found live:
+          // a "move the monitoring stack" answer was gone after a reload).
+          persist(workspace, conversation, projectName);
           return;
         }
         const errors = validateOperations(workspace, result.operations);
         if (errors.length > 0) {
-          setChat([
+          const conversation: ChatEntry[] = [
             ...withUser,
             {
               role: "error",
               text: `Rejected invalid operations: ${errors[0]?.message ?? "unknown"}`,
             },
-          ]);
+          ];
+          setChat(conversation);
+          // Same reasoning as the zero-op path: the rejected attempt is part
+          // of the board's story, not ephemeral UI state.
+          persist(workspace, conversation, projectName);
           return;
         }
         const explanation = result.explanation ?? `Applied ${result.operations.length} operations.`;
@@ -555,14 +566,18 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           result.operations.length > PROPOSAL_THRESHOLD && Object.keys(workspace.nodes).length > 0;
 
         if (isLarge) {
-          setProposal({ request: text, operations: result.operations, explanation });
-          setChat([
+          const conversation: ChatEntry[] = [
             ...withUser,
             {
               role: "ai",
               text: `${explanation} — review ${result.operations.length} proposed changes.`,
             },
-          ]);
+          ];
+          setProposal({ request: text, operations: result.operations, explanation });
+          setChat(conversation);
+          // The ops themselves apply (and persist) only on approval, but the
+          // request and the review-gate reply are real turns now.
+          persist(workspace, conversation, projectName);
         } else {
           const next = applyOperations(workspace, result.operations);
           const conversation: ChatEntry[] = [...withUser, { role: "ai", text: explanation }];
@@ -570,12 +585,20 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           commitAndShare(next, result.operations, explanation, conversation, projectName);
         }
       } catch (err) {
-        setChat([...withUser, { role: "error", text: (err as Error).message }]);
+        const conversation: ChatEntry[] = [
+          ...withUser,
+          { role: "error", text: (err as Error).message },
+        ];
+        setChat(conversation);
+        // A network failure mid-stream used to swallow the user's message
+        // entirely — on reload the board looked like the request never
+        // happened. Keep the failed attempt visible.
+        persist(workspace, conversation, projectName);
       } finally {
         setBusy(false);
       }
     },
-    [busy, chat, workspace, commitAndShare, projectName, readOnly],
+    [busy, chat, workspace, commitAndShare, projectName, readOnly, persist],
   );
 
   const applyProposal = useCallback(() => {
@@ -699,6 +722,13 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     setView("canvas");
     setTick((t) => t + 1);
     setLastOpenProject(id);
+    // A deliberate move to a local board ends the shared-board session.
+    // Without this clear, the boot rejoin effect kept adopting the LAST
+    // shared board on every reload — the user's "New workspace" was undone
+    // by the next refresh (found live: a K8s board was silently replaced by
+    // a shared board from an earlier session).
+    setSharedBoardId(null);
+    setBoardId(null);
   }, []);
 
   /**
@@ -804,6 +834,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     setView("canvas");
     setTick((t) => t + 1);
     setLastOpenProject(data.id);
+    // Same as newProject: opening a local project leaves the shared-board
+    // session, or the next reload swaps the user back into the shared board.
+    setSharedBoardId(null);
+    setBoardId(null);
   }, []);
 
   /**
