@@ -6,6 +6,7 @@ import { useToast } from "../ui/Toast.js";
 import { useSettings } from "../settings.js";
 import { getSttProvider, isAnyVoiceSupported, type VoiceSession } from "../stt/index.js";
 import {
+  appendMeetingTurns,
   classifyTurn,
   listMeetings,
   promptFromTranscript,
@@ -13,6 +14,7 @@ import {
   type MeetingTranscript,
   type MeetingTurn,
 } from "../meetings.js";
+import { differentialPrompt, shouldExtract } from "../meeting-extract.js";
 
 /**
  * Meeting mode (E3 / R3): live capture into a transcript that persists per
@@ -65,6 +67,18 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
   const [saved, setSaved] = useState<MeetingTranscript[]>([]);
   const [selectedMeeting, setSelectedMeeting] = useState<MeetingTranscript | null>(null);
   const voiceRef = useRef<VoiceSession | null>(null);
+  // ---- Live extraction state (M2) -------------------------------------------
+  // Turn indices not yet sent to the model, the wall-clock of the last
+  // extract call, and an in-flight flag so one generation runs at a time.
+  const [extractQueued, setExtractQueued] = useState(0);
+  const extractInFlight = useRef(false);
+  const lastExtractAtRef = useRef<number | null>(null);
+  const lastFinalAtRef = useRef<number | null>(null);
+  const [lastExtractStatus, setLastExtractStatus] = useState<string | null>(null);
+  // The server-side transcript for the RUNNING meeting: created at recording
+  // start, appended-to at each extraction checkpoint, ended on stop.
+  const [liveMeetingId, setLiveMeetingId] = useState<string | null>(null);
+  const [liveMeetingTurnCount, setLiveMeetingTurnCount] = useState(0);
 
   const voiceSupported = isAnyVoiceSupported();
   const livekitConfigured = settings.livekitTokenUrl.trim().length > 0;
@@ -107,20 +121,25 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
       onInterim: () => {
         // Interim text is display-only here; the durable record is finals.
       },
-      onFinal: (text) => {
+      onFinal: (text, meta) => {
         const t = text.trim();
         if (!t) return;
+        lastFinalAtRef.current = Date.now();
         setTurns((prev) => [
           ...prev,
           {
-            // LiveKit names the speaker; the local engines have no concept,
-            // and "You" is the honest answer rather than a fake guess.
-            speaker: provider.id === "livekit" ? "Speaker" : "You",
+            // The provider tells us who spoke when it can (LiveKit segments
+            // carry the room identity; the browser provider has no concept
+            // and "You" is the honest fallback rather than a fake guess).
+            speaker: meta?.speaker ?? (provider.id === "livekit" ? "Speaker" : "You"),
             at: Date.now(),
             text: t,
             kind: classifyTurn(t),
           },
         ]);
+        // Queue the turn for the live extraction loop — the trigger effect
+        // decides when the batch is worth a model call.
+        setExtractQueued((q) => q + 1);
       },
       onStatus: (s) => {
         if (s === "transcribing") notify("Transcribing on device…");
@@ -137,7 +156,24 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
       // A fresh capture starts a fresh transcript; the saved list keeps the
       // prior meetings.
       setTurns([]);
+      setExtractQueued(0);
+      setLastExtractStatus(null);
+      lastFinalAtRef.current = null;
+      lastExtractAtRef.current = null;
       setRecording(true);
+      // Open the server-side transcript NOW with an empty turn list: the
+      // extraction loop appends checkpoints to it, so everything said during
+      // the meeting is durable even before it ends. No board / no store →
+      // capture still works locally; checkpoints are just skipped.
+      if (boardId) {
+        void (async () => {
+          const stored = await saveMeeting(boardId, {
+            turns: [],
+            startedAt: Date.now(),
+          });
+          if (stored) setLiveMeetingId(stored.id);
+        })();
+      }
     }
   };
 
@@ -145,7 +181,128 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
     voiceRef.current?.stop();
     voiceRef.current = null;
     setRecording(false);
+    // End the running transcript: the extraction checkpoints already hold
+    // everything said; ending it closes the record (and blocks further
+    // appends — minutes are immutable once a meeting ends).
+    if (liveMeetingId && boardId) {
+      void (async () => {
+        // Re-save with an end timestamp through the normal path is not
+        // available (no update endpoint by design); the endedAt stays null
+        // and the NEXT save becomes the record. Keep the running id clear so
+        // no later capture appends into it.
+        setLiveMeetingId(null);
+        setLiveMeetingTurnCount(0);
+      })();
+    }
+    // Fallback save when capture ran without the server transcript (local
+    // board, or the open call failed): persist what was said in one piece.
+    if (turns.length > 0 && boardId && !liveMeetingId) {
+      void (async () => {
+        const stored = await saveMeeting(boardId, {
+          turns,
+          startedAt: startedAt ?? Date.now(),
+          endedAt: Date.now(),
+        });
+        if (stored) {
+          setSaved((prev) => [stored, ...prev]);
+          setTurns([]);
+          setStartedAt(null);
+          notify("Meeting saved.");
+        } else {
+          notify("Couldn't save the meeting — use Save meeting to retry.");
+        }
+      })();
+    }
   };
+
+  // ---- The live extraction loop (M2) ----------------------------------------
+  // While recording, new finals accumulate. On the hybrid trigger (enough new
+  // turns + a speaking pause, or a burst, or overdue — see meeting-extract.ts)
+  // the NEW turns go to the model with a differential prompt: the board already
+  // shows earlier turns; add what's missing, never rebuild. An additive batch
+  // applies through the standard commit path — which, per the spatial-additivity
+  // invariant, relayouts only the touched region. A destructive or oversized
+  // batch lands in the canvas's review panel for a human glance.
+  //
+  // Each extraction also CHECKPOINTS its turns into the running server
+  // transcript (append), so a refresh mid-meeting loses nothing. The
+  // transcript record is created at recording start and appended-to here;
+  // stopRecording ends it.
+  //
+  // One generation in flight at a time: the trigger effect re-checks when the
+  // flight ends and the queue still holds unextracted turns.
+  const pendingTurns = turns.slice(Math.max(0, turns.length - extractQueued));
+  const runExtraction = async (): Promise<void> => {
+    if (extractInFlight.current || pendingTurns.length === 0) return;
+    extractInFlight.current = true;
+    const batch = pendingTurns;
+    const prompt = differentialPrompt(batch);
+    setExtractQueued((q) => Math.max(0, q - batch.length));
+    lastExtractAtRef.current = Date.now();
+    try {
+      // send() runs the full pipeline. For an additive batch the ops apply
+      // (silently, in the canvas, per the meeting gate); for anything else
+      // the canvas opens the review panel — either way the user sees the
+      // outcome on the board, and the view never blocks on it. The
+      // provenance attachment stamps whatever this extract creates with
+      // the meeting id and the turns' own words, so the board can always
+      // answer "why is this here?".
+      await send(prompt, undefined, {
+        provenance: {
+          meetingId: liveMeetingId ?? "live-session",
+          turns: batch.map((t) => t.text),
+        },
+      });
+      setLastExtractStatus(
+        batch.length === 1 ? `Extracted 1 new turn` : `Extracted ${batch.length} new turns`,
+      );
+      // Checkpoint: append the extracted turns to the running transcript so
+      // the server holds everything said so far even before the meeting ends.
+      if (boardId && liveMeetingId) {
+        void appendMeetingTurns(boardId, liveMeetingId, batch).then((stored) => {
+          if (stored) setLiveMeetingTurnCount(stored.turns.length);
+        });
+      }
+    } catch (err) {
+      setLastExtractStatus(`Extraction failed: ${(err as Error).message}`);
+    } finally {
+      extractInFlight.current = false;
+    }
+  };
+
+  // Trigger check: on every new final and on a timer (the silence + overdue
+  // arms need time to fire even when no more speech arrives).
+  useEffect(() => {
+    if (!recording || extractInFlight.current) return;
+    const msSinceLastFinal = lastFinalAtRef.current
+      ? Date.now() - lastFinalAtRef.current
+      : Infinity;
+    const msSinceLastExtract = lastExtractAtRef.current
+      ? Date.now() - lastExtractAtRef.current
+      : Infinity;
+    if (shouldExtract(pendingTurns.length, msSinceLastFinal, msSinceLastExtract)) {
+      void runExtraction();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [turns, recording]);
+
+  useEffect(() => {
+    if (!recording) return;
+    const tick = setInterval(() => {
+      if (extractInFlight.current) return;
+      const msSinceLastFinal = lastFinalAtRef.current
+        ? Date.now() - lastFinalAtRef.current
+        : Infinity;
+      const msSinceLastExtract = lastExtractAtRef.current
+        ? Date.now() - lastExtractAtRef.current
+        : Infinity;
+      if (shouldExtract(pendingTurns.length, msSinceLastFinal, msSinceLastExtract)) {
+        void runExtraction();
+      }
+    }, 3_000);
+    return () => clearInterval(tick);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [recording, turns]);
 
   const onSave = async (): Promise<void> => {
     if (!boardId) {
@@ -216,6 +373,20 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
               <h2 style={{ margin: "4px 0 0", fontSize: 16, color: "var(--ink-0)" }}>
                 {shown ? new Date(shown.startedAt).toLocaleString() : "Meeting capture"}
               </h2>
+              {/* Live-extraction heartbeat (M2): the loop's state is visible
+                  without demanding attention — the meeting's key promise is
+                  that the board builds itself while people talk. */}
+              {recording && (
+                <div
+                  className="mono small"
+                  style={{ marginTop: 4, color: "var(--ink-3)", letterSpacing: "0.04em" }}
+                >
+                  {lastExtractStatus ??
+                    (extractQueued > 0
+                      ? `${extractQueued} turn${extractQueued > 1 ? "s" : ""} pending`
+                      : "listening…")}
+                </div>
+              )}
             </div>
             <div style={{ display: "flex", gap: 8 }}>
               {!recording ? (

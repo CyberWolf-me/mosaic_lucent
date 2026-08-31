@@ -87,6 +87,9 @@ export const livekitSttProvider: SttProvider = {
     // Resolved once connected; stop() before then just sets the flag.
     let disconnect: (() => void) | null = null;
     const chunks: string[] = [];
+    // The most recent final segment's speaker — attribution for the joined
+    // final this session emits on stop.
+    let lastSpeaker: string | undefined;
 
     handlers.onStatus?.("connecting");
 
@@ -107,13 +110,23 @@ export const livekitSttProvider: SttProvider = {
 
         // Transcription arrives from the server agent. LiveKit exposes it as a
         // TranscriptionReceived event; segments carry `final` so interim words
-        // can stream while the final text accumulates.
+        // can stream while the final text accumulates — and the speaking
+        // participant's identity, which rides along to onFinal so meeting
+        // capture can attribute turns to people.
         room.on(
           livekit.RoomEvent.TranscriptionReceived ?? "transcriptionReceived",
           (segments: TranscriptionSegment[]) => {
             for (const seg of segments) {
-              if (seg.final) chunks.push(seg.text);
-              else handlers.onInterim?.(seg.text);
+              const speaker =
+                typeof seg.participant === "string"
+                  ? seg.participant
+                  : seg.participant?.name || seg.participant?.identity || undefined;
+              if (seg.final) {
+                chunks.push(seg.text);
+                lastSpeaker = speaker ?? lastSpeaker;
+              } else {
+                handlers.onInterim?.(seg.text);
+              }
             }
             if (chunks.length > 0) handlers.onInterim?.(chunks.join(" "));
           },
@@ -149,7 +162,7 @@ export const livekitSttProvider: SttProvider = {
         handlers.onStatus?.("idle");
         disconnect?.();
         const text = chunks.join(" ").trim();
-        if (text) handlers.onFinal(text);
+        if (text) handlers.onFinal(text, lastSpeaker ? { speaker: lastSpeaker } : undefined);
         else handlers.onError?.("");
       },
     };
@@ -164,7 +177,16 @@ interface LiveKitRoom {
   localParticipant: { setMicrophoneEnabled(on: boolean): Promise<unknown> };
 }
 
+/**
+ * A transcription segment as LiveKit actually delivers it. The SDK's own type
+ * carries more; this file deliberately types only what it reads — and `final`
+ * segments DO carry the speaking participant's identity, which is exactly
+ * what meeting capture needs to attribute a turn to a person. The previous
+ * structural type dropped those fields on the floor.
+ */
 interface TranscriptionSegment {
   text: string;
   final: boolean;
+  /** The participant who spoke — the room identity the token minted. */
+  participant?: { identity?: string; name?: string } | string | null;
 }

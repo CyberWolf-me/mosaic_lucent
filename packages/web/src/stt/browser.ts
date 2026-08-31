@@ -23,6 +23,31 @@ interface SpeechResultEvent {
 interface SpeechErrorEvent {
   error?: string;
 }
+
+/**
+ * Segment mode (M2): fire `onFinal` once per UTTERANCE while the session runs,
+ * not one joined blob at stop. The recognition event marks each result
+ * `isFinal` when the utterance ends; meeting capture needs those as separate
+ * turns ("Sarah: I'll handle marketing" arriving minutes apart as two turns,
+ * not one concatenated blob). The event's `resultIndex` tells us where the
+ * new results begin so nothing is double-counted across restarts.
+ */
+interface SegmentedResultEvent extends SpeechResultEvent {
+  resultIndex: number;
+}
+interface SegmentedResult {
+  0: { transcript: string };
+  isFinal: boolean;
+  length: number;
+}
+interface SegmentedResultList {
+  length: number;
+  [index: number]: SegmentedResult;
+}
+interface SegmentedEvent {
+  resultIndex: number;
+  results: SegmentedResultList;
+}
 type RecognitionCtor = new () => SpeechRecognitionLike;
 
 function getCtor(): RecognitionCtor | null {
@@ -67,8 +92,13 @@ export const browserSttProvider: SttProvider = {
     }
 
     let recognition: SpeechRecognitionLike | null = null;
-    let finalText = "";
     let stopped = false;
+    // Segment mode bookkeeping: every utterance final fires onFinal at once;
+    // the last one is ALSO kept as `lastFinal` so stop() has something to say
+    // for consumers that still expect an end-of-session summary, and so the
+    // legacy one-blob consumers (the canvas voice pill) keep working.
+    let lastFinal = "";
+    let emittedThrough = -1;
 
     const begin = () => {
       if (stopped) return;
@@ -76,13 +106,26 @@ export const browserSttProvider: SttProvider = {
       recognition.lang = "en-US";
       recognition.interimResults = true;
       recognition.continuous = true;
-      recognition.onresult = (event) => {
+      recognition.onresult = (baseEvent) => {
+        // Segment mode: the event carries an index where new results start.
+        const event = baseEvent as unknown as SegmentedEvent;
         let interim = "";
         for (let i = 0; i < event.results.length; i++) {
-          interim += event.results[i]?.[0]?.transcript ?? "";
+          const result = event.results[i];
+          const transcript = result?.[0]?.transcript ?? "";
+          if (result?.isFinal === true) {
+            // A finalized utterance: emit immediately (once, even if the
+            // recognizer restarts and replays the list).
+            if (i > emittedThrough && transcript.trim()) {
+              emittedThrough = i;
+              lastFinal = transcript.trim();
+              handlers.onFinal(transcript.trim());
+            }
+          } else {
+            interim += transcript;
+          }
         }
-        finalText = interim;
-        handlers.onInterim?.(interim);
+        if (interim) handlers.onInterim?.(interim);
       };
       recognition.onerror = (event) => {
         const msg = describeError(event?.error);
@@ -90,7 +133,16 @@ export const browserSttProvider: SttProvider = {
       };
       recognition.onend = () => {
         handlers.onStatus?.("idle");
-        if (finalText.trim()) handlers.onFinal(finalText.trim());
+        // The recognizer stops itself on silence; continuous capture restarts
+        // it unless the session was asked to stop.
+        if (!stopped) {
+          try {
+            recognition?.start();
+            handlers.onStatus?.("listening");
+          } catch {
+            /* restart raced with stop() — nothing to do */
+          }
+        }
       };
       try {
         recognition.start();

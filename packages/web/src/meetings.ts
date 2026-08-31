@@ -87,6 +87,25 @@ export async function saveMeeting(
   return (await res.json()) as MeetingTranscript;
 }
 
+/**
+ * Checkpoint append (M2): push the turns captured since the last checkpoint
+ * into a RUNNING meeting, so a refresh mid-meeting loses nothing. Returns
+ * the extended transcript, or null when the meeting isn't open for appends
+ * (wrong id, or it already ended — the caller falls back to a fresh save).
+ */
+export async function appendMeetingTurns(
+  boardId: string,
+  meetingId: string,
+  turns: MeetingTurn[],
+): Promise<MeetingTranscript | null> {
+  const res = await apiFetch(
+    `/api/boards/${encodeURIComponent(boardId)}/meetings/${encodeURIComponent(meetingId)}/turns`,
+    { method: "POST", body: JSON.stringify({ turns }) },
+  );
+  if (!res.ok) return null;
+  return (await res.json()) as MeetingTranscript;
+}
+
 /** The board's saved meetings, newest first; null when the call fails. */
 export async function listMeetings(boardId: string): Promise<MeetingTranscript[] | null> {
   const res = await apiFetch(`/api/boards/${encodeURIComponent(boardId)}/meetings`);

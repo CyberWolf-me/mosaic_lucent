@@ -233,3 +233,99 @@ describe("board meetings routes (E3/R3)", () => {
     expect(res.status).toBe(401);
   });
 });
+
+describe("checkpoint append (M2)", () => {
+  let h: Harness;
+
+  afterEach(async () => {
+    if (h) await h.close();
+  });
+  it("appends turns to a running meeting and reads the extended transcript back", async () => {
+    h = await harness();
+    const owner = await h.signup("append1@example.com");
+    const boardId = await h.seedBoard(owner.token);
+    const opened = await h.api(`/api/boards/${boardId}/meetings`, {
+      method: "POST",
+      token: owner.token,
+      body: JSON.stringify({ turns: TURNS.slice(0, 1), startedAt: 1_000 }),
+    });
+    expect(opened.status).toBe(201);
+    const mid = opened.body.id as string;
+
+    const appended = await h.api(`/api/boards/${boardId}/meetings/${mid}/turns`, {
+      method: "POST",
+      token: owner.token,
+      body: JSON.stringify({ turns: TURNS.slice(1) }),
+    });
+    expect(appended.status).toBe(200);
+    expect(appended.body.turns).toHaveLength(3);
+
+    const one = await h.api(`/api/boards/${boardId}/meetings/${mid}`, { token: owner.token });
+    expect(one.status).toBe(200);
+    expect(one.body.turns).toHaveLength(3);
+    expect(one.body.turns[2].kind).toBe("decision");
+  });
+
+  it("refuses to append to an ended meeting — minutes are immutable", async () => {
+    h = await harness();
+    const owner = await h.signup("append2@example.com");
+    const boardId = await h.seedBoard(owner.token);
+    const saved = await h.api(`/api/boards/${boardId}/meetings`, {
+      method: "POST",
+      token: owner.token,
+      body: JSON.stringify({ turns: TURNS, startedAt: 500, endedAt: 10_000 }),
+    });
+    const mid = saved.body.id as string;
+    const res = await h.api(`/api/boards/${boardId}/meetings/${mid}/turns`, {
+      method: "POST",
+      token: owner.token,
+      body: JSON.stringify({ turns: [{ speaker: "Ada", at: 20_000, text: "late" }] }),
+    });
+    expect(res.status).toBe(404);
+    expect(res.body.error).toMatch(/ended/);
+  });
+
+  it("append is board-scoped and anonymous-refused", async () => {
+    h = await harness();
+    const owner = await h.signup("append3@example.com");
+    const other = await h.signup("append4@example.com");
+    const boardId = await h.seedBoard(owner.token);
+    const opened = await h.api(`/api/boards/${boardId}/meetings`, {
+      method: "POST",
+      token: owner.token,
+      body: JSON.stringify({ turns: TURNS.slice(0, 1), startedAt: 1_000 }),
+    });
+    const mid = opened.body.id as string;
+
+    const stranger = await h.api(`/api/boards/${boardId}/meetings/${mid}/turns`, {
+      method: "POST",
+      token: other.token,
+      body: JSON.stringify({ turns: [{ speaker: "X", at: 1, text: "x" }] }),
+    });
+    expect(stranger.status).toBe(404);
+
+    const anon = await h.api(`/api/boards/${boardId}/meetings/${mid}/turns`, {
+      method: "POST",
+      body: JSON.stringify({ turns: [{ speaker: "X", at: 1, text: "x" }] }),
+    });
+    expect(anon.status).toBe(401);
+  });
+
+  it("validateTurns still applies to appends — a bad turn is a 400", async () => {
+    h = await harness();
+    const owner = await h.signup("append5@example.com");
+    const boardId = await h.seedBoard(owner.token);
+    const opened = await h.api(`/api/boards/${boardId}/meetings`, {
+      method: "POST",
+      token: owner.token,
+      body: JSON.stringify({ turns: TURNS.slice(0, 1), startedAt: 1_000 }),
+    });
+    const mid = opened.body.id as string;
+    const res = await h.api(`/api/boards/${boardId}/meetings/${mid}/turns`, {
+      method: "POST",
+      token: owner.token,
+      body: JSON.stringify({ turns: [{ speaker: "", at: 1, text: "x" }] }),
+    });
+    expect(res.status).toBe(400);
+  });
+});

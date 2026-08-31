@@ -908,3 +908,125 @@ export function applyLayout(workspace: Workspace, layout: LayoutResult): Workspa
   }
   return { ...workspace, nodes };
 }
+
+/**
+ * SPATIAL ADDITIVITY (M2): re-layout ONE group — the meeting-growth invariant.
+ *
+ * "AI-generated additions must be spatially additive by default; existing
+ * committed objects keep their positions unless the user explicitly asks for a
+ * transformation." A board that has grown topic-by-topic through a meeting is
+ * the user's mental map (left = product, center = architecture, right =
+ * roadmap); re-running the full-board layout on every commit rearranges that
+ * map out from under them. This entry point re-lays out ONLY the named
+ * group's members, under that group's own kind (when it is a region) or the
+ * board kind, and merges the result back AT THE REGION'S CURRENT ORIGIN —
+ * every node outside the group is returned untouched, so callers can diff.
+ *
+ * The result is a full LayoutResult whose entries for non-group nodes simply
+ * restate their existing positions: `applyLayout` then writes only what
+ * changed. Pinned members keep their pinned coordinates through applyLayout's
+ * existing contract.
+ */
+export function relayoutRegion(
+  workspace: Workspace,
+  groupId: string,
+  options: LayoutOptions = {},
+): LayoutResult | null {
+  const group = workspace.groups[groupId];
+  if (!group) return null;
+  // Members by the authoritative link (node.groupId), matching splitByRegions.
+  const memberIds = Object.values(workspace.nodes)
+    .filter((n) => n.groupId === groupId)
+    .map((n) => n.id);
+  if (memberIds.length === 0) return null;
+
+  const opts = { ...DEFAULTS, ...options };
+  const kind = group.kind ?? workspace.diagramKind;
+  // The group's own layout, in its own coordinate frame.
+  const sub = subWorkspaceFor(workspace, memberIds, kind);
+  const subLayout = layoutSingle(sub, kind, opts);
+  if (Object.keys(subLayout).length === 0) return null;
+
+  // Where the group lives NOW: the bounding box of its members' current
+  // positions. Relayout results are centered around their own origin, so the
+  // merge shifts the fresh layout so its top-left lands where the old one was.
+  const placed = memberIds
+    .map((id) => workspace.nodes[id])
+    .filter((n): n is NonNullable<typeof n> => !!n?.position);
+  if (placed.length === 0) return null;
+  const originX = Math.min(...placed.map((n) => n.position!.x));
+  const originY = Math.min(...placed.map((n) => n.position!.y));
+  const b = boundsOf(subLayout);
+  const dx = originX - b.x;
+  const dy = originY - b.y;
+
+  // Full-board result: untouched nodes restate their current positions so
+  // applyLayout writes a no-op for them; group members get the new geometry.
+  const result: LayoutResult = {};
+  for (const [id, node] of Object.entries(workspace.nodes)) {
+    if (node.groupId === groupId) continue;
+    if (node.position && node.size) {
+      result[id] = { position: node.position, size: node.size };
+    }
+  }
+  for (const [id, fresh] of Object.entries(subLayout)) {
+    result[id] = {
+      position: { x: fresh.position.x + dx, y: fresh.position.y + dy },
+      size: fresh.size,
+    };
+  }
+  return result;
+}
+
+/**
+ * Overlap separation for stable growth (M2): after a region relayout changes a
+ * group's footprint, a growing region can extend into the space its right-hand
+ * neighbours occupy. Returns LayoutResult entries shifting ONLY the regions
+ * whose current bounds the growth would overlap, by the minimum clearance —
+ * deterministic, declaration order, no global shuffle. `null` when nothing
+ * collides. (Nodes outside any kind-region are never moved by this pass.)
+ */
+export function separateRegions(workspace: Workspace, growerId: string): LayoutResult | null {
+  const grower = workspace.groups[growerId];
+  if (!grower) return null;
+  const groupIds = Object.keys(workspace.groups).filter((id) => workspace.groups[id]!.kind);
+  if (groupIds.length < 2) return null;
+
+  // Current bounds of each region over its members' positions.
+  const boundsOfGroup = (gid: string) => {
+    const members = Object.values(workspace.nodes)
+      .filter((n) => n.groupId === gid && n.position)
+      .map((n) => n.position!);
+    if (members.length === 0) return null;
+    return {
+      x1: Math.min(...members.map((p) => p.x)),
+      y1: Math.min(...members.map((p) => p.y)),
+      x2: Math.max(...members.map((p) => p.x + 160)),
+      y2: Math.max(...members.map((p) => p.y + 64)),
+    };
+  };
+  const growerBox = boundsOfGroup(growerId);
+  if (!growerBox) return null;
+
+  const shifts: LayoutResult = {};
+  // Regions to the right of the grower, in declaration order, pushed right
+  // when the grower's new right edge would enter their left edge.
+  let pushFrom = growerBox.x2;
+  for (const gid of groupIds) {
+    if (gid === growerId) continue;
+    const box = boundsOfGroup(gid);
+    if (!box) continue;
+    if (box.x1 < pushFrom + REGION_GAP) {
+      const dx = pushFrom + REGION_GAP - box.x1;
+      for (const n of Object.values(workspace.nodes)) {
+        if (n.groupId === gid && n.position && n.size) {
+          shifts[n.id] = { position: { x: n.position.x + dx, y: n.position.y }, size: n.size };
+        }
+      }
+      pushFrom = box.x2 + dx;
+    } else {
+      pushFrom = box.x2;
+    }
+  }
+  return Object.keys(shifts).length > 0 ? shifts : null;
+}

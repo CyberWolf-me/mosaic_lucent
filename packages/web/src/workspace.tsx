@@ -16,6 +16,8 @@ import {
   createWorkspace,
   parseWorkspace,
   parseWorkspaceOrDefault,
+  relayoutRegion,
+  separateRegions,
   validateOperations,
   type DiagramKind,
   type Operation,
@@ -70,12 +72,29 @@ export interface Proposal {
   request: string;
   operations: Operation[];
   explanation: string;
+  /**
+   * Provenance carried from the originating send (M2): stamped onto whatever
+   * the batch creates when the proposal is applied, so even review-gated
+   * meeting extractions keep their "why is this here?" record.
+   */
+  provenance?: SendAttachments["provenance"];
 }
 
 /** Files the user attached to a request: images to look at, documents to read. */
 export interface SendAttachments {
   images?: Array<{ data: string; mediaType: string }>;
   documents?: Array<{ name: string; text: string }>;
+  /**
+   * Provenance to stamp on whatever this request creates (M2). Meeting
+   * extraction passes its transcript id and the turns' span, so every node
+   * the model adds from the conversation can answer "why is this here?"
+   * — the board's audit trail for AI-generated content.
+   */
+  provenance?: {
+    meetingId: string;
+    /** Turn texts that fed this request, quoted in the provenance record. */
+    turns: string[];
+  };
 }
 
 export interface WorkspaceState {
@@ -186,6 +205,81 @@ function laidOut(ws: Workspace): Workspace {
   // No strategy is passed: computeLayout picks radial for mind maps and layered
   // otherwise, so switching representation actually changes the arrangement.
   return applyLayout(ws, computeLayout(ws, { direction: "vertical" }));
+}
+
+/**
+ * The spatial-additivity commit path (M2): if every node this batch TOUCHES
+ * (creates or edits) sits inside one group, re-layout just that group at its
+ * current origin and leave the rest of the board pixel-identical. This is the
+ * product invariant "never rearrange what's built" — a meeting that grows the
+ * pricing region must not shuffle the product region the user already read.
+ * Falls back to the full-board pass when the batch is unscoped (or the group
+ * is unknown), which is the correct behaviour for whole-board transforms.
+ *
+ * `touched` is the set of node ids the batch creates or modifies, derived by
+ * the caller from the ops themselves.
+ */
+function laidOutScoped(ws: Workspace, touched: ReadonlySet<string>): Workspace {
+  if (touched.size === 0) return laidOut(ws);
+  const groupIds = new Set<string>();
+  for (const id of touched) {
+    const g = ws.nodes[id]?.groupId ?? ws.groups[id]?.id;
+    if (!g) return laidOut(ws); // unscoped: a batch touching loose nodes relayouts all
+    groupIds.add(g);
+  }
+  if (groupIds.size !== 1) return laidOut(ws); // crosses regions: global pass
+  const groupId = [...groupIds][0];
+  if (!groupId) return laidOut(ws);
+  const regionResult = relayoutRegion(ws, groupId);
+  if (!regionResult) return laidOut(ws);
+  let next = applyLayout(ws, regionResult);
+  // Growth can extend the region into a right-hand neighbour; push only the
+  // neighbours actually overlapped (never a global shuffle).
+  const shifts = separateRegions(next, groupId);
+  if (shifts) {
+    for (const [id, placed] of Object.entries(shifts)) {
+      const node = next.nodes[id];
+      if (node) next = { ...next, nodes: { ...next.nodes, [id]: { ...node, ...placed } } };
+    }
+  }
+  return next;
+}
+
+/** Node/group ids a batch creates or modifies — the "what did we touch" set. */
+function touchedIdsOf(ops: readonly Operation[]): Set<string> {
+  const touched = new Set<string>();
+  for (const op of ops) {
+    switch (op.op) {
+      case "CREATE_NODE":
+      case "DELETE_NODE":
+      case "CHANGE_TEXT":
+      case "CHANGE_NODE_TYPE":
+      case "SET_ISSUE":
+      case "UPDATE_ISSUE":
+      case "MOVE_NODE":
+      case "CONNECT_NODES":
+      case "DISCONNECT_NODES": {
+        // Both endpoints count for an edge op: a connect implies the pair's
+        // region grew, and either endpoint's group is the natural scope.
+        if ("id" in op && typeof op.id === "string") touched.add(op.id);
+        if ("source" in op && typeof op.source === "string") touched.add(op.source);
+        if ("target" in op && typeof op.target === "string") touched.add(op.target);
+        break;
+      }
+      case "CREATE_GROUP":
+      case "DELETE_GROUP":
+      case "SET_GROUP_KIND":
+        touched.add(op.id);
+        break;
+      case "TRANSFORM_DIAGRAM":
+        // A whole-board transform is explicitly global — scope to nothing so
+        // the full pass runs.
+        return new Set();
+      default:
+        break;
+    }
+  }
+  return touched;
 }
 
 /**
@@ -382,10 +476,14 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   /**
    * Apply a local batch and record it as one history entry. Inverse ops are
    * computed against the pre-batch workspace so undo is multiplayer-safe (M0.4).
+   *
+   * M2: the relayout is SCOPED — when the batch touched nodes all inside one
+   * group, only that group re-flows at its current origin and the rest of the
+   * board keeps its committed positions (the spatial-additivity invariant).
    */
   const commit = useCallback(
     (next: Workspace, ops: Operation[], label: string, conversation: ChatEntry[], name: string) => {
-      const positioned = laidOut(next);
+      const positioned = laidOutScoped(next, touchedIdsOf(ops));
       historyRef.current.commit(ops, label);
       setWorkspace(positioned);
       setTick((t) => t + 1);
@@ -561,6 +659,34 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         }
         const explanation = result.explanation ?? `Applied ${result.operations.length} operations.`;
 
+        // Provenance (M2): stamp meeting extraction onto what it creates, so
+        // any node can answer "why is this here?" — quoted from the transcript
+        // that produced it. Applied here (not in the model) because provenance
+        // is the app's fact about the request, not the model's guess.
+        const provenance = attachments?.provenance;
+        // The workspace after this batch, with new nodes stamped. Without
+        // provenance this is just the plain application.
+        const applyStamped = (): Workspace => {
+          const next = applyOperations(workspace, result.operations);
+          if (!provenance) return next;
+          const quote = provenance.turns.join(" ").slice(0, 240);
+          const meta = {
+            meetingId: provenance.meetingId,
+            quote,
+            extractedAt: Date.now(),
+          };
+          // Only nodes this batch ADDED (absent before) carry the stamp.
+          const nodes: Workspace["nodes"] = {};
+          for (const [id, node] of Object.entries(next.nodes)) {
+            if (!workspace.nodes[id]) {
+              nodes[id] = { ...node, metadata: { ...(node.metadata ?? {}), meeting: meta } };
+            } else {
+              nodes[id] = node;
+            }
+          }
+          return { ...next, nodes };
+        };
+
         // Partial-application report (M1): the server may have skipped ops
         // that failed validation while applying the rest. Attach them to the
         // reply so the chat can show exactly what didn't land — the old
@@ -582,13 +708,18 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
               ...skippedNote,
             },
           ];
-          setProposal({ request: text, operations: result.operations, explanation });
+          setProposal({
+            request: text,
+            operations: result.operations,
+            explanation,
+            provenance,
+          });
           setChat(conversation);
           // The ops themselves apply (and persist) only on approval, but the
           // request and the review-gate reply are real turns now.
           persist(workspace, conversation, projectName);
         } else {
-          const next = applyOperations(workspace, result.operations);
+          const next = applyStamped();
           const conversation: ChatEntry[] = [
             ...withUser,
             { role: "ai", text: explanation, ...skippedNote },
@@ -616,7 +747,26 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const applyProposal = useCallback(() => {
     if (!proposal) return;
     if (readOnly) return;
-    const next = applyOperations(workspace, proposal.operations);
+    let next = applyOperations(workspace, proposal.operations);
+    // Review-gated meeting extractions keep their provenance (M2): the stamp
+    // records the transcript and quote behind whatever the batch created.
+    if (proposal.provenance) {
+      const quote = proposal.provenance.turns.join(" ").slice(0, 240);
+      const meta = {
+        meetingId: proposal.provenance.meetingId,
+        quote,
+        extractedAt: Date.now(),
+      };
+      const nodes: Workspace["nodes"] = {};
+      for (const [id, node] of Object.entries(next.nodes)) {
+        if (!workspace.nodes[id]) {
+          nodes[id] = { ...node, metadata: { ...(node.metadata ?? {}), meeting: meta } };
+        } else {
+          nodes[id] = node;
+        }
+      }
+      next = { ...next, nodes };
+    }
     const conversation: ChatEntry[] = [
       ...chat,
       { role: "ai", text: `Applied ${proposal.operations.length} changes as one commit.` },

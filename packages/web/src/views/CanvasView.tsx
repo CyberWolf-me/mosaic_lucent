@@ -2048,6 +2048,20 @@ function SelectionHud({
       <button onClick={onTransform}>Transform</button>
       <button onClick={() => onExpand(node.label)}>Expand</button>
       <button onClick={onComment}>Comment</button>
+      {/* Meeting provenance (M2): a node created from a meeting extract can
+          always answer "why is this here?" — the quoted words that produced
+          it, shown on demand rather than cluttering the card. */}
+      {Boolean(node.metadata?.meeting) && (
+        <span
+          className="mono"
+          title={`Created from meeting discussion: “${String(
+            (node.metadata?.meeting as { quote?: string } | undefined)?.quote ?? "",
+          )}”`}
+          style={{ color: "var(--amber-2)", padding: "0 6px", fontSize: 11 }}
+        >
+          ✦
+        </span>
+      )}
       <div className="sep" />
       <button style={{ padding: "5px 8px" }}>
         <Ico.Down />

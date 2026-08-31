@@ -53,6 +53,18 @@ export interface MeetingStore {
   forBoard(boardId: string, limit?: number): Promise<MeetingTranscript[]>;
   /** One transcript, scoped to its board so a leaked id is not a read. */
   get(boardId: string, id: string): Promise<MeetingTranscript | undefined>;
+  /**
+   * Append turns to a running meeting (M2): a live capture checkpoints as it
+   * goes instead of holding the whole transcript in a tab. The transcript
+   * stays immutable as a RECORD once ended; appending only extends a capture
+   * whose `endedAt` is still null (an ended meeting's minutes are a new
+   * save, per the insert-only contract).
+   */
+  appendTo(
+    boardId: string,
+    id: string,
+    turns: MeetingTurn[],
+  ): Promise<MeetingTranscript | undefined>;
 }
 
 /** How many meetings `forBoard` returns when the caller does not say. */
@@ -145,6 +157,19 @@ export class InMemoryMeetingStore implements MeetingStore {
   async get(boardId: string, id: string): Promise<MeetingTranscript | undefined> {
     const row = this.rows.get(id);
     if (!row || row.boardId !== boardId) return undefined;
+    return { ...row, turns: [...row.turns] };
+  }
+
+  async appendTo(
+    boardId: string,
+    id: string,
+    turns: MeetingTurn[],
+  ): Promise<MeetingTranscript | undefined> {
+    const row = this.rows.get(id);
+    if (!row || row.boardId !== boardId) return undefined;
+    if (row.endedAt !== null) return undefined; // ended minutes are immutable
+    if (row.turns.length + turns.length > MAX_TURNS_PER_TRANSCRIPT) return undefined;
+    row.turns = [...row.turns, ...turns.map((t) => ({ ...t }))];
     return { ...row, turns: [...row.turns] };
   }
 }

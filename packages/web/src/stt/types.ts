@@ -21,13 +21,30 @@ export interface VoiceSession {
   stop(): void;
 }
 
+/** What a provider can tell the consumer about ONE finalized utterance. */
+export interface FinalMeta {
+  /**
+   * Who spoke, when the provider knows. LiveKit segments carry the room
+   * participant's identity (the token mints it from the signed-in user);
+   * local engines have no speaker concept and omit the field rather than
+   * guessing. Meeting capture uses this to attribute turns — "Sarah: I'll
+   * handle marketing" becomes a task owned by Sarah, not an anonymous card.
+   */
+  speaker?: string;
+}
+
 export interface VoiceHandlers {
   /** Fires once the session is actively capturing audio (after mic permission). */
   onStart?: () => void;
   /** Live partial transcript (browser provider only; whisper has no interim). */
   onInterim?: (text: string) => void;
-  /** Final transcript when the user stops. */
-  onFinal: (text: string) => void;
+  /**
+   * Final transcript when the user stops — or, for segment-mode providers,
+   * once per utterance while the session runs. The optional meta carries
+   * what the provider knows about the utterance; callers that don't care
+   * can keep taking just the text.
+   */
+  onFinal: (text: string, meta?: FinalMeta) => void;
   /** Human-actionable error message; empty string means "silent / user-initiated". */
   onError?: (message: string) => void;
   /** Coarse status for UI (e.g. "transcribing" while Whisper runs). */

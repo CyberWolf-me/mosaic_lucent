@@ -576,3 +576,30 @@ Not built, deliberately: cross-region edges are allowed by the validator (a
 region is a lens, not a wall — linking the pricing mind map to the checkout
 flow is a legitimate "these relate" statement) but render across the region
 band; a dedicated cross-region edge style is a design question, not a gap.
+
+## Milestone 2: trustworthy canvas + live meeting boards (2026-08-31, ADR 0015)
+
+The "connectors midway/disconnected" report ended in two milestones. M1
+(found live, fixed, gated): the 320px dash CSS bug that drew long edges as
+paint-gap-paint, partial application replacing the all-or-nothing 422,
+repair-round starvation, output-token ceilings, and the 90s provider
+timeout that was the real big-generation killer. M2 (this pass):
+
+- [x] Spatial additivity as a hard invariant: commit() relayouts only the
+      touched group; separateRegions pushes just the overlapped neighbours.
+      Live gate: 22 topic-A nodes pixel-identical through topic-B's
+      extraction; journey nodes placed additively to the right.
+- [x] Differential meeting loop in MeetingView: hybrid trigger
+      (configurable thresholds), additive auto-apply, review gate for
+      destructive/oversized batches, differential prompt that
+      updates-not-duplicates and marks casual suggestions as proposals.
+- [x] Speaker identity through the STT seam (LiveKit participant identity;
+      browser provider segment mode), provenance metadata on extracted
+      nodes with a HUD ✦ quote, transcript checkpoint appends
+      (POST /:mid/turns) + save-on-stop.
+- [x] Live topic-switch gate: returning to Pricing UPDATED the existing
+      region (5→7 members, exactly one region, no duplicate) — the
+      review's hardest meeting scenario.
+
+Not built (recorded in ADR 0015): obstacle routing for long connectors,
+ELK/dagre, diarisation beyond LiveKit segments.

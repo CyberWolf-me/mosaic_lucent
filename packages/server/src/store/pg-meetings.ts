@@ -1,4 +1,4 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, isNull } from "drizzle-orm";
 import type { Db } from "../db/client.js";
 import { meetingTranscripts } from "../db/schema.js";
 import {
@@ -54,6 +54,34 @@ export class PostgresMeetingStore implements MeetingStore {
       .from(meetingTranscripts)
       .where(and(eq(meetingTranscripts.boardId, boardId), eq(meetingTranscripts.id, id)))
       .limit(1);
+    return rows[0] ? toRow(rows[0]) : undefined;
+  }
+
+  /**
+   * Append to a RUNNING meeting: JSONB read-modify-write with the ended-null
+   * precondition enforced in the WHERE, so a concurrent "end this meeting"
+   * makes the append affect zero rows (and return undefined) rather than
+   * resurrecting closed minutes.
+   */
+  async appendTo(
+    boardId: string,
+    id: string,
+    turns: MeetingTurn[],
+  ): Promise<MeetingTranscript | undefined> {
+    const existing = await this.get(boardId, id);
+    if (!existing || existing.endedAt !== null) return undefined;
+    const merged = [...existing.turns, ...turns];
+    const rows = await this.target.db
+      .update(meetingTranscripts)
+      .set({ turns: merged })
+      .where(
+        and(
+          eq(meetingTranscripts.boardId, boardId),
+          eq(meetingTranscripts.id, id),
+          isNull(meetingTranscripts.endedAt),
+        ),
+      )
+      .returning();
     return rows[0] ? toRow(rows[0]) : undefined;
   }
 }

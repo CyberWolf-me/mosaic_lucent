@@ -3,15 +3,16 @@ import type { RegisterRoutes } from "./context.js";
 /**
  * Board meeting routes (E3 / R3):
  *
- *   POST /api/boards/:id/meetings      save a diarised transcript (editor)
- *   GET  /api/boards/:id/meetings      list a board's meetings (viewer)
- *   GET  /api/boards/:id/meetings/:mid one transcript (viewer)
+ *   POST   /api/boards/:id/meetings            save a diarised transcript (editor)
+ *   POST   /api/boards/:id/meetings/:mid/turns append to a running meeting (editor)
+ *   GET    /api/boards/:id/meetings            list a board's meetings (viewer)
+ *   GET    /api/boards/:id/meetings/:mid       one transcript (viewer)
  *
  * Reads are viewer-floor because the transcript is board state, same as the
  * workspace; writes are editor-floor because a transcript records what was
  * said in the meeting — a viewer could fabricate minutes.
  *
- * The CSRF guard runs first on the POST: a browser session is the expected
+ * The CSRF guard runs first on the POSTs: a browser session is the expected
  * caller for capture, and bearer clients (the MCP client, API keys) pass
  * through it by design, as everywhere else.
  */
@@ -78,6 +79,49 @@ export const registerMeetingRoutes: RegisterRoutes = (router, s) => {
     if (!meetings) return send(res, 503, { error: "meeting transcripts are not configured" });
     const rows = await meetings.forBoard(boardId);
     send(res, 200, { meetings: rows });
+  });
+
+  // Checkpoint append (M2): a live capture extends its running transcript so
+  // a refresh mid-meeting loses nothing. Ended meetings refuse the append
+  // (their minutes are immutable — "editing the minutes" is a new save).
+  router.post("/api/boards/:id/meetings/:mid/turns", async (ctx) => {
+    const { req, res } = ctx;
+    const boardId = ctx.param("id");
+    const mid = ctx.param("mid");
+    const guard = await requireBoardRole(
+      req,
+      res,
+      boardId,
+      "editor",
+      "/api/boards/:id/meetings/:mid/turns",
+    );
+    if (!guard.ok) return;
+    if (!meetings) return send(res, 503, { error: "meeting transcripts are not configured" });
+
+    let body: { turns?: unknown };
+    try {
+      const raw = await readBody(req);
+      body = raw ? (JSON.parse(raw) as typeof body) : {};
+    } catch (err) {
+      send(res, 400, { error: "bad request", detail: (err as Error).message });
+      return;
+    }
+
+    const { validateTurns } = await import("../meetings.js");
+    const checked = validateTurns(body.turns);
+    if (!checked.ok) {
+      send(res, 400, { error: checked.error });
+      return;
+    }
+
+    const row = await meetings.appendTo(boardId, mid, checked.turns);
+    if (!row) {
+      // Either the id is wrong or the meeting already ended — both answer
+      // the same so the route is not an oracle over other boards' meetings.
+      send(res, 404, { error: "meeting not found or already ended" });
+      return;
+    }
+    send(res, 200, row);
   });
 
   router.get("/api/boards/:id/meetings/:mid", async (ctx) => {
