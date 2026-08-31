@@ -9,7 +9,13 @@ const region: Operation[] = [
   { op: "CREATE_NODE", id: "tier2", nodeType: "idea", label: "Pro" },
   { op: "CONNECT_NODES", source: "center", target: "tier1", relationship: "branch" },
   { op: "CONNECT_NODES", source: "center", target: "tier2", relationship: "branch" },
-  { op: "CREATE_GROUP", id: "pricing", label: "Pricing", children: ["center", "tier1", "tier2"], kind: "mindmap" },
+  {
+    op: "CREATE_GROUP",
+    id: "pricing",
+    label: "Pricing",
+    children: ["center", "tier1", "tier2"],
+    kind: "mindmap",
+  },
 ];
 
 describe("diagram regions (group kind)", () => {
@@ -28,9 +34,7 @@ describe("diagram regions (group kind)", () => {
 
   it("SET_GROUP_KIND with null dissolves the region back into the board", () => {
     const ws = applyOperations(createWorkspace(), region);
-    const cleared = applyOperations(ws, [
-      { op: "SET_GROUP_KIND", id: "pricing", kind: null },
-    ]);
+    const cleared = applyOperations(ws, [{ op: "SET_GROUP_KIND", id: "pricing", kind: null }]);
     expect(cleared.groups.pricing?.kind).toBeUndefined();
     expect("kind" in (cleared.groups.pricing ?? {})).toBe(false);
     expect(cleared.groups.pricing?.label).toBe("Pricing");
@@ -74,9 +78,7 @@ describe("diagram regions (group kind)", () => {
   });
 
   it("rejects an unknown kind literal at the schema layer", () => {
-    const ops = [
-      { op: "SET_GROUP_KIND", id: "g", kind: "spiderweb" },
-    ] as unknown as Operation[];
+    const ops = [{ op: "SET_GROUP_KIND", id: "g", kind: "spiderweb" }] as unknown as Operation[];
     expect(safeParseOperations(ops).success).toBe(false);
   });
 

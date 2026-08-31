@@ -133,8 +133,30 @@ export async function createShareLink(
     method: "POST",
     body: JSON.stringify({ role, ...(expiresInHours ? { expiresInHours } : {}) }),
   });
-  if (!res || !res.ok) return null;
+  if (!res || !res.ok) {
+    // Surface the server's reason rather than swallowing it: "verify your
+    // email before sharing a board" is a fixable action, and telling the
+    // actual owner they're "not the owner" (the old blanket message) sent
+    // people down the wrong path.
+    try {
+      const body = (await res?.json()) as { error?: string } | null;
+      if (body?.error) lastShareLinkError = body.error;
+    } catch {
+      // non-JSON body: leave the generic caller message in place
+    }
+    return null;
+  }
   return (await res.json()) as { token: string; role: ShareRole; expiresAt: number | null };
+}
+
+/** The server's reason for the last failed createShareLink, when it sent one.
+ * Cleared on the next call. Exists so the share dialog can show the real
+ * reason ("verify your email before sharing a board") instead of a guess. */
+let lastShareLinkError: string | null = null;
+export function readShareLinkError(): string | null {
+  const err = lastShareLinkError;
+  lastShareLinkError = null;
+  return err;
 }
 
 /** Revoke one link, or every live link on the board when token is omitted. */

@@ -122,7 +122,10 @@ export function DiagramLayer({
           className="group-region"
           style={{ left: g.x, top: g.y, width: g.width, height: g.height }}
         >
-          <span className="group-region-label">{g.label}</span>
+          <span className="group-region-label">
+            {g.label}
+            {g.kind ? ` · ${DIAGRAM_LABELS[g.kind]}` : ""}
+          </span>
         </div>
       ))}
 

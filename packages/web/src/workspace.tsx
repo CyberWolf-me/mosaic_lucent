@@ -143,6 +143,12 @@ export interface WorkspaceState {
   redo: () => void;
   restoreVersion: (index: number) => void;
   selectDiagram: (kind: DiagramKind) => void;
+  /**
+   * Change one region's diagram kind (a group with a kind), or clear it back
+   * to the board-wide layout with `null`. The manual counterpart of the AI's
+   * SET_GROUP_KIND — same op, same undo.
+   */
+  setRegionKind: (groupId: string, kind: DiagramKind | null) => void;
   /** Apply manual board operations (shapes/links/node moves) and commit to
    * history (docs/13). Returns false when the batch fails validation, so callers
    * can report the failure instead of appearing to succeed. */
@@ -239,7 +245,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   // parseWorkspaceOrDefault warns the console and hands back an empty one.
   const historyRef = useRef(
     new OperationHistory(
-      restored ? withDefaults(restored.workspace) : createWorkspace(),
+      // A restored board may predate positions on this node (history replay,
+      // an old save, a server fetch): lay it out once at boot so the canvas
+      // never renders every card stacked at the origin.
+      restored ? laidOut(withDefaults(restored.workspace)) : createWorkspace(),
       restored ? "loaded" : "initial",
     ),
   );
@@ -586,27 +595,35 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
   const undo = useCallback(() => {
     const { workspace: next, ops } = historyRef.current.undo();
-    setWorkspace(next);
+    // History replays ops, and ops carry no coordinates — positions come only
+    // from the layout pass. Relayout here or every node renders at (0,0)
+    // after the first undo (found live: a 33-node board stacked to a point).
+    const positioned = laidOut(next);
+    setWorkspace(positioned);
     setTick((t) => t + 1);
     if (ops.length > 0) {
       syncRef.current?.commit(ops, "undo");
-      persist(next, chat, projectName);
+      persist(positioned, chat, projectName);
     }
   }, [chat, persist, projectName]);
   const redo = useCallback(() => {
     const { workspace: next, ops } = historyRef.current.redo();
-    setWorkspace(next);
+    // Same as undo: the replayed workspace has no positions of its own.
+    const positioned = laidOut(next);
+    setWorkspace(positioned);
     setTick((t) => t + 1);
     if (ops.length > 0) {
       syncRef.current?.commit(ops, "redo");
-      persist(next, chat, projectName);
+      persist(positioned, chat, projectName);
     }
   }, [chat, persist, projectName]);
 
   const restoreVersion = useCallback(
     (index: number) => {
       const { workspace: restored, ops } = historyRef.current.restoreTo(index);
-      setWorkspace(restored);
+      // Version restore replays history ops — same no-positions rule as undo.
+      const positioned = laidOut(restored);
+      setWorkspace(positioned);
       setTick((t) => t + 1);
       const conversation: ChatEntry[] = [
         ...chat,
@@ -617,7 +634,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       ];
       setChat(conversation);
       if (ops.length > 0) syncRef.current?.commit(ops, "restore");
-      persist(restored, conversation, projectName);
+      persist(positioned, conversation, projectName);
     },
     [chat, persist, projectName],
   );
@@ -653,12 +670,30 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     [workspace, chat, commitAndShare, projectName, readOnly],
   );
 
+  const setRegionKind = useCallback(
+    (groupId: string, kind: DiagramKind | null) => {
+      // Manual edit path: no chat turn, but the same validation + undo as any
+      // other op. Reuses applyManual so a viewer can't flip a region either.
+      applyManual(
+        [{ op: "SET_GROUP_KIND", id: groupId, kind }],
+        kind ? `Region → ${kind}` : "Region → board layout",
+      );
+    },
+    [applyManual],
+  );
+
   const newProject = useCallback(() => {
     const id = newProjectId();
-    historyRef.current = new OperationHistory(createWorkspace(), "initial");
+    const fresh = new OperationHistory(createWorkspace(), "initial");
+    // Write the record synchronously BEFORE the pointer moves: the autosave
+    // races a reload, and the boot restore crashes on a pointer whose record
+    // does not exist yet (`restored.workspace` of undefined) — the same
+    // invariant startNewBoardFor already carries.
+    saveProject({ id, name: "Untitled workspace", workspace: fresh.current(), chat: [] });
+    historyRef.current = fresh;
     setProjectId(id);
     setProjectName("Untitled workspace");
-    setWorkspace(historyRef.current.current);
+    setWorkspace(fresh.current());
     setChat([]);
     setProposal(null);
     setView("canvas");
@@ -861,6 +896,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     redo,
     restoreVersion,
     selectDiagram,
+    setRegionKind,
     nameFor,
     applyManual,
     newProject,

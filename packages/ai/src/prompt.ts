@@ -361,7 +361,10 @@ export function buildUserPrompt(request: GenerateRequest): string {
   if (summary.groups?.length) {
     addBoard(
       `Existing groups:\n${summary.groups
-        .map((g) => `  ${g.id}: ${g.label} (${g.children.length} members)`)
+        .map((g) => {
+          const kind = g.kind ? ` [diagram kind: ${g.kind}]` : "";
+          return `  ${g.id}: ${g.label} (${g.children.length} members)${kind}`;
+        })
         .join("\n")}`,
     );
   }

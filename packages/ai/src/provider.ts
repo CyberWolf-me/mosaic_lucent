@@ -31,8 +31,11 @@ export interface WorkspaceSummary {
   /**
    * Semantic groups. The model is asked to reuse group ids and to declare a
    * group before referencing it, which it cannot do without seeing them.
+   * `kind` marks a diagram region — its own rendering lens on one board —
+   * which the model needs to see to target "the pricing mind map" instead of
+   * the whole board.
    */
-  groups?: Array<{ id: string; label: string; children: string[] }>;
+  groups?: Array<{ id: string; label: string; children: string[]; kind?: string }>;
   /**
    * Manual board objects (sticky notes, shapes, frames, drawings, media). The
    * model can create and edit these, so it has to see them — otherwise
@@ -287,6 +290,7 @@ export function summarizeWorkspace(workspace: Workspace, selection?: string[]): 
       id: g.id,
       label: g.label,
       children: g.children.slice(0, DERIVED_LIMITS.groupChildren),
+      ...(g.kind ? { kind: g.kind } : {}),
     }));
 
   const shapes = Object.values(workspace.shapes)

@@ -26,6 +26,21 @@ function slug(text: string): string {
   );
 }
 
+/** A short region label from a request like "also add a mind map for pricing ideas". */
+function shortRegionLabel(message: string): string {
+  const m = message.match(/for ([a-z0-9][a-z0-9 -]{2,30})/i);
+  const raw = (m?.[1] ?? message).trim();
+  return (raw.length > 30 ? `${raw.slice(0, 29)}…` : raw).replace(/^./, (c) => c.toUpperCase());
+}
+
+/** The centre/step label for a region seed. */
+function coreLabel(message: string): string {
+  const m = message.match(/for ([a-z0-9][a-z0-9 -]{2,30})/i);
+  const raw = (m?.[1] ?? "Core idea").trim();
+  const capped = raw.replace(/^./, (c) => c.toUpperCase());
+  return capped.length > 26 ? `${capped.slice(0, 25)}…` : capped;
+}
+
 const scripts: Script[] = [
   {
     // "e-commerce" seed graph from the example MVP session (docs/07).
@@ -124,6 +139,107 @@ const scripts: Script[] = [
         explanation:
           'That looks like a separate system rather than part of this board — mixing unrelated systems into one diagram makes both unreadable. It belongs on its own board; use "New workspace" (or the button below) and describe it there.',
         operations: [],
+      };
+    },
+  },
+  {
+    // Diagram regions (docs/03): "also add a mind map for X on this board"
+    // builds a second diagram kind as a region group instead of transforming
+    // the whole board — the behaviour the prompt's region rule teaches.
+    match: (m) =>
+      /(also|add|put|create).{0,24}(mind ?map|org ?chart|flow ?chart|journey)\b/i.test(m),
+    build: (req) => {
+      const id = slug(req.message);
+      const mind = /mind ?map/i.test(req.message);
+      const kind = mind
+        ? "mindmap"
+        : /org ?chart/i.test(req.message)
+          ? "orgchart"
+          : /journey/i.test(req.message)
+            ? "journey"
+            : "flowchart";
+      return {
+        explanation: `Added a ${kind} region for "${req.message.slice(0, 40)}" without touching the rest of the board.`,
+        operations: [
+          {
+            op: "CREATE_GROUP",
+            id: `${id}-region`,
+            label: shortRegionLabel(req.message),
+            children: [],
+            kind,
+          },
+          {
+            op: "CREATE_NODE",
+            id: `${id}-core`,
+            nodeType: mind ? "topic" : "step",
+            label: coreLabel(req.message),
+            groupId: `${id}-region`,
+          },
+          {
+            op: "CREATE_NODE",
+            id: `${id}-one`,
+            nodeType: "idea",
+            label: "First branch",
+            groupId: `${id}-region`,
+          },
+          {
+            op: "CREATE_NODE",
+            id: `${id}-two`,
+            nodeType: "idea",
+            label: "Second branch",
+            groupId: `${id}-region`,
+          },
+          {
+            op: "CONNECT_NODES",
+            source: `${id}-core`,
+            target: `${id}-one`,
+            relationship: mind ? "branch" : "leads to",
+          },
+          {
+            op: "CONNECT_NODES",
+            source: `${id}-core`,
+            target: `${id}-two`,
+            relationship: mind ? "branch" : "leads to",
+          },
+        ],
+      };
+    },
+  },
+  {
+    // Region retarget: "change the X section to a Y" flips one region's kind.
+    match: (m) =>
+      /change (the |this )?.{0,32}(section|region|diagram|part) to (an? )?(mind ?map|org ?chart|flow ?chart|journey|process|architecture|decision tree)/i.test(
+        m,
+      ),
+    build: (req) => {
+      const m = req.message;
+      const kind = /mind ?map/i.test(m)
+        ? "mindmap"
+        : /org ?chart/i.test(m)
+          ? "orgchart"
+          : /journey/i.test(m)
+            ? "journey"
+            : /process/i.test(m)
+              ? "process"
+              : /architecture/i.test(m)
+                ? "architecture"
+                : /decision ?tree/i.test(m)
+                  ? "decisiontree"
+                  : "flowchart";
+      // Target the most recently declared kind-bearing group when several
+      // exist; fall back to the only/first region the summary reports.
+      const region =
+        req.summary.groups?.filter((g) => g.kind).slice(-1)[0]?.id ?? req.summary.groups?.[0]?.id;
+      if (!region) {
+        return {
+          explanation:
+            "There is no region on this board to change yet — create the diagram first, then ask to change its kind.",
+          operations: [],
+        };
+      }
+      return {
+        explanation: `Changed region "${region}" to a ${kind}.`,
+        operations: [{ op: "SET_GROUP_KIND", id: region, kind }],
       };
     },
   },

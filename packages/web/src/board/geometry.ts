@@ -271,6 +271,36 @@ export function buildBoardSvg(workspace: Workspace, pad = 40): string {
   const h = bounds.height + pad * 2;
   const parts: string[] = [];
 
+  // Diagram regions first, so their boxes sit behind their member nodes. A
+  // region is a kind-bearing group; its box is measured over placed members.
+  // The label carries the region's kind so a mixed-board export still reads
+  // "this part is the mind map" without the app open.
+  const regionBoxes: string[] = [];
+  for (const g of Object.values(workspace.groups)) {
+    let minX2 = Infinity;
+    let minY2 = Infinity;
+    let maxX2 = -Infinity;
+    let maxY2 = -Infinity;
+    let members = 0;
+    for (const id of g.children) {
+      const n = workspace.nodes[id];
+      if (!n?.position || !n.size) continue;
+      members++;
+      if (n.position.x < minX2) minX2 = n.position.x;
+      if (n.position.y < minY2) minY2 = n.position.y;
+      if (n.position.x + n.size.width > maxX2) maxX2 = n.position.x + n.size.width;
+      if (n.position.y + n.size.height > maxY2) maxY2 = n.position.y + n.size.height;
+    }
+    if (members === 0) continue;
+    const gp = 22;
+    const label = g.kind ? `${g.label} · ${g.kind}` : g.label;
+    regionBoxes.push(
+      `<rect x="${minX2 - gp}" y="${minY2 - gp}" width="${maxX2 - minX2 + gp * 2}" height="${maxY2 - minY2 + gp * 2}" rx="12" fill="#1a1a1d" stroke="#3a3a3e"/>` +
+        `<text x="${minX2 - gp + 12}" y="${minY2 - gp + 16}" fill="#8a8a90" font-family="sans-serif" font-size="11">${escapeXml(label)}</text>`,
+    );
+  }
+  parts.push(regionBoxes.join(""));
+
   for (const n of Object.values(workspace.nodes)) {
     if (!n.position || !n.size) continue;
     parts.push(

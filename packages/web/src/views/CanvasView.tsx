@@ -103,6 +103,7 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
     setListening,
     send,
     selectDiagram,
+    setRegionKind,
     applyManual,
     projectName,
     undo,
@@ -144,7 +145,22 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
   /** Object whose comment thread is open, if any. */
   const [commentTarget, setCommentTarget] = useState<string | null>(null);
   const [inboxOpen, setInboxOpen] = useState(false);
-  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const [menu, setMenu] = useState<{ x: number; y: number; regionId?: string } | null>(null);
+
+  /**
+   * The diagram region the current selection sits inside, if any: a region is a
+   * kind-bearing group, so the selected node's groupId tells us which region a
+   * right-click is about. Falls back through every selected node so a marquee
+   * inside one region still finds it.
+   */
+  const regionForSelection = useCallback((): string | undefined => {
+    const ids = selected ? [selected, ...selectedNodes] : [...selectedNodes];
+    for (const id of ids) {
+      const gid = workspace.nodes[id]?.groupId;
+      if (gid && workspace.groups[gid]?.kind) return gid;
+    }
+    return undefined;
+  }, [selected, selectedNodes, workspace.nodes, workspace.groups]);
   const controls = useRef<ViewportControls | null>(null);
   const voiceRef = useRef<VoiceSession | null>(null);
   const voiceSupported = isAnyVoiceSupported();
@@ -894,7 +910,7 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
     const src = ids
       .map((id) => workspace.shapes[id])
       .filter(Boolean) as import("@lucent/core").Shape[];
-    return [
+    const items: MenuItem[] = [
       { label: "Duplicate", onClick: () => pasteShapes(src, 24), disabled: ids.length === 0 },
       { label: "Bring to front", onClick: () => orderSelection(1), disabled: ids.length === 0 },
       { label: "Send to back", onClick: () => orderSelection(-1), disabled: ids.length === 0 },
@@ -915,9 +931,43 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
       { label: "", onClick: () => {}, sep: true },
       { label: "Delete", onClick: deleteSelection, danger: true, disabled: ids.length === 0 },
     ];
+    // Diagram regions: when the current selection (or the canvas click) points
+    // inside a kind-bearing group, offer that region's kind picker — the manual
+    // counterpart of the AI's SET_GROUP_KIND.
+    const regionId = menu?.regionId ?? regionForSelection();
+    const region = regionId ? workspace.groups[regionId] : undefined;
+    if (region) {
+      const kindItems: MenuItem[] = [
+        { label: "", onClick: () => {}, sep: true },
+        {
+          label: `Region "${region.label}" — diagram kind`,
+          onClick: () => {},
+          disabled: true,
+        },
+      ];
+      for (const k of REGION_KIND_ORDER) {
+        const active = region.kind === k;
+        kindItems.push({
+          label: `${active ? "● " : ""}${DIAGRAM_LABELS[k]}`,
+          onClick: () => setRegionKind(region.id, k),
+          disabled: active,
+        });
+      }
+      if (region.kind) {
+        kindItems.push({
+          label: "Back to board layout",
+          onClick: () => setRegionKind(region.id, null),
+        });
+      }
+      items.unshift(...kindItems);
+    }
+    return items;
   }, [
     selectedShapes,
     workspace.shapes,
+    workspace.groups,
+    menu,
+    regionForSelection,
     pasteShapes,
     orderSelection,
     groupSelection,
@@ -927,6 +977,7 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
     showHidden,
     hiddenCount,
     deleteSelection,
+    setRegionKind,
   ]);
 
   const onShapePrimary = useCallback(
@@ -1592,7 +1643,7 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
                   onEditConsumed={() => setEditShapeId(null)}
                   onContextMenu={(id, cx, cy) => {
                     if (!selectedShapes.has(id)) onShapePrimary(id, false);
-                    setMenu({ x: cx, y: cy });
+                    setMenu({ x: cx, y: cy, regionId: regionForSelection() });
                   }}
                 />
               );
@@ -2065,6 +2116,17 @@ function nextDiagramKind(
   const i = order.indexOf(current);
   return order[(i + 1) % order.length]!;
 }
+
+/** The kinds a region may be set to, in the same order as the board picker. */
+const REGION_KIND_ORDER: import("@lucent/core").DiagramKind[] = [
+  "flowchart",
+  "architecture",
+  "mindmap",
+  "journey",
+  "decisiontree",
+  "process",
+  "orgchart",
+];
 
 /** Mode switcher: edit / present / focus. The extension point where remote
  * collaboration modes (Follow, Spotlight) register later (docs/12). */

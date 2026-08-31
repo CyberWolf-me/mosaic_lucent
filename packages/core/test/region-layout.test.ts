@@ -108,9 +108,21 @@ describe("diagram regions in layout", () => {
   it("two regions of different kinds sit side by side without overlap", () => {
     const ws = applyOperations(createWorkspace(), [
       ...hubGraph("p", ["1", "2", "3"]),
-      { op: "CREATE_GROUP", id: "mind", label: "Pricing ideas", children: ["phub", "p1", "p2", "p3"], kind: "mindmap" },
+      {
+        op: "CREATE_GROUP",
+        id: "mind",
+        label: "Pricing ideas",
+        children: ["phub", "p1", "p2", "p3"],
+        kind: "mindmap",
+      },
       ...chain(["x", "y"], "org_"),
-      { op: "CREATE_GROUP", id: "org", label: "Team", children: ["org_x", "org_y"], kind: "orgchart" },
+      {
+        op: "CREATE_GROUP",
+        id: "org",
+        label: "Team",
+        children: ["org_x", "org_y"],
+        kind: "orgchart",
+      },
     ]);
     const laid = applyLayout(ws, computeLayout(ws, { direction: "vertical" }));
     const mindRight = Math.max(
@@ -119,9 +131,7 @@ describe("diagram regions in layout", () => {
         return n.position!.x + (n.size?.width ?? 160);
       }),
     );
-    const orgLeft = Math.min(
-      ...["org_x", "org_y"].map((id) => laid.nodes[id]!.position!.x),
-    );
+    const orgLeft = Math.min(...["org_x", "org_y"].map((id) => laid.nodes[id]!.position!.x));
     expect(orgLeft).toBeGreaterThan(mindRight);
   });
 
@@ -129,7 +139,13 @@ describe("diagram regions in layout", () => {
     const ws = applyOperations(createWorkspace(), [
       ...chain(["a", "b"]),
       ...hubGraph("p", ["1", "2", "3"]),
-      { op: "CREATE_GROUP", id: "pricing", label: "Pricing", children: ["phub", "p1", "p2", "p3"], kind: "mindmap" },
+      {
+        op: "CREATE_GROUP",
+        id: "pricing",
+        label: "Pricing",
+        children: ["phub", "p1", "p2", "p3"],
+        kind: "mindmap",
+      },
     ]);
     const before = applyLayout(ws, computeLayout(ws, { direction: "vertical" }));
     const changed = applyOperations(ws, [
@@ -152,7 +168,13 @@ describe("diagram regions in layout", () => {
   it("pinned nodes inside a region keep their hand-placed coordinates", () => {
     const ws = applyOperations(createWorkspace(), [
       ...hubGraph("p", ["1", "2", "3"]),
-      { op: "CREATE_GROUP", id: "pricing", label: "Pricing", children: ["phub", "p1", "p2", "p3"], kind: "mindmap" },
+      {
+        op: "CREATE_GROUP",
+        id: "pricing",
+        label: "Pricing",
+        children: ["phub", "p1", "p2", "p3"],
+        kind: "mindmap",
+      },
       { op: "MOVE_NODE", id: "p2", position: { x: 5000, y: 5000 } },
     ]);
     const laid = applyLayout(ws, computeLayout(ws, { direction: "vertical" }));
@@ -163,7 +185,13 @@ describe("diagram regions in layout", () => {
   it("an explicit strategy override suspends the region split", () => {
     const ws = applyOperations(createWorkspace(), [
       ...hubGraph("p", ["1", "2", "3"]),
-      { op: "CREATE_GROUP", id: "pricing", label: "Pricing", children: ["phub", "p1", "p2", "p3"], kind: "mindmap" },
+      {
+        op: "CREATE_GROUP",
+        id: "pricing",
+        label: "Pricing",
+        children: ["phub", "p1", "p2", "p3"],
+        kind: "mindmap",
+      },
     ]);
     // Ask for the whole board as layered: no region band, just the default flow.
     const laid = applyLayout(ws, computeLayout(ws, { direction: "vertical", strategy: "layered" }));

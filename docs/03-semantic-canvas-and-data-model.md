@@ -100,3 +100,26 @@ Workspace
 ```
 
 Every object should carry: `id`, `type`, `position`, `size`, `content`, `metadata`, `relationships`, `created_by`, `created_at`, `updated_at`.
+
+## Diagram regions (multiple kinds on one board)
+
+A board's `diagramKind` is its _board-wide_ rendering lens — but one board can
+carry several diagrams at once. A **region** is a `Group` with an optional
+`kind`: while set, the group's members are laid out by that kind's strategy in
+their own sub-workspace and packed alongside the board's other regions. A
+group without a `kind` stays a plain container (a swimlane's lane, an actor
+boundary), so existing boards and the process-map flow are unchanged.
+
+- **Create:** the AI emits `CREATE_GROUP` with a `kind` and puts the new
+  diagram's nodes in it — "also add a mind map for the pricing ideas on this
+  board" adds a radial region without touching the flowchart next to it.
+- **Change:** `SET_GROUP_KIND { id, kind }` flips one region's lens — "change
+  the pricing section to an org chart" moves only that region; the board kind
+  and every other region keep their geometry. `kind: null` dissolves the
+  region back into the board-wide layout. The same picker is behind the
+  group's right-click menu, so a mouse-only user can flip a region too.
+- **Every action is reversible:** SET_GROUP_KIND inverts to the prior kind,
+  and a deleted region group restores with its kind intact.
+- The kind is a rendering lens, never content: membership is ordinary group
+  membership, so "one model, many representations" becomes _many simultaneous_
+  representations on one board. See ADR 0014.

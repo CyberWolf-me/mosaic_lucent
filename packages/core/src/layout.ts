@@ -631,7 +631,8 @@ function swimlaneLayout(
  * Longest-path depth per node, shared by the swimlane layout. Kahn-style so a
  * cycle cannot hang the pass; unreachable nodes keep depth 0.
  */
-function flowDepths(workspace: Workspace, nodeIds: string[]): Map<string, number> {  const outgoing = new Map<string, string[]>();
+function flowDepths(workspace: Workspace, nodeIds: string[]): Map<string, number> {
+  const outgoing = new Map<string, string[]>();
   const remaining = new Map<string, number>();
   for (const id of nodeIds) {
     outgoing.set(id, []);
@@ -783,11 +784,7 @@ function layoutWithRegions(
  * need lane groups inside the region). The diagramKind is the partition's
  * kind, which is what makes each strategy's dispatch local.
  */
-function subWorkspaceFor(
-  workspace: Workspace,
-  ids: string[],
-  kind: DiagramKind,
-): Workspace {
+function subWorkspaceFor(workspace: Workspace, ids: string[], kind: DiagramKind): Workspace {
   const idSet = new Set(ids);
   const nodes: Workspace["nodes"] = {};
   for (const id of ids) nodes[id] = workspace.nodes[id]!;

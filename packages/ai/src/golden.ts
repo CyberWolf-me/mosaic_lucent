@@ -144,4 +144,41 @@ export const GOLDEN_SET: readonly GoldenCase[] = [
     ],
     forbidOperations: [{ op: "DELETE_NODE" }],
   },
+
+  {
+    id: "region-adds-second-kind",
+    // The region rule: "also add a mind map for X" builds a second diagram
+    // KIND on the same board via a kind-carrying group — it must NOT
+    // transform the board's existing kind or delete existing nodes.
+    message: "Also add a mind map for the pricing ideas on this board",
+    summary: seeded,
+    minOperations: 5,
+    expectOperations: [
+      { op: "CREATE_GROUP", kind: "mindmap" },
+      { op: "CREATE_NODE", nodeType: "topic" },
+      { op: "CONNECT_NODES", relationship: "branch" },
+    ],
+    forbidOperations: [{ op: "TRANSFORM_DIAGRAM" }, { op: "DELETE_NODE", id: "checkout" }],
+  },
+  {
+    id: "region-retarget-changes-one-region",
+    // "change the X section to a Y" flips one region's kind only — the
+    // board kind and every other region are untouched.
+    message: "Change the pricing section to an org chart",
+    summary: summarizeWorkspace(
+      applyOperations(createWorkspace(), [
+        { op: "CREATE_DIAGRAM", kind: "flowchart" },
+        { op: "CREATE_NODE", id: "checkout", nodeType: "screen", label: "Checkout" },
+        {
+          op: "CREATE_GROUP",
+          id: "pricing",
+          label: "Pricing",
+          children: ["checkout"],
+          kind: "mindmap",
+        },
+      ]),
+    ),
+    expectOperations: [{ op: "SET_GROUP_KIND", id: "pricing", kind: "orgchart" }],
+    forbidOperations: [{ op: "TRANSFORM_DIAGRAM" }, { op: "DELETE_NODE", id: "checkout" }],
+  },
 ];

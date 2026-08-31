@@ -62,6 +62,32 @@ describe("summarizeWorkspace", () => {
     expect(s.nodes.find((n) => n.id === "checkout")?.groupId).toBeUndefined();
   });
 
+  it("carries a region group's kind so the model can target it", () => {
+    const s = summarizeWorkspace(
+      applyOperations(createWorkspace(), [
+        { op: "CREATE_NODE", id: "hub", nodeType: "topic", label: "Pricing" },
+        {
+          op: "CREATE_GROUP",
+          id: "pricing",
+          label: "Pricing",
+          children: ["hub"],
+          kind: "mindmap",
+        },
+      ]),
+    );
+    expect(s.groups).toEqual([
+      { id: "pricing", label: "Pricing", children: ["hub"], kind: "mindmap" },
+    ]);
+    // A kindless group stays exactly as compact as before.
+    const plain = summarizeWorkspace(
+      applyOperations(createWorkspace(), [
+        { op: "CREATE_NODE", id: "a", nodeType: "step", label: "A" },
+        { op: "CREATE_GROUP", id: "g", label: "G", children: ["a"] },
+      ]),
+    );
+    expect(plain.groups).toEqual([{ id: "g", label: "G", children: ["a"] }]);
+  });
+
   it("omits empty collections so a fresh board stays small", () => {
     const s = summarizeWorkspace(createWorkspace());
     expect(s.groups).toBeUndefined();
@@ -152,6 +178,25 @@ describe("buildUserPrompt", () => {
     expect(prompt).toContain("Check Stripe fallbacks");
     expect(prompt).toContain("[group: payments]");
     expect(prompt).toContain("User request: add a note about refunds");
+  });
+
+  it("labels a region group with its diagram kind", () => {
+    const prompt = buildUserPrompt({
+      message: "change the pricing section",
+      summary: summarizeWorkspace(
+        applyOperations(createWorkspace(), [
+          { op: "CREATE_NODE", id: "hub", nodeType: "topic", label: "Pricing" },
+          {
+            op: "CREATE_GROUP",
+            id: "pricing",
+            label: "Pricing",
+            children: ["hub"],
+            kind: "mindmap",
+          },
+        ]),
+      ),
+    });
+    expect(prompt).toContain("pricing: Pricing (1 members) [diagram kind: mindmap]");
   });
 
   it("includes recent conversation turns when supplied", () => {

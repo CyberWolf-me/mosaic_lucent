@@ -83,13 +83,26 @@ const summarySchema = z.object({
     )
     .max(REQUEST_LIMITS.edges),
   // Board context beyond the semantic graph. Optional so an older client keeps
-  // working, but the model needs these to see the board it is editing.
+  // working, but the model needs these to see the board it is editing. A
+  // group's optional `kind` marks a diagram region — its own layout lens on
+  // one board — which the model needs to see to target region-scoped edits.
   groups: z
     .array(
       z.object({
         id: shortText,
         label: lineText,
         children: z.array(shortText).max(REQUEST_LIMITS.groupChildren),
+        kind: z
+          .enum([
+            "flowchart",
+            "architecture",
+            "mindmap",
+            "journey",
+            "decisiontree",
+            "process",
+            "orgchart",
+          ])
+          .optional(),
       }),
     )
     .max(REQUEST_LIMITS.groups)
@@ -254,12 +267,15 @@ function workspaceFromSummary(summary: GenerateRequestBody["summary"]): Workspac
     return allowed;
   };
   const ops: Operation[] = [
-    // Groups first: a node may reference its groupId.
+    // Groups first: a node may reference its groupId. The kind rides along so
+    // the validation workspace knows which groups are regions — a SET_GROUP_KIND
+    // must validate against a region that actually exists there.
     ...(summary.groups ?? []).map((g) => ({
       op: "CREATE_GROUP" as const,
       id: g.id,
       label: g.label,
       children: [] as string[],
+      ...(g.kind ? { kind: g.kind } : {}),
     })),
     ...summary.nodes.map((n) => ({
       op: "CREATE_NODE" as const,

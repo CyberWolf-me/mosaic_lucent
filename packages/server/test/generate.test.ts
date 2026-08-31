@@ -112,6 +112,57 @@ describe("richer board context", () => {
     expect(result.status).toBe(200);
   });
 
+  it("carries a region's kind through the summary and lets the model retarget it", async () => {
+    // A region (kind-bearing group) must survive summary → rebuild so a
+    // SET_GROUP_KIND validates against it. Before `kind` rode along, the op
+    // validated against a group stripped of its region nature.
+    const regionBoard = applyOperations(createWorkspace(), [
+      { op: "CREATE_NODE", id: "hub", nodeType: "topic", label: "Pricing" },
+      { op: "CREATE_NODE", id: "b1", nodeType: "idea", label: "Free tier" },
+      { op: "CONNECT_NODES", source: "hub", target: "b1", relationship: "branch" },
+      {
+        op: "CREATE_GROUP",
+        id: "region",
+        label: "Pricing",
+        children: ["hub", "b1"],
+        kind: "mindmap",
+      },
+    ]);
+    const regionSummary = summarizeWorkspace(regionBoard);
+    expect(regionSummary.groups?.[0]?.kind).toBe("mindmap");
+
+    const retarget = await handleGenerate(
+      fixedProvider([{ op: "SET_GROUP_KIND", id: "region", kind: "orgchart" }]),
+      { message: "change the pricing section to an org chart", summary: regionSummary },
+    );
+    expect(retarget.status).toBe(200);
+
+    // Dissolving to null also validates against the same rebuilt region.
+    const dissolve = await handleGenerate(
+      fixedProvider([{ op: "SET_GROUP_KIND", id: "region", kind: null }]),
+      { message: "merge the pricing section back into the board", summary: regionSummary },
+    );
+    expect(dissolve.status).toBe(200);
+
+    // A kind flip on a group the summary never declared is still rejected.
+    const ghost = await handleGenerate(
+      fixedProvider([{ op: "SET_GROUP_KIND", id: "nope", kind: "orgchart" }]),
+      { message: "change that other section", summary: regionSummary },
+    );
+    expect(ghost.status).toBe(422);
+  });
+
+  it("accepts a region-creating batch (CREATE_GROUP with kind + members)", async () => {
+    const result = await handleGenerate(
+      fixedProvider([
+        { op: "CREATE_GROUP", id: "team", label: "Team", children: [], kind: "orgchart" },
+        { op: "CREATE_NODE", id: "ceo", nodeType: "role", label: "CEO", groupId: "team" },
+      ]),
+      { message: "add an org chart for the team on this board", summary },
+    );
+    expect(result.status).toBe(200);
+  });
+
   it("still rejects an edit to a shape that does not exist", async () => {
     const result = await handleGenerate(
       fixedProvider([{ op: "UPDATE_SHAPE", id: "ghost-shape", text: "nope" }]),

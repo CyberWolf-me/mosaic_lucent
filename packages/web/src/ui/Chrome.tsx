@@ -8,6 +8,7 @@ import { useWorkspace, type View } from "../workspace.js";
 import {
   createShareLink,
   listMembers,
+  readShareLinkError,
   removeMember,
   revokeShareLinks,
   setMemberRole,
@@ -198,7 +199,12 @@ function ShareDialog({ onClose }: { onClose: () => void }) {
     const link = await createShareLink(boardId, linkRole);
     setMinting(false);
     if (!link) {
-      setError("Couldn't create an invite link. Only the board owner can share it.");
+      // Prefer the server's own reason (e.g. the email-verification gate) over
+      // the old blanket "only the owner" guess, which misled actual owners.
+      setError(
+        readShareLinkError() ??
+          "Couldn't create an invite link. Check your connection and try again.",
+      );
       return;
     }
     setInvite({ token: link.token, role: link.role });

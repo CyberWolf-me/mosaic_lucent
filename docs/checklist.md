@@ -540,3 +540,39 @@ verification with signature-wrapping defense, admin + ACS routes, 16 tests
 against a mock IdP), audit CSV export + keyset pagination (3 tests), mobile
 present mode, the changesets release workflow, the public status page, site
 SEO, and the i18n package with Hungarian.
+
+## Diagram regions — multiple kinds on one board (2026-08-31)
+
+Landed, tested end to end: a `Group` with a `kind` is a _diagram region_ — its
+members lay out under that kind's strategy while the rest of the board keeps
+its board-wide kind. One board can now hold the checkout flowchart AND the
+pricing mind map AND the team org chart, and each is individually editable by
+text or voice ("change the pricing section to an org chart" → `SET_GROUP_KIND`,
+only that region moves).
+
+- [x] Core: `Group.kind?`, `SET_GROUP_KIND` op (null dissolves), reducer,
+      inverse (undo restores the prior kind, delete+undo restores the kind),
+      validator, workspace schema — 7 tests; tool-schema drift guard picked the
+      new op up automatically.
+- [x] Layout: region partition → per-region sub-workspace under its own
+      strategy → packed band with gutters; pinned nodes keep hand-placed
+      coordinates; explicit `strategy` suspends the split — 8 tests, all 29
+      pre-region core tests byte-identical (308 total).
+- [x] AI: summary carries each group's kind, prompt v3 teaches region
+      targeting (add-kind-don't-transform, SET_GROUP_KIND, TRANSFORM is
+      whole-board), mock scripts for both flows, golden cases
+      `region-adds-second-kind` + `region-retarget-changes-one-region` — gate
+      1.00.
+- [x] Web: region boxes labelled with their kind, right-click kind picker on a
+      region's members (same op, same undo), SVG/PNG/PDF exports draw labelled
+      region boxes, proposal previews render regions under their own strategy —
+      3 board tests (497 web total).
+- [x] Server: summary schema accepts the kind, the validation rebuild carries
+      it so SET_GROUP_KIND validates against a real region; a flip on a
+      missing group still 422s — 3 generate tests.
+- [x] Docs: ADR 0014, data-model section in docs/03, this entry.
+
+Not built, deliberately: cross-region edges are allowed by the validator (a
+region is a lens, not a wall — linking the pricing mind map to the checkout
+flow is a legitimate "these relate" statement) but render across the region
+band; a dedicated cross-region edge style is a design question, not a gap.

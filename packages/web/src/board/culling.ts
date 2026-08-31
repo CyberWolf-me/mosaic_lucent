@@ -1,4 +1,4 @@
-import type { Shape, Workspace } from "@lucent/core";
+import type { DiagramKind, Shape, Workspace } from "@lucent/core";
 import { toScene, type PlacedEdge, type PlacedNode } from "../scene.js";
 import type { Box } from "./geometry.js";
 
@@ -55,6 +55,8 @@ export interface GroupRegion {
   y: number;
   width: number;
   height: number;
+  /** Present when this group is a diagram region rendered as its own kind. */
+  kind?: DiagramKind;
 }
 
 /** The live drag delta shared by every node in the dragged selection. */
@@ -136,6 +138,7 @@ export function groupRegions(
       y: minY - GROUP_PAD,
       width: maxX - minX + GROUP_PAD * 2,
       height: maxY - minY + GROUP_PAD * 2,
+      ...(g.kind ? { kind: g.kind } : {}),
     });
   }
   return regions;
