@@ -166,3 +166,79 @@ it's larger than everything before it combined. G is the pre-launch polish gate.
 
 MVP/Private-Beta checklist maps to: A + C + a minimal slice of F (share + basic
 presence) + reliable autosave (already ✅). Public launch needs D, B, and full F.
+
+---
+
+## Milestone 3 — Large-board readability (2026-08 direction; the next unit of work)
+
+> Added post-M1/M2. The problem is precisely stated: _large AI-generated
+> boards contain too much visual information._ The discipline (docs/01, docs/05):
+> **improve readability without changing the workspace data model, the layout
+> engine, or the AI pipeline.** Three small layers, each independently
+> shippable, in this order.
+
+### 3.1 Selection focus (small, do first)
+
+Selecting a node makes it and its connections prominent; every other node and
+connector fades slightly (opacity, no geometry). No data changes, no layout
+changes, no AI changes — pure CSS over the existing render path. This alone
+makes a 40-node board readable at a glance.
+
+- Touch: `DiagramLayer` gets a `focusId` prop; non-adjacent nodes/edges render
+  at reduced opacity (adjacency = share an edge with the selected node).
+- Tests: pure helper (`focusSet(workspace, id) → Set`) unit tests; a render
+  test asserting the opacity classes.
+
+### 3.2 Connector visibility tiers (small)
+
+Give edges a visual hierarchy — primary ━━━▶ / secondary ───▶ / contextual
+·····▶ — with a user toggle: _Connections: All / Important / Off_. v1 ranking is
+structural, not AI: edges inside the focused/selected region and edges with
+labelled relationships rank above cross-region context edges. Nothing is
+deleted from the model; the toggle only changes rendering.
+
+- Touch: `scene.ts` gains a per-edge `tier` derivation; `DiagramLayer` filters
+  by the toggle; a small segmented control on the bottom bar.
+- Tests: tier-derivation unit tests (primary = within-region or
+  relationship-labelled; contextual = cross-region unlabeled).
+
+### 3.3 Region collapse (small)
+
+A region renders as a summary card — `ARCHITECTURE · 24 nodes · 31 edges
+[Expand]` — that expands to exactly today's diagram. The region's members stay
+in the model untouched; collapse is a render-mode on the group, the same way
+`kind` already is. Meeting-grown boards (five-plus regions) become navigable:
+collapse everything, open the topic under discussion.
+
+- Touch: `GroupRegion` gains a `collapsed` flag (render-local state keyed by
+  group id, not a model change); collapsed regions draw the card and skip
+  member nodes/edges in culling.
+- Tests: collapse preserves member positions exactly (expand == before);
+  culling respects collapsed regions.
+
+### 3.4 Then STOP and measure
+
+Use the real benchmark board (40 nodes / 72 edges / 7 groups / 1,922px longest
+connector — not a hypothetical), then escalate: 20 → 40 → 80 → 150 nodes. The
+question at each size: _"Can I actually understand this?"_
+
+- If 80 is readable after 3.1–3.3: **ship; don't over-engineer.**
+- Only a measured failure at 150 opens the investigation into ELK/routing —
+  and even then it must beat the simpler alternative (more aggressive
+  defaults for tiers, auto-collapse of low-relevance regions).
+
+**Explicitly not in M3:** ELK/Dagre, edge bundling, a new layout engine,
+semantic zoom, a new graph representation, region-system rewrites. The
+existing architecture (LLM owns meaning; the engine owns state and geometry)
+is correct; M3 adds _presentation_ layers on top of it.
+
+### Companion fixes from the live passes (fold in opportunistically)
+
+- **Proposal persistence** — a pending review batch is React-state only; a
+  reload drops the ops. Persist + rehydrate the proposal into the project
+  record (small; known gap from the M2 live gate).
+- **AI ownership model** (future hook, not this pass): today `pinned` is the
+  only "the user placed this" signal. The eventual richer model —
+  `layout: { mode: "manual" | "ai" | "auto", locked }` — should distinguish
+  AI-created vs user-created vs user-positioned so a hand-placed AI node is
+  never moved again. Design kept open; not built.

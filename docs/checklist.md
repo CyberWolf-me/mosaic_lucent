@@ -603,3 +603,41 @@ timeout that was the real big-generation killer. M2 (this pass):
 
 Not built (recorded in ADR 0015): obstacle routing for long connectors,
 ELK/dagre, diarisation beyond LiveKit segments.
+
+## Strategy notes from the 2026-08 advisory pass (docs updated, no code)
+
+The post-milestone review added market and product-direction input. Taken as
+notes into the docs — no behavior changed:
+
+- **Competitive landscape re-audited** (docs/01): Miro (AI Innovation
+  Workspace + Talktrack), FigJam AI, Wavelength (voice→process diagram),
+  SayCanvas (voice-first workspace, early access), VoxeNova
+  (meeting-intelligence), plus education-side convergence. Conclusion:
+  "AI can make a diagram" is no longer the product; the defensible pitch
+  is "Lucent is a visual workspace that understands conversations," and
+  the moat is persistent, traceable team memory + conversation
+  understanding — not voice input.
+- **Statement kinds documented as the trust foundation** (docs/05):
+  fact/proposal/question/opinion/decision/rejection/action/constraint/
+  risk, conversation evolution (corrections supersede), and the
+  visualize filter (novel + material + asserted) — "maybe we could…"
+  must never become a decided date. Status: carried by prompt today;
+  structured data is the "Now" roadmap item.
+- **Meeting artifacts + lenses designed** (docs/05): the meeting produces
+  Decisions / Open Questions / Actions / Risks panels (all provenance-
+  traceable), and lenses (Brainstorm/Decision/Product/Engineering/
+  Execution; "what changed since last week") re-project the same model.
+  Not built; designed.
+- **CEO roadmap re-ordered** (docs/14): Now = trustworthy intelligence
+  (proposal persistence + statement kinds as data + conversation
+  evolution); Next = meeting-intelligence reliability measured against a
+  scripted messy-meeting benchmark with concrete metrics (extraction
+  precision/recall, contradictions resolved, duplicates, provenance
+  coverage, readability); Then = M3 readability; Then = meeting →
+  execution. The spine: "How much complexity can Lucent remove?", not
+  "how much can it create?"
+- **Milestone 3 planned** (docs/15): selection focus → connector visibility
+  tiers → region collapse, then STOP and measure at 20/40/80/150 nodes
+  against the real benchmark board. No engine rewrites; ELK/routing only
+  on a measured 150-node failure. Also recorded: proposal persistence
+  fix and the future AI-ownership (`layout.mode`) hook.
