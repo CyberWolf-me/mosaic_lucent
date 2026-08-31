@@ -170,8 +170,11 @@ export function AdminView({ onBack }: { onBack: () => void }) {
       <section className="admin-section admin-future">
         <h2>SSO / SCIM</h2>
         <p className="muted">
-          SAML, OIDC and SCIM provisioning arrive in M6. The membership roster above is the source
-          of truth for now.
+          SAML single sign-on is live: paste IdP metadata under this org&apos;s SSO settings (PUT
+          /api/orgs/:id/sso), claim your email domain with a TXT record, and optionally enforce
+          SSO-only sign-in. SCIM 2.0 provisioning runs at /scim/v2 (bearer-token gated via
+          LUCENT_SCIM_TOKEN). Manage it from the org&apos;s SSO settings or the API; the roster
+          above stays the source of truth for who is in the org.
         </p>
       </section>
     </div>
