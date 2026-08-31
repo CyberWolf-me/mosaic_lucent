@@ -5516,3 +5516,204 @@ html[data-theme="light"] .allowance-note.spent {
   background: var(--canvas-2);
   border-top: 1px solid var(--stroke-1);
 }
+
+/* ---------------------------------------------------------------------------
+ * Admin console (AdminView). Shipped with classes but no styles — the console
+ * rendered as bare semantic HTML while its sibling Analytics view was fully
+ * styled. All rules use the same tokens as the rest of the dark canvas so the
+ * two org pages read as one surface.
+ * ------------------------------------------------------------------------- */
+
+.admin-view {
+  padding: 28px 36px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  min-height: 100%;
+  max-width: 860px;
+}
+
+.admin-header {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--stroke-1);
+}
+
+.admin-header h1 {
+  margin: 0;
+  font-size: 22px;
+  letter-spacing: -0.02em;
+  font-variation-settings: "wght" 600;
+}
+
+.admin-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--ink-2);
+  font-size: 12.5px;
+}
+
+.admin-meta .dot {
+  width: 3px;
+  height: 3px;
+  border-radius: 999px;
+  background: var(--ink-4);
+}
+
+.link-btn {
+  align-self: flex-start;
+  background: none;
+  border: none;
+  color: var(--ink-2);
+  font-size: 12.5px;
+  padding: 4px 8px;
+  margin-left: -8px;
+  border-radius: var(--r-md);
+  cursor: pointer;
+  transition:
+    color 120ms ease,
+    background 120ms ease;
+}
+
+.link-btn:hover {
+  color: var(--ink-0);
+  background: var(--canvas-3);
+}
+
+.admin-error {
+  background: var(--canvas-2);
+  border: 1px solid var(--stroke-2);
+  border-left: 2px solid var(--amber-1);
+  border-radius: var(--r-lg);
+  padding: 12px 14px;
+  color: var(--ink-1);
+  font-size: 13px;
+}
+
+.admin-section {
+  background: var(--canvas-1);
+  border: 1px solid var(--stroke-1);
+  border-radius: var(--r-lg);
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.admin-section h2 {
+  margin: 0;
+  font-size: 12px;
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--ink-3);
+  font-variation-settings: "wght" 500;
+}
+
+.admin-section .muted {
+  color: var(--ink-3);
+  font-size: 13px;
+  line-height: 1.55;
+  margin: 0;
+}
+
+.admin-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.admin-table th {
+  text-align: left;
+  padding: 6px 12px;
+  color: var(--ink-4);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  border-bottom: 1px solid var(--stroke-1);
+}
+
+.admin-table td {
+  padding: 10px 12px;
+  color: var(--ink-1);
+  border-bottom: 1px solid var(--stroke-1);
+}
+
+.admin-table tr:last-child td {
+  border-bottom: none;
+}
+
+.admin-table tbody tr {
+  transition: background 120ms ease;
+}
+
+.admin-table tbody tr:hover {
+  background: var(--canvas-2);
+}
+
+.role-pill {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  letter-spacing: 0.02em;
+  color: var(--ink-2);
+  background: var(--canvas-3);
+  border: 1px solid var(--stroke-2);
+}
+
+.role-pill.role-owner {
+  color: var(--ink-0);
+  border-color: var(--amber-1);
+}
+
+.audit-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.audit-entry {
+  display: grid;
+  grid-template-columns: 84px 1fr auto;
+  gap: 12px;
+  align-items: baseline;
+  padding: 8px 10px;
+  border-radius: var(--r-md);
+  font-size: 12.5px;
+}
+
+.audit-entry:hover {
+  background: var(--canvas-2);
+}
+
+.audit-when {
+  color: var(--ink-4);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.audit-action {
+  color: var(--ink-1);
+}
+
+.audit-subject {
+  color: var(--ink-3);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+/* The SSO block is informational today (settings live behind the API), so it
+   reads as a quiet footnote card rather than a control panel. */
+.admin-future {
+  border-style: dashed;
+  background: transparent;
+}
