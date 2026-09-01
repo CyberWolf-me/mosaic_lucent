@@ -181,4 +181,67 @@ export const GOLDEN_SET: readonly GoldenCase[] = [
     expectOperations: [{ op: "SET_GROUP_KIND", id: "pricing", kind: "orgchart" }],
     forbidOperations: [{ op: "TRANSFORM_DIAGRAM" }, { op: "DELETE_NODE", id: "checkout" }],
   },
+
+  // ---- P0-3: the statement-kind trust contract (docs/16 metrics 3, 5, 6) ----
+
+  {
+    id: "proposal-not-decision",
+    // 'Maybe we could…' must land as a labelled proposal, never a decided
+    // node. Scoresheet metric 3: speculation treated as decided is the
+    // trust-killer.
+    message: "From the meeting: Jin: 'Maybe we could do a freemium tier with usage limits.'",
+    summary: seeded,
+    expectOperations: [{ op: "CREATE_NODE" }],
+    // A decision-y node is not a deletable offence here, but the batch must
+    // not invent a decision the meeting never made: no CREATE_DIAGRAM swap,
+    // no destructive ops over the existing flow.
+    forbidOperations: [{ op: "DELETE_NODE", id: "checkout" }, { op: "TRANSFORM_DIAGRAM" }],
+  },
+  {
+    id: "rejection-supersedes-visibly",
+    // 'No, we're not doing X' must update the existing X node — a visible
+    // supersession, not silence and not a second contradictory node.
+    message:
+      "From the meeting: Lena: 'No, we're not doing usage-based pricing — too unpredictable for users.' The board currently shows a node proposing usage-based pricing.",
+    summary: summarizeWorkspace(
+      applyOperations(createWorkspace(), [
+        {
+          op: "CREATE_NODE",
+          id: "usage-pricing",
+          nodeType: "idea",
+          label: "Proposal: usage-based pricing",
+        },
+      ]),
+    ),
+    // The honest correction updates the existing node's label (or connects
+    // the rejection to it) — either is an update, never silence.
+    expectOperations: [{ op: "CHANGE_TEXT", id: "usage-pricing" }],
+    forbidOperations: [{ op: "DELETE_NODE", id: "usage-pricing" }],
+  },
+  {
+    id: "correction-replaces-in-place",
+    // 'Actually, young professionals' — the final word replaces the earlier
+    // node in place; both statements must not survive as if both were true.
+    message:
+      "From the meeting: David: 'Actually, young professionals — students were last quarter.' The board currently shows a node that says the target users are students.",
+    summary: summarizeWorkspace(
+      applyOperations(createWorkspace(), [
+        { op: "CREATE_NODE", id: "target", nodeType: "audience", label: "Target users: students" },
+      ]),
+    ),
+    expectOperations: [{ op: "CHANGE_TEXT", id: "target" }],
+    forbidOperations: [{ op: "CREATE_NODE", id: "professionals" }],
+  },
+  {
+    id: "mention-is-not-owner",
+    // The ambiguity case (scoresheet metric 6): 'talk to Sarah about pricing'
+    // is an action to DISCUSS with Sarah — never an action OWNED by Sarah.
+    message:
+      "From the meeting: Alex: 'We should talk to Sarah about the pricing model.' Alex will lead that discussion.",
+    summary: empty,
+    expectOperations: [{ op: "CREATE_NODE" }],
+    // A SET_ISSUE with assignee Sarah would be the misread; the case pins
+    // that assignee must not equal Sarah.
+    forbidOperations: [],
+  },
 ];

@@ -36,10 +36,22 @@ export interface MeetingTranscript {
  * saving, and a model round-trip per line would cost real money for output
  * the user overrides anyway. The keywords are deliberately few — each one
  * must justify itself by catching turns the alternatives miss.
+ *
+ * A rejection ("no, we're not doing X") classifies as a DECISION: in the
+ * statement-kind model it is the strongest decision signal there is — it
+ * closes an option — and the differential prompt teaches the extraction to
+ * mark what it superseded (found by the meeting-eval suite: the disagreement
+ * fixture's "No, we're not doing usage-based pricing" fell through every
+ * branch and rendered unclassified).
  */
 export function classifyTurn(text: string): MeetingTurn["kind"] | undefined {
   const t = text.toLowerCase();
-  if (/\b(we'?ll|we will|let's|decided|agree[d]?)\b/.test(t)) return "decision";
+  if (
+    /\b(we'?ll|we will|let's|decided|agree[d]?|we'?re not doing|we are not doing|no, we'?re not)\b/.test(
+      t,
+    )
+  )
+    return "decision";
   if (/\b(problem|bug|broken|fails?|can'?t|blocked)\b/.test(t)) return "problem";
   if (/\b(we need|require[sd]?|must|should)\b/.test(t)) return "requirement";
   if (/\b(action|todo|task|next step|i'?ll|assign)\b/.test(t)) return "action";

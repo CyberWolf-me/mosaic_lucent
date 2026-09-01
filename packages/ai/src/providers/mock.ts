@@ -206,6 +206,57 @@ const scripts: Script[] = [
     },
   },
   {
+    // P0-3: statement-kind scripts. A rejection visibly supersedes the
+    // existing proposal (CHANGE_TEXT on the named node, never silence and
+    // never a second contradictory node); a correction replaces the earlier
+    // statement in place. The prompts carry "The board currently shows a
+    // node…" phrasing the golden cases pin.
+    match: (m) => /not doing usage-based pricing/i.test(m),
+    build: (req) => ({
+      explanation:
+        "Marked the usage-based pricing proposal as rejected in place — the board now shows the rejection, not the proposal.",
+      operations: [
+        {
+          op: "CHANGE_TEXT",
+          id: "usage-pricing",
+          text: "Rejected: usage-based pricing",
+        },
+      ] as Operation[],
+    }),
+  },
+  {
+    match: (m) => /actually,? young professionals/i.test(m),
+    build: (req) => ({
+      explanation:
+        "Corrected the target users node in place: young professionals replaces students, no contradictory copy survives.",
+      operations: [
+        {
+          op: "CHANGE_TEXT",
+          id: "target",
+          text: "Target users: young professionals",
+        },
+      ] as Operation[],
+    }),
+  },
+  {
+    // The ambiguity case: a mention is not an owner. "Talk to Sarah about
+    // pricing" is an action to DISCUSS with Sarah — the golden set pins
+    // that it must not come out as an action assigned to Sarah.
+    match: (m) => /talk to sarah about/i.test(m),
+    build: (req) => ({
+      explanation:
+        "Added an action to discuss the pricing model with Sarah. Sarah is the person to talk to, not the owner of this action — the speaker owns it.",
+      operations: [
+        {
+          op: "CREATE_NODE",
+          id: "discuss-pricing-sarah",
+          nodeType: "action",
+          label: "Discuss pricing model with Sarah",
+        },
+      ] as Operation[],
+    }),
+  },
+  {
     // Region retarget: "change the X section to a Y" flips one region's kind.
     match: (m) =>
       /change (the |this )?.{0,32}(section|region|diagram|part) to (an? )?(mind ?map|org ?chart|flow ?chart|journey|process|architecture|decision tree)/i.test(

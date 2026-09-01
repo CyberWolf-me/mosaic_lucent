@@ -641,3 +641,47 @@ notes into the docs — no behavior changed:
   against the real benchmark board. No engine rewrites; ELK/routing only
   on a measured 150-node failure. Also recorded: proposal persistence
   fix and the future AI-ownership (`layout.mode`) hook.
+
+## Persist, measure, clarify (2026-09-01, branch persist-test-measure)
+
+P0-1 — **persisted proposals** (the advisory's "one obvious reliability
+gap"):
+
+- [x] Record on the project: id/boardId/meetingId/turns/operations/status/
+      createdAt. Statuses pending/approved/rejected/superseded; one
+      Proposal type serves live state and the record.
+- [x] Idempotent decide (decidedRef guard set before any await); archive
+      to proposalHistory (cap 10) rather than destroy; supersede happens
+      automatically when a new proposal opens over an unreviewed one.
+- [x] Rehydrate on boot (pending reopens the panel); back-compat (no
+      status → pending; malformed dropped); cross-project ref clearing on
+      every switch path; apply re-validates via applyValidOperations so a
+      stale rehydrated batch partially applies and reports skips.
+- [x] Live gate: 18-op proposal written pending → HARD reload → panel
+      restored → approve → 25→34 nodes committed once → record archived
+      approved. 12 unit tests.
+
+P0-2 — **the meeting-evaluation harness**: five scripted fixtures
+(product-launch, architecture-jumping, brainstorm-disagreement,
+planning-owners, messy-meeting), a 21-test offline suite over the
+differential-loop policies, and docs/16-meeting-evaluation.md — the
+eight-metric scoresheet with run protocol and failure→fix rules. The
+suite's first run caught a real gap: rejections now classify as decisions
+(classifyTurn).
+
+P0-3 — **statement kinds as data**: turnKinds in provenance (both apply
+paths), HUD shows kinds beside the quote, and the differential prompt
+carries the full kind contract (proposal≠decision; rejection supersedes
+visibly; correction replaces in place; mention≠owner; small talk →
+nothing). Four golden cases (proposal-not-decision, rejection-
+supersedes-visibly, correction-replaces-in-place, mention-is-not-owner)
+with mock scripts — the offline gate stays 1.00.
+
+P1 — **visual clarity, the two**: selection focus (focusSet/
+focusOpacity/focusEdgeOpacity; selected + edge-neighbours full strength,
+edges drawn when either endpoint prominent; pure opacity) and region
+collapse (summary card with counts + Expand; double-click to collapse;
+expand == pixel-identical). Connector tiers deliberately NOT built —
+stop-and-measure comes next, per the discipline.
+
+Gate: typecheck 0, 1,838 tests, lint/format clean.

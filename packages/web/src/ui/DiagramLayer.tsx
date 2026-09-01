@@ -13,6 +13,7 @@ import {
   visibleNodes,
   withDrag,
 } from "../board/culling.js";
+import { focusSet, focusOpacity, focusEdgeOpacity } from "../board/focus.js";
 import type { Box } from "../board/geometry.js";
 
 /**
@@ -36,6 +37,8 @@ export function DiagramLayer({
   onRenameConsumed,
   dragOverride,
   viewport,
+  collapsedRegions,
+  onToggleCollapse,
 }: {
   workspace: Workspace;
   selected?: string | null;
@@ -65,6 +68,15 @@ export function DiagramLayer({
    * live canvas; a preview leaves it out and every object renders.
    */
   viewport?: Box | null;
+  /**
+   * Region collapse (P1, docs/15 M3.3): ids of groups whose members render
+   * as one summary card instead of their nodes and connectors. Render-local
+   * state owned by the caller — the MODEL never changes: expand returns the
+   * exact prior geometry because member positions were never touched.
+   */
+  collapsedRegions?: ReadonlySet<string>;
+  /** Toggle a region's collapsed state (the summary card's button). */
+  onToggleCollapse?: (groupId: string) => void;
 }) {
   // Derived once per workspace instead of once per render: on a large board the
   // scene mapping, the id index, the group boxes and the frame bounds were all
@@ -92,6 +104,12 @@ export function DiagramLayer({
   // change one — every other re-render reuses the memoised regions.
   const regions = dragOverride ? groupRegions(workspace, nodeAt) : scene.groups;
 
+  // Selection focus (P1): the selected node plus its direct neighbours stay
+  // at full strength while the rest of a busy board recedes. Derived per
+  // render from the graph; no data or geometry changes. Spotlight remains
+  // the stronger, exclusive dim of Focus/Present mode.
+  const focus = focusSet(workspace, selected ?? null);
+
   // Viewport culling (M3). Below the object threshold, or with no viewport
   // reported, `view` is null and each list below is handed back untouched, so a
   // normal-sized board pays nothing for this path.
@@ -114,24 +132,109 @@ export function DiagramLayer({
   const drawEdges = visibleEdges(edges, byId, view, keep, dragOverride);
   const groups = visibleGroups(regions, view);
 
+  // Region collapse (P1): a collapsed group's members and their edges are
+  // filtered from the draw lists — the model keeps everything, so expanding
+  // restores the exact prior render. Edges fully inside a collapsed region
+  // go; cross-region edges stay (they connect the collapsed region's card
+  // to the rest of the board, and their far endpoint still draws).
+  const collapsedSet = collapsedRegions ?? new Set<string>();
+  const regionOf = (id: string) => workspace.nodes[id]?.groupId;
+  const isCollapsedMember = (id: string) => {
+    const gid = regionOf(id);
+    return gid !== undefined && collapsedSet.has(gid);
+  };
+  const finalNodes =
+    collapsedSet.size > 0 ? drawNodes.filter((n) => !isCollapsedMember(n.id)) : drawNodes;
+  const finalEdges =
+    collapsedSet.size > 0
+      ? drawEdges.filter((e) => !(isCollapsedMember(e.source) && isCollapsedMember(e.target)))
+      : drawEdges;
+  // A collapsed group's summary card: its bounds plus the counts the card
+  // shows. Kept as a local type so the render branch reads cleanly.
+  type CollapsedGroup = {
+    id: string;
+    label: string;
+    kind?: (typeof groups)[number]["kind"];
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    collapsed: true;
+    memberCount: number;
+    edgeCount: number;
+  };
+  const finalGroups: Array<(typeof groups)[number] | CollapsedGroup> =
+    collapsedSet.size > 0
+      ? groups.map((g) =>
+          collapsedSet.has(g.id)
+            ? ({
+                ...g,
+                collapsed: true,
+                memberCount: Object.values(workspace.nodes).filter((n) => n.groupId === g.id)
+                  .length,
+                edgeCount: Object.values(workspace.edges).filter(
+                  (e) => regionOf(e.source) === g.id && regionOf(e.target) === g.id,
+                ).length,
+              } satisfies CollapsedGroup)
+            : g,
+        )
+      : groups;
+
   return (
     <div style={{ position: "absolute", inset: 0 }}>
       {/* Semantic groups, drawn behind everything. CREATE_GROUP has always been
           part of the operation schema and the model emits it (process maps depend
           on it for swimlanes), but the canvas never rendered groups — so "group
           these ideas" produced no visible result. */}
-      {groups.map((g) => (
-        <div
-          key={g.id}
-          className="group-region"
-          style={{ left: g.x, top: g.y, width: g.width, height: g.height }}
-        >
-          <span className="group-region-label">
-            {g.label}
-            {g.kind ? ` · ${DIAGRAM_LABELS[g.kind]}` : ""}
-          </span>
-        </div>
-      ))}
+      {finalGroups.map((g) =>
+        "collapsed" in g && g.collapsed ? (
+          // A collapsed region renders as a summary card at the region's
+          // original bounds (P1): label, node/edge counts, one expand button.
+          // The members are untouched in the model — expanding filters
+          // nothing and the exact prior geometry returns.
+          <div
+            key={g.id}
+            className="group-region collapsed"
+            style={{ left: g.x, top: g.y, width: g.width, height: g.height }}
+          >
+            <span className="group-region-label">
+              {g.label}
+              {g.kind ? ` · ${DIAGRAM_LABELS[g.kind]}` : ""}
+            </span>
+            <div className="mono" style={{ fontSize: 11.5, color: "var(--ink-3)", marginTop: 10 }}>
+              {g.memberCount} node{g.memberCount === 1 ? "" : "s"} · {g.edgeCount} edge
+              {g.edgeCount === 1 ? "" : "s"}
+            </div>
+            <button
+              className="icon-btn"
+              style={{ marginTop: 10, height: 26, padding: "0 10px" }}
+              onClick={() => onToggleCollapse?.(g.id)}
+            >
+              Expand
+            </button>
+          </div>
+        ) : (
+          <div
+            key={g.id}
+            className="group-region"
+            style={{ left: g.x, top: g.y, width: g.width, height: g.height }}
+            {...(onToggleCollapse && g.kind
+              ? {
+                  onDoubleClick: (e: React.MouseEvent) => {
+                    e.stopPropagation();
+                    onToggleCollapse(g.id);
+                  },
+                  title: "Double-click to collapse this region",
+                }
+              : {})}
+          >
+            <span className="group-region-label">
+              {g.label}
+              {g.kind ? ` · ${DIAGRAM_LABELS[g.kind]}` : ""}
+            </span>
+          </div>
+        ),
+      )}
 
       <svg
         className="connectors"
@@ -144,7 +247,7 @@ export function DiagramLayer({
         }}
       >
         <ConnectorDefs />
-        {drawEdges.map((e) => {
+        {finalEdges.map((e) => {
           const from = nodeAt(e.source);
           const to = nodeAt(e.target);
           if (!from || !to) return null;
@@ -158,6 +261,10 @@ export function DiagramLayer({
           const spread = e.parallelIndex === 0 ? 0 : e.parallelIndex % 2 === 1 ? step : -step;
           const proposed = proposedIds?.has(e.id);
           const cls = [proposed ? "dashed emerging" : "", "appear"].filter(Boolean).join(" ");
+          // Selection focus (P1): an edge stays fully drawn when EITHER
+          // endpoint is prominent, so the selected node's relationships
+          // remain readable while unrelated clusters recede.
+          const edgeFocus = focus ? focusEdgeOpacity(focus, e.source, e.target) : 1;
           return (
             <path
               key={e.id}
@@ -172,6 +279,8 @@ export function DiagramLayer({
               // relative to the whole path whatever its real pixel length.
               pathLength={100}
               markerEnd={proposed ? "url(#arr-amber)" : "url(#arr)"}
+              opacity={edgeFocus}
+              style={edgeFocus !== 1 ? { transition: "opacity 160ms ease" } : undefined}
             />
           );
         })}
@@ -195,7 +304,7 @@ export function DiagramLayer({
           "publishes", "guards") and the canvas used to throw it away, so an
           architecture diagram showed arrows with no stated meaning. */}
       {showEdgeLabels &&
-        drawEdges.map((e) => {
+        finalEdges.map((e) => {
           const from = nodeAt(e.source);
           const to = nodeAt(e.target);
           if (!from || !to || !e.relationship) return null;
@@ -214,7 +323,7 @@ export function DiagramLayer({
           );
         })}
 
-      {drawNodes.map((base, i) => {
+      {finalNodes.map((base, i) => {
         const n = withDrag(base, dragOverride);
         let state: NodeState = "";
         if (proposedIds?.has(n.id)) state = "proposed";
@@ -226,6 +335,12 @@ export function DiagramLayer({
         // culling is on cards mount as the camera moves, and a per-index delay
         // would make an ordinary pan look like the board loading in slow motion.
         const delay = view ? 0 : i * 45;
+        // Selection focus (P1): when a node is selected, it and its direct
+        // neighbours stay at full strength while the rest of a busy board
+        // recedes — the cheapest possible readability win, and purely
+        // presentational (opacity, never geometry or data). The spotlight
+        // mode above is the stronger, exclusive dim of Focus/Present mode;
+        // focus is a subtler grade for ordinary selection.
         return (
           <NodeCard
             key={n.id}
@@ -233,6 +348,7 @@ export function DiagramLayer({
             y={n.cy - n.h / 2}
             w={n.w}
             h={n.h}
+            opacity={focus ? focusOpacity(focus, n.id) : 1}
             title={n.label}
             meta={n.meta}
             sub={n.nodeType}

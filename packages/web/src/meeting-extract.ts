@@ -145,6 +145,14 @@ export function differentialPrompt(
     "",
     ...lines,
     "",
-    "Add ONLY what these new turns introduce that is not on the board yet: new concepts as nodes, new relationships as connections, new topics as a new group with a fitting diagram kind (mindmap, flowchart, journey, orgchart, decisiontree, process, or architecture). Connect new nodes to related existing ones. If a turn refines or corrects something already on the board, update that node's label or connections — do not duplicate it. Emit no DELETE operations and do not regenerate existing regions. Casual suggestions ('maybe we could…') are proposals, not requirements — label them as such rather than treating them as decided.",
+    "Add ONLY what these new turns introduce that is not on the board yet: new concepts as nodes, new relationships as connections, new topics as a new group with a fitting diagram kind (mindmap, flowchart, journey, orgchart, decisiontree, process, or architecture). Connect new nodes to related existing ones. If a turn refines or corrects something already on the board, update that node's label or connections — do not duplicate it. Emit no DELETE operations and do not regenerate existing regions.",
+    "",
+    "Statement kinds — get these right; they are how the board earns trust:",
+    "- Decisions ('okay, let's…', 'we'll…', 'agreed') are the only decided things on the board.",
+    "- Proposals ('maybe', 'what if', 'we could try') are NEVER decisions. Label the node 'Proposal: …' so a later rejection has something to visibly supersede.",
+    "- A REJECTION ('no, we're not doing X') updates the existing X node: relabel it 'Rejected: X' or connect the rejection to it. Both statements must not survive as if both were true.",
+    "- A CORRECTION ('actually…', 'no, I meant…') replaces the earlier statement's node in place: update its label; do not keep the superseded wording and do not create a second node.",
+    "- ATTRIBUTION: an action belongs to the person who said 'I'll…'. A mention is not an owner — 'we should talk to Sarah about pricing' is an action 'Discuss pricing with Sarah', NOT an action owned by Sarah.",
+    "- If a turn is small talk, a joke, or off-topic, emit nothing for it.",
   ].join("\n");
 }

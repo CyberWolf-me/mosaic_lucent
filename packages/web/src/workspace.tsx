@@ -25,6 +25,7 @@ import {
   type Workspace,
 } from "@lucent/core";
 import { streamGenerate } from "./api.js";
+import { classifyTurn } from "./meetings.js";
 import { BoardSync, type Peer } from "./boardSync.js";
 import { fetchBoard, joinBoard, saveBoard, type BoardRole } from "./boards.js";
 import { loadOrgs } from "./orgs.js";
@@ -722,6 +723,11 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         // any node can answer "why is this here?" — quoted from the transcript
         // that produced it. Applied here (not in the model) because provenance
         // is the app's fact about the request, not the model's guess.
+        //
+        // P0-3: the stamp also carries the turn KINDS (deterministic, from
+        // classifyTurn — the same draft classification the transcript shows)
+        // so the board can render statement kinds from data rather than from
+        // whatever the model happened to put in a label.
         const provenance = attachments?.provenance;
         // The workspace after this batch, with new nodes stamped. Without
         // provenance this is just the plain application.
@@ -733,6 +739,14 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
             meetingId: provenance.meetingId,
             quote,
             extractedAt: Date.now(),
+            // Deterministic kinds, per source turn, in turn order (P0-3).
+            ...(provenance.turns.some((t) => classifyTurn(t))
+              ? {
+                  turnKinds: provenance.turns
+                    .map((t) => classifyTurn(t))
+                    .filter((k): k is NonNullable<ReturnType<typeof classifyTurn>> => !!k),
+                }
+              : {}),
           };
           // Only nodes this batch ADDED (absent before) carry the stamp.
           const nodes: Workspace["nodes"] = {};
@@ -854,13 +868,22 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     const appliedOps = partial.applied.length > 0 ? partial.applied : proposal.operations;
     let next = partial.workspace;
     // Review-gated meeting extractions keep their provenance (M2): the stamp
-    // records the transcript and quote behind whatever the batch created.
+    // records the transcript and quote behind whatever the batch created —
+    // and, since P0-3, the deterministic turn kinds.
     if (proposal.meetingId) {
-      const quote = (proposal.turns ?? []).join(" ").slice(0, 240);
+      const turns = proposal.turns ?? [];
+      const quote = turns.join(" ").slice(0, 240);
       const meta = {
         meetingId: proposal.meetingId,
         quote,
         extractedAt: Date.now(),
+        ...(turns.some((t) => classifyTurn(t))
+          ? {
+              turnKinds: turns
+                .map((t) => classifyTurn(t))
+                .filter((k): k is NonNullable<ReturnType<typeof classifyTurn>> => !!k),
+            }
+          : {}),
       };
       const nodes: Workspace["nodes"] = {};
       for (const [id, node] of Object.entries(next.nodes)) {

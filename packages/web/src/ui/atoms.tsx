@@ -53,6 +53,7 @@ export function NodeCard({
   mark,
   draggable = false,
   scale = 1,
+  opacity,
   onMove,
   onRename,
   editRequested = false,
@@ -78,6 +79,12 @@ export function NodeCard({
   draggable?: boolean;
   /** Viewport zoom factor, so drag distance maps to content space. */
   scale?: number;
+  /**
+   * Selection-focus grade (P1): 1 for prominent, <1 for subdued. Unlike
+   * `dimmed` (the exclusive spotlight of Focus/Present mode), this is a
+   * soft, layered recede — the selected node's neighbourhood stays legible.
+   */
+  opacity?: number;
   onMove?: (x: number, y: number, commit: boolean) => void;
   /** Double-click to relabel the node (emits CHANGE_TEXT via the parent). */
   onRename?: (label: string) => void;
@@ -171,6 +178,9 @@ export function NodeCard({
         // connector anchor, minimap box, and comment pin is computed from it.
         // Letting content decide the height detached edges from card edges.
         ...(h ? { height: h } : {}),
+        ...(opacity !== undefined && opacity !== 1
+          ? { opacity, transition: "opacity 160ms ease" }
+          : {}),
         animationDelay: state === "emerging" ? `${delay}ms, ${delay + 400}ms` : `${delay}ms`,
       }}
     >

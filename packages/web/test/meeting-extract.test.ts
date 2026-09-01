@@ -122,9 +122,36 @@ describe("differentialPrompt — add, never rebuild", () => {
     expect(prompt).toContain("not duplicate");
   });
 
-  it("marks casual suggestions as proposals, not requirements", () => {
+  it("marks casual suggestions as proposals, never decisions (P0-3 contract)", () => {
     const prompt = differentialPrompt([{ text: "Maybe Stripe?" }]);
-    expect(prompt).toContain("proposals, not requirements");
+    expect(prompt).toContain("are NEVER decisions");
+    expect(prompt).toContain("Proposal:");
+  });
+
+  it("teaches rejection as visible supersession, not silence", () => {
+    const prompt = differentialPrompt([{ text: "No, we're not doing usage-based pricing." }]);
+    expect(prompt).toContain("REJECTION");
+    expect(prompt).toContain("supersede");
+    expect(prompt).toContain("Rejected:");
+  });
+
+  it("teaches correction as in-place replacement", () => {
+    const prompt = differentialPrompt([{ text: "Actually, young professionals." }]);
+    expect(prompt).toContain("CORRECTION");
+    expect(prompt).toContain("replaces the earlier statement's node in place");
+  });
+
+  it("teaches the mention-vs-owner attribution rule (the ambiguity case)", () => {
+    const prompt = differentialPrompt([{ text: "We should talk to Sarah about pricing." }]);
+    expect(prompt).toContain("A mention is not an owner");
+    expect(prompt).toContain("Discuss pricing with Sarah");
+    expect(prompt).toContain("NOT an action owned by Sarah");
+  });
+
+  it("tells the model to skip small talk and jokes entirely", () => {
+    const prompt = differentialPrompt([{ text: "Did you see the game?" }]);
+    expect(prompt).toContain("small talk, a joke, or off-topic");
+    expect(prompt).toContain("emit nothing for it");
   });
 
   it("names the region kinds available for new topics", () => {

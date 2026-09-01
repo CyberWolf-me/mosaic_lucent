@@ -130,6 +130,19 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
   const [overviewOpen, setOverviewOpen] = useState(true);
   /** Object the keyboard asked to edit (Enter). Cleared once editing starts. */
   const [renameNodeId, setRenameNodeId] = useState<string | null>(null);
+  // Region collapse (P1): render-local, keyed by group id, deliberately NOT
+  // in the model — collapse is a view of the board, never a change to it.
+  // Expanding restores the exact prior geometry because member positions
+  // were never touched.
+  const [collapsedRegions, setCollapsedRegions] = useState<Set<string>>(new Set());
+  const toggleRegionCollapse = useCallback((groupId: string) => {
+    setCollapsedRegions((prev) => {
+      const next = new Set(prev);
+      if (next.has(groupId)) next.delete(groupId);
+      else next.add(groupId);
+      return next;
+    });
+  }, []);
   const [editShapeId, setEditShapeId] = useState<string | null>(null);
   /** Visible content region, pushed up by the viewport for the minimap. */
   const [viewportBox, setViewportBox] = useState<{
@@ -1602,6 +1615,8 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
               viewport={viewportBox}
               renameNodeId={renameNodeId}
               onRenameConsumed={() => setRenameNodeId(null)}
+              collapsedRegions={collapsedRegions}
+              onToggleCollapse={toggleRegionCollapse}
               {...(tool === "select" && canEdit
                 ? { onMoveNode: moveNode, onRenameNode: renameNode }
                 : {})}
@@ -2048,18 +2063,34 @@ function SelectionHud({
       <button onClick={onTransform}>Transform</button>
       <button onClick={() => onExpand(node.label)}>Expand</button>
       <button onClick={onComment}>Comment</button>
-      {/* Meeting provenance (M2): a node created from a meeting extract can
-          always answer "why is this here?" — the quoted words that produced
-          it, shown on demand rather than cluttering the card. */}
+      {/* Meeting provenance (M2/P0-3): a node created from a meeting extract
+          can always answer "why is this here?" — the quoted words that
+          produced it plus the statement KINDS the turns carried, shown on
+          demand rather than cluttering the card. The kinds come from the
+          deterministic classifyTurn stamp, so a decision node and a proposal
+          node are distinguishable at a glance on the board itself. */}
       {Boolean(node.metadata?.meeting) && (
         <span
           className="mono"
           title={`Created from meeting discussion: “${String(
             (node.metadata?.meeting as { quote?: string } | undefined)?.quote ?? "",
-          )}”`}
+          )}”${
+            Array.isArray(
+              (node.metadata?.meeting as { turnKinds?: unknown[] } | undefined)?.turnKinds,
+            )
+              ? `\nStatement kinds: ${(
+                  (node.metadata?.meeting as { turnKinds?: string[] }).turnKinds ?? []
+                ).join(", ")}`
+              : ""
+          }`}
           style={{ color: "var(--amber-2)", padding: "0 6px", fontSize: 11 }}
         >
           ✦
+          {Array.isArray(
+            (node.metadata?.meeting as { turnKinds?: unknown[] } | undefined)?.turnKinds,
+          ) && (node.metadata?.meeting as { turnKinds?: string[] }).turnKinds!.length > 0
+            ? ` ${(node.metadata?.meeting as { turnKinds?: string[] }).turnKinds!.join("·")}`
+            : ""}
         </span>
       )}
       <div className="sep" />
