@@ -43,9 +43,130 @@ export interface ProjectMeta {
   updatedAt: number;
 }
 
+/**
+ * A review-gate batch's durable record (2026-09 direction: "finish the one
+ * obvious reliability gap"). Previously a proposal lived only in React
+ * state — a browser refresh silently dropped the AI's proposed changes while
+ * the chat reply describing them survived, which read as Lucent losing work.
+ *
+ * Statuses and transitions (all idempotent — a repeated click, or a replayed
+ * transition after a reload, is a no-op rather than a double-apply):
+ *
+ *   pending   → approved  (the ops committed; the record archives itself)
+ *   pending   → rejected  (discarded from the board; the record archives)
+ *   pending   → superseded (a NEWER proposal replaced it before review)
+ *
+ * Terminal records stay in the project (an audit trail: what Lucent proposed
+ * and what the user did about it) until the next proposal overwrites the slot
+ * — one proposal is pending per board at a time, because the review panel is
+ * a single decision surface.
+ */
+export type ProposalStatus = "pending" | "approved" | "rejected" | "superseded";
+
+export interface PersistedProposal {
+  /** Stable across saves; a new proposal mints a new id. */
+  id: string;
+  /** Copied from the project for when the record is read outside context. */
+  boardId: string | null;
+  /**
+   * The live meeting this batch came from, when it did. The proposal is then
+   * the review gate for a meeting extraction, and the meeting id links it to
+   * the transcript turns below.
+   */
+  meetingId: string | null;
+  /** The source turns, quoted, when the proposal came from meeting capture. */
+  turns?: string[];
+  operations: import("@lucent/core").Operation[];
+  status: ProposalStatus;
+  createdAt: number;
+  /** The request that produced the batch, for re-anchoring the review UI. */
+  request: string;
+  explanation: string;
+}
+
 export interface ProjectData extends ProjectMeta {
   workspace: Workspace;
   chat: ChatEntry[];
+  /**
+   * The current (or most recently decided) proposal for this board, when
+   * there is one to remember. Absent on older saves.
+   */
+  proposal?: PersistedProposal;
+  /**
+   * Decided proposals, newest last, capped (`PROPOSAL_HISTORY_CAP`). The audit
+   * trail: what Lucent proposed and what the user did about it. Absent on
+   * older saves.
+   */
+  proposalHistory?: PersistedProposal[];
+}
+
+/** How many decided proposals the project remembers. */
+export const PROPOSAL_HISTORY_CAP = 10;
+
+/** Mint a proposal record id — same shape as the other local ids. */
+export function newProposalId(): string {
+  return `prp_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+}
+
+/** True when the record can still be decided; false for terminal states. */
+export function proposalIsPending(record: PersistedProposal | undefined): boolean {
+  return record?.status === "pending";
+}
+
+/**
+ * Idempotent transition. A record already in a terminal state keeps it — the
+ * second click of a double-click, or a decision replayed after a reload, is a
+ * no-op rather than a second apply. Returns the updated record.
+ */
+export function decideProposal(
+  record: PersistedProposal,
+  decision: Exclude<ProposalStatus, "pending">,
+): PersistedProposal {
+  if (record.status !== "pending") return record;
+  return { ...record, status: decision };
+}
+
+/**
+ * Open a new proposal record: a pending predecessor (if any) is superseded
+ * first, and both land in the returned project fields. Pure — the caller
+ * owns the state and the save.
+ */
+export function openProposalIn(
+  data: Pick<ProjectData, "proposal" | "proposalHistory">,
+  record: Omit<PersistedProposal, "status">,
+): { proposal: PersistedProposal; proposalHistory: PersistedProposal[] } {
+  const history = [...(data.proposalHistory ?? [])];
+  if (proposalIsPending(data.proposal)) {
+    history.push({ ...data.proposal!, status: "superseded" });
+  }
+  const opened: PersistedProposal = { ...record, status: "pending" };
+  return {
+    proposal: opened,
+    // Newest last, bounded: the cap is the audit window, not a growth path.
+    proposalHistory: history.slice(-PROPOSAL_HISTORY_CAP),
+  };
+}
+
+/**
+ * Archive a decision: the record gains its terminal status, moves to the end
+ * of the history, and stays in the active slot as the "most recently decided"
+ * record (the review panel only reads *pending* ones, so a decided record in
+ * the slot is inert — it just keeps the audit complete in one save).
+ */
+export function archiveDecision(
+  data: Pick<ProjectData, "proposal" | "proposalHistory">,
+  decision: Exclude<ProposalStatus, "pending">,
+): { proposal: PersistedProposal; proposalHistory: PersistedProposal[] } {
+  const current = data.proposal;
+  if (!current) {
+    throw new Error("archiveDecision requires a current proposal");
+  }
+  const decided = decideProposal(current, decision);
+  const history = (data.proposalHistory ?? [])
+    .filter((p) => p.id !== decided.id)
+    .concat([decided])
+    .slice(-PROPOSAL_HISTORY_CAP);
+  return { proposal: decided, proposalHistory: history };
 }
 
 function readIndex(): ProjectMeta[] {
@@ -121,6 +242,16 @@ export function loadProject(id: string): ProjectData | null {
       if (!ws.comments) data.workspace = { ...data.workspace, comments: {} };
     }
     data.chat = Array.isArray(data.chat) ? data.chat : [];
+    // A proposal record from a pre-persistence save can't exist; from an
+    // interim build it may lack a status. Anything malformed is dropped
+    // rather than surfaced — a proposal is recoverable (re-ask), a crash on
+    // load is not.
+    if (data.proposal && data.proposal.operations && data.proposal.id) {
+      const p = data.proposal as PersistedProposal;
+      data.proposal = { ...p, status: p.status ?? "pending" };
+    } else {
+      delete data.proposal;
+    }
     return data as ProjectData;
   } catch {
     return null;

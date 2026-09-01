@@ -12,6 +12,7 @@ import {
   OperationHistory,
   applyLayout,
   applyOperations,
+  applyValidOperations,
   computeLayout,
   createWorkspace,
   parseWorkspace,
@@ -29,16 +30,22 @@ import { fetchBoard, joinBoard, saveBoard, type BoardRole } from "./boards.js";
 import { loadOrgs } from "./orgs.js";
 import { getSessionUser } from "./session.js";
 import {
+  archiveDecision,
   getSharedBoardId,
   loadLastOpenProject,
   loadProject,
   mirrorProjectId,
   newProjectId,
+  newProposalId,
   onStorageError,
+  openProposalIn,
+  proposalIsPending,
   saveProject,
   setLastOpenProject,
   setSharedBoardId,
   type ChatEntry,
+  type PersistedProposal,
+  type ProjectData,
 } from "./persistence.js";
 import { settingsStore } from "./settings.js";
 
@@ -68,16 +75,34 @@ export type CanvasPhase = "empty" | "generating" | "main" | "proposing" | "voice
 /** Realtime link state. "offline" covers both signed-out and disconnected. */
 export type SyncStatus = "offline" | "connecting" | "online";
 
+import type { ProposalStatus } from "./persistence.js";
+
+/**
+ * A review-gate proposal. One shape for the live state AND the persisted
+ * record (2026-09: persisting proposals is the reliability fix — a refresh
+ * used to drop the AI's proposed ops while the chat reply describing them
+ * survived, which read as Lucent losing work). `status` is `"pending"`
+ * whenever the panel is open; decide/transition helpers in persistence.ts
+ * keep every change idempotent. The active slot on the project record is
+ * the current-or-most-recently-decided record; terminal ones are the audit
+ * trail in `proposalHistory`.
+ */
 export interface Proposal {
   request: string;
   operations: Operation[];
   explanation: string;
   /**
-   * Provenance carried from the originating send (M2): stamped onto whatever
-   * the batch creates when the proposal is applied, so even review-gated
-   * meeting extractions keep their "why is this here?" record.
+   * Meeting provenance, when this batch came from live capture: stamped onto
+   * whatever it creates at apply time, so the board can always answer "why
+   * is this here?".
    */
-  provenance?: SendAttachments["provenance"];
+  meetingId: string | null;
+  /** The source turns, quoted, when the proposal came from meeting capture. */
+  turns?: string[];
+  /** Stable across saves; a new proposal mints a new id. */
+  id: string;
+  status: ProposalStatus;
+  createdAt: number;
 }
 
 /** Files the user attached to a request: images to look at, documents to read. */
@@ -358,7 +383,22 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   /** M5/E1: characters of the streamed payload received so far (display only). */
   const [streamChars, setStreamChars] = useState(0);
   const [listening, setListening] = useState(false);
-  const [proposal, setProposal] = useState<Proposal | null>(null);
+  // A pending proposal restores from the project record (2026-09: the
+  // reliability fix — a refresh used to drop the AI's proposed ops). Terminal
+  // records stay on disk as the audit trail but don't reopen the panel.
+  const [proposal, setProposal] = useState<Proposal | null>(
+    restored?.proposal && proposalIsPending(restored.proposal) ? restored.proposal : null,
+  );
+  /**
+   * The durable record, mirrored so persist() can write it without churn at
+   * its call sites, and so double-decisions can be caught synchronously.
+   * `decidedRef` is the idempotency guard: applyProposal/cancelProposal set
+   * it before any await, so a double-click, a keyboard replay, or a
+   * rehydrated-but-already-decided record reads "already decided" and no-ops.
+   */
+  const proposalRecordRef = useRef<PersistedProposal | undefined>(restored?.proposal);
+  const proposalHistoryRef = useRef<PersistedProposal[]>(restored?.proposalHistory ?? []);
+  const decidedRef = useRef<string | null>(null);
   const [tick, setTick] = useState(0); // force re-read of history undo/redo flags
   // Live collaborators. Populated only when a server-side board is open and the
   // realtime socket is connected; empty in the offline/solo localStorage flow.
@@ -434,6 +474,12 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       // leaving a new local project behind on every visit.
       setProjectId(mirrorProjectId(board.id));
       setProjectName(board.name);
+      // A different project's proposal record must not leak into this
+      // board's autosave slot (same class of cross-project bug as above).
+      proposalRecordRef.current = undefined;
+      proposalHistoryRef.current = [];
+      decidedRef.current = null;
+      setProposal(null);
       // The server tells us our role on this board; trusting it here means the
       // read-only UI is correct before the socket's `welcome` arrives.
       setSyncRole(board.role);
@@ -467,7 +513,20 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const persist = useCallback(
     (ws: Workspace, conversation: ChatEntry[], name: string) => {
       if (!settingsStore.get().autosave) return;
-      saveProject({ id: projectId, name, workspace: ws, chat: conversation });
+      saveProject({
+        id: projectId,
+        name,
+        workspace: ws,
+        chat: conversation,
+        // The durable proposal record (2026-09 reliability fix): whatever is
+        // in the ref is what gets saved — open, decided, or absent. Terminal
+        // records persist as the audit trail even though only pending ones
+        // reopen the panel.
+        ...(proposalRecordRef.current ? { proposal: proposalRecordRef.current } : {}),
+        ...(proposalHistoryRef.current.length > 0
+          ? { proposalHistory: proposalHistoryRef.current }
+          : {}),
+      });
       setLastOpenProject(projectId);
     },
     [projectId],
@@ -708,15 +767,34 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
               ...skippedNote,
             },
           ];
-          setProposal({
-            request: text,
-            operations: result.operations,
-            explanation,
-            provenance,
-          });
+          // Open the durable record FIRST (any pending predecessor is
+          // superseded into the archive), then mirror it into live state.
+          // The record must be in the ref before persist() runs below —
+          // that save is what makes the proposal survive a reload.
+          const opened = openProposalIn(
+            {
+              proposal: proposalRecordRef.current,
+              proposalHistory: proposalHistoryRef.current,
+            },
+            {
+              id: newProposalId(),
+              boardId,
+              meetingId: provenance?.meetingId ?? null,
+              ...(provenance?.turns ? { turns: provenance.turns } : {}),
+              operations: result.operations,
+              createdAt: Date.now(),
+              request: text,
+              explanation,
+            },
+          );
+          proposalRecordRef.current = opened.proposal;
+          proposalHistoryRef.current = opened.proposalHistory;
+          decidedRef.current = null; // the new record is undecided
+          setProposal(opened.proposal);
           setChat(conversation);
           // The ops themselves apply (and persist) only on approval, but the
-          // request and the review-gate reply are real turns now.
+          // request, the review-gate reply, and now the PROPOSAL RECORD are
+          // durable from this moment on.
           persist(workspace, conversation, projectName);
         } else {
           const next = applyStamped();
@@ -744,16 +822,43 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     [busy, chat, workspace, commitAndShare, projectName, readOnly, persist],
   );
 
+  /** Shared idempotency: claim the pending record, or no-op when decided. */
+  const claimDecision = useCallback((decision: "approved" | "rejected"): boolean => {
+    const record = proposalRecordRef.current;
+    // Nothing open, or already decided (a double-click, a replayed call, or
+    // a record rehydrated after its decision): a no-op, never a second
+    // apply of the same batch.
+    if (!record || !proposalIsPending(record)) return false;
+    if (decidedRef.current === record.id) return false;
+    decidedRef.current = record.id;
+    const archived = archiveDecision(
+      { proposal: record, proposalHistory: proposalHistoryRef.current },
+      decision,
+    );
+    proposalRecordRef.current = archived.proposal;
+    proposalHistoryRef.current = archived.proposalHistory;
+    return true;
+  }, []);
+
   const applyProposal = useCallback(() => {
     if (!proposal) return;
     if (readOnly) return;
-    let next = applyOperations(workspace, proposal.operations);
+    // Idempotency FIRST — a double click must not commit the batch twice.
+    if (!claimDecision("approved")) return;
+    // Re-validate against the CURRENT board: a rehydrated proposal may
+    // reference nodes deleted before the reload. Partial application (the
+    // same one-simulator partition the server uses, M1) applies the valid
+    // remainder and surfaces the skips, instead of blindly committing ops
+    // against a board that changed under them.
+    const partial = applyValidOperations(workspace, proposal.operations);
+    const appliedOps = partial.applied.length > 0 ? partial.applied : proposal.operations;
+    let next = partial.workspace;
     // Review-gated meeting extractions keep their provenance (M2): the stamp
     // records the transcript and quote behind whatever the batch created.
-    if (proposal.provenance) {
-      const quote = proposal.provenance.turns.join(" ").slice(0, 240);
+    if (proposal.meetingId) {
+      const quote = (proposal.turns ?? []).join(" ").slice(0, 240);
       const meta = {
-        meetingId: proposal.provenance.meetingId,
+        meetingId: proposal.meetingId,
         quote,
         extractedAt: Date.now(),
       };
@@ -767,16 +872,29 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       }
       next = { ...next, nodes };
     }
+    const skippedNote =
+      partial.skipped.length > 0
+        ? ` (${partial.skipped.length} skipped — the board changed since this was proposed)`
+        : "";
     const conversation: ChatEntry[] = [
       ...chat,
-      { role: "ai", text: `Applied ${proposal.operations.length} changes as one commit.` },
+      {
+        role: "ai",
+        text: `Applied ${appliedOps.length} changes as one commit.${skippedNote}`,
+      },
     ];
     setChat(conversation);
-    commitAndShare(next, proposal.operations, proposal.explanation, conversation, projectName);
+    commitAndShare(next, appliedOps, proposal.explanation, conversation, projectName);
+    // The panel closes; the record (now status:"approved") stays in the ref
+    // so the very next persist() archives it durably.
     setProposal(null);
-  }, [proposal, workspace, chat, commitAndShare, projectName, readOnly]);
+  }, [proposal, workspace, chat, claimDecision, commitAndShare, projectName, readOnly]);
 
-  const cancelProposal = useCallback(() => setProposal(null), []);
+  const cancelProposal = useCallback(() => {
+    // Idempotent reject: the record archives as rejected, not destroyed.
+    if (!claimDecision("rejected")) return;
+    setProposal(null);
+  }, [claimDecision]);
 
   const undo = useCallback(() => {
     const { workspace: next, ops } = historyRef.current.undo();
@@ -880,6 +998,12 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     setProjectName("Untitled workspace");
     setWorkspace(fresh.current());
     setChat([]);
+    // The new project has no proposal record; leaving the old one in the
+    // refs would write the previous board's proposal into this slot's first
+    // autosave (cross-project leak).
+    proposalRecordRef.current = undefined;
+    proposalHistoryRef.current = [];
+    decidedRef.current = null;
     setProposal(null);
     setView("canvas");
     setTick((t) => t + 1);
@@ -924,6 +1048,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     setProjectName(name);
     setWorkspace(fresh);
     setChat([]);
+    // Fresh project: no proposal record carries over.
+    proposalRecordRef.current = undefined;
+    proposalHistoryRef.current = [];
+    decidedRef.current = null;
     setProposal(null);
     setView("canvas");
     setLastOpenProject(id);
@@ -968,6 +1096,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     setProjectName(name);
     setWorkspace(safe);
     setChat([]);
+    // Imported boards carry no proposal state of their own.
+    proposalRecordRef.current = undefined;
+    proposalHistoryRef.current = [];
+    decidedRef.current = null;
     setProposal(null);
     setView("canvas");
     setTick((t) => t + 1);
@@ -992,7 +1124,13 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     setProjectName(data.name);
     setWorkspace(safe);
     setChat(review.error ? [...conversation, { role: "error", text: review.error }] : conversation);
-    setProposal(null);
+    // Open THIS project's proposal state: a pending record reopens the panel;
+    // a decided one keeps its place in the slot but stays inert, and its
+    // history rides along.
+    proposalRecordRef.current = data.proposal;
+    proposalHistoryRef.current = data.proposalHistory ?? [];
+    decidedRef.current = null;
+    setProposal(data.proposal && proposalIsPending(data.proposal) ? data.proposal : null);
     setView("canvas");
     setTick((t) => t + 1);
     setLastOpenProject(data.id);
