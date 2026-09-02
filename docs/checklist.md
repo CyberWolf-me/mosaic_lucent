@@ -705,3 +705,25 @@ right owners). Failure tally over 14 calls: one provider termination
 ready.** Evidence-named fixes: provenance on every send path (weakest
 metric, 70 — the stamp never fired through the manual harness), the
 ownership nudge in brainstorm-style prompts, provider retry parity.
+
+## Stage A shipped; feature freeze in force (2026-09, docs/17)
+
+The five approved post-gate commits, each gated and independent: provider
+retry with the stream-restart contract (3228bf5), the semantic attribution
+rule with both polarities pinned (7ebfee2), provenance stable turn references
+plus the clickable ✦ jump (4becb03), the storage data-loss guard (de6037e),
+and non-destructive dangling-edge handling (96ee6f0). The live browser gate
+on the P1 visual work then found and fixed two bugs the unit suites couldn't
+see — regions were un-collapsible with a real pointer (pointer-events, both
+on the region box and the bounds frame stealing hit-tests, 59d839e), and
+entrance animations pinned their final frame at animation precedence,
+silently disabling the focus grades, the spotlight dim, the hover lift, the
+presentation caption's centering, and disabled-item dimming (736d448). Focus
+grades, region hit-testing, and the collapse/expand round-trip are verified
+in-DOM.
+
+docs/17 records the freeze rule (with the explicit not-sufficient reasons and
+the production-safety exception), the four decision gates (A: PASS; B/C:
+UNKNOWN, need users; D: data-driven), the keep-list (validated core is
+additive-only), the P2 server-side-proposal boundary, and the category audit.
+Gate: typecheck 0, tests green across all six packages, lint/format clean.

@@ -126,3 +126,34 @@ exactly the "visualize the important 35%" behaviour the advisory wanted.
 enough to be useful?" — on this evidence, yes.** Six messy, adversarial
 meetings produced six readable, correct, correctly-hedged boards with zero
 human intervention.
+
+## Addendum (2026-09-02, post-gate): the evidence-named fixes shipped
+
+All three evidence-named fixes from this report, plus the two audit-found
+safety issues and the live verification pass, shipped as Stage A before the
+feature freeze (details and commit map in `docs/17-engineering-roadmap.md`):
+
+- **F12 retry parity** — the Anthropic client now carries the full
+  stream-restart retry contract (partial stream → discard → restart →
+  exactly one commit), with the truncation-without-`message_stop` case
+  classified retryable.
+- **F7 attribution** — the semantic commitment rule replaces the lexical
+  trigger; the planning-meeting ownership nudge now applies in every meeting
+  style, with both polarities pinned in golden cases.
+- **Provenance weakest-metric fix** — stable turn references (`turnRange`/
+  `turnKinds`) now stamp through both apply paths, and the HUD ✦ jumps to
+  the source meeting.
+- **Safety P1/P3** — the in-memory data-loss deployment now refuses to boot
+  (prod + auth); dangling edges are retained on load instead of silently
+  deleted.
+- **Live gate** — browser verification of the P1 visual work found and fixed
+  two bugs the unit suites couldn't see (regions un-collapsible with a real
+  pointer; entrance animations pinning their final frame at animation
+  precedence, which silently disabled the focus grades, the spotlight dim,
+  the hover lift, the presentation caption's centering, and disabled menu
+  item dimming). Focus grades, region hit-testing, and the collapse/expand
+  round-trip are now verified in-DOM.
+
+The freeze is in force as of these commits. What reopens engineering: a
+decision gate on user evidence, a failing benchmark, or a production-safety
+requirement — nothing else.

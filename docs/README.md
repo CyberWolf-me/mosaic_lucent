@@ -29,6 +29,8 @@ describe intent; 9 is the original build plan and is explicitly superseded.
 | 13  | [13-board-and-manual-editing.md](./13-board-and-manual-editing.md)             | The manual board: shapes, connectors, frames, inspector, tiers                                                   |
 | 14  | [14-product-vision.md](./14-product-vision.md)                                 | Vision → implementation status map and strategic trade-offs                                                      |
 | 15  | [15-execution-plan.md](./15-execution-plan.md)                                 | Phased execution plan (A–G) and the testing model                                                                |
+| 16  | [16-meeting-evaluation.md](./16-meeting-evaluation.md)                         | The meeting-intelligence scoresheet: metrics, fixtures, run protocol                                             |
+| 17  | [17-engineering-roadmap.md](./17-engineering-roadmap.md)                       | The feature freeze, the decision gates, the keep-list, and what reopens engineering                              |
 | —   | [checklist.md](./checklist.md)                                                 | **Audited current status**, feature by feature. The source of truth.                                             |
 
 ### Decisions and operations
