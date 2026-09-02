@@ -120,6 +120,13 @@
       "when": 1787970000000,
       "tag": "0016_sso_connections",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1788371165623,
+      "tag": "0017_swift_wendigo",
+      "breakpoints": true
     }
   ]
 }

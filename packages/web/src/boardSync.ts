@@ -26,12 +26,31 @@ export interface BoardSyncCallbacks {
   onWorkspace: (workspace: Workspace) => void;
   /** Peer presence changed (join/leave/cursor/selection). */
   onPeers: (peers: Peer[]) => void;
-  /** A local edit was refused by the server. */
-  onRejected?: (error: string, detail?: string) => void;
+  /** A local edit was refused by the server. The requestId (Stage B) names
+   * WHICH submit failed, when the submitter sent one; `head` is where the log
+   * actually was, so the caller can resync rather than guess.
+   */
+  onRejected?: (
+    error: string,
+    detail?: string,
+    requestId?: string,
+    ...rest: [head?: number]
+  ) => void;
+  /** A local submit was accepted (or answered as a duplicate replay). */
+  onAcked?: (seq: number, requestId: string | undefined, duplicate: boolean) => void;
   /** Connection state, for a status dot. */
   onStatus?: (status: "connecting" | "online" | "offline") => void;
   /** The caller's role on this board. */
   onRole?: (role: "owner" | "editor" | "viewer") => void;
+}
+
+/**
+ * A client submit id (`req_…`). Every local edit gets one before it leaves
+ * the browser: a network retry of the same batch replays the same id, and the
+ * server answers with the original outcome instead of applying the edit twice.
+ */
+function newRequestId(): string {
+  return `req_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
 }
 
 export class BoardSync {
@@ -131,8 +150,25 @@ export class BoardSync {
         this.cb.onWorkspace(this.workspace);
         break;
       }
+      case "op-ack":
+        // Stage B: the server confirmed a specific submit landed (or was a
+        // replay of one that already had). The seq is the fact the optimistic
+        // local apply now rests on — nothing to re-apply, the broadcast entry
+        // carries the same ops. Surfaced for callers that track it; the
+        // default handler is silence because the op echo already synced state.
+        this.cb.onAcked?.(
+          Number(msg.seq ?? 0),
+          typeof msg.requestId === "string" ? msg.requestId : undefined,
+          msg.duplicate === true,
+        );
+        break;
       case "op-rejected":
-        this.cb.onRejected?.(String(msg.error ?? "rejected"), msg.detail as string | undefined);
+        this.cb.onRejected?.(
+          String(msg.error ?? "rejected"),
+          msg.detail as string | undefined,
+          typeof msg.requestId === "string" ? msg.requestId : undefined,
+          ...(typeof msg.head === "number" ? [msg.head] : []),
+        );
         break;
       case "peer-joined":
       case "presence": {
@@ -151,7 +187,11 @@ export class BoardSync {
   /** Send a committed local batch to the server for sequencing. */
   commit(ops: Operation[], label = ""): void {
     if (ops.length === 0) return;
-    this.send({ type: "op", ops, label });
+    // Stage B: every submit is idempotent by id. The same batch retried over a
+    // flapping socket (a later batch) replays this id and is answered with the
+    // original outcome — the client never needs to guess whether "it sent".
+    const requestId = newRequestId();
+    this.send({ type: "op", ops, label, requestId });
   }
 
   /** Report cursor/selection; throttled so a moving mouse doesn't flood. */

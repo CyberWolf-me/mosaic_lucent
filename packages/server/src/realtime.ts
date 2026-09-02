@@ -32,6 +32,12 @@ interface ClientMsg {
   fromSeq?: number;
   ops?: unknown[];
   label?: string;
+  /**
+   * The submit's idempotency key (Stage B): every send carries one, and a
+   * network retry of the same key is answered with the original outcome
+   * instead of a second effect.
+   */
+  requestId?: string;
   cursor?: { x: number; y: number } | null;
   selection?: string[];
 }
@@ -286,11 +292,54 @@ export class RealtimeServer {
     const room = this.rooms.get(conn.boardId);
     if (!room) return;
 
-    const result = await room.commit(conn.userId, (msg.ops ?? []) as never, msg.label ?? "");
+    // The request id is bounded and shape-checked: it is echoed into acks and
+    // stored as the idempotency key, so a hostile string must not ride either.
+    const requestId =
+      typeof msg.requestId === "string" && msg.requestId.length > 0 && msg.requestId.length <= 64
+        ? msg.requestId
+        : undefined;
+
+    const result = await room.commit(conn.userId, (msg.ops ?? []) as never, msg.label ?? "", {
+      ...(requestId !== undefined ? { requestId } : {}),
+    });
     if (!result.ok) {
-      this.sendTo(conn, { type: "op-rejected", error: result.error, detail: result.detail });
+      // Correlated refusal (Stage B): the client knows WHICH submit failed,
+      // not merely that something did, and `head` names where the log actually
+      // is so a retry resyncs rather than guessing.
+      this.sendTo(conn, {
+        type: "op-rejected",
+        error: result.error,
+        detail: result.detail,
+        ...(result.requestId !== undefined ? { requestId: result.requestId } : {}),
+        ...(result.head !== undefined ? { head: result.head } : {}),
+      });
       return;
     }
+    // A replayed request: the original entry already broadcast when it first
+    // committed, and re-sending it would double-apply on every peer that
+    // trusts seq ordering... except it would not (clients dedupe by seq), but
+    // the room also never re-applied it, so there is no entry to send. The
+    // ack below IS the answer to a retry — it names the original seq.
+    if (result.duplicate) {
+      this.sendTo(conn, {
+        type: "op-ack",
+        seq: result.head,
+        operationId: result.entry?.operationId,
+        ...(result.requestId !== undefined ? { requestId: result.requestId } : {}),
+        duplicate: true,
+      });
+      return;
+    }
+    // The explicit ack (Stage B): "I sent it, therefore it happened" was never
+    // a safe client assumption. The ack names the submit's requestId, the seq
+    // it landed at, and the operationId of the committed batch — the same
+    // facts the broadcast entry carries, addressed to the one submitter.
+    this.sendTo(conn, {
+      type: "op-ack",
+      seq: result.entry?.seq,
+      operationId: result.entry?.operationId,
+      ...(result.requestId !== undefined ? { requestId: result.requestId } : {}),
+    });
     // Persist so the REST path and a future reconnect see the same state —
     // unless the commit already did: with a durable allocator wired into the
     // room (M3), the entry was written to the store as part of allocating its
@@ -542,6 +591,7 @@ export class RealtimeServer {
             label: entry.label,
             at: entry.at,
             expectedSeq: entry.expectedSeq,
+            ...(entry.requestId !== undefined ? { requestId: entry.requestId } : {}),
           }),
         fetch: (fromSeq) =>
           this.deps.boardStore
@@ -549,7 +599,15 @@ export class RealtimeServer {
             // LoggedOpEntry and LoggedOp are structurally the same record;
             // the mapping keeps the room decoupled from the store's type.
             .then((entries) =>
-              entries.map((e) => ({ seq: e.seq, ops: e.ops, by: e.by, label: e.label, at: e.at })),
+              entries.map((e) => ({
+                seq: e.seq,
+                ops: e.ops,
+                by: e.by,
+                label: e.label,
+                at: e.at,
+                ...(e.operationId !== undefined ? { operationId: e.operationId } : {}),
+                ...(e.requestId !== undefined ? { requestId: e.requestId } : {}),
+              })),
             ),
       });
       this.rooms.set(boardId, room);

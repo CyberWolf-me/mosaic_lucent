@@ -117,6 +117,22 @@ export const opLog = pgTable(
     by: text("by").notNull(),
     label: text("label").notNull(),
     at: bigint("at", { mode: "number" }).notNull(),
+    /**
+     * Server-generated id for this committed batch (`op_…`). The log's primary
+     * key is (board_id, seq) — a coordinate in one board's history — while the
+     * operation id names the batch itself, which is what an ack, a proposal's
+     * applied link, or a future audit trail wants to reference without naming
+     * a board and a position.
+     */
+    operationId: text("operation_id").notNull(),
+    /**
+     * Client-generated id for the submit that produced this entry (`req_…`).
+     * The idempotency key (Stage B): a network retry replays the same
+     * requestId and must be answered with the original outcome, never a second
+     * effect. Nullable because a log written before the protocol existed — or
+     * a caller with no retry semantics — has no id to claim.
+     */
+    requestId: text("request_id"),
   },
   (t) => ({
     pk: primaryKey({ columns: [t.boardId, t.seq] }),
@@ -125,6 +141,11 @@ export const opLog = pgTable(
     // would filter every entry it owns on the heap. Ordering by `at` is also how
     // "what happened here recently" is answered without reading the whole log.
     boardAtIdx: index("op_log_board_at_idx").on(t.boardId, t.at),
+    // Stage B idempotency: one row per (board, requestId) among rows that
+    // carry one. Partial so legacy rows (NULL) never collide with anything.
+    requestUniq: uniqueIndex("op_log_board_request_uniq")
+      .on(t.boardId, t.requestId)
+      .where(sql`${t.requestId} is not null`),
   }),
 );
 

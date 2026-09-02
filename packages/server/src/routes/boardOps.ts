@@ -53,6 +53,7 @@ export const registerBoardOpsRoutes: RegisterRoutes = (router, s) => {
       ops?: unknown;
       label?: unknown;
       expectedSeq?: unknown;
+      requestId?: unknown;
     };
     try {
       const raw = await readBody(req);
@@ -72,6 +73,32 @@ export const registerBoardOpsRoutes: RegisterRoutes = (router, s) => {
       typeof body.label === "string" && body.label.trim().length > 0
         ? body.label.trim().slice(0, 120)
         : "agent ops";
+    // The idempotency key (Stage B): an HTTP client's retry of the same
+    // submit must be answered with the original outcome, not a second effect.
+    const requestId =
+      typeof body.requestId === "string" && body.requestId.length > 0 && body.requestId.length <= 64
+        ? body.requestId
+        : undefined;
+
+    // The idempotency guard runs BEFORE validation, for the same reason the
+    // room's does: the original submit changed the workspace, so a replay
+    // re-validated against current state would be refused ("node already
+    // exists") instead of answered with its original outcome. The KEY names
+    // the request; what that key already did is the answer.
+    if (requestId !== undefined) {
+      const prior = await boardStore.findRequest(boardId, requestId);
+      if (prior) {
+        send(res, 200, {
+          seq: prior.seq,
+          applied: 0,
+          updatedAt: Date.now(),
+          duplicate: true,
+          ...(prior.operationId !== undefined ? { operationId: prior.operationId } : {}),
+          requestId,
+        });
+        return;
+      }
+    }
 
     // The pipeline. Every step is the one Room.commit performs, in the same
     // order, for the same reasons; the comments there are the long form.
@@ -115,11 +142,25 @@ export const registerBoardOpsRoutes: RegisterRoutes = (router, s) => {
       label,
       at: Date.now(),
       ...(typeof body.expectedSeq === "number" ? { expectedSeq: body.expectedSeq } : {}),
+      ...(requestId !== undefined ? { requestId } : {}),
     });
     if (!append.ok) {
       // Stale or raced: the caller re-reads and re-validates. `head` is
       // included so the retry saves the round trip, per AppendResult.
       send(res, 409, { error: "stale board", reason: append.reason, head: append.head });
+      return;
+    }
+    // A replayed requestId: the original submit already applied and
+    // persisted; answer with its outcome and change nothing. The 200 (not
+    // 409) is deliberate — from the caller's side the request succeeded.
+    if (append.duplicate) {
+      send(res, 200, {
+        seq: append.seq,
+        applied: 0,
+        updatedAt: Date.now(),
+        duplicate: true,
+        ...(requestId !== undefined ? { requestId } : {}),
+      });
       return;
     }
     const updated = applyOperations(guard.board.workspace, operations);
@@ -144,6 +185,12 @@ export const registerBoardOpsRoutes: RegisterRoutes = (router, s) => {
         // write must not 500 an op batch that already landed.
       });
 
-    send(res, 200, { seq: append.seq, applied: operations.length, updatedAt: Date.now() });
+    send(res, 200, {
+      seq: append.seq,
+      applied: operations.length,
+      updatedAt: Date.now(),
+      ...(append.operationId !== undefined ? { operationId: append.operationId } : {}),
+      ...(requestId !== undefined ? { requestId } : {}),
+    });
   });
 };

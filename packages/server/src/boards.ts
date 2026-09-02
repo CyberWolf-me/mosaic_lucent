@@ -65,6 +65,10 @@ export interface LoggedOpEntry {
   by: string;
   label: string;
   at: number;
+  /** Server-generated batch id (`op_…`), present on every Stage B row. */
+  operationId?: string;
+  /** The idempotency key the submit carried, when it had one. */
+  requestId?: string;
 }
 
 /**
@@ -76,6 +80,12 @@ export interface LoggedOpEntry {
  * the caller validated its ops. Omit it and the batch lands at whatever the head
  * happens to be -- right for a replay or a backfill, wrong for a commit, which
  * validated against one specific state.
+ *
+ * `requestId` is the Stage B idempotency key: when a row with the same
+ * (boardId, requestId) already exists, the append answers with THAT row's seq
+ * and `duplicate: true` instead of writing a second effect — a network retry
+ * must never apply an edit twice. Omitted by callers with no retry semantics
+ * (legacy rows, log rewrites).
  */
 export type OpAppend = Omit<LoggedOpEntry, "seq"> & {
   boardId: string;
@@ -97,8 +107,17 @@ export type OpAppend = Omit<LoggedOpEntry, "seq"> & {
  * the losing statement observed it, which saves the retry a round trip.
  */
 export type AppendResult =
-  | { ok: true; seq: number }
+  | { ok: true; seq: number; duplicate?: boolean; operationId?: string }
   | { ok: false; reason: "lost" | "conflict"; head: number };
+
+/**
+ * A new operation id (`op_…`). Server-generated, one per committed batch: the
+ * thing an ack names, so a client can correlate "the server accepted my
+ * request" with a specific entry in the log without knowing its seq.
+ */
+export function newOperationId(): string {
+  return `op_${Date.now().toString(36)}${randomBytes(6).toString("hex")}`;
+}
 
 /**
  * A cached workspace at a known point in the log (M3). Never a second source of
@@ -181,6 +200,13 @@ export interface BoardStore {
    * Never throws on contention -- see `AppendResult`.
    */
   appendOp(entry: OpAppend): Promise<AppendResult>;
+  /**
+   * The log entry a requestId committed, if any (Stage B idempotency). This is
+   * the pre-validation replay check: a retried submit must be recognized by
+   * its KEY, because re-validating its ops against the moved world would
+   * refuse a retried CREATE ("already exists") or double-apply a MOVE.
+   */
+  findRequest(boardId: string, requestId: string): Promise<LoggedOpEntry | undefined>;
   /**
    * Load a board's op log ordered by seq ascending, optionally only the entries
    * *after* `fromSeq`. Used when a Room is constructed from a cold start so
@@ -355,23 +381,48 @@ export class InMemoryBoardStore implements BoardStore {
    * `lost` is unreachable here and every stale caller comes back as `conflict`
    * -- which is the point: two Rooms sharing one of these stores reproduce
    * contention, and the code paths that handle it, with no database in the test.
+   *
+   * Stage B idempotency mirrors the Postgres partial unique index: a replayed
+   * requestId returns the original seq with `duplicate: true` and writes
+   * nothing — the retry of a network call must not become a second edit.
    */
   async appendOp(entry: OpAppend): Promise<AppendResult> {
+    if (entry.requestId !== undefined) {
+      const list0 = this.logs.get(entry.boardId) ?? [];
+      const existing = list0.find((e) => e.requestId === entry.requestId);
+      if (existing) {
+        return { ok: true, seq: existing.seq, duplicate: true, operationId: existing.operationId };
+      }
+    }
     const list = this.logs.get(entry.boardId) ?? [];
     const head = list.length > 0 ? (list[list.length - 1]?.seq ?? 0) : 0;
     const seq = head + 1;
     if (entry.expectedSeq !== undefined && entry.expectedSeq !== seq) {
       return { ok: false, reason: "conflict", head };
     }
-    list.push({ seq, ops: entry.ops, by: entry.by, label: entry.label, at: entry.at });
+    const operationId = entry.operationId ?? newOperationId();
+    list.push({
+      seq,
+      ops: entry.ops,
+      by: entry.by,
+      label: entry.label,
+      at: entry.at,
+      ...(entry.requestId !== undefined ? { requestId: entry.requestId } : {}),
+      operationId,
+    });
     this.logs.set(entry.boardId, list);
-    return { ok: true, seq };
+    return { ok: true, seq, operationId };
   }
 
   async loadLog(boardId: string, fromSeq?: number): Promise<LoggedOpEntry[]> {
     const list = this.logs.get(boardId) ?? [];
     const from = fromSeq ?? 0;
     return from > 0 ? list.filter((e) => e.seq > from) : list.slice();
+  }
+
+  async findRequest(boardId: string, requestId: string): Promise<LoggedOpEntry | undefined> {
+    const list = this.logs.get(boardId) ?? [];
+    return list.find((e) => e.requestId === requestId);
   }
 
   async latestSeq(boardId: string): Promise<number> {

@@ -13,6 +13,7 @@ import type {
   StoredBoard,
 } from "../boards.js";
 import { effectiveBoardRole, type Role } from "../identity.js";
+import { newOperationId } from "../boards.js";
 
 /**
  * Postgres-backed BoardStore. Implements the full interface: board CRUD, the
@@ -222,7 +223,8 @@ export class PostgresBoardStore implements BoardStore {
   }
 
   /**
-   * One statement does the allocation, the staleness guard and the loser report.
+   * One statement does the allocation, the staleness guard, the loser report,
+   * and the idempotency check (Stage B).
    *
    * Raw SQL because the shape has no query-builder equivalent: a data-modifying
    * CTE whose INSERT ... SELECT reads the head it is about to extend. Splitting
@@ -230,41 +232,110 @@ export class PostgresBoardStore implements BoardStore {
    * the race it is trying to win, and would still need this statement to be
    * correct -- so it is the only statement.
    *
-   * How the three answers arise:
-   *   - a row came back      -> `ok`, that is the allocated seq.
-   *   - no row, guard failed -> `conflict`: head + 1 was already past
+   * How the four answers arise:
+   *   - a row came back from the INSERT -> `ok`, that is the allocated seq.
+   *   - no insert row, a PRIOR row holds this requestId -> `ok` + `duplicate`:
+   *     the request already landed (a network retry); the caller is answered
+   *     with the original seq and nothing is written. The lookup runs before the
+   *     head CTE so a duplicate is settled without reading the log's max.
+   *   - no insert row, guard failed -> `conflict`: head + 1 was already past
    *     `expectedSeq`, so nothing was even attempted.
-   *   - no row, guard passed -> `lost`: another writer took `head + 1` between
-   *     this statement's read and its insert, and ON CONFLICT DO NOTHING made
-   *     that a fact to report rather than an exception to unwind.
+   *   - no insert row, guard passed -> `lost`: another writer took `head + 1`
+   *     between this statement's read and its insert, and ON CONFLICT DO NOTHING
+   *     made that a fact to report rather than an exception to unwind.
    *
    * `ops` is stringified and cast: node-postgres would otherwise send a JS array
    * as a Postgres array literal, and the column is jsonb. Identifiers are quoted
    * because `by` is a keyword everywhere else in SQL.
+   *
+   * A duplicate ignores `expectedSeq` on purpose: the request already committed
+   * at ITS seq, and re-checking the caller's (now stale) expectation would
+   * 409 a replay of something that already succeeded.
    */
   async appendOp(entry: OpAppend): Promise<AppendResult> {
     const expected = entry.expectedSeq ?? null;
+    const requestId = entry.requestId ?? null;
+    const operationId = entry.operationId ?? newOperationId();
     const result = await this.target.db.execute(sql`
-      with head as (
+      with prior as (
+        select "seq", "operation_id" from ${opLog}
+         where "board_id" = ${entry.boardId} and "request_id" = ${requestId}::text
+         limit 1
+      ), head as (
         select coalesce(max("seq"), 0) as seq from ${opLog} where "board_id" = ${entry.boardId}
       ), ins as (
-        insert into ${opLog} ("board_id", "seq", "ops", "by", "label", "at")
+        insert into ${opLog} ("board_id", "seq", "ops", "by", "label", "at", "operation_id", "request_id")
         select ${entry.boardId}, head.seq + 1, ${JSON.stringify(entry.ops)}::jsonb,
-               ${entry.by}, ${entry.label}, ${entry.at}::bigint
+               ${entry.by}, ${entry.label}, ${entry.at}::bigint,
+               ${operationId}, ${requestId}::text
           from head
          where ${expected}::bigint is null or head.seq + 1 = ${expected}::bigint
         on conflict ("board_id", "seq") do nothing
-        returning "seq"
+        returning "seq", "operation_id"
       )
-      select (select seq from ins) as seq, (select seq from head) as head
+      select (select seq from ins) as seq,
+             (select operation_id from ins) as operation_id,
+             (select seq from head) as head,
+             (select seq from prior) as prior_seq,
+             (select operation_id from prior) as prior_operation_id
     `);
-    const row = result.rows[0] as { seq: unknown; head: unknown } | undefined;
+    const row = result.rows[0] as
+      | {
+          seq: unknown;
+          head: unknown;
+          operation_id: unknown;
+          prior_seq: unknown;
+          prior_operation_id: unknown;
+        }
+      | undefined;
     const head = toNumber(row?.head);
+    // A replayed requestId: answer with the original outcome, write nothing.
+    if (row?.prior_seq !== null && row?.prior_seq !== undefined) {
+      return {
+        ok: true,
+        seq: toNumber(row.prior_seq),
+        duplicate: true,
+        operationId:
+          row.prior_operation_id === null || row.prior_operation_id === undefined
+            ? undefined
+            : String(row.prior_operation_id),
+      };
+    }
     if (row?.seq === null || row?.seq === undefined) {
       const reason = expected !== null && head + 1 !== expected ? "conflict" : "lost";
       return { ok: false, reason, head };
     }
-    return { ok: true, seq: toNumber(row.seq) };
+    return {
+      ok: true,
+      seq: toNumber(row.seq),
+      operationId:
+        row.operation_id === null || row.operation_id === undefined
+          ? undefined
+          : String(row.operation_id),
+    };
+  }
+
+  async findRequest(boardId: string, requestId: string): Promise<LoggedOpEntry | undefined> {
+    // Serves the partial unique index (board_id, request_id); the equality
+    // lookup is an index hit, never a log scan.
+    const rows = await this.target.db
+      .select()
+      .from(opLog)
+      .where(and(eq(opLog.boardId, boardId), eq(opLog.requestId, requestId)))
+      .limit(1);
+    const r = rows[0];
+    if (!r) return undefined;
+    return {
+      seq: r.seq,
+      ops: r.ops as Operation[],
+      by: r.by,
+      label: r.label,
+      at: r.at,
+      ...(r.operationId !== null && r.operationId !== undefined
+        ? { operationId: r.operationId }
+        : {}),
+      requestId: r.requestId ?? requestId,
+    };
   }
 
   async loadLog(boardId: string, fromSeq?: number): Promise<LoggedOpEntry[]> {
@@ -281,6 +352,10 @@ export class PostgresBoardStore implements BoardStore {
       by: r.by,
       label: r.label,
       at: r.at,
+      ...(r.operationId !== null && r.operationId !== undefined
+        ? { operationId: r.operationId }
+        : {}),
+      ...(r.requestId !== null && r.requestId !== undefined ? { requestId: r.requestId } : {}),
     }));
   }
 

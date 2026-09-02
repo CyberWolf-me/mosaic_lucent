@@ -9,7 +9,6 @@ import {
 import type { Role } from "./identity.js";
 import { roleAtLeast } from "./identity.js";
 import type { AppendResult, BoardSnapshot } from "./boards.js";
-
 /**
  * A collaboration room: the server-authoritative sync engine for one board
  * (docs/03, docs/12). Transport-free on purpose — it takes operations and
@@ -30,6 +29,10 @@ export interface LoggedOp {
   by: string;
   label: string;
   at: number;
+  /** Server-generated batch id; what an ack names (Stage B). */
+  operationId?: string;
+  /** The idempotency key the submit carried, when it had one. */
+  requestId?: string;
 }
 
 /** A participant's live presence: cursor, viewport hint, and selection. */
@@ -61,12 +64,25 @@ export interface CommitResult {
   /** The log head as the losing append saw it (on `stale`). */
   head?: number;
   /**
+   * The idempotency key this commit carried, echoed back on every answer.
+   * On `duplicate`, the entry's original seq rides `head` (there is no fresh
+   * entry to name it).
+   */
+  requestId?: string;
+  /**
    * True when the allocator already wrote the entry to durable state. The
    * caller then skips its own `appendOp` — running both would write the batch
    * twice. False for the default local allocator (tests, single-process dev),
    * where persistence stays the caller's job.
    */
   persisted?: boolean;
+  /**
+   * True when this submit was a REPLAY of a requestId the log already holds
+   * (Stage B idempotency): nothing was applied and no entry exists to
+   * broadcast — `entry` is the caller's own batch echoed back so the ack can
+   * name the original seq. Callers must not re-broadcast on duplicate.
+   */
+  duplicate?: boolean;
 }
 
 /**
@@ -141,6 +157,16 @@ export class Room {
    * working in the meantime and the unit tests green.
    */
   private readonly presence = new Map<string, Presence>();
+  /**
+   * requestId → the seq it committed at (Stage B). The replay guard: a retried
+   * submit is recognized by its KEY, not by re-validating its ops — the world
+   * has moved since the original landed, so a retried CREATE would fail
+   * validation ("already exists") and a retried MOVE would double-apply. The
+   * map is seeded from the replayed log at construction and updated on every
+   * commit, so a room that restarts mid-board still recognizes replays of
+   * anything in its log.
+   */
+  private readonly committedRequests = new Map<string, number>();
 
   constructor(
     boardId: string,
@@ -158,7 +184,10 @@ export class Room {
       // Replay the persisted log so the room's internal cursor matches the
       // durable state. Entries are already validated and applied at write
       // time, so we just trust the workspace snapshot + log ordering.
-      for (const entry of initialLog) this.log.push(entry);
+      for (const entry of initialLog) {
+        this.log.push(entry);
+        if (entry.requestId !== undefined) this.committedRequests.set(entry.requestId, entry.seq);
+      }
       this.head = Math.max(this.head, initialLog[initialLog.length - 1]?.seq ?? 0);
     }
     this.maxRetries = options.maxRetries ?? 1;
@@ -233,10 +262,41 @@ export class Room {
    * only when it is genuinely invalid against the merged state, never merely
    * because someone else got there first.
    */
-  async commit(userId: string, ops: Operation[], label = ""): Promise<CommitResult> {
+  async commit(
+    userId: string,
+    ops: Operation[],
+    label = "",
+    meta?: { requestId?: string },
+  ): Promise<CommitResult> {
     const role = this.roles.get(userId);
     if (!role || !roleAtLeast(role, "editor")) {
       return { ok: false, error: "permission", detail: "editor role required" };
+    }
+    // The replay guard runs BEFORE validation, on the queue: the world has
+    // moved since the original landed, so recognizing a retry by re-checking
+    // its ops would answer a retried CREATE with "already exists" and
+    // double-apply a retried MOVE. The KEY is the identity of the request;
+    // its outcome is already in the log, and the answer is that outcome.
+    // (The allocator's own duplicate handling stays as the durable backstop
+    // for a two-instance race this room's map cannot see.)
+    if (meta?.requestId !== undefined) {
+      const seq = this.committedRequests.get(meta.requestId);
+      if (seq !== undefined) {
+        const run = this.queue.then(() =>
+          Promise.resolve({
+            ok: true as const,
+            persisted: true,
+            duplicate: true as const,
+            head: seq,
+            requestId: meta.requestId,
+          }),
+        );
+        this.queue = run.then(
+          () => undefined,
+          () => undefined,
+        );
+        return run;
+      }
     }
     // The AI-only guard also applies to humans: coordinates come from layout,
     // except MOVE_NODE which is explicitly a human op and allowed here.
@@ -251,7 +311,7 @@ export class Room {
     // One commit at a time: between the validation and the append the room's
     // state must not move under us. The chain keeps commits in arrival order;
     // a rejected commit must not poison the chain, hence the catch-and-drop.
-    const run = this.queue.then(() => this.commitQueued(authored, userId, label));
+    const run = this.queue.then(() => this.commitQueued(authored, userId, label, meta));
     this.queue = run.then(
       () => undefined,
       () => undefined,
@@ -264,6 +324,7 @@ export class Room {
     authored: Operation[],
     userId: string,
     label: string,
+    meta?: { requestId?: string },
   ): Promise<CommitResult> {
     const absorbed: LoggedOp[] = [];
     for (let attempt = 0; ; attempt += 1) {
@@ -271,7 +332,16 @@ export class Room {
       // state this batch was checked against no longer exists.
       const errors = validateOperations(this.workspace, authored);
       if (errors.length > 0) {
-        return { ok: false, error: "validation", detail: errors[0]?.message };
+        return {
+          ok: false,
+          error: "validation",
+          detail: errors[0]?.message,
+          // The head at refusal: without it a rejected submitter cannot tell
+          // how stale the state it validated against was. On validation the
+          // room has not moved during this attempt, so this.head IS the head.
+          head: this.head,
+          ...(meta?.requestId !== undefined ? { requestId: meta.requestId } : {}),
+        };
       }
 
       const result = await this.append({
@@ -280,29 +350,56 @@ export class Room {
         label,
         at: Date.now(),
         expectedSeq: this.head + 1,
+        ...(meta?.requestId !== undefined ? { requestId: meta.requestId } : {}),
       });
 
       if (result.ok) {
+        // A replayed requestId: the log already holds this batch at its own
+        // seq. Nothing to apply (it is in the room's replayed state wherever
+        // the room was built from the log), nothing to broadcast (peers saw
+        // the original), and the caller's ack must name the ORIGINAL seq so
+        // the retrying client learns where its edit actually landed.
+        if (result.duplicate) {
+          return {
+            ok: true,
+            persisted: true,
+            duplicate: true,
+            head: result.seq,
+            ...(result.operationId !== undefined ? { operationId: result.operationId } : {}),
+            ...(meta?.requestId !== undefined ? { requestId: meta.requestId } : {}),
+          };
+        }
         const entry: LoggedOp = {
           seq: result.seq,
           ops: authored,
           by: userId,
           label,
           at: Date.now(),
+          ...(result.operationId !== undefined ? { operationId: result.operationId } : {}),
+          ...(meta?.requestId !== undefined ? { requestId: meta.requestId } : {}),
         };
         this.workspace = applyOperations(this.workspace, authored);
         this.log.push(entry);
         this.head = result.seq;
+        if (entry.requestId !== undefined) {
+          this.committedRequests.set(entry.requestId, entry.seq);
+        }
         return {
           ok: true,
           entry,
           persisted: this.durable,
           ...(absorbed.length > 0 ? { absorbed } : {}),
+          ...(meta?.requestId !== undefined ? { requestId: meta.requestId } : {}),
         };
       }
 
       if (attempt >= this.maxRetries) {
-        return { ok: false, error: "stale", head: result.head };
+        return {
+          ok: false,
+          error: "stale",
+          head: result.head,
+          ...(meta?.requestId !== undefined ? { requestId: meta.requestId } : {}),
+        };
       }
 
       // Someone else owns `head + 1`. Pull in everything we lack, advance,
