@@ -685,3 +685,23 @@ expand == pixel-identical). Connector tiers deliberately NOT built —
 stop-and-measure comes next, per the discipline.
 
 Gate: typecheck 0, 1,838 tests, lint/format clean.
+
+## Real-provider product gate PASSED (2026-09-02, docs/eval-results)
+
+Six meetings through the real provider (gorouter) via the live browser
+pipeline — no mocks. Composite ≈ 93/100 across the ten metrics; **zero
+human corrections** across all six boards. The four adversarial traps all
+passed: the withdrawn $20 idea became "Pricing undecided" (retraction
+sticky, no price), Sarah's action was owned by Sarah (not "marketing"),
+"probably not subscriptions" stayed tentative (confirm-first sticky), and
+React→Svelte superseded in one node. Continuity held ("back on the
+frontend" grew the existing cluster, no duplicate), the explicit rejection
+visibly ruled its option out, messy-meeting precision was perfect (joke +
+game chat + babysitter line all absent, 40% turn-to-object with the right
+40%), and planning attribution was perfect (epic/task/story all with the
+right owners). Failure tally over 14 calls: one provider termination
+(F12, clean recovery) + one missing attribution in a brainstorm meeting
+(F7). **Verdict A: start testing with actual users; the semantics are
+ready.** Evidence-named fixes: provenance on every send path (weakest
+metric, 70 — the stamp never fired through the manual harness), the
+ownership nudge in brainstorm-style prompts, provider retry parity.

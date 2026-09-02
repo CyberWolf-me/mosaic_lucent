@@ -139,3 +139,50 @@ export const MEETING_FIXTURES: MeetingFixture[] = [
   PLANNING_OWNERS,
   MESSY_MEETING,
 ];
+
+/**
+ * The adversarial traps (2026-09-02 product gate): deliberately unfair turns
+ * whose CORRECT handling is a non-action or a supersession, not a node. Each
+ * trap names its expected outcome — the scorer checks exactly that. These
+ * exist as experiment data; they also seed the next golden cases whenever a
+ * trap fails.
+ */
+export const ADVERSARIAL_TRAPS: MeetingFixture = {
+  id: "adversarial-traps",
+  purpose:
+    "The unfair cases: withdrawn thoughts, misdirected requests, tentative scope, and a tech-stack correction. Expected outcomes are mostly NO-OP or supersession — promoting any of these into hard workspace state is the failure.",
+  expectedTopics: ["Tech stack"],
+  turns: [
+    {
+      speaker: "Maya",
+      text: "I don't know, maybe pricing should be $20... actually, forget that.",
+    },
+    { speaker: "Maya", text: "Sarah, can you talk to marketing about the launch?" },
+    { speaker: "Tom", text: "We're probably not doing subscriptions in v1." },
+    { speaker: "Tom", text: "Wait, frontend isn't React. We're using Svelte." },
+  ],
+};
+
+/**
+ * Expected no-op / supersession outcomes for the traps, as scorer checks.
+ * A "none" expectation means the correct result is NOTHING on the board (or
+ * at most a proposal-marked node for the constraint-style turns).
+ */
+export const TRAP_EXPECTATIONS = [
+  {
+    turn: "I don't know, maybe pricing should be $20... actually, forget that.",
+    expected: "none — the thought was withdrawn; no permanent pricing decision",
+  },
+  {
+    turn: "Sarah, can you talk to marketing about the launch?",
+    expected: "action: Sarah → talk to marketing about the launch (NOT owner=marketing)",
+  },
+  {
+    turn: "We're probably not doing subscriptions in v1.",
+    expected: "constraint / tentative scope marker — not a hard requirement",
+  },
+  {
+    turn: "Wait, frontend isn't React. We're using Svelte.",
+    expected: "React → superseded by Svelte (one corrected node, not two unrelated techs)",
+  },
+] as const;
