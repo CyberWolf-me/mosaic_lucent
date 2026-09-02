@@ -170,7 +170,7 @@ function makeStores(databaseUrl: string | undefined): {
 }
 
 // Late-bind readConfig so the .env values are visible.
-const { readConfig } = await import("./config.js");
+const { readConfig, isProduction } = await import("./config.js");
 const config = readConfig();
 
 /**
@@ -193,6 +193,41 @@ const metrics = new MetricsRegistry();
 // nobody is reading. Uptime is deliberately absent — Prometheus convention is
 // to expose the start time and let the query do `time() - start_time`.
 registerProcessMetrics(metrics);
+
+/**
+ * DATA-LOSS GUARD (Stage A safety, P1). Without LUCENT_DATABASE_URL the
+ * server runs the in-memory stores: every account, board, meeting
+ * transcript, and audit row lives in the process and evaporates on
+ * restart. That fallback is correct for solo dev — but the gate pass
+ * watched it silently swallow real user data whenever the env was
+ * missing, which is the single easiest variable to forget in a
+ * container. The guard makes the tradeoff loud instead of silent:
+ * production + auth + in-memory REFUSES TO BOOT (a deployment that would
+ * quietly lose everything on the next pod restart); dev prints a
+ * warning that names the fix. The refusal deliberately mirrors
+ * sessionSecret's production throw — the same class of "weak default in
+ * production" — and auth-off is exempt: an intentionally open solo
+ * server is a demo, not a data-loss incident.
+ */
+if (!config.databaseUrl) {
+  if (isProduction(process.env) && config.requireAuth) {
+    console.error(
+      "[lucent] REFUSING TO START: NODE_ENV=production with authentication but no " +
+        "LUCENT_DATABASE_URL. The in-memory stores do not survive a restart — every " +
+        "account, board, and meeting would be lost. Set LUCENT_DATABASE_URL to a " +
+        "Postgres instance, or set LUCENT_REQUIRE_AUTH=0 for an intentionally " +
+        "ephemeral demo.",
+    );
+    process.exit(1);
+  }
+  console.warn(
+    "[lucent] DATA LOSS WARNING: no LUCENT_DATABASE_URL — running on in-memory " +
+      "stores. Accounts, boards, and meeting transcripts will NOT survive a " +
+      "restart. Fine for local development; set LUCENT_DATABASE_URL for " +
+      "anything real.",
+  );
+}
+
 const stores = makeStores(config.databaseUrl);
 const db: Db | null = stores.db;
 if (db) {

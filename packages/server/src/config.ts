@@ -147,7 +147,7 @@ const num = (value: string | undefined, fallback: number) => {
 };
 
 /** True for any environment where accidentally weak defaults would be a security incident. */
-function isProduction(env: ConfigEnv): boolean {
+export function isProduction(env: ConfigEnv): boolean {
   return env.NODE_ENV === "production";
 }
 
