@@ -905,6 +905,11 @@ html[data-grid="none"] .canvas-grid {
   border: 1px dashed var(--stroke-2);
   border-radius: var(--r-lg);
   padding: 26px 14px 14px;
+  /* Decorative: the bounds frame paints over the region backdrops and renders
+     after them in DOM order, so with default pointer-events it would win every
+     real hit-test on the region interior — a user's double-click lands here
+     instead of the region's collapse handler. Never let chrome eat clicks. */
+  pointer-events: none;
 }
 .frame-label {
   position: absolute;
@@ -4247,7 +4252,12 @@ html[data-theme="light"] .badge-react {
   border: 1px dashed var(--stroke-2);
   border-radius: var(--r-lg);
   background: oklch(from var(--canvas-1) l c h / 0.35);
-  pointer-events: none;
+  /* A kind-region carries a collapse affordance (P1: double-click to
+     collapse), so the box must receive pointer events — with `none` the
+     onDoubleClick attribute never fired and the region could not be
+     collapsed with a mouse at all (found live). The box sits BEHIND the
+     nodes in z-order, so clicks on nodes still hit the nodes. */
+  pointer-events: auto;
 }
 .group-region-label {
   position: absolute;
