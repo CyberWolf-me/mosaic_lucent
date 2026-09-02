@@ -76,6 +76,10 @@ export interface PersistedProposal {
   meetingId: string | null;
   /** The source turns, quoted, when the proposal came from meeting capture. */
   turns?: string[];
+  /** Stable index range of those turns in the meeting (Stage A provenance). */
+  turnRange?: [number, number];
+  /** Kinds of the source turns, when the capture classified them. */
+  turnKinds?: string[];
   operations: import("@lucent/core").Operation[];
   status: ProposalStatus;
   createdAt: number;

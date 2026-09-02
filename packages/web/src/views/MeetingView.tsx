@@ -95,7 +95,16 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
     let cancelled = false;
     void (async () => {
       const rows = await listMeetings(boardId);
-      if (!cancelled && rows) setSaved(rows);
+      if (!cancelled) {
+        setSaved(rows ?? []);
+        // The ✦ provenance jump (Stage A): the canvas set ?meeting=<id> so
+        // this view opens directly on the transcript that created the node.
+        const wanted = new URL(window.location.href).searchParams.get("meeting");
+        if (wanted) {
+          const match = (rows ?? []).find((m) => m.id === wanted);
+          if (match) setSelectedMeeting(match);
+        }
+      }
     })();
     return () => {
       cancelled = true;
@@ -251,12 +260,18 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
       // the canvas opens the review panel — either way the user sees the
       // outcome on the board, and the view never blocks on it. The
       // provenance attachment stamps whatever this extract creates with
-      // the meeting id and the turns' own words, so the board can always
-      // answer "why is this here?".
+      // the meeting id, the turns' own words, AND the stable index range
+      // + per-turn kinds — the range survives transcript normalization and
+      // is what a future board→transcript→object link keys on.
+      const batchStart = Math.max(0, turns.length - extractQueued);
       await send(prompt, undefined, {
         provenance: {
           meetingId: liveMeetingId ?? "live-session",
           turns: batch.map((t) => t.text),
+          turnRange: [batchStart, batchStart + batch.length - 1],
+          turnKinds: batch
+            .map((t) => t.kind)
+            .filter((k): k is NonNullable<MeetingTurn["kind"]> => Boolean(k)),
         },
       });
       setLastExtractStatus(

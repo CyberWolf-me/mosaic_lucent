@@ -99,6 +99,10 @@ export interface Proposal {
   meetingId: string | null;
   /** The source turns, quoted, when the proposal came from meeting capture. */
   turns?: string[];
+  /** Stable index range of those turns in the meeting (Stage A provenance). */
+  turnRange?: [number, number];
+  /** Kinds of the source turns, when the capture classified them. */
+  turnKinds?: string[];
   /** Stable across saves; a new proposal mints a new id. */
   id: string;
   status: ProposalStatus;
@@ -114,11 +118,21 @@ export interface SendAttachments {
    * extraction passes its transcript id and the turns' span, so every node
    * the model adds from the conversation can answer "why is this here?"
    * — the board's audit trail for AI-generated content.
+   *
+   * Stage A: `turns` gains stable per-turn references alongside the quoted
+   * text. The quote is presentation (it changes if transcript normalization
+   * changes); the ids/range are the durable link — and they are what a later
+   * reverse navigation (open a transcript turn, jump back to the object it
+   * created) keys on, so the data is shaped for that now.
    */
   provenance?: {
     meetingId: string;
     /** Turn texts that fed this request, quoted in the provenance record. */
     turns: string[];
+    /** Stable references to those turns — the index range in the meeting. */
+    turnRange?: [number, number];
+    /** Kinds of the source turns (decision / proposal / …) when classified. */
+    turnKinds?: string[];
   };
 }
 
@@ -738,14 +752,22 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
             meetingId: provenance.meetingId,
             quote,
             extractedAt: Date.now(),
-            // Deterministic kinds, per source turn, in turn order (P0-3).
-            ...(provenance.turns.some((t) => classifyTurn(t))
-              ? {
-                  turnKinds: provenance.turns
-                    .map((t) => classifyTurn(t))
-                    .filter((k): k is NonNullable<ReturnType<typeof classifyTurn>> => Boolean(k)),
-                }
-              : {}),
+            // Stable references (Stage A): the index range survives transcript
+            // normalization where the quote cannot, and a future reverse link
+            // (transcript turn → object) keys on it.
+            ...(provenance.turnRange ? { turnRange: provenance.turnRange } : {}),
+            // Deterministic kinds, per source turn, in turn order (P0-3) —
+            // preferring the kinds the caller derived (the meeting loop's
+            // per-turn classification) over re-deriving from bare text.
+            ...(provenance.turnKinds?.length
+              ? { turnKinds: provenance.turnKinds }
+              : provenance.turns.some((t) => classifyTurn(t))
+                ? {
+                    turnKinds: provenance.turns
+                      .map((t) => classifyTurn(t))
+                      .filter((k): k is NonNullable<ReturnType<typeof classifyTurn>> => Boolean(k)),
+                  }
+                : {}),
           };
           // Only nodes this batch ADDED (absent before) carry the stamp.
           const nodes: Workspace["nodes"] = {};
@@ -794,6 +816,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
               boardId,
               meetingId: provenance?.meetingId ?? null,
               ...(provenance?.turns ? { turns: provenance.turns } : {}),
+              ...(provenance?.turnRange ? { turnRange: provenance.turnRange } : {}),
+              ...(provenance?.turnKinds?.length ? { turnKinds: provenance.turnKinds } : {}),
               operations: result.operations,
               createdAt: Date.now(),
               request: text,
@@ -868,7 +892,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     let next = partial.workspace;
     // Review-gated meeting extractions keep their provenance (M2): the stamp
     // records the transcript and quote behind whatever the batch created —
-    // and, since P0-3, the deterministic turn kinds.
+    // and, since Stage A, the stable turn range and kinds.
     if (proposal.meetingId) {
       const turns = proposal.turns ?? [];
       const quote = turns.join(" ").slice(0, 240);
@@ -876,13 +900,16 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         meetingId: proposal.meetingId,
         quote,
         extractedAt: Date.now(),
-        ...(turns.some((t) => classifyTurn(t))
-          ? {
-              turnKinds: turns
-                .map((t) => classifyTurn(t))
-                .filter((k): k is NonNullable<ReturnType<typeof classifyTurn>> => Boolean(k)),
-            }
-          : {}),
+        ...(proposal.turnRange ? { turnRange: proposal.turnRange } : {}),
+        ...(proposal.turnKinds?.length
+          ? { turnKinds: proposal.turnKinds }
+          : turns.some((t) => classifyTurn(t))
+            ? {
+                turnKinds: turns
+                  .map((t) => classifyTurn(t))
+                  .filter((k): k is NonNullable<ReturnType<typeof classifyTurn>> => Boolean(k)),
+              }
+            : {}),
       };
       const nodes: Workspace["nodes"] = {};
       for (const [id, node] of Object.entries(next.nodes)) {

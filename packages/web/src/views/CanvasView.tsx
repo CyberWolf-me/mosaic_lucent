@@ -110,6 +110,7 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
     redo,
     peers,
     readOnly,
+    setView,
   } = useWorkspace();
   const [settings] = useSettings();
   const { notify } = useToast();
@@ -1703,6 +1704,17 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
                 onExpand={(label) => void send(`Expand the "${label}" node into its sub-steps.`)}
                 onTransform={() => selectDiagram(nextDiagramKind(workspace.diagramKind))}
                 onComment={() => setCommentTarget(selected)}
+                onOpenMeeting={(meetingId) => {
+                  // The ✦ trust loop: jump to the meeting that created this
+                  // node. The meeting id rides in the URL (?meeting=<id>) —
+                  // MeetingView reads it on mount and selects that transcript,
+                  // so the canvas needs no meeting state of its own.
+                  const url = new URL(window.location.href);
+                  if (meetingId) url.searchParams.set("meeting", meetingId);
+                  else url.searchParams.delete("meeting");
+                  window.history.replaceState({}, "", url.toString());
+                  setView("meeting");
+                }}
               />
             )}
             {/* Live collaborators' cursors and selections track content space. */}
@@ -2043,6 +2055,7 @@ function SelectionHud({
   onExpand,
   onTransform,
   onComment,
+  onOpenMeeting,
 }: {
   id: string;
   workspace: import("@lucent/core").Workspace;
@@ -2050,6 +2063,8 @@ function SelectionHud({
   onExpand: (label: string) => void;
   onTransform: () => void;
   onComment: () => void;
+  /** Open the meeting a provenance stamp points at (null = the view itself). */
+  onOpenMeeting?: (meetingId: string | null) => void;
 }) {
   const node = workspace.nodes[id];
   if (!node?.position) return null;
@@ -2063,15 +2078,26 @@ function SelectionHud({
       <button onClick={onTransform}>Transform</button>
       <button onClick={() => onExpand(node.label)}>Expand</button>
       <button onClick={onComment}>Comment</button>
-      {/* Meeting provenance (M2/P0-3): a node created from a meeting extract
-          can always answer "why is this here?" — the quoted words that
-          produced it plus the statement KINDS the turns carried, shown on
-          demand rather than cluttering the card. The kinds come from the
+      {/* Meeting provenance (M2/P0-3/Stage A): a node created from a meeting
+          extract can always answer "why is this here?" — the quoted words
+          that produced it plus the statement KINDS the turns carried, and a
+          click that JUMPS to the source meeting, closing the trust loop:
+          AI creates → user questions → evidence. The kinds come from the
           deterministic classifyTurn stamp, so a decision node and a proposal
-          node are distinguishable at a glance on the board itself. */}
+          node are distinguishable at a glance. */}
       {Boolean(node.metadata?.meeting) && (
-        <span
+        <button
           className="mono"
+          onClick={() => {
+            const meetingId = (node.metadata?.meeting as { meetingId?: string }).meetingId;
+            if (meetingId && meetingId !== "live-session") {
+              onOpenMeeting?.(meetingId);
+            } else {
+              // A live-session stamp (capture without a stored transcript)
+              // has no meeting to open — go to the view itself.
+              onOpenMeeting?.(null);
+            }
+          }}
           title={`Created from meeting discussion: “${String(
             (node.metadata?.meeting as { quote?: string } | undefined)?.quote ?? "",
           )}”${
@@ -2082,8 +2108,15 @@ function SelectionHud({
                   (node.metadata?.meeting as { turnKinds?: string[] }).turnKinds ?? []
                 ).join(", ")}`
               : ""
-          }`}
-          style={{ color: "var(--amber-2)", padding: "0 6px", fontSize: 11 }}
+          }${(node.metadata?.meeting as { turnRange?: [number, number] }).turnRange ? `\nTurns: ${String((node.metadata?.meeting as { turnRange?: [number, number] }).turnRange![0])}–${String((node.metadata?.meeting as { turnRange?: [number, number] }).turnRange![1])}` : ""}\nClick to open the source meeting`}
+          style={{
+            color: "var(--amber-2)",
+            padding: "0 6px",
+            fontSize: 11,
+            background: "transparent",
+            border: "none",
+            cursor: "pointer",
+          }}
         >
           ✦
           {Array.isArray(
@@ -2091,7 +2124,7 @@ function SelectionHud({
           ) && (node.metadata?.meeting as { turnKinds?: string[] }).turnKinds!.length > 0
             ? ` ${(node.metadata?.meeting as { turnKinds?: string[] }).turnKinds!.join("·")}`
             : ""}
-        </span>
+        </button>
       )}
       <div className="sep" />
       <button style={{ padding: "5px 8px" }}>
