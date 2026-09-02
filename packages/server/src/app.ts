@@ -3206,7 +3206,11 @@ export function createApp(deps: AppDeps): App {
       // non-member gets 404, not 403, so board ids stay unguessable.
       const guard = await requireBoardRole(req, res, id, "viewer", "/api/boards/:id", user);
       if (!guard.ok) return;
-      send(res, 200, { ...guard.board, role: guard.role });
+      // Stage B4: the board's durable revision rides the snapshot, so a first
+      // join knows where it already is before the socket opens — the
+      // handshake the store's `latestSeq` contract promised all along.
+      const seq = await boardStore.latestSeq(id);
+      send(res, 200, { ...guard.board, role: guard.role, latestSeq: seq });
       return;
     }
 

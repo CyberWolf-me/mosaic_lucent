@@ -499,6 +499,17 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         // A viewer's edit, or a stale op. The server state we already hold wins.
         setChat((c) => [...c, { role: "error", text: `Change refused: ${error}` }]);
       },
+      // Stage B4: a server-level error is never swallowed. "board deleted"
+      // from an eviction means this client is editing a ghost — the honest
+      // reaction is leaving the board, not letting the user type into it.
+      onError: (message) => {
+        if (/deleted/i.test(message)) {
+          setChat((c) => [...c, { role: "error", text: "This board was deleted." }]);
+          setView("dashboard");
+          return;
+        }
+        setChat((c) => [...c, { role: "error", text: message }]);
+      },
       // Stage B3: a peer's proposal opens on this board too — the record is
       // server-side now, so the panel is board state, not a local draft.
       onProposalCreated: (server, supersededId) => {

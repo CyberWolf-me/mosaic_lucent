@@ -51,6 +51,11 @@ export interface BoardSyncCallbacks {
     by: string;
     appliedSeq?: number;
   }) => void;
+  /**
+   * Stage B4: a server-level error the client must not swallow (e.g. "board
+   * deleted" from an eviction) — the caller decides what to do about it.
+   */
+  onError?: (message: string) => void;
   /** Connection state, for a status dot. */
   onStatus?: (status: "connecting" | "online" | "offline") => void;
   /** The caller's role on this board. */
@@ -75,6 +80,15 @@ export class BoardSync {
   private reconnectAttempts = 0;
   private presenceTimer: ReturnType<typeof setTimeout> | null = null;
   private pendingPresence: { cursor?: { x: number; y: number } | null; selection?: string[] } = {};
+  /**
+   * Stage B4: batches committed while the socket was down. `send()` used to
+   * drop them silently — an edit made on a train tunnel vanished when the
+   * socket blinked. Queued in order and replayed after catchup, WITH THEIR
+   * ORIGINAL requestIds, so Batch 1's idempotency makes the replay
+   * exactly-once: if a batch actually landed before the drop, its replay is
+   * answered with the original seq as a duplicate no-op.
+   */
+  private pendingQueue: Array<{ msg: Record<string, unknown>; requestId: string }> = [];
 
   constructor(
     private readonly boardId: string,
@@ -152,6 +166,46 @@ export class BoardSync {
         for (const p of (msg.peers ?? []) as Peer[]) this.peers.set(p.userId, p);
         this.cb.onWorkspace(this.workspace);
         this.cb.onPeers([...this.peers.values()]);
+        // Stage B4: catchup is in, the queue goes out. Replay in order with
+        // the original requestIds — idempotency (B1) makes anything that
+        // actually landed before the drop a duplicate no-op, so the replay
+        // is exactly-once even after a half-delivered send.
+        if (this.pendingQueue.length > 0) {
+          const queue = this.pendingQueue;
+          this.pendingQueue = [];
+          for (const { msg: queued } of queue) this.send(queued);
+        }
+        break;
+      }
+      case "resync": {
+        // Stage B4: the server could not serve an honest catchup from this
+        // cursor (the log was pruned past it — the client's state has a hole
+        // nothing can fill). The workspace arrives wholesale: replace state
+        // atomically, never diff it — partial application here would leave
+        // the board half-old.
+        this.cb.onStatus?.("online");
+        if (msg.role) this.cb.onRole?.(msg.role as "owner" | "editor" | "viewer");
+        this.workspace = msg.workspace as Workspace;
+        this.version = Number(msg.version ?? 0);
+        this.peers.clear();
+        for (const p of (msg.peers ?? []) as Peer[]) this.peers.set(p.userId, p);
+        this.cb.onWorkspace(this.workspace);
+        this.cb.onPeers([...this.peers.values()]);
+        // The queued batches were built against pre-resync state; they are
+        // still the user's edits, so they replay as-is — the server's
+        // validation is the arbiter of what still applies (B1 semantics).
+        if (this.pendingQueue.length > 0) {
+          const queue = this.pendingQueue;
+          this.pendingQueue = [];
+          for (const { msg: queued } of queue) this.send(queued);
+        }
+        break;
+      }
+      case "error": {
+        // Stage B4: server-level errors were silently dropped — "board
+        // deleted" from an eviction left a zombie client editing nothing.
+        // Surfaced so the caller can react (the app navigates away).
+        this.cb.onError?.(String(msg.message ?? "server error"));
         break;
       }
       case "op": {
@@ -228,7 +282,16 @@ export class BoardSync {
     // flapping socket (a later batch) replays this id and is answered with the
     // original outcome — the client never needs to guess whether "it sent".
     const requestId = newRequestId();
-    this.send({ type: "op", ops, label, requestId });
+    const msg: Record<string, unknown> = { type: "op", ops, label, requestId };
+    // Stage B4: never drop a user edit again. Socket open → send now;
+    // closed → queue for the reconnect replay above. Optimistic local state
+    // already holds the edit (workspace.tsx applies first), so this is purely
+    // a durability question, and the queue is the answer.
+    if (this.socket?.readyState === WebSocket.OPEN) {
+      this.socket.send(JSON.stringify(msg));
+    } else {
+      this.pendingQueue.push({ msg, requestId });
+    }
   }
 
   /** Report cursor/selection; throttled so a moving mouse doesn't flood. */

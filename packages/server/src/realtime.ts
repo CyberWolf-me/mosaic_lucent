@@ -5,6 +5,7 @@ import { Room } from "./room.js";
 import type { LoggedOp } from "./room.js";
 import type { FanoutMessage, Unsubscribe } from "./fanout.js";
 import type { BoardStore } from "./boards.js";
+import type { OperationActor } from "./boards.js";
 import type { UserStore } from "./accounts.js";
 import type { Role } from "./identity.js";
 import type { TicketStore } from "./realtimeTicket.js";
@@ -180,8 +181,22 @@ export class RealtimeServer {
     this.connsByBoard.clear();
   }
 
-  /** Drop a hosted room and its bus subscription; state lives in the store. */
-  private evictRoom(boardId: string): void {
+  /**
+   * Drop a hosted room and its bus subscription; state lives in the store.
+   * Eviction is also the compaction moment (Stage B4): the room's current
+   * workspace is written as a snapshot at its head seq, so the NEXT cold start
+   * rebuilds from it and replays only the tail — a busy board stops paying the
+   * full-history replay on every all-participants-leave cycle. Idempotent on
+   * (board, seq) by the store's contract; best-effort, because a failed
+   * snapshot costs a full replay next time, never correctness.
+   */
+  private evictRoom(boardId: string, room?: Room): void {
+    const current = room ?? this.rooms.get(boardId);
+    if (current) {
+      void this.deps.boardStore
+        .putSnapshot(boardId, current.version(), current.current())
+        .catch(() => {});
+    }
     this.rooms.delete(boardId);
     this.connsByBoard.delete(boardId);
     const unsub = this.fanoutUnsubs.get(boardId);
@@ -248,8 +263,12 @@ export class RealtimeServer {
       this.sendTo(conn, { type: "error", message: "board not found" });
       return;
     }
-    const log = await this.deps.boardStore.loadLog(boardId);
-    const room = this.roomFor(boardId, board.workspace, board.ownerId, log);
+    // Room rebuild, snapshot-anchored (ADR 0010's intent, wired): a hot room
+    // is reused; a cold start rebuilds from the newest SNAPSHOT plus the log
+    // tail after it, instead of replaying the board's whole history — a
+    // board with 50k entries used to replay all 50k on every cold join. When
+    // no snapshot exists the full log is the only honest base.
+    const room = await this.roomFor(boardId, board.workspace, board.ownerId);
     room.setRole(conn.userId, role);
 
     conn.boardId = boardId;
@@ -272,6 +291,24 @@ export class RealtimeServer {
           selection: [],
         })
         .catch(() => {});
+    }
+
+    // Reseed instead of a partial catchup: the client's cursor predates the
+    // snapshot floor (the log was pruned past where it last was), so honest
+    // entries for the gap simply do not exist. Sending the tail alone would
+    // leave a hole in the client's state; the workspace wholesale is the only
+    // correct answer, and the client's resync handler replaces its state
+    // atomically rather than applying a diff.
+    if (room.baseSeqOf() > fromSeq) {
+      this.sendTo(conn, {
+        type: "resync",
+        workspace: room.current(),
+        version: room.version(),
+        role: room.roleOf(conn.userId),
+        peers: room.peers(conn.userId),
+      });
+      this.broadcast(boardId, { type: "peer-joined", presence }, conn);
+      return;
     }
 
     // Send the joiner: their role, the current version, and any ops they've missed.
@@ -546,14 +583,14 @@ export class RealtimeServer {
           .peers(boardIdForEvict)
           .then((peers) => {
             if (peers.length === 0) {
-              this.evictRoom(boardIdForEvict);
+              this.evictRoom(boardIdForEvict, room);
             }
           })
           .catch(() => {});
         stillHasPeer = true;
       }
       if (!stillHasPeer && room.isEmpty()) {
-        this.evictRoom(conn.boardId);
+        this.evictRoom(conn.boardId, room);
       }
       // Drop the cross-instance row for this participant. The compare-and-
       // delete on `instanceId` keeps a sibling instance's live row safe if
@@ -567,12 +604,16 @@ export class RealtimeServer {
     conn.boardId = null;
   }
 
-  private roomFor(
-    boardId: string,
-    workspace: Workspace,
-    ownerId: string,
-    initialLog?: RoomInitLog,
-  ): Room {
+  /**
+   * The room for a board, cold-started snapshot-anchored (Stage B4, wiring
+   * ADR 0010's design): the newest snapshot becomes the base state and only
+   * the log TAIL after it replays. `Room.fromSnapshot` records the snapshot's
+   * seq as `baseSeq`, which is what makes the reseed-vs-catchup decision in
+   * `join` possible — and a board with a long history stops paying the full
+   * replay on every cold join. No snapshot: the full log is the only honest
+   * base, and the room is built exactly as before.
+   */
+  private async roomFor(boardId: string, workspace: Workspace, ownerId: string): Promise<Room> {
     let room = this.rooms.get(boardId);
     if (!room) {
       // M3: the room allocates seqs through the board store, so two instances
@@ -582,36 +623,63 @@ export class RealtimeServer {
       // entries in, re-validates, retries. The store contract says appendOp
       // never throws on contention, it answers `conflict`/`lost` — exactly
       // what the allocator wants.
-      room = new Room(boardId, workspace, ownerId, initialLog, {
-        append: (entry) =>
-          this.deps.boardStore.appendOp({
-            boardId,
-            ops: entry.ops,
-            by: entry.by,
-            label: entry.label,
-            at: entry.at,
-            expectedSeq: entry.expectedSeq,
-            ...(entry.requestId !== undefined ? { requestId: entry.requestId } : {}),
-            ...(entry.actor !== undefined ? { actor: entry.actor } : {}),
-          }),
-        fetch: (fromSeq) =>
-          this.deps.boardStore
-            .loadLog(boardId, fromSeq)
-            // LoggedOpEntry and LoggedOp are structurally the same record;
-            // the mapping keeps the room decoupled from the store's type.
-            .then((entries) =>
-              entries.map((e) => ({
-                seq: e.seq,
-                ops: e.ops,
-                by: e.by,
-                label: e.label,
-                at: e.at,
-                ...(e.operationId !== undefined ? { operationId: e.operationId } : {}),
-                ...(e.requestId !== undefined ? { requestId: e.requestId } : {}),
-                ...(e.actor !== undefined ? { actor: e.actor } : {}),
-              })),
-            ),
-      });
+      const append = (entry: {
+        ops: Operation[];
+        by: string;
+        label: string;
+        at: number;
+        expectedSeq: number;
+        requestId?: string;
+        actor?: OperationActor;
+      }) =>
+        this.deps.boardStore.appendOp({
+          boardId,
+          ops: entry.ops,
+          by: entry.by,
+          label: entry.label,
+          at: entry.at,
+          expectedSeq: entry.expectedSeq,
+          ...(entry.requestId !== undefined ? { requestId: entry.requestId } : {}),
+          ...(entry.actor !== undefined ? { actor: entry.actor } : {}),
+        });
+      // LoggedOpEntry and LoggedOp are structurally the same record; the
+      // mapping keeps the room decoupled from the store's type.
+      const mapLog = (entries: Awaited<ReturnType<BoardStore["loadLog"]>>): RoomInitLog =>
+        entries.map((e) => ({
+          seq: e.seq,
+          ops: e.ops,
+          by: e.by,
+          label: e.label,
+          at: e.at,
+          ...(e.operationId !== undefined ? { operationId: e.operationId } : {}),
+          ...(e.requestId !== undefined ? { requestId: e.requestId } : {}),
+          ...(e.actor !== undefined ? { actor: e.actor } : {}),
+        }));
+      const fetch = (fromSeq: number): Promise<RoomInitLog> =>
+        this.deps.boardStore.loadLog(boardId, fromSeq).then(mapLog);
+      // Stage B4: the authoritative replay check — a request committed at a
+      // seq that was later snapshotted and pruned leaves no replayed entry
+      // for the room's map, and only the store can still answer.
+      const findRequest = (bid: string, requestId: string) =>
+        this.deps.boardStore
+          .findRequest(bid, requestId)
+          .then((e) => (e ? { seq: e.seq } : undefined));
+      // Snapshot-anchored cold start: the base state is the newest snapshot
+      // and only the tail replays. `Room.fromSnapshot` records the snapshot's
+      // seq as baseSeq, which is what makes the reseed-vs-catchup decision in
+      // `join` honest. No snapshot: the full log is the only correct base.
+      const snapshot = await this.deps.boardStore.latestSnapshot(boardId);
+      if (snapshot) {
+        const tail = await this.deps.boardStore.loadLog(boardId, snapshot.seq);
+        room = Room.fromSnapshot(boardId, snapshot, mapLog(tail), ownerId, {
+          append,
+          fetch,
+          findRequest,
+        });
+      } else {
+        const log = await this.deps.boardStore.loadLog(boardId);
+        room = new Room(boardId, workspace, ownerId, mapLog(log), { append, fetch, findRequest });
+      }
       this.rooms.set(boardId, room);
       this.subscribeFanout(boardId, room);
     }

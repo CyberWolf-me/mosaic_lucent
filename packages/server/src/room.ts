@@ -108,6 +108,15 @@ export interface RoomOptions {
   /** Reader for entries another writer added. Omitted: a losing commit cannot retry. */
   fetch?: OpFetcher;
   /**
+   * Stage B4: durable requestId lookup, the authoritative replay check. The
+   * room's own map only holds what its log replay saw — a request committed
+   * at a seq that was later snapshotted and pruned out of the log leaves no
+   * entry for the map to seed from, so the map alone would let a retry
+   * through to validation (which refuses a CREATE whose node exists) instead
+   * of answering with the original outcome. The store always knows.
+   */
+  findRequest?: (boardId: string, requestId: string) => Promise<{ seq: number } | undefined>;
+  /**
    * The seq the initial workspace is the state after -- a snapshot's seq, or the
    * head of a log whose entries were pruned. Below it the room cannot produce
    * catchup and says so (`canCatchUp`), which is what makes a reseed possible
@@ -146,6 +155,8 @@ export class Room {
   private readonly baseSeq: number;
   private readonly append: OpAllocator;
   private readonly fetch: OpFetcher;
+  /** Durable replay check for requests the in-memory map cannot see (B4). */
+  private readonly findRequest: NonNullable<RoomOptions["findRequest"]>;
   private readonly maxRetries: number;
   /** Whether the allocator persists (governs the caller's duplicate-write guard). */
   private readonly durable: boolean;
@@ -204,6 +215,9 @@ export class Room {
     this.durable = options.append !== undefined;
     // Default fetcher: nothing to catch up to, because nobody else is writing.
     this.fetch = options.fetch ?? (async () => []);
+    // Default lookup: nothing durable to consult — the in-memory map is the
+    // whole answer (unit tests, single-process dev). Realtime wires the store.
+    this.findRequest = options.findRequest ?? (async () => undefined);
   }
 
   /**
@@ -251,6 +265,16 @@ export class Room {
   }
 
   /**
+   * The snapshot floor: below this seq the log was pruned, so a client asking
+   * for catchup from an older cursor cannot be served honestly — only a
+   * reseed can answer. The join path uses this to choose between `welcome`
+   * (catchup) and `resync` (state wholesale).
+   */
+  baseSeqOf(): number {
+    return this.baseSeq;
+  }
+
+  /**
    * Commit a batch from one participant. Validates against live state, asks the
    * allocator for a sequence number, and returns the entry to broadcast.
    * Editing requires at least the editor role; a viewer is refused.
@@ -279,25 +303,26 @@ export class Room {
     // its ops would answer a retried CREATE with "already exists" and
     // double-apply a retried MOVE. The KEY is the identity of the request;
     // its outcome is already in the log, and the answer is that outcome.
+    // The map is the fast path; the store's findRequest is the truth for a
+    // request whose entry left the replayed log (snapshotted and pruned).
     // (The allocator's own duplicate handling stays as the durable backstop
-    // for a two-instance race this room's map cannot see.)
+    // for a two-instance race this room cannot see.)
     if (meta?.requestId !== undefined) {
-      const seq = this.committedRequests.get(meta.requestId);
+      const known = this.committedRequests.get(meta.requestId);
+      const seq = known ?? (await this.findRequest(this.boardId, meta.requestId))?.seq;
       if (seq !== undefined) {
-        const run = this.queue.then(() =>
-          Promise.resolve({
-            ok: true as const,
-            persisted: true,
-            duplicate: true as const,
-            head: seq,
-            requestId: meta.requestId,
-          }),
-        );
-        this.queue = run.then(
-          () => undefined,
-          () => undefined,
-        );
-        return run;
+        if (known === undefined) {
+          // Seed the map so subsequent replays of the same key are answered
+          // from memory.
+          this.committedRequests.set(meta.requestId, seq);
+        }
+        return {
+          ok: true,
+          persisted: true,
+          duplicate: true,
+          head: seq,
+          requestId: meta.requestId,
+        };
       }
     }
     // The AI-only guard also applies to humans: coordinates come from layout,
