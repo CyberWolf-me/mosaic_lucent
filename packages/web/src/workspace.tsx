@@ -46,7 +46,6 @@ import {
   setSharedBoardId,
   type ChatEntry,
   type PersistedProposal,
-  type ProjectData,
 } from "./persistence.js";
 import { settingsStore } from "./settings.js";
 
@@ -744,7 +743,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
               ? {
                   turnKinds: provenance.turns
                     .map((t) => classifyTurn(t))
-                    .filter((k): k is NonNullable<ReturnType<typeof classifyTurn>> => !!k),
+                    .filter((k): k is NonNullable<ReturnType<typeof classifyTurn>> => Boolean(k)),
                 }
               : {}),
           };
@@ -833,7 +832,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         setBusy(false);
       }
     },
-    [busy, chat, workspace, commitAndShare, projectName, readOnly, persist],
+    [busy, chat, workspace, commitAndShare, projectName, readOnly, persist, boardId],
   );
 
   /** Shared idempotency: claim the pending record, or no-op when decided. */
@@ -881,7 +880,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           ? {
               turnKinds: turns
                 .map((t) => classifyTurn(t))
-                .filter((k): k is NonNullable<ReturnType<typeof classifyTurn>> => !!k),
+                .filter((k): k is NonNullable<ReturnType<typeof classifyTurn>> => Boolean(k)),
             }
           : {}),
       };

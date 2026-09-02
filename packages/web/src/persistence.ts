@@ -247,7 +247,7 @@ export function loadProject(id: string): ProjectData | null {
     // rather than surfaced — a proposal is recoverable (re-ask), a crash on
     // load is not.
     if (data.proposal && data.proposal.operations && data.proposal.id) {
-      const p = data.proposal as PersistedProposal;
+      const p = data.proposal;
       data.proposal = { ...p, status: p.status ?? "pending" };
     } else {
       delete data.proposal;

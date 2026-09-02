@@ -952,7 +952,7 @@ export function relayoutRegion(
   // merge shifts the fresh layout so its top-left lands where the old one was.
   const placed = memberIds
     .map((id) => workspace.nodes[id])
-    .filter((n): n is NonNullable<typeof n> => !!n?.position);
+    .filter((n): n is NonNullable<typeof n> => Boolean(n?.position));
   if (placed.length === 0) return null;
   const originX = Math.min(...placed.map((n) => n.position!.x));
   const originY = Math.min(...placed.map((n) => n.position!.y));

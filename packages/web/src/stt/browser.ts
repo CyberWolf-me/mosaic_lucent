@@ -32,9 +32,6 @@ interface SpeechErrorEvent {
  * not one concatenated blob). The event's `resultIndex` tells us where the
  * new results begin so nothing is double-counted across restarts.
  */
-interface SegmentedResultEvent extends SpeechResultEvent {
-  resultIndex: number;
-}
 interface SegmentedResult {
   0: { transcript: string };
   isFinal: boolean;
@@ -93,11 +90,9 @@ export const browserSttProvider: SttProvider = {
 
     let recognition: SpeechRecognitionLike | null = null;
     let stopped = false;
-    // Segment mode bookkeeping: every utterance final fires onFinal at once;
-    // the last one is ALSO kept as `lastFinal` so stop() has something to say
-    // for consumers that still expect an end-of-session summary, and so the
-    // legacy one-blob consumers (the canvas voice pill) keep working.
-    let lastFinal = "";
+    // Segment mode bookkeeping: every utterance final fires onFinal at once.
+    // `emittedThrough` tracks the last result index already emitted so a
+    // recognizer restart replaying the list can't double-fire a turn.
     let emittedThrough = -1;
 
     const begin = () => {
@@ -118,7 +113,6 @@ export const browserSttProvider: SttProvider = {
             // recognizer restarts and replays the list).
             if (i > emittedThrough && transcript.trim()) {
               emittedThrough = i;
-              lastFinal = transcript.trim();
               handlers.onFinal(transcript.trim());
             }
           } else {

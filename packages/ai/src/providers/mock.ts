@@ -212,7 +212,7 @@ const scripts: Script[] = [
     // statement in place. The prompts carry "The board currently shows a
     // node…" phrasing the golden cases pin.
     match: (m) => /not doing usage-based pricing/i.test(m),
-    build: (req) => ({
+    build: () => ({
       explanation:
         "Marked the usage-based pricing proposal as rejected in place — the board now shows the rejection, not the proposal.",
       operations: [
@@ -226,7 +226,7 @@ const scripts: Script[] = [
   },
   {
     match: (m) => /actually,? young professionals/i.test(m),
-    build: (req) => ({
+    build: () => ({
       explanation:
         "Corrected the target users node in place: young professionals replaces students, no contradictory copy survives.",
       operations: [
@@ -243,7 +243,7 @@ const scripts: Script[] = [
     // pricing" is an action to DISCUSS with Sarah — the golden set pins
     // that it must not come out as an action assigned to Sarah.
     match: (m) => /talk to sarah about/i.test(m),
-    build: (req) => ({
+    build: () => ({
       explanation:
         "Added an action to discuss the pricing model with Sarah. Sarah is the person to talk to, not the owner of this action — the speaker owns it.",
       operations: [

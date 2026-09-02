@@ -78,7 +78,13 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
   // The server-side transcript for the RUNNING meeting: created at recording
   // start, appended-to at each extraction checkpoint, ended on stop.
   const [liveMeetingId, setLiveMeetingId] = useState<string | null>(null);
-  const [liveMeetingTurnCount, setLiveMeetingTurnCount] = useState(0);
+  // Durable turn count after the last checkpoint — a ref, because the count
+  // surfaces through the transcript list itself; only the extraction loop
+  // needs to read it.
+  const liveMeetingTurnCountRef = useRef(0);
+  const setLiveMeetingTurnCount = (n: number): void => {
+    liveMeetingTurnCountRef.current = n;
+  };
 
   const voiceSupported = isAnyVoiceSupported();
   const livekitConfigured = settings.livekitTokenUrl.trim().length > 0;
