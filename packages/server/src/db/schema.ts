@@ -1091,3 +1091,64 @@ export type DbSsoConnection = typeof ssoConnections.$inferSelect;
 export type DbNewSsoConnection = typeof ssoConnections.$inferInsert;
 export type DbDomainClaim = typeof domainClaims.$inferSelect;
 export type DbNewDomainClaim = typeof domainClaims.$inferInsert;
+
+/**
+ * Review-gate proposals, server-side (Stage B3 — the P2 boundary). A proposal
+ * is a durable record of what Lucent wants to change: the operations, the
+ * request that prompted them, the meeting provenance, and the decision.
+ *
+ * Before this table a pending proposal for a SHARED board lived only in the
+ * proposing browser's localStorage — that browser was the sole source of
+ * truth for the batch, invisible to every peer, gone if it closed. Now the
+ * server is the record, every member of the board sees the same pending
+ * batch, and the decision is transition-guarded where the log's own
+ * idempotency lives.
+ *
+ * `appliedSeq` links an approval to the exact op_log entry it produced, and
+ * together with the actor columns on that entry (ai/lucent/initiatedBy/
+ * approvedBy) gives the full accountability chain for every gated change.
+ */
+export const proposals = pgTable(
+  "proposals",
+  {
+    id: text("id").primaryKey(),
+    orgId: text("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    boardId: text("board_id")
+      .notNull()
+      .references(() => boards.id, { onDelete: "cascade" }),
+    /** Null when not extracted from a meeting. */
+    meetingId: text("meeting_id"),
+    status: text("status").notNull(),
+    operations: jsonb("operations").notNull(),
+    /** What the user asked for, as typed or spoken. */
+    request: text("request").notNull(),
+    /** The model's one-line explanation of the batch. */
+    explanation: text("explanation"),
+    /** Meeting provenance: quote, turnRange, turnKinds. */
+    provenance: jsonb("provenance"),
+    createdBy: text("created_by")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    createdAt: bigint("created_at", { mode: "number" }).notNull(),
+    /** Who decided, when — null while pending. */
+    decidedBy: text("decided_by").references(() => users.id, { onDelete: "set null" }),
+    decidedAt: bigint("decided_at", { mode: "number" }),
+    /** The op_log seq the approval committed, once applied. */
+    appliedSeq: bigint("applied_seq", { mode: "number" }),
+  },
+  (t) => ({
+    // One pending proposal per board, enforced by the database rather than by
+    // cooperating clients: two browsers extracting into the same board race
+    // for the slot, and the loser's create supersedes the winner's pending
+    // record — same contract the localStorage path had, now race-safe.
+    onePendingPerBoard: uniqueIndex("proposals_board_pending_uniq")
+      .on(t.boardId)
+      .where(sql`${t.status} = 'pending'`),
+    boardIdx: index("proposals_board_idx").on(t.boardId, t.createdAt),
+  }),
+);
+
+export type DbProposal = typeof proposals.$inferSelect;
+export type DbNewProposal = typeof proposals.$inferInsert;

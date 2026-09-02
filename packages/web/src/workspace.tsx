@@ -27,7 +27,16 @@ import {
 import { streamGenerate } from "./api.js";
 import { classifyTurn } from "./meetings.js";
 import { BoardSync, type Peer } from "./boardSync.js";
-import { fetchBoard, joinBoard, saveBoard, type BoardRole } from "./boards.js";
+import {
+  createServerProposal,
+  decideServerProposal,
+  fetchBoard,
+  joinBoard,
+  listServerProposals,
+  saveBoard,
+  type BoardRole,
+  type ServerProposal,
+} from "./boards.js";
 import { loadOrgs } from "./orgs.js";
 import { getSessionUser } from "./session.js";
 import {
@@ -359,6 +368,26 @@ export function reviewWorkspace(
  * access to anyone who reloads the URL, so leaving it visible turns a one-time
  * invite into a link the recipient can forward.
  */
+/**
+ * Mirror a server-side proposal record into the panel's Proposal shape
+ * (Stage B3). The panel renders from the local type; this adapter keeps the
+ * two contracts in one visible place instead of scattering field mappings.
+ */
+function serverProposalToPanel(server: ServerProposal): Proposal {
+  return {
+    id: server.id,
+    request: server.request,
+    operations: server.operations as Operation[],
+    explanation: server.explanation ?? "",
+    meetingId: server.meetingId,
+    ...(server.provenance?.quote ? { turns: [server.provenance.quote] } : {}),
+    ...(server.provenance?.turnRange ? { turnRange: server.provenance.turnRange } : {}),
+    ...(server.provenance?.turnKinds?.length ? { turnKinds: server.provenance.turnKinds } : {}),
+    status: server.status,
+    createdAt: server.createdAt,
+  };
+}
+
 function stripInviteFromUrl(): void {
   const url = new URL(window.location.href);
   if (!url.searchParams.has("invite")) return;
@@ -413,6 +442,15 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const proposalRecordRef = useRef<PersistedProposal | undefined>(restored?.proposal);
   const proposalHistoryRef = useRef<PersistedProposal[]>(restored?.proposalHistory ?? []);
   const decidedRef = useRef<string | null>(null);
+  /**
+   * Stage B3: the server-side record id of the currently open proposal, when
+   * the board is server-adopted. A proposal on a shared board lives on the
+   * SERVER — peers see it, and the decision is enforced once where both
+   * browsers can see it. Undefined on local boards (the localStorage record
+   * remains that path's contract) and for local previews of a server proposal
+   * before the create round-trip completes.
+   */
+  const serverProposalRef = useRef<{ boardId: string; id: string } | null>(null);
   const [tick, setTick] = useState(0); // force re-read of history undo/redo flags
   // Live collaborators. Populated only when a server-side board is open and the
   // realtime socket is connected; empty in the offline/solo localStorage flow.
@@ -461,6 +499,25 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         // A viewer's edit, or a stale op. The server state we already hold wins.
         setChat((c) => [...c, { role: "error", text: `Change refused: ${error}` }]);
       },
+      // Stage B3: a peer's proposal opens on this board too — the record is
+      // server-side now, so the panel is board state, not a local draft.
+      onProposalCreated: (server, supersededId) => {
+        serverProposalRef.current = { boardId: server.boardId, id: server.id };
+        decidedRef.current = null;
+        setProposal(serverProposalToPanel(server));
+        // A create supersedes the pending record this browser held locally
+        // (the same-board predecessor): its local mirror closes with it.
+        if (supersededId && proposalRecordRef.current?.id === supersededId) {
+          proposalRecordRef.current = undefined;
+        }
+      },
+      onProposalDecided: (event) => {
+        // The decision happened — possibly here, possibly on a peer. The
+        // panel closes either way; the ops (if approved) arrive as the room's
+        // ordinary broadcast, applying through onWorkspace above.
+        setProposal((p) => (p && p.id === event.id ? null : p));
+        if (serverProposalRef.current?.id === event.id) serverProposalRef.current = null;
+      },
     });
     syncRef.current = sync;
     sync.connect();
@@ -493,7 +550,19 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       proposalRecordRef.current = undefined;
       proposalHistoryRef.current = [];
       decidedRef.current = null;
+      serverProposalRef.current = null;
       setProposal(null);
+      // Stage B3: a shared board's pending proposal lives on the server, so
+      // adopting the board re-reads it — a refresh no longer drops the panel
+      // (and a peer's pending extraction opens on this browser as soon as
+      // the socket's proposal-created frame lands).
+      void listServerProposals(board.id).then((list) => {
+        const pending = list.find((p) => p.status === "pending");
+        if (pending) {
+          serverProposalRef.current = { boardId: board.id, id: pending.id };
+          setProposal(serverProposalToPanel(pending));
+        }
+      });
       // The server tells us our role on this board; trusting it here means the
       // read-only UI is correct before the socket's `welcome` arrives.
       setSyncRole(board.role);
@@ -802,36 +871,58 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
               ...skippedNote,
             },
           ];
-          // Open the durable record FIRST (any pending predecessor is
-          // superseded into the archive), then mirror it into live state.
-          // The record must be in the ref before persist() runs below —
-          // that save is what makes the proposal survive a reload.
-          const opened = openProposalIn(
-            {
-              proposal: proposalRecordRef.current,
-              proposalHistory: proposalHistoryRef.current,
-            },
-            {
-              id: newProposalId(),
-              boardId,
-              meetingId: provenance?.meetingId ?? null,
-              ...(provenance?.turns ? { turns: provenance.turns } : {}),
-              ...(provenance?.turnRange ? { turnRange: provenance.turnRange } : {}),
-              ...(provenance?.turnKinds?.length ? { turnKinds: provenance.turnKinds } : {}),
-              operations: result.operations,
-              createdAt: Date.now(),
-              request: text,
-              explanation,
-            },
-          );
-          proposalRecordRef.current = opened.proposal;
-          proposalHistoryRef.current = opened.proposalHistory;
-          decidedRef.current = null; // the new record is undecided
-          setProposal(opened.proposal);
           setChat(conversation);
-          // The ops themselves apply (and persist) only on approval, but the
-          // request, the review-gate reply, and now the PROPOSAL RECORD are
-          // durable from this moment on.
+          setBusy(true);
+          // Shared board (Stage B3): the record goes to the SERVER, which is
+          // what makes a pending proposal visible to every member — the
+          // localStorage path could never do that. The server supersedes any
+          // pending predecessor; peers' panels open via proposal-created.
+          const serverRecord = boardId
+            ? await createServerProposal(boardId, {
+                operations: result.operations,
+                request: text,
+                explanation,
+                ...(provenance?.meetingId ? { meetingId: provenance.meetingId } : {}),
+                ...(provenance?.turnRange
+                  ? { provenance: { turnRange: provenance.turnRange } }
+                  : {}),
+              })
+            : null;
+          if (serverRecord) {
+            serverProposalRef.current = {
+              boardId: boardId ?? serverRecord.boardId,
+              id: serverRecord.id,
+            };
+            decidedRef.current = null;
+            setProposal(serverProposalToPanel(serverRecord));
+          } else {
+            // Local board (or the server create failed — the panel must still
+            // open; the localStorage record is that path's durability).
+            const opened = openProposalIn(
+              {
+                proposal: proposalRecordRef.current,
+                proposalHistory: proposalHistoryRef.current,
+              },
+              {
+                id: newProposalId(),
+                boardId,
+                meetingId: provenance?.meetingId ?? null,
+                ...(provenance?.turns ? { turns: provenance.turns } : {}),
+                ...(provenance?.turnRange ? { turnRange: provenance.turnRange } : {}),
+                ...(provenance?.turnKinds?.length ? { turnKinds: provenance.turnKinds } : {}),
+                operations: result.operations,
+                createdAt: Date.now(),
+                request: text,
+                explanation,
+              },
+            );
+            proposalRecordRef.current = opened.proposal;
+            proposalHistoryRef.current = opened.proposalHistory;
+            decidedRef.current = null; // the new record is undecided
+            setProposal(opened.proposal);
+          }
+          // The ops themselves apply only on approval, but the request and
+          // the review-gate reply are durable from this moment on.
           persist(workspace, conversation, projectName);
         } else {
           const next = applyStamped();
@@ -880,6 +971,41 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const applyProposal = useCallback(() => {
     if (!proposal) return;
     if (readOnly) return;
+    // Server-side record (Stage B3): the decision goes to the server, which
+    // re-validates against the CURRENT board, commits through the room (so
+    // peers receive the same sequenced entry, stamped with the AI actor and
+    // the accountability chain), and enforces once-only — a second browser's
+    // approve is a read. This browser's local state catches up through the
+    // room's ordinary broadcast, so there is nothing to apply locally.
+    const server = serverProposalRef.current;
+    if (server) {
+      // The same synchronous guard as claimDecision: a double-click must not
+      // fire two requests. The server is the durable backstop.
+      if (decidedRef.current === proposal.id) return;
+      decidedRef.current = proposal.id;
+      setProposal(null); // the panel closes immediately; the ops arrive via WS
+      void decideServerProposal(server.boardId, server.id, "approve").then((out) => {
+        serverProposalRef.current = null;
+        if (!out) {
+          setChat((c) => [
+            ...c,
+            { role: "error", text: "Could not approve the proposal on the server." },
+          ]);
+          decidedRef.current = null; // allow a retry
+          return;
+        }
+        setChat((c) => [
+          ...c,
+          {
+            role: "ai",
+            text: out.duplicate
+              ? "Proposal was already decided by someone else."
+              : `Applied ${out.proposal.appliedSeq !== null ? "the" : ""} proposal changes as one commit.`,
+          },
+        ]);
+      });
+      return;
+    }
     // Idempotency FIRST — a double click must not commit the batch twice.
     if (!claimDecision("approved")) return;
     // Re-validate against the CURRENT board: a rehydrated proposal may
@@ -940,10 +1066,22 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   }, [proposal, workspace, chat, claimDecision, commitAndShare, projectName, readOnly]);
 
   const cancelProposal = useCallback(() => {
+    // Server-side record: the refusal is also the server's to record, so the
+    // decision is visible to every member and survives this browser.
+    const server = serverProposalRef.current;
+    if (server && proposal) {
+      if (decidedRef.current === proposal.id) return;
+      decidedRef.current = proposal.id;
+      setProposal(null);
+      void decideServerProposal(server.boardId, server.id, "reject").then(() => {
+        serverProposalRef.current = null;
+      });
+      return;
+    }
     // Idempotent reject: the record archives as rejected, not destroyed.
     if (!claimDecision("rejected")) return;
     setProposal(null);
-  }, [claimDecision]);
+  }, [claimDecision, proposal]);
 
   const undo = useCallback(() => {
     const { workspace: next, ops } = historyRef.current.undo();

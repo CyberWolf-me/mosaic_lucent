@@ -233,3 +233,82 @@ export async function fetchRealtimeTicket(): Promise<string | null> {
   const body = (await res.json()) as { ticket?: string };
   return body.ticket ?? null;
 }
+
+// --- Server-side proposals (Stage B3) ---------------------------------------
+//
+// The proposal record on a server-adopted board lives on the SERVER, not in
+// localStorage: every member of the board sees the same pending batch, and
+// the decision is enforced where both browsers can see it. The shapes mirror
+// `StoredProposal` from the server's proposals.ts.
+
+export interface ServerProposal {
+  id: string;
+  boardId: string;
+  meetingId: string | null;
+  status: "pending" | "approved" | "rejected" | "superseded";
+  operations: unknown[];
+  request: string;
+  explanation: string | null;
+  provenance: {
+    quote?: string;
+    turnRange?: [number, number];
+    turnKinds?: string[];
+  } | null;
+  createdBy: string;
+  createdAt: number;
+  decidedBy: string | null;
+  decidedAt: number | null;
+  appliedSeq: number | null;
+}
+
+/** Create a proposal on the server; supersedes any pending predecessor. */
+export async function createServerProposal(
+  boardId: string,
+  body: {
+    operations: unknown[];
+    request: string;
+    explanation?: string;
+    meetingId?: string;
+    provenance?: {
+      quote?: string;
+      turnRange?: [number, number];
+      turnKinds?: string[];
+    };
+  },
+): Promise<ServerProposal | null> {
+  const res = await authed(`/api/boards/${encodeURIComponent(boardId)}/proposals`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res || !res.ok) return null;
+  const data = (await res.json()) as { proposal?: ServerProposal };
+  return data.proposal ?? null;
+}
+
+/** A board's proposals, newest first — the rehydrate path on board load. */
+export async function listServerProposals(boardId: string): Promise<ServerProposal[]> {
+  const res = await authed(`/api/boards/${encodeURIComponent(boardId)}/proposals`);
+  if (!res || !res.ok) return [];
+  const data = (await res.json()) as { proposals?: ServerProposal[] };
+  return data.proposals ?? [];
+}
+
+/**
+ * Approve or reject. Returns the decided record plus `duplicate` when the
+ * proposal was already decided (the other browser got there first — a read,
+ * not a second commit).
+ */
+export async function decideServerProposal(
+  boardId: string,
+  proposalId: string,
+  verdict: "approve" | "reject",
+): Promise<{ proposal: ServerProposal; duplicate: boolean } | null> {
+  const res = await authed(
+    `/api/boards/${encodeURIComponent(boardId)}/proposals/${encodeURIComponent(proposalId)}/${verdict}`,
+    { method: "POST" },
+  );
+  if (!res || !res.ok) return null;
+  const out = (await res.json()) as { proposal: ServerProposal; duplicate?: boolean };
+  return { proposal: out.proposal, duplicate: out.duplicate === true };
+}

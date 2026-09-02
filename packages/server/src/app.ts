@@ -104,6 +104,7 @@ import { registerNotificationRoutes } from "./routes/notifications.js";
 import { registerInviteRoutes } from "./routes/invites.js";
 import { registerBoardOpsRoutes } from "./routes/boardOps.js";
 import { registerMeetingRoutes } from "./routes/meetings.js";
+import { registerProposalRoutes } from "./routes/proposals.js";
 import { registerSsoRoutes } from "./routes/sso.js";
 import { mintLiveKitToken } from "./livekit.js";
 import { registerAssetRoutes } from "./routes/assets.js";
@@ -215,6 +216,12 @@ export interface AppDeps {
    * LUCENT_DATABASE_URL is set, in-memory otherwise).
    */
   meetings?: import("./meetings.js").MeetingStore;
+  /**
+   * Stage B3: review-gate proposals. When present, proposal create/list/
+   * decide are real; without it they answer 503 (fail-closed, like the other
+   * optional stores). Built by main.ts on the store-per-database rule.
+   */
+  proposals?: import("./proposals.js").ProposalStore;
   /**
    * F1: SSO connections + domain claims. When present, the admin SSO routes
    * and the SAML ACS are real; without it they answer 503. Built by
@@ -415,6 +422,7 @@ export function createApp(deps: AppDeps): App {
     billing,
     meetings,
     ssoStore,
+    proposals: proposalStore,
   } = deps;
 
   const logger = deps.logger ?? silentLogger;
@@ -1482,6 +1490,7 @@ export function createApp(deps: AppDeps): App {
     usageStore,
     meetings,
     ssoStore,
+    proposals: proposalStore,
     entitlements,
     tickets,
     usage,
@@ -1531,6 +1540,11 @@ export function createApp(deps: AppDeps): App {
     // Deferred deliberately: `realtime` is constructed below, after the HTTP
     // server it needs, so this closure resolves it at request time.
     evictBoard: (boardId) => realtime.evictBoard(boardId),
+    // Stage B3: the proposal seams, deferred for the same reason as evictBoard
+    // — `realtime` is constructed below the route table.
+    commitForBoard: (boardId, userId, ops, label, meta) =>
+      realtime.commitForBoard(boardId, userId, ops, label, meta),
+    broadcastProposal: (boardId, event) => realtime.broadcastProposal(boardId, event),
   };
 
   const router = new Router<EmptyState>({
@@ -1546,6 +1560,7 @@ export function createApp(deps: AppDeps): App {
   registerInviteRoutes(router, services);
   registerBoardOpsRoutes(router, services);
   registerMeetingRoutes(router, services);
+  registerProposalRoutes(router, services);
   registerSsoRoutes(router, services);
   /**
    * Asset gateway (M7 / M4 storage): `/api/assets/*`. The handler is built

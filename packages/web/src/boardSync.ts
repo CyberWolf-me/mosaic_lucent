@@ -1,5 +1,6 @@
 import { applyOperations, type Operation, type Workspace } from "@lucent/core";
 import { fetchRealtimeTicket } from "./boards.js";
+import type { ServerProposal } from "./boards.js";
 
 /**
  * Client realtime sync (docs/12). Mirrors the server's Room over a WebSocket:
@@ -38,6 +39,18 @@ export interface BoardSyncCallbacks {
   ) => void;
   /** A local submit was accepted (or answered as a duplicate replay). */
   onAcked?: (seq: number, requestId: string | undefined, duplicate: boolean) => void;
+  /**
+   * Stage B3: a proposal was created on this board (by this browser or a
+   * peer) — the review panel opens on every connected client.
+   */
+  onProposalCreated?: (proposal: ServerProposal, supersededId: string | null) => void;
+  /** Stage B3: a proposal was decided — the panel closes everywhere. */
+  onProposalDecided?: (event: {
+    id: string;
+    status: "approved" | "rejected";
+    by: string;
+    appliedSeq?: number;
+  }) => void;
   /** Connection state, for a status dot. */
   onStatus?: (status: "connecting" | "online" | "offline") => void;
   /** The caller's role on this board. */
@@ -181,6 +194,30 @@ export class BoardSync {
         this.peers.delete(String(msg.userId));
         this.cb.onPeers([...this.peers.values()]);
         break;
+      case "proposal-created": {
+        const proposal = msg.proposal as ServerProposal | undefined;
+        if (proposal) {
+          this.cb.onProposalCreated?.(
+            proposal,
+            typeof msg.supersededId === "string" ? msg.supersededId : null,
+          );
+        }
+        break;
+      }
+      case "proposal-decided": {
+        if (
+          typeof msg.id === "string" &&
+          (msg.status === "approved" || msg.status === "rejected")
+        ) {
+          this.cb.onProposalDecided?.({
+            id: msg.id,
+            status: msg.status,
+            by: String(msg.by ?? ""),
+            ...(typeof msg.appliedSeq === "number" ? { appliedSeq: msg.appliedSeq } : {}),
+          });
+        }
+        break;
+      }
     }
   }
 

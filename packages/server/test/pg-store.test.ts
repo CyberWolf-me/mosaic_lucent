@@ -3,6 +3,8 @@ import { createWorkspace, type Operation, type Workspace } from "@lucent/core";
 import { closeDb, createDb, type Db } from "../src/db/client.js";
 import { migrate } from "../src/db/migrate.js";
 import { PostgresUserStore } from "../src/store/pg-users.js";
+import { PostgresOrgStore } from "../src/orgs.js";
+import { PostgresProposalStore } from "../src/store/pg-proposals.js";
 import { PostgresBoardStore } from "../src/store/pg-boards.js";
 import type { StoredBoard } from "../src/boards.js";
 import type { Role, StoredUser } from "../src/identity.js";
@@ -303,5 +305,191 @@ describeIf("PostgresBoardStore", () => {
     await store.delete(BOARD_DEL);
     expect(await store.get(BOARD_DEL)).toBeUndefined();
     expect(await store.loadLog(BOARD_DEL)).toHaveLength(0);
+  });
+});
+
+// --- Stage B: proposals + the idempotency index (Postgres parity) ---------
+
+describeIf("PostgresProposalStore", () => {
+  const tag = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+  const ORG = `org_pg_${tag}`;
+  const BOARD = `brd_pg_${tag}`;
+  const BOARD2 = `brd_pg2_${tag}`;
+  const USER = `usr_pg_${tag}`;
+
+  let store: PostgresProposalStore;
+  let boards: PostgresBoardStore;
+  let orgs: PostgresOrgStore;
+  let users: PostgresUserStore;
+
+  beforeAll(async () => {
+    const target = createDb(URL!);
+    store = new PostgresProposalStore(target);
+    boards = new PostgresBoardStore(target);
+    orgs = new PostgresOrgStore(target);
+    users = new PostgresUserStore(target);
+    await orgs.insert({ id: ORG, name: "P", createdAt: Date.now() });
+    await users.insert({
+      id: USER,
+      email: `pg_${tag}@e.com`,
+      name: "PG",
+      passwordHash: "x:y",
+      tokenVersion: 0,
+      createdAt: Date.now(),
+      emailVerifiedAt: null,
+    });
+    const { emptyWorkspace } = await import("../src/boards.js");
+    await boards.put({
+      id: BOARD,
+      orgId: ORG,
+      ownerId: USER,
+      name: "A",
+      workspace: emptyWorkspace("A"),
+      createdAt: 0,
+      updatedAt: 0,
+    });
+    await boards.put({
+      id: BOARD2,
+      orgId: ORG,
+      ownerId: USER,
+      name: "B",
+      workspace: emptyWorkspace("B"),
+      createdAt: 0,
+      updatedAt: 0,
+    });
+  });
+
+  it("create supersedes the pending predecessor; one pending per board", async () => {
+    const ops = [{ op: "CREATE_NODE", id: "n1", nodeType: "step", label: "N" }];
+    const first = await store.create({
+      boardId: BOARD,
+      orgId: ORG,
+      operations: ops as never,
+      request: "one",
+      createdBy: USER,
+      createdAt: 1,
+    });
+    expect(first.proposal.status).toBe("pending");
+    expect(first.supersededId).toBeNull();
+    const second = await store.create({
+      boardId: BOARD,
+      orgId: ORG,
+      operations: ops as never,
+      request: "two",
+      createdBy: USER,
+      createdAt: 2,
+    });
+    expect(second.supersededId).toBe(first.proposal.id);
+    const list = await store.forBoard(BOARD);
+    expect(list.filter((p) => p.status === "pending")).toHaveLength(1);
+    expect(list.find((p) => p.id === first.proposal.id)?.status).toBe("superseded");
+  });
+
+  it("decide is transition-guarded: a second decision changes nothing", async () => {
+    const { proposal } = await store.create({
+      boardId: BOARD2,
+      orgId: ORG,
+      operations: [{ op: "CREATE_NODE", id: "z", nodeType: "step", label: "Z" }] as never,
+      request: "r",
+      createdBy: USER,
+      createdAt: 3,
+    });
+    const first = await store.decide(BOARD2, proposal.id, {
+      status: "approved",
+      decidedBy: USER,
+      decidedAt: 4,
+      appliedSeq: 9,
+    });
+    expect(first?.status).toBe("approved");
+    expect(first?.appliedSeq).toBe(9);
+    const again = await store.decide(BOARD2, proposal.id, {
+      status: "rejected",
+      decidedBy: USER,
+      decidedAt: 5,
+    });
+    // The second decision is a read: the record still says approved.
+    expect(again?.status).toBe("approved");
+    expect(again?.appliedSeq).toBe(9);
+  });
+});
+
+describeIf("PostgresBoardStore idempotency (Stage B)", () => {
+  const tag = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+  const ORG = `org_bi_${tag}`;
+  const BOARD = `brd_bi_${tag}`;
+  const USER = `usr_bi_${tag}`;
+
+  let boards: PostgresBoardStore;
+  let orgs: PostgresOrgStore;
+  let users: PostgresUserStore;
+
+  beforeAll(async () => {
+    const target = createDb(URL!);
+    boards = new PostgresBoardStore(target);
+    orgs = new PostgresOrgStore(target);
+    users = new PostgresUserStore(target);
+    await orgs.insert({ id: ORG, name: "B", createdAt: Date.now() });
+    await users.insert({
+      id: USER,
+      email: `bi_${tag}@e.com`,
+      name: "BI",
+      passwordHash: "x:y",
+      tokenVersion: 0,
+      createdAt: Date.now(),
+      emailVerifiedAt: null,
+    });
+    const { emptyWorkspace } = await import("../src/boards.js");
+    await boards.put({
+      id: BOARD,
+      orgId: ORG,
+      ownerId: USER,
+      name: "I",
+      workspace: emptyWorkspace("I"),
+      createdAt: 0,
+      updatedAt: 0,
+    });
+  });
+
+  it("a replayed requestId answers the original seq via findRequest + appendOp", async () => {
+    const ops = [{ op: "CREATE_NODE", id: "q1", nodeType: "step", label: "Q" }];
+    const base = {
+      boardId: BOARD,
+      ops: ops as never,
+      by: USER,
+      label: "t",
+      at: 1,
+      requestId: `req_${tag}`,
+    };
+    const first = await boards.appendOp(base);
+    expect(first.ok).toBe(true);
+    // The replay through findRequest: the pre-validation guard the REST route runs.
+    const prior = await boards.findRequest(BOARD, `req_${tag}`);
+    expect(prior?.seq).toBe(first.ok ? first.seq : undefined);
+    // And the allocator-level duplicate answer for the two-instance race.
+    const replay = await boards.appendOp({ ...base, at: 2 });
+    expect(replay).toMatchObject({ ok: true, duplicate: true, seq: prior?.seq });
+    const log = await boards.loadLog(BOARD);
+    expect(log.filter((e) => e.requestId === `req_${tag}`)).toHaveLength(1);
+  });
+
+  it("the actor columns round-trip through the log", async () => {
+    const ops = [{ op: "CREATE_NODE", id: "q2", nodeType: "step", label: "Q2" }];
+    await boards.appendOp({
+      boardId: BOARD,
+      ops: ops as never,
+      by: USER,
+      label: "t",
+      at: 3,
+      requestId: `req_actor_${tag}`,
+      actor: { actorType: "ai", actorId: "lucent", initiatedBy: USER, approvedBy: USER },
+    });
+    const log = await boards.loadLog(BOARD);
+    const entry = log.find((e) => e.requestId === `req_actor_${tag}`);
+    expect(entry?.actor).toEqual({
+      actorType: "ai",
+      actorId: "lucent",
+      initiatedBy: USER,
+      approvedBy: USER,
+    });
   });
 });

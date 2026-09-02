@@ -681,6 +681,67 @@ export class RealtimeServer {
     this.connsByBoard.delete(boardId);
   }
 
+  /**
+   * Commit a batch into a board's room on behalf of a user (Stage B3). The
+   * proposal-approval path uses this so an applied proposal broadcasts through
+   * the ordinary pipeline — peers receive the same sequenced entry any edit
+   * produces, carrying the proposal's AI actor record. Requires the room to be
+   * live; an approval when nobody is connected to the board returns false and
+   * the caller applies the batch through the store directly instead.
+   */
+  async commitForBoard(
+    boardId: string,
+    userId: string,
+    ops: Operation[],
+    label: string,
+    meta?: { requestId?: string; actor?: import("./boards.js").OperationActor },
+  ): Promise<import("./room.js").CommitResult | null> {
+    const room = this.rooms.get(boardId);
+    if (!room) return null;
+    // The room's role map is the gate: a user who has not joined (or holds no
+    // role on the board) cannot commit through this seam at all.
+    if (room.roleOf(userId) === undefined) return null;
+    const result = await room.commit(userId, ops, label, meta);
+    // The caller has no store access, so this seam also performs the two
+    // post-commit steps applyOp owns: persist the room's workspace into the
+    // board row (unless the allocator already did) and publish the fanout.
+    if (result.ok && result.entry && !result.persisted) {
+      await this.deps.boardStore.appendOp({ ...result.entry, boardId });
+    }
+    if (result.ok && result.entry) {
+      const board = await this.deps.boardStore.get(boardId);
+      if (board) {
+        await this.deps.boardStore.put({
+          ...board,
+          workspace: room.current(),
+          updatedAt: Date.now(),
+        });
+      }
+      if (this.deps.fanout) {
+        void this.deps.fanout
+          .publish({ boardId, kind: "op", seq: result.entry.seq, userId: result.entry.by })
+          .catch(() => {});
+      }
+    }
+    return result;
+  }
+
+  /**
+   * Broadcast a proposal event to everyone connected to a board (Stage B3).
+   * The proposal review panel opens on every browser as one fact: the panel
+   * state is per-board, so the create and the decision both fan out here.
+   * Returns false when nobody is connected — the event is still durable in
+   * the store, and the next join reads it from GET /proposals.
+   */
+  broadcastProposal(boardId: string, event: unknown): boolean {
+    const set = this.connsByBoard.get(boardId);
+    if (!set || set.size === 0) return false;
+    for (const conn of set) {
+      if (conn.boardId === boardId) this.sendTo(conn, event);
+    }
+    return true;
+  }
+
   /** Testing/metrics: how many rooms are live. */
   roomCount(): number {
     return this.rooms.size;

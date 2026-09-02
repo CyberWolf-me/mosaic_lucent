@@ -13,6 +13,7 @@ import type { MetricsRegistry } from "../obs/metrics.js";
 import type { OrgStore } from "../orgs.js";
 import type { ExportFormat, NumericEntitlementKey } from "../plans.js";
 import type { MeetingStore } from "../meetings.js";
+import type { Operation } from "@lucent/core";
 import type { TicketStore } from "../realtimeTicket.js";
 import type { Telemetry } from "../telemetry.js";
 import type { UsageLimits, UsageTracker } from "../usage.js";
@@ -79,6 +80,8 @@ export interface RouteServices {
   readonly usageStore: UsageStore | undefined;
   /** E3/R3: meeting transcripts; undefined → the meetings routes answer 503. */
   readonly meetings: MeetingStore | undefined;
+  /** Stage B3: review-gate proposals; undefined → the proposal routes answer 503. */
+  readonly proposals: import("../proposals.js").ProposalStore | undefined;
   /** F1: SSO connections + domain claims; undefined → the SSO routes answer 503. */
   readonly ssoStore: import("../ssoStore.js").SsoStore | undefined;
   /**
@@ -205,4 +208,22 @@ export interface RouteServices {
    * free from being inside the request handler.
    */
   evictBoard(boardId: string): void;
+  /**
+   * Stage B3: commit a proposal's ops into the board's live room, so the
+   * approval broadcasts through the ordinary pipeline. Null when no room is
+   * live or the user holds no role in it (the caller applies through the
+   * store instead).
+   */
+  commitForBoard(
+    boardId: string,
+    userId: string,
+    ops: Operation[],
+    label: string,
+    meta?: { requestId?: string; actor?: import("../boards.js").OperationActor },
+  ): Promise<import("../room.js").CommitResult | null>;
+  /**
+   * Stage B3: fan a proposal event out to the board's live sockets. False
+   * when nobody is connected — the store stays the durable record.
+   */
+  broadcastProposal(boardId: string, event: unknown): boolean;
 }
