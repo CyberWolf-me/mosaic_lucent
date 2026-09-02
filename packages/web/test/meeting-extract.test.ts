@@ -143,9 +143,11 @@ describe("differentialPrompt — add, never rebuild", () => {
 
   it("teaches the mention-vs-owner attribution rule (the ambiguity case)", () => {
     const prompt = differentialPrompt([{ text: "We should talk to Sarah about pricing." }]);
-    expect(prompt).toContain("A mention is not an owner");
+    expect(prompt).toContain("A mention is never an owner");
     expect(prompt).toContain("Discuss pricing with Sarah");
-    expect(prompt).toContain("NOT an action owned by Sarah");
+    // The strengthened rule: the mentioned person never gets the assignee, and
+    // the action belongs to the SPEAKER.
+    expect(prompt).toContain("owned by the SPEAKER, not an action owned by Sarah");
   });
 
   it("tells the model to skip small talk and jokes entirely", () => {

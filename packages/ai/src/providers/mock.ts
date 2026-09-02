@@ -257,6 +257,94 @@ const scripts: Script[] = [
     }),
   },
   {
+    // Stage A attribution polarity (the gate's F7). The ✓ commitment shapes:
+    // a genuine 'I'll…' or 'Sarah will…' is an action WITH an owner, in any
+    // meeting style — the golden cases pin the SET_ISSUE assignee.
+    match: (m) => /i'?ll prepare the launch brief/i.test(m),
+    build: () => ({
+      explanation:
+        "David committed to the launch brief: an action card with David as owner, due Friday.",
+      operations: [
+        {
+          op: "CREATE_NODE",
+          id: "launch-brief",
+          nodeType: "action",
+          label: "Prepare launch brief",
+        },
+        {
+          op: "SET_ISSUE",
+          id: "launch-brief",
+          issue: { type: "task", status: "To Do", assignee: "David" },
+        },
+      ] as Operation[],
+    }),
+  },
+  {
+    match: (m) => /sarah will review both prototypes/i.test(m),
+    build: () => ({
+      explanation:
+        "Sarah is tasked with reviewing both prototypes Monday: an action owned by Sarah.",
+      operations: [
+        {
+          op: "CREATE_NODE",
+          id: "review-prototypes",
+          nodeType: "action",
+          label: "Review both prototypes",
+        },
+        {
+          op: "SET_ISSUE",
+          id: "review-prototypes",
+          issue: { type: "task", status: "To Do", assignee: "Sarah" },
+        },
+      ] as Operation[],
+    }),
+  },
+  {
+    // 'Can you ask Sarah…' — the speaker is asked to do the asking; the
+    // action is 'ask Sarah', owned by the SPEAKER. The golden case forbids
+    // a SET_ISSUE with assignee Sarah.
+    match: (m) => /can you ask sarah about/i.test(m),
+    build: () => ({
+      explanation:
+        "The speaker was asked to ask Sarah about the pricing model: an action to ask Sarah, owned by the speaker — Sarah is the topic, not the owner.",
+      operations: [
+        {
+          op: "CREATE_NODE",
+          id: "ask-sarah-pricing",
+          nodeType: "action",
+          label: "Ask Sarah about the pricing model",
+        },
+      ] as Operation[],
+    }),
+  },
+  {
+    // The ✗ hedged shape: 'we should probably ask Sarah' is a suggestion,
+    // not a commitment — the action may exist as a proposal, but NO owner.
+    match: (m) => /should probably ask sarah/i.test(m),
+    build: () => ({
+      explanation:
+        "Jin's line is a hedged suggestion, not a commitment: noted as a proposal-style idea with no owner. Nobody signed up to ask Sarah.",
+      operations: [
+        {
+          op: "CREATE_NODE",
+          id: "ask-sarah-idea",
+          nodeType: "idea",
+          label: "Proposal: ask Sarah about pricing",
+        },
+      ] as Operation[],
+    }),
+  },
+  {
+    // The anti-lexical guard: 'I'll think about it' contains "I'll" but is
+    // not a task in any meaningful sense — nothing lands on the board.
+    match: (m) => /i'?ll think about it/i.test(m),
+    build: () => ({
+      explanation:
+        "Lena said she'd think about it — a deferral, not a task. Nothing was committed, so nothing was added to the board.",
+      operations: [],
+    }),
+  },
+  {
     // Region retarget: "change the X section to a Y" flips one region's kind.
     match: (m) =>
       /change (the |this )?.{0,32}(section|region|diagram|part) to (an? )?(mind ?map|org ?chart|flow ?chart|journey|process|architecture|decision tree)/i.test(

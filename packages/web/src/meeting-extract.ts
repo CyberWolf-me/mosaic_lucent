@@ -152,7 +152,7 @@ export function differentialPrompt(
     "- Proposals ('maybe', 'what if', 'we could try') are NEVER decisions. Label the node 'Proposal: …' so a later rejection has something to visibly supersede.",
     "- A REJECTION ('no, we're not doing X') updates the existing X node: relabel it 'Rejected: X' or connect the rejection to it. Both statements must not survive as if both were true.",
     "- A CORRECTION ('actually…', 'no, I meant…') replaces the earlier statement's node in place: update its label; do not keep the superseded wording and do not create a second node.",
-    "- ATTRIBUTION: an action belongs to the person who said 'I'll…'. A mention is not an owner — 'we should talk to Sarah about pricing' is an action 'Discuss pricing with Sarah', NOT an action owned by Sarah.",
+    "- ATTRIBUTION: when the conversation establishes a GENUINE commitment or action, create the action node AND emit a SET_ISSUE giving it to the person who committed to it or was explicitly tasked with it — in ANY meeting style, not only planning sessions. A hedged or speculative mention ('we should probably ask Sarah', 'I'll think about it', 'I'll see if that's possible', 'can you imagine if…') is NOT a commitment: no assignee, and often no action at all. A mention is never an owner — 'we should talk to Sarah about pricing' is an action 'Discuss pricing with Sarah' owned by the SPEAKER, not an action owned by Sarah.",
     "- If a turn is small talk, a joke, or off-topic, emit nothing for it.",
   ].join("\n");
 }

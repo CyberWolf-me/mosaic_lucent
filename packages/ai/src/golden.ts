@@ -244,4 +244,77 @@ export const GOLDEN_SET: readonly GoldenCase[] = [
     // that assignee must not equal Sarah.
     forbidOperations: [],
   },
+
+  // ---- Stage A: attribution polarity (the gate's F7) — commitments get
+  // owners in EVERY meeting style; hedged mentions never do. ----
+
+  {
+    id: "commitment-speaker-owned",
+    // ✓ 'I'll…' — a genuine commitment: an action owned by the speaker.
+    message: "From a brainstorm: David: 'I'll prepare the launch brief by Friday.'",
+    summary: empty,
+    expectOperations: [
+      { op: "CREATE_NODE", nodeType: "action" },
+      {
+        op: "SET_ISSUE",
+        id: "launch-brief",
+        issue: { type: "task", status: "To Do", assignee: "David" },
+      },
+    ],
+  },
+  {
+    id: "commitment-third-person",
+    // ✓ 'Sarah will…' — an explicit tasking: the action belongs to Sarah.
+    message: "From a brainstorm: Sarah: 'Sarah will review both prototypes on Monday.'",
+    summary: empty,
+    expectOperations: [
+      { op: "CREATE_NODE" },
+      {
+        op: "SET_ISSUE",
+        id: "review-prototypes",
+        issue: { type: "task", status: "To Do", assignee: "Sarah" },
+      },
+    ],
+  },
+  {
+    id: "commitment-tasked-request",
+    // ✓ 'Can you ask Sarah…' — a tasked request: the speaker is asked to do
+    // it; the action is 'ask Sarah', owned by the SPEAKER, never by Sarah.
+    message: "From a brainstorm: Maya: 'Can you ask Sarah about the pricing model?'",
+    summary: empty,
+    expectOperations: [{ op: "CREATE_NODE" }],
+    // The misread to catch: SET_ISSUE with assignee Sarah (the mentioned
+    // person is the topic, not the owner).
+    forbidOperations: [
+      {
+        op: "SET_ISSUE",
+        id: "review-prototypes",
+        issue: { type: "task", status: "To Do", assignee: "Sarah" },
+      },
+    ],
+  },
+  {
+    id: "hedged-mention-no-assignee",
+    // ✗ 'we should probably ask Sarah' — a hedged suggestion, not a
+    // commitment. An action node MAY exist; an OWNER must not.
+    message: "From a brainstorm: Jin: 'We should probably ask Sarah about pricing at some point.'",
+    summary: empty,
+    forbidOperations: [
+      {
+        op: "SET_ISSUE",
+        id: "review-prototypes",
+        issue: { type: "task", status: "To Do", assignee: "Sarah" },
+      },
+    ],
+  },
+  {
+    id: "no-task-for-vague-commitment",
+    // ✗ 'I'll think about it' — the anti-lexical guard: this is not a task
+    // in any meaningful sense, so the board should carry at most nothing.
+    message: "From a brainstorm: Lena: 'I'll think about it.'",
+    summary: empty,
+    // The wrong answers are a task card and/or an assignee; nothing about
+    // the turn justifies workspace state.
+    forbidOperations: [{ op: "SET_ISSUE", issue: { assignee: "Lena" } }],
+  },
 ];

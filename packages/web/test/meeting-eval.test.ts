@@ -138,7 +138,7 @@ describe("differential prompt contract across all five meetings", () => {
       expect(prompt).toContain("do NOT rebuild");
       expect(prompt).toContain("update that node");
       expect(prompt).toContain("are NEVER decisions");
-      expect(prompt).toContain("A mention is not an owner");
+      expect(prompt).toContain("A mention is never an owner");
     },
   );
 
