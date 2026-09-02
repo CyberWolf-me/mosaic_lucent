@@ -8,7 +8,7 @@ import {
 } from "@lucent/core";
 import type { Role } from "./identity.js";
 import { roleAtLeast } from "./identity.js";
-import type { AppendResult, BoardSnapshot } from "./boards.js";
+import type { AppendResult, BoardSnapshot, OperationActor } from "./boards.js";
 /**
  * A collaboration room: the server-authoritative sync engine for one board
  * (docs/03, docs/12). Transport-free on purpose — it takes operations and
@@ -33,6 +33,8 @@ export interface LoggedOp {
   operationId?: string;
   /** The idempotency key the submit carried, when it had one. */
   requestId?: string;
+  /** Who/what produced the batch — the log-level accountability record. */
+  actor?: OperationActor;
 }
 
 /** A participant's live presence: cursor, viewport hint, and selection. */
@@ -266,7 +268,7 @@ export class Room {
     userId: string,
     ops: Operation[],
     label = "",
-    meta?: { requestId?: string },
+    meta?: { requestId?: string; actor?: OperationActor },
   ): Promise<CommitResult> {
     const role = this.roles.get(userId);
     if (!role || !roleAtLeast(role, "editor")) {
@@ -324,7 +326,7 @@ export class Room {
     authored: Operation[],
     userId: string,
     label: string,
-    meta?: { requestId?: string },
+    meta?: { requestId?: string; actor?: OperationActor },
   ): Promise<CommitResult> {
     const absorbed: LoggedOp[] = [];
     for (let attempt = 0; ; attempt += 1) {
@@ -351,6 +353,9 @@ export class Room {
         at: Date.now(),
         expectedSeq: this.head + 1,
         ...(meta?.requestId !== undefined ? { requestId: meta.requestId } : {}),
+        // The accountability record: defaults to the acting user, so every
+        // call site that predates the actor model keeps the same meaning.
+        actor: meta?.actor ?? { actorType: "user", actorId: userId, initiatedBy: userId },
       });
 
       if (result.ok) {
@@ -377,6 +382,9 @@ export class Room {
           at: Date.now(),
           ...(result.operationId !== undefined ? { operationId: result.operationId } : {}),
           ...(meta?.requestId !== undefined ? { requestId: meta.requestId } : {}),
+          ...(meta?.actor !== undefined
+            ? { actor: meta.actor }
+            : { actor: { actorType: "user", actorId: userId, initiatedBy: userId } }),
         };
         this.workspace = applyOperations(this.workspace, authored);
         this.log.push(entry);

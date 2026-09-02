@@ -133,6 +133,27 @@ export const opLog = pgTable(
      * a caller with no retry semantics — has no id to claim.
      */
     requestId: text("request_id"),
+    /**
+     * WHO/WHAT produced this batch: "user" (a human through the room, or an
+     * agent acting under a human's token), "ai" (Lucent's extraction — a
+     * proposal approval commits the model's operations as the model's act),
+     * or "system" (reserved for server-initiated writes; no producer yet).
+     * The three-part accountability split lives on the next two columns.
+     */
+    actorType: text("actor_type").notNull().default("user"),
+    /** The actor's stable id: a usr_… for users, "lucent" for the AI. */
+    actorId: text("actor_id").notNull(),
+    /**
+     * WHO ASKED for it: the user whose request produced the batch. Same as
+     * actorId for human edits; for an AI commit it is the user whose meeting
+     * or prompt the extraction answered.
+     */
+    initiatedBy: text("initiated_by"),
+    /**
+     * WHO AUTHORIZED it: for a review-gated AI proposal, the user who
+     * approved it. Null for direct edits (the editor IS the authorizer).
+     */
+    approvedBy: text("approved_by"),
   },
   (t) => ({
     pk: primaryKey({ columns: [t.boardId, t.seq] }),

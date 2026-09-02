@@ -134,7 +134,9 @@ export const registerBoardOpsRoutes: RegisterRoutes = (router, s) => {
 
     // Append before persist: the log is the record, the workspace is the
     // projection. A crash between the two leaves a log entry the next
-    // `catchUp` replays — the same ordering the room uses.
+    // `catchUp` replays — the same ordering the room uses. The actor record
+    // names the accountable human: an agent acts under its caller's token,
+    // so `user/caller` is honest — it is their agent, not a fourth actor kind.
     const append = await boardStore.appendOp({
       boardId,
       ops: operations,
@@ -143,6 +145,7 @@ export const registerBoardOpsRoutes: RegisterRoutes = (router, s) => {
       at: Date.now(),
       ...(typeof body.expectedSeq === "number" ? { expectedSeq: body.expectedSeq } : {}),
       ...(requestId !== undefined ? { requestId } : {}),
+      actor: { actorType: "user", actorId: user.id, initiatedBy: user.id },
     });
     if (!append.ok) {
       // Stale or raced: the caller re-reads and re-validates. `head` is

@@ -69,6 +69,50 @@ export interface LoggedOpEntry {
   operationId?: string;
   /** The idempotency key the submit carried, when it had one. */
   requestId?: string;
+  /** Who/what produced the batch; `by` remains the authorship stamp. */
+  actor?: OperationActor;
+}
+
+/**
+ * The three-part accountability split (Stage B, per the approved actor model):
+ *
+ *   actor       — WHO/WHAT produced the operations.
+ *   initiatedBy — WHO ASKED for them (the user behind the meeting or prompt).
+ *   approvedBy  — WHO AUTHORIZED the change (for review-gated AI proposals).
+ *
+ * They are often the same person, but not always: Alex asks, Lucent
+ * generates, Sarah approves. The history can then honestly say both things —
+ * "✦ Lucent created 4 nodes" and "initiated by Alex, approved by Sarah" —
+ * where a single `by` column could only ever say one of them, and said the
+ * wrong one (the approver) for every gated commit.
+ *
+ * `by` on the workspace side (comments/votes/reactions authorship) is
+ * unchanged: `stampAuthorship` stamps the connection's user, and the reserved
+ * `assistant` id stays the AI's workspace-level author. The actor model is
+ * LOG-level accountability and deliberately does not migrate workspace data.
+ */
+export interface OperationActor {
+  /** "user" (human or their agent), "ai" (Lucent's extraction), "system". */
+  actorType: "user" | "ai" | "system";
+  /** The actor's stable id: usr_… for users, "lucent" for the AI. */
+  actorId: string;
+  /** Who asked for the batch; the user behind a meeting/prompt for AI acts. */
+  initiatedBy?: string;
+  /** Who approved a review-gated batch; null for direct edits. */
+  approvedBy?: string;
+}
+
+/** The ordinary case: a human edited the board directly. */
+export function userActor(userId: string): OperationActor {
+  return { actorType: "user", actorId: userId, initiatedBy: userId };
+}
+
+/**
+ * An AI act: Lucent generated the operations from `initiatedBy`'s meeting or
+ * prompt, and (for review-gated proposals) `approvedBy` authorized the commit.
+ */
+export function aiActor(initiatedBy: string, approvedBy?: string): OperationActor {
+  return { actorType: "ai", actorId: "lucent", initiatedBy, ...(approvedBy ? { approvedBy } : {}) };
 }
 
 /**
@@ -409,6 +453,7 @@ export class InMemoryBoardStore implements BoardStore {
       at: entry.at,
       ...(entry.requestId !== undefined ? { requestId: entry.requestId } : {}),
       operationId,
+      actor: entry.actor ?? { actorType: "user", actorId: entry.by, initiatedBy: entry.by },
     });
     this.logs.set(entry.boardId, list);
     return { ok: true, seq, operationId };

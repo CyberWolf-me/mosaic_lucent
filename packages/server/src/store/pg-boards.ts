@@ -256,6 +256,15 @@ export class PostgresBoardStore implements BoardStore {
     const expected = entry.expectedSeq ?? null;
     const requestId = entry.requestId ?? null;
     const operationId = entry.operationId ?? newOperationId();
+    // The actor columns: defaulted at the call sites to the acting user, so
+    // `by` and the actor agree on every pre-Stage-B path by construction.
+    const actor = entry.actor ?? {
+      actorType: "user" as const,
+      actorId: entry.by,
+      initiatedBy: entry.by,
+    };
+    const approvedBy = actor.approvedBy ?? null;
+    const initiatedBy = actor.initiatedBy ?? null;
     const result = await this.target.db.execute(sql`
       with prior as (
         select "seq", "operation_id" from ${opLog}
@@ -264,10 +273,12 @@ export class PostgresBoardStore implements BoardStore {
       ), head as (
         select coalesce(max("seq"), 0) as seq from ${opLog} where "board_id" = ${entry.boardId}
       ), ins as (
-        insert into ${opLog} ("board_id", "seq", "ops", "by", "label", "at", "operation_id", "request_id")
+        insert into ${opLog} ("board_id", "seq", "ops", "by", "label", "at", "operation_id", "request_id", "actor_type", "actor_id", "initiated_by", "approved_by")
         select ${entry.boardId}, head.seq + 1, ${JSON.stringify(entry.ops)}::jsonb,
                ${entry.by}, ${entry.label}, ${entry.at}::bigint,
-               ${operationId}, ${requestId}::text
+               ${operationId}, ${requestId}::text,
+               ${actor.actorType}, ${actor.actorId},
+               ${initiatedBy}::text, ${approvedBy}::text
           from head
          where ${expected}::bigint is null or head.seq + 1 = ${expected}::bigint
         on conflict ("board_id", "seq") do nothing
@@ -335,6 +346,7 @@ export class PostgresBoardStore implements BoardStore {
         ? { operationId: r.operationId }
         : {}),
       requestId: r.requestId ?? requestId,
+      ...rowActor(r),
     };
   }
 
@@ -356,6 +368,7 @@ export class PostgresBoardStore implements BoardStore {
         ? { operationId: r.operationId }
         : {}),
       ...(r.requestId !== null && r.requestId !== undefined ? { requestId: r.requestId } : {}),
+      ...rowActor(r),
     }));
   }
 
@@ -487,4 +500,38 @@ function toNumber(value: unknown): number {
     return Number.isFinite(parsed) ? parsed : 0;
   }
   return 0;
+}
+
+/**
+ * Assemble the actor record off a log row, collapsing "no actor columns" (a
+ * pre-Stage-B row the backfill upgraded) into the equivalent human actor so
+ * callers never see a partial shape. `by` remains the authorship truth; the
+ * actor defaults to it, which is exactly what the migration backfilled.
+ */
+function rowActor(r: {
+  actorType: string | null;
+  actorId: string | null;
+  initiatedBy: string | null;
+  approvedBy: string | null;
+  by: string;
+}): {
+  actor: {
+    actorType: "user" | "ai" | "system";
+    actorId: string;
+    initiatedBy?: string;
+    approvedBy?: string;
+  };
+} {
+  const type = (r.actorType ?? "user") as "user" | "ai" | "system";
+  const actorId = r.actorId ?? r.by;
+  return {
+    actor: {
+      actorType: type,
+      actorId,
+      ...(r.initiatedBy !== null && r.initiatedBy !== undefined
+        ? { initiatedBy: r.initiatedBy }
+        : { initiatedBy: actorId }),
+      ...(r.approvedBy !== null && r.approvedBy !== undefined ? { approvedBy: r.approvedBy } : {}),
+    },
+  };
 }

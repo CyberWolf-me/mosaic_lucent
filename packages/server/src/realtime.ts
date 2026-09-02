@@ -592,6 +592,7 @@ export class RealtimeServer {
             at: entry.at,
             expectedSeq: entry.expectedSeq,
             ...(entry.requestId !== undefined ? { requestId: entry.requestId } : {}),
+            ...(entry.actor !== undefined ? { actor: entry.actor } : {}),
           }),
         fetch: (fromSeq) =>
           this.deps.boardStore
@@ -607,6 +608,7 @@ export class RealtimeServer {
                 at: e.at,
                 ...(e.operationId !== undefined ? { operationId: e.operationId } : {}),
                 ...(e.requestId !== undefined ? { requestId: e.requestId } : {}),
+                ...(e.actor !== undefined ? { actor: e.actor } : {}),
               })),
             ),
       });

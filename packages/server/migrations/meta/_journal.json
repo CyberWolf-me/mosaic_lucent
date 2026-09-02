@@ -127,6 +127,13 @@
       "when": 1788371165623,
       "tag": "0017_swift_wendigo",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1788372851756,
+      "tag": "0018_pretty_brood",
+      "breakpoints": true
     }
   ]
 }
