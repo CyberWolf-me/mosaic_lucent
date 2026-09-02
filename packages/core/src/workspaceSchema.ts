@@ -256,24 +256,25 @@ export function parseWorkspace(value: unknown): ParseWorkspaceResult {
     return { ok: false, detail: `workspace.${path}: ${first?.message ?? "invalid"}` };
   }
   const workspace = parsed.data as Workspace;
-  // Referential repair: an edge pointing at a node id that doesn't exist
-  // renders as silent nothing on the canvas (its draw path bails when either
-  // endpoint is missing). The op pipeline can't produce these — the validator
-  // refuses them — but an older build's save, a hand-edited export, or a
-  // server board from a different era can carry them. Drop them at the load
-  // boundary and SAY so, rather than letting the board carry edges that look
-  // missing for no visible reason.
+  // Referential repair, NON-DESTRUCTIVELY (Stage A safety, P3). An edge
+  // pointing at a node id that doesn't resolve renders as silent nothing on
+  // the canvas (its draw path bails when either endpoint is missing) — but
+  // that is exactly why nothing needs to DELETE it: the skip is the belt.
+  // The first cut dropped these edges at the load boundary, and dropping is
+  // a data-loss bug in disguise: load → drop → save permanently deletes
+  // them, so any transient bug that mismatches one node id silently deleted
+  // its edges forever. A dangling edge is RECOVERABLE state (the node it
+  // references may come back — an undo of a delete, a re-import, a server
+  // catch-up); deleting it at load removed the recovery. We now retain them
+  // and report: `dropped` keeps its name for caller compatibility but now
+  // means "dangling, retained" — the render layer already skips them safely.
   const dropped: string[] = [];
   if (workspace.edges && Object.keys(workspace.edges).length > 0) {
-    const edges: Workspace["edges"] = {};
     for (const [id, edge] of Object.entries(workspace.edges)) {
-      if (workspace.nodes[edge.source] && workspace.nodes[edge.target]) {
-        edges[id] = edge;
-      } else {
+      if (!(workspace.nodes[edge.source] && workspace.nodes[edge.target])) {
         dropped.push(id);
       }
     }
-    if (dropped.length > 0) workspace.edges = edges;
   }
   return dropped.length > 0 ? { ok: true, workspace, dropped } : { ok: true, workspace };
 }

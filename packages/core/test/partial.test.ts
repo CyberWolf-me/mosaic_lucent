@@ -110,7 +110,12 @@ describe("parseWorkspace drops dangling edges at the load boundary", () => {
     expect(Object.keys(result.workspace!.edges)).toHaveLength(1);
   });
 
-  it("drops an edge whose target node id doesn't resolve, and reports it", () => {
+  it("RETAINS an edge whose target node id doesn't resolve, and reports it", () => {
+    // Stage A safety (P3): dropping was a data-loss bug in disguise — load →
+    // drop → save permanently deleted the edge, so a transient bug that
+    // mismatches one node id silently deleted its edges forever. The load
+    // boundary now retains dangling edges (recoverable state: the node may
+    // come back) and the RENDER layer's skip is the belt.
     const withDangling = {
       ...validWs,
       edges: {
@@ -126,11 +131,12 @@ describe("parseWorkspace drops dangling edges at the load boundary", () => {
     const result = parseWorkspace(withDangling);
     expect(result.ok).toBe(true);
     expect(result.dropped).toEqual(["broken-edge"]);
-    // The good edge survives; the board is still usable.
+    // BOTH edges survive the load — the report means "dangling, retained".
     expect(result.workspace!.edges["a->b:r"]).toBeDefined();
+    expect(result.workspace!.edges["broken-edge"]).toBeDefined();
   });
 
-  it("drops an edge whose SOURCE doesn't resolve too", () => {
+  it("RETAINS an edge whose SOURCE doesn't resolve too", () => {
     const withDangling = {
       ...validWs,
       edges: {
@@ -145,7 +151,33 @@ describe("parseWorkspace drops dangling edges at the load boundary", () => {
     };
     const result = parseWorkspace(withDangling);
     expect(result.dropped).toEqual(["broken-source"]);
-    expect(Object.keys(result.workspace!.edges)).toHaveLength(1);
+    // Retained, not deleted.
+    expect(result.workspace!.edges["broken-source"]).toBeDefined();
+  });
+
+  it("a retained dangling edge RE-RESOLVES if its node returns (the recovery case)", () => {
+    const withDangling = {
+      ...validWs,
+      edges: {
+        ...validWs.edges,
+        recoverable: {
+          id: "recoverable",
+          source: "a",
+          target: "late-arriving-node",
+          relationship: "r",
+        },
+      },
+    };
+    const first = parseWorkspace(withDangling);
+    expect(first.dropped).toEqual(["recoverable"]);
+    // The node arrives later (an undo, a re-import): the same edge parses
+    // clean on the next load because nothing deleted it.
+    const healed = applyOperations(first.workspace!, [
+      { op: "CREATE_NODE", id: "late-arriving-node", nodeType: "t", label: "Back" },
+    ]);
+    const second = parseWorkspace(healed);
+    expect(second.dropped).toBeUndefined();
+    expect(second.workspace!.edges["recoverable"]).toBeDefined();
   });
 
   it("a board with no edges reports nothing", () => {
