@@ -169,6 +169,11 @@ describe("Anthropic streaming", () => {
     const frames = [
       'event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"{\\"operations\\": []}"}}\n\n',
       'event: message_delta\ndata: {"type":"message_delta","usage":{"output_tokens":3}}\n\n',
+      // The terminal frame Anthropic always sends. Since the Stage A retry
+      // contract, a stream WITHOUT message_stop is truncation (discarded and
+      // retried) — the prose fixture here needed the frame to stay a
+      // completed answer rather than an error.
+      'event: message_stop\ndata: {"type":"message_stop"}\n\n',
     ];
     const provider = new AnthropicProvider({
       apiKey: "k",
