@@ -551,7 +551,10 @@ export function ShapeElement({
     top: y,
     zIndex: z,
     cursor: editing ? "text" : "grab",
-    animation: "emerge 0.35s var(--e-out) both",
+    // backwards, not both: a forwards fill pins the final keyframe at
+    // animation precedence, which sits above .shape:hover's scale and any
+    // later transform forever after the entrance ends.
+    animation: "emerge 0.35s var(--e-out) backwards",
     ...(sty?.fill ? { background: sty.fill } : {}),
     ...(sty?.stroke ? { borderColor: sty.stroke } : {}),
     ...(sty?.color ? { color: sty.color } : {}),

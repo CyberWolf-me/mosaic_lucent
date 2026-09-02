@@ -983,7 +983,10 @@ html[data-grid="none"] .canvas-grid {
 .connectors path.dashed.appear {
   stroke-dasharray: 4 4;
   opacity: 1;
-  animation: connector-fade-in 0.4s var(--e-out) both;
+  /* backwards, not both — same cascade trap as node-appear: a forwards fill
+     would pin opacity:1 at animation precedence, so the selection-focus
+     grades could never recede a proposed edge. */
+  animation: connector-fade-in 0.4s var(--e-out) backwards;
 }
 @keyframes connector-fade-in {
   from {
@@ -1013,8 +1016,10 @@ html[data-grid="none"] .canvas-grid {
   }
 }
 .node.emerging {
+  /* backwards, not both — same cascade trap as node-appear above. The pulse
+     keeps no forwards fill either, so box-shadow returns to the cascade. */
   animation:
-    emerge 0.4s var(--e-out) both,
+    emerge 0.4s var(--e-out) backwards,
     emerge-pulse 1.2s var(--e-out) 0.4s;
 }
 
@@ -1923,7 +1928,16 @@ html[data-theme="light"] .shape.diamond {
   transform: translateY(0) scale(0.99);
 }
 
-/* Staggered entrance for freshly rendered nodes (see .node.appear). */
+/* Staggered entrance for freshly rendered nodes (see .node.appear).
+
+   fill-mode is BACKWARDS, never both/forwards: a finished animation with a
+   forwards fill keeps applying its final keyframe at animation precedence,
+   which sits above inline styles and every class rule in the cascade. `both`
+   here pinned opacity:1 and the identity transform on every node forever,
+   silently overriding the selection-focus grades (inline opacity), the
+   spotlight dim (.node.dimmed), and the hover lift. Backwards still hides the
+   node during its stagger delay (the `from` frame applies pre-run) but hands
+   opacity and transform back to the cascade the moment the entrance ends. */
 @keyframes node-appear {
   from {
     opacity: 0;
@@ -1935,7 +1949,7 @@ html[data-theme="light"] .shape.diamond {
   }
 }
 .node.appear {
-  animation: node-appear 0.42s var(--e-out) both;
+  animation: node-appear 0.42s var(--e-out) backwards;
 }
 
 /* Connectors draw in via the normalized rule near draw-line above. The rule
@@ -2603,7 +2617,10 @@ html[data-theme="light"] .segmented button.active {
   border: 1px solid var(--stroke-2);
   box-shadow: var(--elev-3);
   backdrop-filter: blur(24px);
-  animation: toast-in 0.3s var(--e-out) both;
+  /* backwards, not both: a forwards fill pins transform to the keyframe's
+     identity, which sits above this rule's translateX(-50%) centering — the
+     caption rendered off-center by half its width. */
+  animation: toast-in 0.3s var(--e-out) backwards;
 }
 .present-body {
   flex: 1;
@@ -3191,6 +3208,9 @@ html[data-board="sketch"] .frame-tag {
   font-size: 13px;
   color: var(--ink-1);
   background: transparent;
+  /* backwards, not both — a forwards fill pins opacity:1 at animation
+     precedence, stomping .ctx-item:disabled's 0.35 below. */
+  animation: toast-in 0.25s var(--e-out) backwards;
 }
 .ctx-item:hover:not(:disabled) {
   background: var(--canvas-3);
