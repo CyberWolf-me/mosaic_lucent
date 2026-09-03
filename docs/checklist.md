@@ -727,3 +727,27 @@ the production-safety exception), the four decision gates (A: PASS; B/C:
 UNKNOWN, need users; D: data-driven), the keep-list (validated core is
 additive-only), the P2 server-side-proposal boundary, and the category audit.
 Gate: typecheck 0, tests green across all six packages, lint/format clean.
+
+## Stage B shipped: the multi-user operation protocol completed (2026-09, docs/17 amendment)
+
+Four batches, each committed and gated independently. B1 the operation
+protocol: requestId idempotency with the replay guard BEFORE validation (a
+retried CREATE is answered with its original outcome, never "already exists";
+a retried MOVE applies once, not twice), explicit op-ack frames per submitter,
+server operationIds, a partial unique index, and findRequest as the durable
+lookup (ADR 0016). B2 the actor model: user/ai/system + initiatedBy/approvedBy
+on every log row — a gated commit now records who produced it, who asked, and
+who authorized, with `by` unchanged as workspace authorship (ADR 0017). B3
+server-side proposals: the P2 boundary closed — the pending record lives on
+the server, the transition guard and one-pending invariant are enforced in the
+database, approval commits through the room stamped ai/lucent/initiatedBy/
+approvedBy, and proposal-created/decided broadcast so panels open and close on
+every connected browser; a refresh no longer drops the panel (ADR 0018). B4
+reconnect resilience: the pending-op queue replays exactly-once after a drop,
+resync replaces partial catchups below the snapshot floor, room rebuilds are
+snapshot-anchored with eviction-time compaction (ADR 0010 wired), GET
+/api/boards/:id reports latestSeq, and a dropped edit on a dead socket is
+queued rather than lost. The definition-of-done scenario — two users, presence,
+sequenced edits, a shared proposal approved by the second user with both boards
+converging on one AI-actor entry, a hard refresh, a reconnect with exact
+catchup — passes end to end.

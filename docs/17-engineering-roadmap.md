@@ -176,3 +176,47 @@ the boundary above).
 3. The first gate to fail picks the next phase — and only then does
    engineering reopen, on the evidence, through the decision that Gate D
    names.
+
+## Amendment (2026-09-02): Stage B executed — the platform core completed
+
+The freeze's own rule admits engineering on an owner decision grounded in the
+audit, and the owner made one: the four gaps the audit named (all
+engineering-verified, none user-demanded yet) were exactly the ones that make
+shared boards untrustworthy, and Stage B closed them. Recorded honestly: this
+reopening was **not** Gate B/C evidence — it was the owner accepting that the
+P2 boundary, the missing idempotency protocol, and the dropped-edit failure
+modes would be found by users as breakage, not as feature requests.
+
+What Stage B shipped (batches, commits, and the full acceptance scenario in
+`packages/server/test/stageB.definition.e2e.test.ts`):
+
+- **B1 — the operation protocol** (c87a832): requestId idempotency (the replay
+  guard runs BEFORE validation — recognizing a retry by re-checking its ops
+  answers a retried CREATE with "already exists" and double-applies a retried
+  MOVE), explicit `op-ack` frames, server-generated `operationId`, and a
+  partial unique index at the database. ADR 0016.
+- **B2 — the actor model** (0d5f44a): `user | ai | system` plus
+  `initiatedBy`/`approvedBy` on every log entry — "✦ Lucent created 4 nodes,
+  initiated by Alex, approved by Sarah" is now true of the record. ADR 0017.
+- **B3 — server-side proposals** (6ff0686): the P2 boundary. The record, the
+  transition guard, the one-pending invariant, approval through the room with
+  the full accountability chain, and live panels on every connected browser.
+  ADR 0018.
+- **B4 — reconnect resilience** (c4ab04c): the pending-op queue (edits on a
+  dead socket queue and replay exactly-once), resync below the snapshot floor
+  (never a partial catchup), snapshot-anchored room rebuilds (ADR 0010 finally
+  wired — a 50k-entry board stopped replaying its whole history on cold join),
+  eviction-time compaction, `latestSeq` on the board snapshot, and the durable
+  replay lookup the resilience tests found missing.
+
+Explicitly NOT built, per the plan's decisions: commenter/admin/guest roles
+and `can()` (owner/editor/viewer stays; the vocabulary opens on a real team's
+"discuss without edit"), the workspace hierarchy tier (org→board stays;
+"workspace" is the canvas document), AI room participation (actor typing
+delivers the auditability; presence is a UX call), magic-link login,
+server-derived undo inverses.
+
+The freeze resumes on the same terms: production safety, benchmarks, user
+evidence, infrastructure requirements. Gate B (repeat usage) and Gate C
+(adoption blockers) remain UNKNOWN — the next engineering phase still comes
+from users, not from us.
