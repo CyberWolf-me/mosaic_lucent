@@ -39,6 +39,7 @@ import { InMemoryMeetingStore } from "./meetings.js";
 import { PostgresMeetingStore } from "./store/pg-meetings.js";
 import { InMemoryProposalStore } from "./proposals.js";
 import { PostgresProposalStore } from "./store/pg-proposals.js";
+import { PostgresAssetStore } from "./store/pg-assets.js";
 import { InMemorySsoStore } from "./ssoStore.js";
 import { PostgresSsoStore } from "./store/pg-sso.js";
 import { InMemoryUsageStore, type UsageStore } from "./usageStore.js";
@@ -130,6 +131,8 @@ function makeStores(databaseUrl: string | undefined): {
   ssoStore: import("./ssoStore.js").SsoStore;
   /** Stage B3: review-gate proposals — in-memory for dev, Postgres when set. */
   proposals: import("./proposals.js").ProposalStore;
+  /** Stage B6: asset metadata — in-memory for dev, Postgres when set. */
+  assetStore: import("./assets.js").AssetStore;
   db: Db | null;
   presenceStore?: import("./presence.js").PresenceStore;
   fanout?: import("./fanout.js").Fanout;
@@ -152,6 +155,7 @@ function makeStores(databaseUrl: string | undefined): {
       meetings: new InMemoryMeetingStore(),
       ssoStore: new InMemorySsoStore(),
       proposals: new InMemoryProposalStore(),
+      assetStore: new InMemoryAssetStore(),
       db: null,
     };
   }
@@ -171,6 +175,7 @@ function makeStores(databaseUrl: string | undefined): {
     meetings: new PostgresMeetingStore(target),
     ssoStore: new PostgresSsoStore(target),
     proposals: new PostgresProposalStore(target),
+    assetStore: new PostgresAssetStore(target),
     db: target,
   };
 }
@@ -352,15 +357,17 @@ const usage = new UsageTracker(limits);
 const authLimiter = new Limiter(config.authLimiter.perWindow, config.authLimiter.windowMs);
 const tickets = new InMemoryTicketStore(config.realtimeTicketTtlMs);
 
-// M7 / M4 storage: the asset gateway. The store is always in-memory for v1;
-// persistence is intentionally deferred — the Postgres-backed `assets` table
-// exists but a Postgres `AssetStore` would not survive a `SelectBlobBackend`
-// swap that did not also write to the same bucket, and that is what this
-// release is not yet committing to. Wired anyway so the routes exist and a
-// S3-backed blob store does not depend on a process restart to find the
-// gateway.
+// M7 / M4 storage: the asset gateway. Stage B6 closes the deferred gap: the
+// metadata store is Postgres when a database is configured (the `assets` table
+// was always there; every uploaded asset row previously evaporated with the
+// process), in-memory otherwise. The bytes stay in the BlobBackend by
+// config — the documented caveat stands and is recorded in the restore
+// runbook: a backend swap that does not carry the bytes to the same bucket
+// leaves rows pointing at keys the new backend cannot serve, and the
+// content-addressed keys make that a byte migration, not a metadata one
+// (re-upload dedupes).
 const assetService = new AssetService({
-  store: new InMemoryAssetStore(),
+  store: stores.assetStore,
   blobs: selectBlobBackend(process.env),
   thumbnails: selectThumbnailer(process.env),
 });

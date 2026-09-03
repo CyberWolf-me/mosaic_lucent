@@ -5,6 +5,7 @@ import { migrate } from "../src/db/migrate.js";
 import { PostgresUserStore } from "../src/store/pg-users.js";
 import { PostgresOrgStore } from "../src/orgs.js";
 import { PostgresProposalStore } from "../src/store/pg-proposals.js";
+import { PostgresAssetStore } from "../src/store/pg-assets.js";
 import { PostgresBoardStore } from "../src/store/pg-boards.js";
 import type { StoredBoard } from "../src/boards.js";
 import type { Role, StoredUser } from "../src/identity.js";
@@ -491,5 +492,97 @@ describeIf("PostgresBoardStore idempotency (Stage B)", () => {
       initiatedBy: USER,
       approvedBy: USER,
     });
+  });
+});
+
+// --- Stage B6: asset metadata, Postgres parity --------------------------------
+
+describeIf("PostgresAssetStore", () => {
+  const tag = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+  const ORG = `org_as_${tag}`;
+  const BOARD = `brd_as_${tag}`;
+  const USER = `usr_as_${tag}`;
+
+  let store: PostgresAssetStore;
+  let boards: PostgresBoardStore;
+  let orgs: PostgresOrgStore;
+  let users: PostgresUserStore;
+
+  const asset = (id: string, checksum: string, bytes: number) => ({
+    id,
+    orgId: ORG,
+    boardId: BOARD,
+    mime: "image/png",
+    bytes,
+    checksum,
+    storageKey: `asset/${checksum}`,
+    thumbKey: null,
+    width: 100,
+    height: 80,
+    createdBy: USER,
+    createdAt: Date.now(),
+  });
+
+  beforeAll(async () => {
+    const target = createDb(URL!);
+    store = new PostgresAssetStore(target);
+    boards = new PostgresBoardStore(target);
+    orgs = new PostgresOrgStore(target);
+    users = new PostgresUserStore(target);
+    await orgs.insert({ id: ORG, name: "Assets", createdAt: Date.now() });
+    await users.insert({
+      id: USER,
+      email: `as_${tag}@e.com`,
+      name: "AS",
+      passwordHash: "x:y",
+      tokenVersion: 0,
+      createdAt: Date.now(),
+      emailVerifiedAt: null,
+    });
+    const { emptyWorkspace } = await import("../src/boards.js");
+    await boards.put({
+      id: BOARD,
+      orgId: ORG,
+      ownerId: USER,
+      name: "Assets",
+      workspace: emptyWorkspace("A"),
+      createdAt: 0,
+      updatedAt: 0,
+    });
+  });
+
+  it("create + get round-trip the full row", async () => {
+    const created = await store.create(asset(`ast_${tag}_1`, `chk_${tag}_1`, 1234));
+    expect(created.id).toBe(`ast_${tag}_1`);
+    const got = await store.get(`ast_${tag}_1`);
+    expect(got?.bytes).toBe(1234);
+    expect(got?.width).toBe(100);
+    expect(got?.boardId).toBe(BOARD);
+  });
+
+  it("a checksum collision returns the existing row (dedupe)", async () => {
+    const first = await store.create(asset(`ast_${tag}_2a`, `chk_${tag}_2`, 500));
+    const dup = await store.create(asset(`ast_${tag}_2b`, `chk_${tag}_2`, 500));
+    expect(dup.id).toBe(first.id);
+    // One row, one billable object.
+    const list = await store.listForOrg(ORG, 50);
+    expect(list.filter((a) => a.checksum === `chk_${tag}_2`)).toHaveLength(1);
+  });
+
+  it("byChecksum finds the org-scoped row; totalBytes sums; delete falls through", async () => {
+    const found = await store.byChecksum(ORG, `chk_${tag}_1`);
+    expect(found?.id).toBe(`ast_${tag}_1`);
+    const bytes = await store.totalBytes(ORG);
+    expect(bytes).toBeGreaterThanOrEqual(1234);
+    const removed = await store.delete(`ast_${tag}_1`);
+    expect(removed?.id).toBe(`ast_${tag}_1`);
+    expect(await store.get(`ast_${tag}_1`)).toBeUndefined();
+  });
+
+  it("listForBoard scopes to the board, oldest first", async () => {
+    await store.create({ ...asset(`ast_${tag}_3`, `chk_${tag}_3`, 10), createdAt: 200 });
+    await store.create({ ...asset(`ast_${tag}_4`, `chk_${tag}_4`, 10), createdAt: 100 });
+    const list = await store.listForBoard(BOARD);
+    expect(list.map((a) => a.id).slice(-2)).toEqual([`ast_${tag}_4`, `ast_${tag}_3`]);
   });
 });

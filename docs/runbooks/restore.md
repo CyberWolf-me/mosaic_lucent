@@ -95,3 +95,25 @@ the database provider. It is the only thing that turns a backup into a restore.
 
 If any step fails, the finding is a bug in the backup path, not a bad drill.
 Fix it before the next deploy.
+
+## Assets: two stores, one restore
+
+Upload metadata lives in Postgres (`assets`); the bytes live in the configured
+blob backend (memory / disk / S3). A database restore alone does not bring
+images back — and a blob restore alone leaves the metadata pointing at
+checksums nobody can request.
+
+The Stage B6 rule: **restore the database first, then verify the bucket.** The
+`storage_key` is content-addressed (`asset/<sha256>`), so bytes and metadata
+can never disagree about _what_ a row is — only about _whether the bytes are
+present_. After a restore, spot-check the newest asset: `GET /api/assets/:id`
+serving bytes means the pair is whole; a metadata row whose bytes are missing
+is safe to delete and re-upload (the dedupe unique index makes the re-upload
+land on the original row).
+
+The known edge, recorded since the gateway shipped: swapping blob backends
+(disk → S3, say) without carrying the bytes to the new backend leaves every
+row pointing at keys the new backend cannot serve. The content-addressed keys
+make that a byte _migration_, not a metadata one — copy the objects key-for-key
+(rclone/sync preserve the prefix), and the pair is whole again with no
+database work.
