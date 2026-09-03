@@ -5478,6 +5478,23 @@ html[data-theme="light"] .allowance-note.spent {
 .meeting-turn:hover {
   background: var(--canvas-2);
 }
+/* Stage C1: the citation turn jump — the turn a citation pointed at, flashed
+   briefly so the eye lands on it after the smooth scroll. Same amber family
+   the ✦ provenance affordances use. */
+.meeting-turn.highlight {
+  background: oklch(0.82 0.15 75 / 0.16);
+  outline: 1px solid oklch(0.82 0.15 75 / 0.45);
+}
+/* Stage C1: the evidence chips under an Ask reply (base styles inline in the
+   component; the pointer and hover belong here — a chip that does not look
+   clickable is a chip nobody discovers). */
+.citation-chip {
+  cursor: pointer;
+}
+.citation-chip:hover {
+  border-color: oklch(0.82 0.15 75 / 0.55) !important;
+  background: oklch(0.82 0.15 75 / 0.1) !important;
+}
 .meeting-turn-speaker {
   color: var(--ink-3);
   min-width: 64px;

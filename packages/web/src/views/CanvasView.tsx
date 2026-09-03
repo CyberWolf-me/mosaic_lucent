@@ -102,6 +102,10 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
     listening,
     setListening,
     send,
+    ask,
+    pillMode,
+    setPillMode,
+    onCitation,
     selectDiagram,
     setRegionKind,
     applyManual,
@@ -488,13 +492,20 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
     const text = message.trim();
     if (!text) return;
     setMessage("");
+    // Ask mode (Stage C1): the read direction. No selection/attachments — a
+    // question about the board's history carries no board edits, and the
+    // server builds its own context from the visible window.
+    if (pillMode === "ask") {
+      void ask(text);
+      return;
+    }
     // Pass current selection so the AI can resolve "this/these/that" (Phase C).
     const sel = [...selectedShapes, ...(selected ? [selected] : [])];
     // Selected images and file/text objects travel with the request, so
     // "turn this screenshot into a wireframe" has something to look at.
     const attachments = collectAttachments(workspace, sel);
     void send(text, sel, attachments);
-  }, [message, send, selectedShapes, selected, workspace]);
+  }, [message, send, ask, pillMode, selectedShapes, selected, workspace]);
 
   const toggleVoice = useCallback(() => {
     if (listening) {
@@ -1098,6 +1109,28 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
     window.addEventListener("paste", onPaste);
     return () => window.removeEventListener("paste", onPaste);
   }, [applyManual, workspace.shapes, notify]);
+
+  // Citation jump (Stage C1): a clicked citation chip with kind "node" sets
+  // ?reveal=<id> and switches to the canvas (workspace.tsx onCitation). This
+  // effect consumes the param — select the node and center on it, the exact
+  // recipe Tab traversal uses — then clears it so a reload doesn't re-jump.
+  // A node the board no longer carries (deleted since the answer) degrades to
+  // nothing rather than an error: the citation was honest when made.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const reveal = params.get("reveal");
+    if (!reveal) return;
+    params.delete("reveal");
+    window.history.replaceState(null, "", `?${params.toString()}`);
+    const node = workspace.nodes[reveal];
+    if (node) {
+      selectNode(reveal, false);
+      controls.current?.focusOn(
+        (node.position?.x ?? 0) + 80,
+        (node.position?.y ?? 0) + 40,
+      );
+    }
+  }, [workspace.nodes, selectNode]);
 
   // Drag & drop files onto the canvas: images become image shapes, other files
   // become file chips (Phase A file objects + Phase E media, docs/15).
@@ -1914,6 +1947,9 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
               value={message}
               onChange={setMessage}
               onSubmit={submit}
+              mode={pillMode}
+              onModeChange={setPillMode}
+              onCitation={onCitation}
               listening={listening}
               onToggleMic={toggleVoice}
               voiceSupported={voiceSupported}

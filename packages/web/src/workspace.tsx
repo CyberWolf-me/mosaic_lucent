@@ -34,6 +34,7 @@ import {
   joinBoard,
   listServerProposals,
   saveBoard,
+  askLucent,
   type BoardRole,
   type ServerProposal,
 } from "./boards.js";
@@ -204,6 +205,29 @@ export interface WorkspaceState {
   openBoard: (id: string) => Promise<boolean>;
 
   send: (message: string, selection?: string[], attachments?: SendAttachments) => Promise<void>;
+  /**
+   * Ask Lucent (Stage C1): the read direction of the AI pill's Build/Ask
+   * split. The question goes to POST /api/boards/:id/ask over the shared
+   * board's history; the reply lands in the chat with citations attached.
+   * Read-only: an ask never mutates the board, and a viewer may ask (asking
+   * is reading — the same content the history view shows, answered by the
+   * model instead of listed).
+   */
+  ask: (question: string) => Promise<void>;
+  /** The pill's Build/Ask mode; shared across views so the toggle persists. */
+  pillMode: "build" | "ask";
+  setPillMode: (mode: "build" | "ask") => void;
+  /**
+   * Citation navigation (Stage C1): jump to a cited node, meeting, or
+   * revision. Node → select+focus on the canvas; meeting → the transcript
+   * (with the turn range highlighted); revision → the history view. No-op
+   * when the cited object no longer exists.
+   */
+  onCitation: (citation: {
+    kind: "node" | "meeting" | "revision";
+    id: string;
+    turnRange?: [number, number];
+  }) => void;
   applyProposal: () => void;
   cancelProposal: () => void;
   undo: () => void;
@@ -426,6 +450,11 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   /** M5/E1: characters of the streamed payload received so far (display only). */
   const [streamChars, setStreamChars] = useState(0);
   const [listening, setListening] = useState(false);
+  /**
+   * Stage C1: the AI pill's Build/Ask mode. Workspace-level (not view-level)
+   * so the toggle survives view switches the same way the conversation does.
+   */
+  const [pillMode, setPillMode] = useState<"build" | "ask">("build");
   // A pending proposal restores from the project record (2026-09: the
   // reliability fix — a refresh used to drop the AI's proposed ops). Terminal
   // records stay on disk as the audit trail but don't reopen the panel.
@@ -961,6 +990,126 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     [busy, chat, workspace, commitAndShare, projectName, readOnly, persist, boardId],
   );
 
+  /**
+   * Ask Lucent (Stage C1): the read direction of the pill. Deliberately
+   * permissive where `send` is strict — a VIEWER may ask (asking is reading:
+   * the board's history is already viewer-visible, and the server validates
+   * every citation against the caller's own window) — and deliberately
+   * strict where `send` is loose: no shared boardId, no ask, because the
+   * server-side history the answer draws from does not exist for a local
+   * board. The refusal says how to fix that (share first), which is the
+   * honest answer rather than an empty history.
+   */
+  const ask = useCallback(
+    async (question: string) => {
+      const text = question.trim();
+      if (!text || busy) return;
+      if (!boardId) {
+        const conversation: ChatEntry[] = [
+          ...chat,
+          { role: "user", text },
+          {
+            role: "error",
+            text: "Ask works on shared boards — their history lives on the server. Share this board first, then ask.",
+          },
+        ];
+        setChat(conversation);
+        persist(workspace, conversation, projectName);
+        return;
+      }
+      const withUser: ChatEntry[] = [...chat, { role: "user", text }];
+      setChat(withUser);
+      setBusy(true);
+      try {
+        // Recent turns only (recentHistory caps at 8): follow-ups like
+        // "and who did that?" resolve against the same conversation the
+        // build path sends.
+        const turns = chat
+          .filter((c) => c.role === "user" || c.role === "ai")
+          .slice(-8)
+          .map((c) => ({ role: c.role === "user" ? ("user" as const) : ("ai" as const), text: c.text }));
+        const result = await askLucent(boardId, text, turns);
+        if ("error" in result) {
+          const conversation: ChatEntry[] = [
+            ...withUser,
+            { role: "error", text: result.error },
+          ];
+          setChat(conversation);
+          persist(workspace, conversation, projectName);
+          return;
+        }
+        const conversation: ChatEntry[] = [
+          ...withUser,
+          {
+            role: "ai",
+            text: result.answer,
+            ...(result.citations.length
+              ? { citations: result.citations.map(({ kind, id, label, detail, why, turnRange }) => ({
+                  kind,
+                  id,
+                  label,
+                  ...(detail ? { detail } : {}),
+                  ...(why ? { why } : {}),
+                  ...(turnRange ? { turnRange } : {}),
+                })) }
+              : {}),
+            ...(result.hasMore ? { historyTruncated: true } : {}),
+          },
+        ];
+        setChat(conversation);
+        persist(workspace, conversation, projectName);
+      } catch (err) {
+        const conversation: ChatEntry[] = [
+          ...withUser,
+          { role: "error", text: (err as Error).message },
+        ];
+        setChat(conversation);
+        persist(workspace, conversation, projectName);
+      } finally {
+        setBusy(false);
+      }
+    },
+    [busy, boardId, chat, workspace, persist, projectName],
+  );
+
+  /**
+   * Citation navigation (Stage C1). The views own the actual navigation
+   * (canvas focus, transcript scrolling, history deep-link); this is the
+   * workspace-level seam that picks the destination view and sets the URL
+   * params the views' mount effects honor:
+   *
+   *   node     → canvas, selection handled by the view's own handler
+   *   meeting  → ?meeting=<id>[&turn=<start>] + the meeting view
+   *   revision → ?rev=<seq> + the history view
+   *
+   * The node case just switches to the canvas here — the select+focus jump
+   * is CanvasView's, driven through the same URL-free path its Tab traversal
+   * uses; the citation's id travels in the search params for simplicity and
+   * deep-linkability of the other two.
+   */
+  const onCitation = useCallback(
+    (citation: { kind: "node" | "meeting" | "revision"; id: string; turnRange?: [number, number] }) => {
+      const params = new URLSearchParams(window.location.search);
+      if (citation.kind === "node") {
+        params.set("reveal", citation.id);
+        window.history.replaceState(null, "", `?${params.toString()}`);
+        setView("canvas");
+        return;
+      }
+      if (citation.kind === "meeting") {
+        params.set("meeting", citation.id);
+        if (citation.turnRange) params.set("turn", String(citation.turnRange[0]));
+        window.history.replaceState(null, "", `?${params.toString()}`);
+        setView("meeting");
+        return;
+      }
+      params.set("rev", citation.id);
+      window.history.replaceState(null, "", `?${params.toString()}`);
+      setView("history");
+    },
+    [setView],
+  );
+
   /** Shared idempotency: claim the pending record, or no-op when decided. */
   const claimDecision = useCallback((decision: "approved" | "rejected"): boolean => {
     const record = proposalRecordRef.current;
@@ -1422,6 +1571,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     startSharing,
     openBoard,
     send,
+    ask,
+    pillMode,
+    setPillMode,
+    onCitation,
     applyProposal,
     cancelProposal,
     undo,

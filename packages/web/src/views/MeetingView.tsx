@@ -111,6 +111,29 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
     };
   }, [boardId]);
 
+  // The turn jump (Stage C1): an Ask citation set ?turn=<start> (alongside
+  // ?meeting=). Once the transcript is on screen, scroll the turn into view
+  // and flash it — the reverse-provenance interaction: evidence → the exact
+  // words that produced it. Index-based, like turnRange itself; consumed on
+  // read so a reload doesn't re-flash.
+  const [turnFlash, setTurnFlash] = useState<number | null>(null);
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const turn = params.get("turn");
+    if (turn === null) return;
+    params.delete("turn");
+    window.history.replaceState(null, "", `?${params.toString()}`);
+    const idx = Number(turn);
+    if (Number.isInteger(idx) && idx >= 0) setTurnFlash(idx);
+  }, []);
+  useEffect(() => {
+    if (turnFlash === null) return;
+    const el = document.querySelector(`[data-turn="${turnFlash}"]`);
+    el?.scrollIntoView({ block: "center", behavior: "smooth" });
+    const t = setTimeout(() => setTurnFlash(null), 1600);
+    return () => clearTimeout(t);
+  }, [turnFlash, selectedMeeting]);
+
   // A capture still running when the view unmounts must stop — otherwise the
   // mic indicator stays on with no surface left to stop it from.
   useEffect(
@@ -452,7 +475,11 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
               </p>
             )}
             {displayTurns.map((t, i) => (
-              <div key={i} className="meeting-turn">
+              <div
+                key={i}
+                className={`meeting-turn${i === turnFlash ? " highlight" : ""}`}
+                data-turn={i}
+              >
                 <span className="mono small meeting-turn-speaker">{t.speaker}</span>
                 <span style={{ flex: 1, fontSize: 13.5, color: "var(--ink-1)" }}>{t.text}</span>
                 {t.kind && (

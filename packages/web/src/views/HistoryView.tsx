@@ -1,15 +1,76 @@
-import { useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Ico } from "../ui/icons.js";
 import { TopBar, LeftRail } from "../ui/Chrome.js";
 import { DiagramLayer } from "../ui/DiagramLayer.js";
 import { useWorkspace } from "../workspace.js";
 import { useToast } from "../ui/Toast.js";
+import { fetchBoardHistory, type BoardHistory } from "../boards.js";
+import { depthBanner, groupHistoryByDay } from "../historyTimeline.js";
 
-/** Version history, ported from reference/screen_history.jsx and wired to the
- * real History.timeline() from @lucent/core. */
+/**
+ * Version history. Two sources, one surface (Stage C1):
+ *
+ * - A SHARED board (boardId set) renders the server's revision timeline —
+ *   the op log's authoritative, windowed record (who, when, what, and the
+ *   proposal link), grouped by day, with the honest depth banner when the
+ *   plan's window truncates. This is the timeline Ask cites.
+ * - A LOCAL board (no boardId) keeps the client timeline exactly as before —
+ *   there is no server log to read, and the local History view predates it.
+ */
 export function HistoryView({ onOpenSettings }: { onOpenSettings: (section?: string) => void }) {
-  const { history, undo, redo, canUndo, canRedo, restoreVersion, setView } = useWorkspace();
+  const { history, undo, redo, canUndo, canRedo, restoreVersion, setView, boardId, onCitation } =
+    useWorkspace();
   const { notify } = useToast();
+
+  // --- Server mode -----------------------------------------------------------
+  const [server, setServer] = useState<BoardHistory | null>(null);
+  const [serverError, setServerError] = useState<string | null>(null);
+  useEffect(() => {
+    if (!boardId) return;
+    let cancelled = false;
+    setServerError(null);
+    void fetchBoardHistory(boardId)
+      .then((res) => {
+        if (cancelled) return;
+        if (!res) {
+          setServerError("The board's history could not be loaded.");
+          return;
+        }
+        setServer(res);
+      })
+      .catch(() => {
+        if (!cancelled) setServerError("The board's history could not be loaded.");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [boardId]);
+
+  const days = useMemo(() => groupHistoryByDay(server?.items ?? []), [server]);
+  const banner = server ? depthBanner(server) : null;
+
+  // ?rev=<seq>: a citation (or the row itself) deep-links a revision; scroll
+  // to it and flash it. Consumed on read so a reload doesn't re-flash.
+  const revRef = useRef<HTMLDivElement | null>(null);
+  const [flashSeq, setFlashSeq] = useState<number | null>(null);
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const rev = params.get("rev");
+    if (!rev) return;
+    params.delete("rev");
+    window.history.replaceState(null, "", `?${params.toString()}`);
+    const seq = Number(rev);
+    if (Number.isInteger(seq)) setFlashSeq(seq);
+  }, []);
+  useEffect(() => {
+    if (flashSeq !== null) {
+      revRef.current?.scrollIntoView({ block: "center", behavior: "smooth" });
+      const t = setTimeout(() => setFlashSeq(null), 1600);
+      return () => clearTimeout(t);
+    }
+  }, [flashSeq]);
+
+  // --- Client mode (unchanged) -------------------------------------------------
   const entries = history.timeline();
   const [selected, setSelected] = useState(entries.length - 1);
   const current = entries[Math.min(selected, entries.length - 1)];
@@ -19,6 +80,279 @@ export function HistoryView({ onOpenSettings }: { onOpenSettings: (section?: str
     setView("canvas");
   };
 
+  // The server timeline's "show on board" jump: the first touched id is the
+  // node the batch was most clearly about (the route caps the list at 10).
+  const showOnBoard = (seq: number, touched: string[]) => {
+    const first = touched.find((id) => id.length > 0);
+    if (!first) {
+      notify("This revision touched no board objects.");
+      return;
+    }
+    onCitation({ kind: "node", id: first });
+  };
+
+  // --------------------------------------------------------------------- render
+  if (boardId) {
+    return (
+      <div style={{ position: "absolute", inset: 0 }}>
+        <div style={{ position: "absolute", inset: 0 }}>
+          <div className="canvas-grid" />
+          <div className="canvas-vignette" />
+        </div>
+        <TopBar
+          crumbs={[
+            { label: "Personal" },
+            { label: "Workspace", view: "canvas" },
+            { label: "History", current: true },
+          ]}
+          onOpenSettings={onOpenSettings}
+        />
+        <LeftRail />
+
+        {serverError ? (
+          <div className="view-empty">
+            <div className="view-empty-icon">
+              <Ico.History />
+            </div>
+            <h2>{serverError}</h2>
+            <p>Check that the Lucent server is running, then reopen this view.</p>
+          </div>
+        ) : !server || server.items.length === 0 ? (
+          <div className="view-empty">
+            <div className="view-empty-icon">
+              <Ico.History />
+            </div>
+            <h2>No history yet</h2>
+            <p>
+              Every change to a shared board becomes a revision — who made it, when, and what it
+              touched. Make a change and it will show up here.
+            </p>
+          </div>
+        ) : (
+          <div
+            style={{
+              position: "absolute",
+              top: 76,
+              bottom: 30,
+              left: 76,
+              right: 30,
+              display: "grid",
+              gridTemplateColumns: "minmax(420px, 520px) 1fr",
+              gap: 18,
+            }}
+          >
+            <div
+              style={{
+                background: "oklch(from var(--canvas-2) l c h / 0.75)",
+                border: "1px solid var(--stroke-1)",
+                borderRadius: 16,
+                overflow: "hidden",
+                display: "flex",
+                flexDirection: "column",
+              }}
+            >
+              <div
+                style={{
+                  padding: "14px 18px",
+                  borderBottom: "1px solid var(--stroke-1)",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 10,
+                }}
+              >
+                <div style={{ fontSize: 13, fontVariationSettings: "'wght' 550" }}>Timeline</div>
+                <span className="mono" style={{ fontSize: 10, color: "var(--ink-3)" }}>
+                  {server.items.length} revision{server.items.length === 1 ? "" : "s"}
+                  {server.hasMore ? ` · latest ${server.limit}` : ""}
+                </span>
+              </div>
+              {banner && (
+                <div
+                  className="mono"
+                  style={{
+                    fontSize: 11,
+                    color: "var(--amber-1)",
+                    background: "oklch(from var(--canvas-2) l c h / 0.6)",
+                    borderBottom: "1px solid var(--stroke-1)",
+                    padding: "8px 18px",
+                  }}
+                >
+                  {banner}
+                </div>
+              )}
+              <div
+                className="panel-body"
+                style={{ flex: 1, overflowY: "auto", padding: "10px 8px 20px" }}
+              >
+                {days.map((day) => (
+                  <div key={day.key} style={{ marginBottom: 10 }}>
+                    <div
+                      className="mono"
+                      style={{
+                        fontSize: 10,
+                        color: "var(--ink-3)",
+                        letterSpacing: "0.06em",
+                        textTransform: "uppercase",
+                        padding: "6px 12px 4px",
+                      }}
+                    >
+                      {day.label}
+                    </div>
+                    {day.items.map((item) => {
+                      const isAi = item.actor.type === "ai";
+                      const flash = item.seq === flashSeq;
+                      return (
+                        <div
+                          key={item.seq}
+                          ref={flash ? revRef : undefined}
+                          style={{
+                            display: "flex",
+                            gap: 12,
+                            position: "relative",
+                            borderRadius: 8,
+                            transition: "background 0.6s",
+                            background: flash
+                              ? "oklch(0.82 0.15 75 / 0.18)"
+                              : "transparent",
+                          }}
+                        >
+                          <div style={{ width: 24, position: "relative", flexShrink: 0 }}>
+                            <div
+                              style={{
+                                position: "absolute",
+                                top: 12,
+                                left: 6,
+                                width: 12,
+                                height: 12,
+                                borderRadius: 999,
+                                background: isAi
+                                  ? "linear-gradient(135deg, var(--amber-2), var(--amber-3))"
+                                  : "var(--canvas-3)",
+                                border: `1px solid ${
+                                  isAi ? "oklch(0.82 0.15 75 / 0.5)" : "var(--stroke-2)"
+                                }`,
+                                boxShadow: isAi ? "0 0 8px var(--amber-glow)" : "none",
+                              }}
+                            />
+                          </div>
+                          <button
+                            onClick={() => showOnBoard(item.seq, item.touched)}
+                            title={
+                              item.touched.length
+                                ? `Show on board: ${item.touched.slice(0, 3).join(", ")}`
+                                : "This revision touched no board objects"
+                            }
+                            style={{
+                              flex: 1,
+                              textAlign: "left",
+                              padding: "8px 12px 8px 0",
+                              marginBottom: 4,
+                              borderRadius: 8,
+                              background: "transparent",
+                              border: "1px solid transparent",
+                            }}
+                          >
+                            <div
+                              style={{
+                                display: "flex",
+                                alignItems: "baseline",
+                                gap: 8,
+                                marginBottom: 2,
+                              }}
+                            >
+                              <span
+                                className="mono"
+                                style={{ fontSize: 10.5, color: "var(--ink-3)" }}
+                              >
+                                {new Date(item.at).toLocaleTimeString([], {
+                                  hour: "2-digit",
+                                  minute: "2-digit",
+                                })}
+                              </span>
+                              <span
+                                style={{
+                                  fontSize: 13,
+                                  color: "var(--ink-0)",
+                                  fontVariationSettings: "'wght' 500",
+                                  flex: 1,
+                                }}
+                              >
+                                {item.label}
+                              </span>
+                              {isAi && (
+                                <span
+                                  className="mono"
+                                  style={{ fontSize: 10, color: "var(--amber-2)" }}
+                                >
+                                  ✦
+                                </span>
+                              )}
+                            </div>
+                            <div style={{ fontSize: 12, color: "var(--ink-2)" }}>
+                              {item.actor.name} · {item.opCount} op
+                              {item.opCount === 1 ? "" : "s"}
+                              {item.proposal?.meetingId
+                                ? ` · from meeting`
+                                : ""}
+                            </div>
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div
+              style={{
+                background: "var(--canvas-0)",
+                border: "1px solid var(--stroke-1)",
+                borderRadius: 16,
+                overflow: "hidden",
+                display: "flex",
+                flexDirection: "column",
+              }}
+            >
+              <div
+                style={{
+                  padding: "14px 18px",
+                  borderBottom: "1px solid var(--stroke-1)",
+                }}
+              >
+                <div style={{ fontSize: 13, fontVariationSettings: "'wght' 550" }}>
+                  Every change, remembered
+                </div>
+                <div className="mono" style={{ fontSize: 10.5, color: "var(--ink-3)", marginTop: 2 }}>
+                  {server.items.length} visible revision
+                  {server.items.length === 1 ? "" : "s"}
+                  {server.hasMore ? ` of more — your plan shows the latest ${server.limit}` : ""}
+                </div>
+              </div>
+              <div
+                style={{
+                  flex: 1,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  color: "var(--ink-3)",
+                  fontSize: 13,
+                  padding: 30,
+                  textAlign: "center",
+                }}
+              >
+                Pick a revision on the left to jump to the objects it touched. Ask Lucent
+                (&ldquo;Ask&rdquo; in the composer) answers questions about this same history, with
+                citations back to it.
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // Local board: the client timeline, unchanged.
   return (
     <div style={{ position: "absolute", inset: 0 }}>
       <div style={{ position: "absolute", inset: 0 }}>

@@ -312,3 +312,93 @@ export async function decideServerProposal(
   const out = (await res.json()) as { proposal: ServerProposal; duplicate?: boolean };
   return { proposal: out.proposal, duplicate: out.duplicate === true };
 }
+
+/* ------------------------- Stage C1: history + ask ------------------------- */
+
+/** One revision of the server-backed timeline, as the history route summarizes it. */
+export interface BoardHistoryItem {
+  seq: number;
+  at: number;
+  label: string;
+  operationId?: string;
+  opCount: number;
+  actor: {
+    type: "user" | "ai" | "system";
+    name: string;
+    id: string;
+    initiatedBy?: string;
+    approvedBy?: string;
+  };
+  /** Node/object ids the batch referenced — the "show on board" jump. */
+  touched: string[];
+  proposal?: {
+    id: string;
+    meetingId: string | null;
+    quote?: string;
+    turnRange?: [number, number];
+  };
+}
+
+export interface BoardHistory {
+  items: BoardHistoryItem[];
+  historyDepth: number | null;
+  limit: number;
+  hasMore: boolean;
+  latestSeq: number;
+  windowCeiling: number;
+}
+
+/**
+ * The visible revision window of a shared board (Stage C1). Server-side history
+ * exists only for shared boards — a local (localStorage) board has no op log,
+ * and its history view keeps using the client timeline.
+ */
+export async function fetchBoardHistory(boardId: string): Promise<BoardHistory | null> {
+  const res = await authed(`/api/boards/${encodeURIComponent(boardId)}/history`);
+  if (!res || !res.ok) return null;
+  return (await res.json()) as BoardHistory;
+}
+
+/** A citation the ask route resolved against real, visible state. */
+export interface AskCitation {
+  kind: "node" | "meeting" | "revision";
+  id: string;
+  label: string;
+  detail?: string;
+  why?: string;
+  turnRange?: [number, number];
+}
+
+export interface AskResponse {
+  answer: string;
+  citations: AskCitation[];
+  warnings?: Array<{ citation: { kind: string; id: string }; reason: string }>;
+  historyDepth: number | null;
+  hasMore: boolean;
+  provider: string;
+  model?: string;
+}
+
+/**
+ * Ask Lucent about the board (Stage C1): the read direction of the AI pill's
+ * Build/Ask split. The question bills the same ai.generationsPerMonth
+ * allowance as Build, metered with mode "ask" — so a 402 here renders through
+ * the same paywall, and `recordPlanRefusal` (in the caller) keeps the wall
+ * honest rather than surfacing as a generic failure.
+ */
+export async function askLucent(
+  boardId: string,
+  question: string,
+  history?: Array<{ role: "user" | "ai"; text: string }>,
+): Promise<AskResponse | { error: string; status: number }> {
+  const res = await authed(`/api/boards/${encodeURIComponent(boardId)}/ask`, {
+    method: "POST",
+    body: JSON.stringify({ question, ...(history?.length ? { history } : {}) }),
+  });
+  if (!res) return { error: "You're working offline. Sign in to ask about this board.", status: 0 };
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as { error?: string; reason?: string };
+    return { error: body.error ?? "Lucent could not answer that question.", status: res.status };
+  }
+  return (await res.json()) as AskResponse;
+}

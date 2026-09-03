@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import { Ico } from "./icons.js";
 import { AllowanceNote } from "./Paywall.js";
 import type { ChatEntry } from "../persistence.js";
+import type { AskCitation } from "../boards.js";
 import { useWorkspace } from "../workspace.js";
 
 /**
@@ -13,12 +14,17 @@ export interface PillStatus {
   text: string;
 }
 
+export type PillMode = "build" | "ask";
+
 export function AIPill({
-  placeholder = "Ask Lucent to build something…",
+  placeholder,
   status,
   value = "",
   onChange,
   onSubmit,
+  mode,
+  onModeChange,
+  onCitation,
   listening = false,
   onToggleMic,
   voiceSupported = true,
@@ -27,11 +33,23 @@ export function AIPill({
   shifted = false,
   readOnly = false,
 }: {
+  /** Mode-aware callers pass one; the default stays the Build wording. */
   placeholder?: string;
   status?: PillStatus | null;
   value?: string;
   onChange?: (v: string) => void;
   onSubmit?: () => void;
+  /**
+   * Stage C1's Build/Ask split. Both this and onModeChange must be present for
+   * the toggle to render — the pill stays presentation-only, so a mount that
+   * passes neither (BoardView, the document views) keeps its exact old shape.
+   * Build = "change my workspace" (operations); Ask = "understand my
+   * workspace" (answers + citations, never a mutation).
+   */
+  mode?: PillMode;
+  onModeChange?: (mode: PillMode) => void;
+  /** Citation click → jump to evidence. The workspace owns the navigation. */
+  onCitation?: (citation: AskCitation & { turnRange?: [number, number] }) => void;
   listening?: boolean;
   onToggleMic?: () => void;
   voiceSupported?: boolean;
@@ -48,14 +66,16 @@ export function AIPill({
 }) {
   const [expanded, setExpanded] = useState(false);
   const bars = useRef(Array.from({ length: 14 }, () => 20 + Math.random() * 60));
+  const hasMode = mode !== undefined && onModeChange !== undefined;
+  const askMode = hasMode && mode === "ask";
 
   return (
     <div className={`ai-pill-wrap${shifted ? " shifted" : ""}`}>
       {/* The plan warning belongs to the composer rather than to each view that
           mounts one: every AI surface asks the same allowance the same way, and a
           prop would put the warning only where somebody remembered to pass it.
-          Reads the live status itself and renders nothing when there is nothing to
-          say, which is most of the month. */}
+          Reads the live status itself and renders nothing when there is nothing
+          to say, which is most of the month. */}
       <AllowanceNote />
       {status && (
         <div className="pill-status">
@@ -101,7 +121,7 @@ export function AIPill({
             <Ico.Down style={{ transform: "rotate(180deg)" }} />
           </button>
           {history.map((m, i) => (
-            <ConvoTurn key={i} entry={m} />
+            <ConvoTurn key={i} entry={m} onCitation={onCitation} />
           ))}
         </div>
       )}
@@ -112,10 +132,33 @@ export function AIPill({
             <Ico.Eye />
           ) : listening ? (
             <Ico.Mic2 style={{ color: "var(--amber-1)" }} />
+          ) : askMode ? (
+            <Ico.History />
           ) : (
             <Ico.Sparkle />
           )}
         </div>
+        {/* Build/Ask: the one toggle the reviewer's model asked for — Build
+            mutates, Ask reads. Rendered as the app's established segmented
+            control, only for mounts that own a mode. */}
+        {hasMode && !readOnly && (
+          <div className="segmented" style={{ flexShrink: 0 }}>
+            <button
+              className={mode === "build" ? "active" : ""}
+              onClick={() => onModeChange!("build")}
+              title="Describe what to build — Lucent changes the board"
+            >
+              Build
+            </button>
+            <button
+              className={mode === "ask" ? "active" : ""}
+              onClick={() => onModeChange!("ask")}
+              title="Ask about the board and its history — read-only, with citations"
+            >
+              Ask
+            </button>
+          </div>
+        )}
         {readOnly ? (
           <span className="pill-notice">
             You're viewing this board. Ask the owner for edit access to change it.
@@ -138,7 +181,10 @@ export function AIPill({
             onKeyDown={(e) => {
               if (e.key === "Enter") onSubmit?.();
             }}
-            placeholder={placeholder}
+            placeholder={
+              placeholder ??
+              (askMode ? "Ask about this board's history…" : "Ask Lucent to build something…")
+            }
           />
         )}
         {!readOnly && <span className="kbd">⌘K</span>}
@@ -180,7 +226,13 @@ export function AIPill({
   );
 }
 
-function ConvoTurn({ entry }: { entry: ChatEntry }) {
+function ConvoTurn({
+  entry,
+  onCitation,
+}: {
+  entry: ChatEntry;
+  onCitation?: (citation: AskCitation & { turnRange?: [number, number] }) => void;
+}) {
   const isUser = entry.role === "user";
   const isError = entry.role === "error";
   return (
@@ -234,7 +286,55 @@ function ConvoTurn({ entry }: { entry: ChatEntry }) {
         {!isUser && entry.skippedOps && entry.skippedOps.length > 0 && (
           <SkippedOpsList skipped={entry.skippedOps} />
         )}
+        {/* Citations (Stage C1): the evidence an Ask answer points at, each a
+            jump to where the evidence lives. Only entries the server resolved
+            against real state ever carry them. */}
+        {!isUser && entry.citations && entry.citations.length > 0 && (
+          <CitationList citations={entry.citations} onCitation={onCitation} />
+        )}
       </div>
+    </div>
+  );
+}
+
+/**
+ * The citation chips under an Ask reply. Node → canvas, meeting → transcript,
+ * revision → history view; the navigation itself is the workspace's (the pill
+ * stays presentation-only), passed down as `onCitation`.
+ */
+function CitationList({
+  citations,
+  onCitation,
+}: {
+  citations: NonNullable<ChatEntry["citations"]>;
+  onCitation?: (citation: AskCitation & { turnRange?: [number, number] }) => void;
+}) {
+  if (!onCitation) return null;
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
+      {citations.map((c, i) => (
+        <button
+          key={i}
+          className="citation-chip"
+          onClick={() => onCitation(c)}
+          title={c.why ?? c.detail ?? c.label}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+            fontSize: 11,
+            fontFamily: "var(--font-mono)",
+            padding: "3px 9px",
+            borderRadius: 999,
+            border: "1px solid var(--stroke-2)",
+            background: "oklch(from var(--canvas-2) l c h / 0.7)",
+            color: "var(--ink-1)",
+          }}
+        >
+          <span style={{ color: "var(--amber-2)", fontSize: 10 }}>✦</span>
+          {c.label}
+        </button>
+      ))}
     </div>
   );
 }

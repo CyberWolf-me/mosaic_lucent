@@ -35,6 +35,28 @@ export interface ChatEntry {
    * found") instead of a silent gap — and can ask Lucent to fix just those.
    */
   skippedOps?: Array<{ op: string; reason: string }>;
+  /**
+   * Evidence links (Stage C1): on an Ask reply, the citations the server
+   * resolved against real, visible state. Each renders as a chip that jumps
+   * to its evidence — node → select+focus on the canvas, meeting → the
+   * transcript, revision → the history view. Optional so older saved
+   * conversations keep parsing.
+   */
+  citations?: Array<{
+    kind: "node" | "meeting" | "revision";
+    id: string;
+    label: string;
+    detail?: string;
+    why?: string;
+    turnRange?: [number, number];
+  }>;
+  /**
+   * On an Ask reply: true when older revisions exist beyond the caller's
+   * visible history window. The answer itself already discloses the limit in
+   * prose (the historian prompt's rule); this bit lets the UI badge the
+   * entry without re-parsing the text.
+   */
+  historyTruncated?: boolean;
 }
 
 export interface ProjectMeta {
