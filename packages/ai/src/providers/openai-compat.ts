@@ -1,8 +1,21 @@
 import { openAiToolDefinition, TOOL_NAME } from "@lucent/core";
 import type { GenerateRequest, GenerateResult, LLMProvider, StreamCallbacks } from "../provider.js";
+import type { AnswerRequest, AnswerResult } from "../answer.js";
+import { ANSWER_TOOL_NAME, openAiAnswerToolDefinition } from "../answer.js";
 import { sseEvents } from "./sse.js";
-import { SYSTEM_PROMPT, buildUserPrompt } from "../prompt.js";
-import { completionMeta, parseModelJson, parseToolArguments } from "./toolCall.js";
+import {
+  ANSWER_SYSTEM_PROMPT,
+  SYSTEM_PROMPT,
+  buildAnswerUserPrompt,
+  buildUserPrompt,
+} from "../prompt.js";
+import {
+  completionMeta,
+  parseAnswerModelJson,
+  parseAnswerToolArguments,
+  parseModelJson,
+  parseToolArguments,
+} from "./toolCall.js";
 
 /**
  * Provider for OpenAI-compatible chat-completions gateways (e.g. gorouter.app,
@@ -179,6 +192,84 @@ export class OpenAICompatibleProvider implements LLMProvider {
       const text = message?.content ?? "";
       if (!text) throw new Error("Provider returned neither a tool call nor content");
       return parseModelJson(text, meta);
+    }
+
+    throw new Error(`Provider request failed (${lastStatus}): ${lastDetail}`);
+  }
+
+  /**
+   * The answer call type (Stage C1): the build path's request loop, retry
+   * ladder, and prose fallback, with the historian prompt, the answer tool,
+   * and the answer parsers swapped in. No streaming, no repair — see the
+   * Anthropic provider's note for why (a dropped citation is not worth
+   * re-asking the whole question).
+   */
+  async generateAnswer(request: AnswerRequest): Promise<AnswerResult> {
+    const body = JSON.stringify({
+      model: this.model,
+      messages: [
+        { role: "system", content: ANSWER_SYSTEM_PROMPT },
+        { role: "user", content: buildAnswerUserPrompt(request) },
+      ],
+      tools: [openAiAnswerToolDefinition()],
+      tool_choice: { type: "function", function: { name: ANSWER_TOOL_NAME } },
+      // A few sentences plus a citation list, not a board.
+      max_tokens: 4096,
+      temperature: 0.2,
+    });
+
+    let lastDetail = "";
+    let lastStatus = 0;
+    for (let attempt = 0; attempt < this.maxRetries; attempt++) {
+      let response: Response;
+      try {
+        response = await this.fetchImpl(this.baseUrl, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            authorization: `Bearer ${this.apiKey}`,
+          },
+          body,
+          signal: AbortSignal.timeout(this.timeoutMs),
+        });
+      } catch (err) {
+        lastDetail = (err as Error).message;
+        lastStatus = 0;
+        if (attempt < this.maxRetries - 1) {
+          await sleep(400 * 2 ** attempt);
+          continue;
+        }
+        throw new Error(`Provider request failed (network): ${lastDetail}`);
+      }
+
+      if (!response.ok) {
+        lastStatus = response.status;
+        lastDetail = await response.text().catch(() => "");
+        if (RETRYABLE_STATUS.has(response.status) && attempt < this.maxRetries - 1) {
+          await sleep(400 * 2 ** attempt + Math.random() * 250);
+          continue;
+        }
+        throw new Error(`Provider request failed (${lastStatus}): ${lastDetail}`);
+      }
+
+      const data = (await response.json()) as ChatResponse;
+      const message = data.choices?.[0]?.message;
+      const meta = completionMeta(
+        data.model ?? this.model,
+        data.usage?.prompt_tokens,
+        data.usage?.completion_tokens,
+      );
+
+      const call =
+        message?.tool_calls?.find((c) => c.function?.name === ANSWER_TOOL_NAME) ??
+        message?.tool_calls?.[0];
+      if (call?.function?.arguments) {
+        return parseAnswerToolArguments(call.function.arguments, meta);
+      }
+
+      const text = message?.content ?? "";
+      if (!text) throw new Error("Provider returned neither a tool call nor content");
+      return parseAnswerModelJson(text, meta);
     }
 
     throw new Error(`Provider request failed (${lastStatus}): ${lastDetail}`);

@@ -1,7 +1,24 @@
 import { anthropicToolDefinition, TOOL_NAME } from "@lucent/core";
 import type { GenerateRequest, GenerateResult, LLMProvider, StreamCallbacks } from "../provider.js";
-import { SYSTEM_PROMPT, buildUserPrompt } from "../prompt.js";
-import { completionMeta, parseModelJson, parseToolArguments } from "./toolCall.js";
+import type { AnswerRequest, AnswerResult } from "../answer.js";
+import {
+  ANSWER_TOOL_NAME,
+  anthropicAnswerToolDefinition,
+  answerArgumentsSchema,
+} from "../answer.js";
+import {
+  ANSWER_SYSTEM_PROMPT,
+  SYSTEM_PROMPT,
+  buildAnswerUserPrompt,
+  buildUserPrompt,
+} from "../prompt.js";
+import {
+  completionMeta,
+  parseAnswerToolArguments,
+  parseAnswerModelJson,
+  parseModelJson,
+  parseToolArguments,
+} from "./toolCall.js";
 import { sseEvents } from "./sse.js";
 
 /**
@@ -178,6 +195,78 @@ export class AnthropicProvider implements LLMProvider {
       return parseModelJson(text, meta);
     }
     // Unreachable: the loop returns or throws on every path.
+    throw new Error(`Anthropic request failed (${lastStatus}): ${lastDetail}`);
+  }
+
+  /**
+   * The answer call type (Stage C1): the same request loop and retry ladder as
+   * generateOperations — transport failures are provider failures on both
+   * paths — with three deltas: the historian system prompt, the answer tool,
+   * and the answer parsers. No repair round: a citation that fails validation
+   * is dropped server-side rather than re-asked, because the answer around it
+   * is still worth returning (the same partial-application judgment the build
+   * path made in Stage A).
+   */
+  async generateAnswer(request: AnswerRequest): Promise<AnswerResult> {
+    let lastDetail = "";
+    let lastStatus = 0;
+    for (let attempt = 0; attempt < this.maxRetries; attempt++) {
+      let response: Response;
+      try {
+        response = await this.fetchImpl(this.baseUrl, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-api-key": this.apiKey,
+            "anthropic-version": "2023-06-01",
+          },
+          body: JSON.stringify({
+            model: this.model,
+            // Answers are a few sentences plus citations; the 16k board
+            // budget is a generation budget, not an answer budget.
+            max_tokens: 4096,
+            system: ANSWER_SYSTEM_PROMPT,
+            messages: [{ role: "user", content: buildAnswerUserPrompt(request) }],
+            tools: [anthropicAnswerToolDefinition()],
+            tool_choice: { type: "tool", name: ANSWER_TOOL_NAME },
+          }),
+          signal: AbortSignal.timeout(this.timeoutMs),
+        });
+      } catch (err) {
+        lastDetail = (err as Error).message;
+        lastStatus = 0;
+        if (attempt < this.maxRetries - 1) {
+          await sleep(400 * 2 ** attempt);
+          continue;
+        }
+        throw new Error(`Anthropic request failed (network): ${lastDetail}`);
+      }
+
+      if (!response.ok) {
+        lastStatus = response.status;
+        lastDetail = await response.text().catch(() => "");
+        if (RETRYABLE_STATUS.has(response.status) && attempt < this.maxRetries - 1) {
+          await sleep(400 * 2 ** attempt + Math.random() * 250);
+          continue;
+        }
+        throw new Error(`Anthropic request failed (${lastStatus}): ${lastDetail}`);
+      }
+
+      const data = (await response.json()) as AnthropicResponse;
+      const meta = completionMeta(
+        data.model ?? this.model,
+        data.usage?.input_tokens,
+        data.usage?.output_tokens,
+      );
+
+      const toolUse = data.content?.find((c) => c.type === "tool_use");
+      if (toolUse?.input !== undefined) {
+        return parseAnswerToolArguments(toolUse.input as object, meta);
+      }
+      const text = data.content?.find((c) => c.type === "text")?.text ?? "";
+      if (!text) throw new Error("Anthropic returned neither a tool call nor text");
+      return parseAnswerModelJson(text, meta);
+    }
     throw new Error(`Anthropic request failed (${lastStatus}): ${lastDetail}`);
   }
 

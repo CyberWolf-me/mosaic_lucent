@@ -1,5 +1,7 @@
 import { safeParseOperations } from "@lucent/core";
 import type { GenerateResult, TokenUsage } from "../provider.js";
+import type { AnswerResult } from "../answer.js";
+import { answerArgumentsSchema } from "../answer.js";
 
 /**
  * Shared handling of a model's tool-call arguments.
@@ -98,4 +100,64 @@ export function parseModelJson(text: string, meta?: CompletionMeta): GenerateRes
     throw new Error(`Model response was not valid JSON: ${(err as Error).message}`);
   }
   return toResult(parsed, "text fallback", meta);
+}
+
+/* -------------------------------------------------------------------------- */
+/* The answer path (Stage C1)                                                 */
+/* -------------------------------------------------------------------------- */
+
+/** Tool-args shape the answer tool sends; structurally validated by the schema. */
+interface AnswerArgs {
+  answer?: unknown;
+  citations?: unknown;
+}
+
+function toAnswerResult(parsed: AnswerArgs, source: string, meta?: CompletionMeta): AnswerResult {
+  const result = answerArgumentsSchema.safeParse({
+    answer: parsed.answer,
+    // The schema defaults citations to [], but a raw `undefined` must reach
+    // zod as a *missing* key for the default to apply — passing undefined
+    // inside an object literal does exactly that.
+    ...(parsed.citations !== undefined ? { citations: parsed.citations } : {}),
+  });
+  if (!result.success) {
+    throw new Error(`Model returned an invalid answer (${source}): ${result.error.message}`);
+  }
+  return {
+    answer: result.data.answer,
+    citations: result.data.citations,
+    ...(meta?.model ? { model: meta.model } : {}),
+    ...(meta?.usage ? { usage: meta.usage } : {}),
+  };
+}
+
+/** Parse the answer tool's call arguments (a JSON string or an object). */
+export function parseAnswerToolArguments(raw: string | object, meta?: CompletionMeta): AnswerResult {
+  let parsed: AnswerArgs;
+  if (typeof raw === "string") {
+    try {
+      parsed = JSON.parse(raw) as AnswerArgs;
+    } catch (err) {
+      throw new Error(`Tool arguments were not valid JSON: ${(err as Error).message}`);
+    }
+  } else {
+    parsed = raw as AnswerArgs;
+  }
+  return toAnswerResult(parsed, "tool call", meta);
+}
+
+/** Prose fallback for the answer path — same narrow extraction as the build one. */
+export function parseAnswerModelJson(text: string, meta?: CompletionMeta): AnswerResult {
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+  if (start === -1 || end === -1 || end < start) {
+    throw new Error("No JSON object found in model response");
+  }
+  let parsed: AnswerArgs;
+  try {
+    parsed = JSON.parse(text.slice(start, end + 1)) as AnswerArgs;
+  } catch (err) {
+    throw new Error(`Model response was not valid JSON: ${(err as Error).message}`);
+  }
+  return toAnswerResult(parsed, "text fallback", meta);
 }

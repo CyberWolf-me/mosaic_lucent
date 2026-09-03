@@ -1,5 +1,6 @@
 import type { DiagramKind, Operation, Workspace } from "@lucent/core";
 import { commentThreads, reactionTally, voteRanking } from "@lucent/core";
+import type { AnswerRequest, AnswerResult } from "./answer.js";
 
 /**
  * Provider-agnostic AI boundary. The moat is the semantic canvas + harness, not
@@ -167,6 +168,14 @@ export interface StreamCallbacks {
 export interface LLMProvider {
   readonly name: string;
   generateOperations(request: GenerateRequest): Promise<GenerateResult>;
+  /**
+   * The answering call type (Stage C1): the same board, read instead of
+   * written. Required, so a provider cannot compile as a silent gap where
+   * asking breaks at runtime — the three shipped providers implement it and
+   * test stubs say what they want. No streaming variant: answers are short,
+   * and the citations only make sense as part of a whole.
+   */
+  generateAnswer(request: AnswerRequest): Promise<AnswerResult>;
   /**
    * Streaming variant. Optional: the single-shot contract stays the default,
    * and `streamViaGenerate` adapts any non-streaming provider so callers can

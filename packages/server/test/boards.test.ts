@@ -100,6 +100,10 @@ describe("authoritative validation", () => {
       async generateOperations() {
         return { operations: [{ op: "CHANGE_TEXT", id: "pay", text: "Stripe" }] };
       },
+      // Stage C1: answering is not under test here; reaching it would be a bug.
+      async generateAnswer() {
+        throw new Error("fixed provider cannot answer questions");
+      },
     };
     // The summary lies (says the board is empty), but the stored board wins.
     const result = await handleGenerate(
@@ -129,6 +133,10 @@ describe("authoritative validation", () => {
         return {
           operations: [{ op: "CHANGE_TEXT", id: "ghost", text: "nope" }],
         };
+      },
+      // Stage C1: answering is not under test here; reaching it would be a bug.
+      async generateAnswer() {
+        throw new Error("fixed provider cannot answer questions");
       },
     };
     const result = await handleGenerate(
@@ -160,6 +168,10 @@ describe("authoritative validation", () => {
       async generateOperations() {
         return { operations: [op] };
       },
+      // Stage C1: answering is not under test here; reaching it would be a bug.
+      async generateAnswer() {
+        throw new Error("fixed provider cannot answer questions");
+      },
     });
 
     await handleGenerate(
@@ -190,6 +202,10 @@ describe("authoritative validation", () => {
       async generateOperations() {
         return { operations: [{ op: "CHANGE_TEXT", id: "only-in-summary", text: "x" }] };
       },
+      // Stage C1: answering is not under test here; reaching it would be a bug.
+      async generateAnswer() {
+        throw new Error("fixed provider cannot answer questions");
+      },
     };
     const result = await handleGenerate(
       provider,
@@ -217,6 +233,10 @@ describe("authoritative validation", () => {
       name: "fixed",
       async generateOperations() {
         return { operations: [{ op: "CHANGE_TEXT", id: "secret", text: "stolen" }] };
+      },
+      // Stage C1: answering is not under test here; reaching it would be a bug.
+      async generateAnswer() {
+        throw new Error("fixed provider cannot answer questions");
       },
     };
     const summaryWithGhost = summarizeWorkspace(

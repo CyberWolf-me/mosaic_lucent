@@ -14,6 +14,11 @@ function fixedProvider(operations: Operation[], explanation?: string) {
     async generateOperations() {
       return { operations, ...(explanation ? { explanation } : {}) };
     },
+    // Stage C1 made generateAnswer part of the interface; these tests only
+    // exercise the generate path, so asking would be a test bug, not a fallback.
+    async generateAnswer() {
+      throw new Error("fixed provider cannot answer questions");
+    },
   };
 }
 

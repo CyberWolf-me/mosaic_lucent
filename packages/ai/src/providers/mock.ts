@@ -1,5 +1,6 @@
 import { safeParseOperations, type Operation } from "@lucent/core";
 import type { GenerateRequest, GenerateResult, LLMProvider, StreamCallbacks } from "../provider.js";
+import type { AnswerCitation, AnswerRequest, AnswerResult } from "../answer.js";
 
 /**
  * Offline provider so the full pipeline (generate -> validate -> reduce ->
@@ -458,8 +459,123 @@ const scripts: Script[] = [
   },
 ];
 
+/**
+ * The answer scripts (Stage C1). Intent matching over the QUESTION, evidence
+ * synthesis from the CONTEXT — the mock never invents an id, because the
+ * server's citation validation drops invented ids and a mock whose citations
+ * were all dropped would exercise nothing. Three scripts cover the shapes the
+ * offline demo and the route tests need: a "what changed" answer synthesized
+ * from the history window (the disclosure case included), a "why is this node
+ * here" answer citing node + source meeting from provenance, and a default
+ * that answers from the current board digest.
+ */
+interface AnswerScript {
+  match: (question: string) => boolean;
+  build: (request: AnswerRequest) => AnswerResult;
+}
+
+const answerScripts: AnswerScript[] = [
+  {
+    // "What changed?" — the lens the C1 acceptance scenario drives. The answer
+    // names the revisions it was built from, newest first, and states the
+    // window honestly when it is truncated (the historian's trust rule, made
+    // executable so the offline path demonstrates it).
+    match: (q) => /what( |'s)?\s*(changed|change|happened)|since\b/i.test(q),
+    build: (request) => {
+      const history = request.history;
+      const newest = history[0];
+      const oldest = history[history.length - 1];
+      if (!history.length || !newest || !oldest) {
+        return { answer: "No revisions are recorded for this board yet.", citations: [] };
+      }
+      const actors = [...new Set(history.map((h) => h.actorName))];
+      const cited = history.slice(0, 3).map((h) => ({
+        kind: "revision" as const,
+        id: String(h.seq),
+        detail: h.label,
+      }));
+      const disclosure = request.historyTruncated
+        ? ` You see the latest ${history.length} revisions${
+            request.historyDepth !== null
+              ? ` (your plan's history depth is ${request.historyDepth})`
+              : ""
+          }, so there may be older changes outside this window.`
+        : "";
+      return {
+        answer:
+          `${history.length} revisions are visible. The most recent was revision ${newest.seq} ` +
+          `at ${new Date(newest.at).toISOString().slice(0, 16).replace("T", " ")} UTC — ` +
+          `${newest.actorName} ${newest.label.toLowerCase()} (${newest.opCount} op${
+            newest.opCount === 1 ? "" : "s"
+          }). ` +
+          `The oldest visible revision is ${oldest.seq} (${oldest.actorName}). ` +
+          `${actors.length === 1 ? `${actors[0] ?? "someone"} made every change` : `${actors.length} contributors made changes`}.${disclosure}`,
+        citations: cited,
+      };
+    },
+  },
+  {
+    // "Why is this node here?" — provenance tracing. The node comes from the
+    // question's own text when it names one that exists (the mock resolves
+    // against nodeIndex); the source meeting is cited only when the digest
+    // mentions provenance for it.
+    match: (q) => /\bwhy\b.*\b(node|here|this)\b|\bwhy\b/i.test(q),
+    build: (request) => {
+      const named = request.nodeIndex.find((n) => {
+        const words = n.label.toLowerCase().split(/\s+/).filter((w) => w.length > 3);
+        return words.some((w) => request.question.toLowerCase().includes(w));
+      });
+      const node = named ?? request.nodeIndex[0];
+      if (!node) {
+        return { answer: "This board has no nodes to explain yet.", citations: [] };
+      }
+      const meeting = request.meetings[0];
+      const provenance = meeting
+        ? ` It traces to meeting ${meeting.id} (${meeting.turns[0]?.speaker ?? "the team"}: "${
+            meeting.turns.find((t) => t.text.toLowerCase().includes(node.label.toLowerCase().split(" ")[0] ?? "§"))?.text.slice(0, 80) ??
+            meeting.turns[0]?.text.slice(0, 80) ??
+            "discussed"
+          }").`
+        : "";
+      const citations: AnswerCitation[] = [{ kind: "node", id: node.id, detail: node.label }];
+      if (meeting) citations.push({ kind: "meeting", id: meeting.id });
+      return {
+        answer: `"${node.label}" is on the board as node ${node.id}.${provenance} The current state is in the board context above.`,
+        citations,
+      };
+    },
+  },
+];
+
 export class MockProvider implements LLMProvider {
   readonly name = "mock";
+
+  /**
+   * The answer path (Stage C1). Scripts first, then a digest-grounded default:
+   * whichever surface the offline demo drives, the mock answers from the same
+   * windowed context the server will send and cites only ids that context
+   * really contains.
+   */
+  async generateAnswer(request: AnswerRequest): Promise<AnswerResult> {
+    const script = answerScripts.find((s) => s.match(request.question));
+    if (script) return script.build(request);
+
+    // Default: answer from the board itself. One node citation (or none, on
+    // an empty board) keeps the offline path honest without synthesizing a
+    // narrative the context does not support.
+    const node = request.nodeIndex[0];
+    const nodeCount = request.nodeIndex.length;
+    return {
+      answer: node
+        ? `This board ("${request.boardName}") currently has ${nodeCount} node${
+            nodeCount === 1 ? "" : "s"
+          }, including "${node.label}". ${request.history.length} revision${
+            request.history.length === 1 ? "" : "s"
+          } are visible in its history.`
+        : `This board ("${request.boardName}") has no nodes yet.`,
+      citations: node ? [{ kind: "node", id: node.id }] : [],
+    };
+  }
 
   async generateOperations(request: GenerateRequest): Promise<GenerateResult> {
     const script = scripts.find((s) => s.match(request.message));

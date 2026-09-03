@@ -1,6 +1,7 @@
 import * as z from "zod/v4";
 import { AI_OPERATION_NAMES } from "@lucent/core";
 import visualAgentFile from "./prompts/visual-agent.json" with { type: "json" };
+import boardHistorianFile from "./prompts/board-historian.json" with { type: "json" };
 
 /**
  * The prompt registry (M5). Prompts are data, not string literals in code.
@@ -46,10 +47,16 @@ import visualAgentFile from "./prompts/visual-agent.json" with { type: "json" };
  */
 const vocabularySchema = z.object({
   base: z.literal("ai-permitted"),
-  /** Keep only these, in core's declaration order. */
-  only: z.array(z.string().min(1)).min(1).optional(),
+  /**
+   * Keep only these, in core's declaration order. An EMPTY list is legal and
+   * means the prompt produces no operations at all — the Stage C1 historian is
+   * read-only and declares that as data ("only: []") rather than by convention.
+   * `only` with names still narrows as before; the never-wider invariant is
+   * unchanged because an empty intersection is the narrowest vocabulary there is.
+   */
+  only: z.array(z.string().min(1)).optional(),
   /** Drop these. */
-  without: z.array(z.string().min(1)).min(1).optional(),
+  without: z.array(z.string().min(1)).optional(),
 });
 
 const promptFileSchema = z.object({
@@ -112,6 +119,14 @@ function resolveVocabulary(file: PromptFile): readonly string[] {
   }
   const only = file.vocabulary.only;
   const without = file.vocabulary.without;
+  // `only: []` is the deliberate zero-operation vocabulary (the historian). It
+  // is distinguished from a filter that *accidentally* drained the set: an
+  // empty `only` array is present on purpose, whereas `without: [everything]`
+  // or a typo'd `only` means someone believed the prompt could do something
+  // it cannot. Only the accident throws.
+  if (only !== undefined && only.length === 0) {
+    return Object.freeze([]);
+  }
   const names = base
     .filter((name) => (only ? only.includes(name) : true))
     .filter((name) => !without?.includes(name));
@@ -129,7 +144,11 @@ function render(file: PromptFile, vocabulary: readonly string[]): string {
   if (!body.includes(OPERATIONS_PLACEHOLDER)) {
     throw new Error(`prompt "${file.id}": body never uses ${OPERATIONS_PLACEHOLDER}`);
   }
-  const rendered = body.split(OPERATIONS_PLACEHOLDER).join(vocabulary.join(", "));
+  const rendered =
+    body.split(OPERATIONS_PLACEHOLDER)
+      .join(
+        vocabulary.length ? vocabulary.join(", ") : "(none — this prompt emits no operations)",
+      );
   const leftover = ANY_PLACEHOLDER.exec(rendered);
   if (leftover) {
     throw new Error(`prompt "${file.id}": unresolved placeholder ${leftover[0]}`);
@@ -165,6 +184,7 @@ export function loadPromptFile(raw: unknown): PromptEntry {
  */
 const REGISTRY = Object.freeze({
   "visual-agent": loadPromptFile(visualAgentFile),
+  "board-historian": loadPromptFile(boardHistorianFile),
 });
 
 /** The ids callers may ask for, checked by the compiler. */
