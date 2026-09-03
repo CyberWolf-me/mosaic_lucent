@@ -751,3 +751,50 @@ queued rather than lost. The definition-of-done scenario — two users, presence
 sequenced edits, a shared proposal approved by the second user with both boards
 converging on one AI-actor entry, a hard refresh, a reconnect with exact
 catchup — passes end to end.
+
+## Stage C1 shipped: history and Ask (2026-09, docs/17 amendment)
+
+[x] History API: `GET /api/boards/:id/history` (viewer floor) — the op log's
+    windowed revision timeline, summarized per revision (actor name, label,
+    touched ids, the proposal join by appliedSeq) with the honest
+    historyDepth/limit/hasMore/latestSeq envelope. `history.depth` (25/500/
+    unlimited) is finally ENFORCED — as a read boundary, never a deletion:
+    an upgrade to Pro immediately widens the same log (ADR 0019, asserted
+    end to end). Covered by `test/history-route.test.ts`.
+[x] Ask Lucent: `POST /api/boards/:id/ask` (viewer floor — asking is
+    reading) over the same window. The context is the askContext PROJECTION
+    (disposable, derived, never stored): a provenance-aware board digest
+    (node.metadata.meeting visible to the model for the first time), the
+    visible history, meetings filtered to the window floor. Citations are
+    validated at the boundary — node on the board, meeting/revision inside
+    the caller's window — and dropped into `warnings` while the answer
+    survives (ADR 0020). Bills ai.generationsPerMonth, metered mode:ask.
+    The two review scope guarantees are locked by tests: the provider
+    receives exactly the visible 25 of a 30-entry Free log, and an
+    out-of-window citation is dropped like an invented one
+    (`test/ask-route.test.ts`).
+[x] The answer call type (`@lucent/ai`): generateAnswer on the provider
+    interface, the board-historian prompt (zero-operation vocabulary —
+    `only: []` now legal and deliberate), answer_with_citations derived from
+    Zod like core's tool, and MockProvider scripts that cite only real ids
+    so offline answers survive the same server validation. The historian's
+    honesty rule (a truncated window is disclosed, never "nothing happened")
+    is prompt, window statement, and mock behavior.
+[x] Build/Ask pill (`@lucent/web`): one surface, two directions. The
+    segmented toggle renders only where a mode is passed; Ask answers carry
+    amber ✦ citation chips that jump to evidence — node → select+focus on
+    the canvas, meeting → the transcript with ?turn= scrolled and flashed
+    (reverse provenance, now real), revision → the history view with ?rev=.
+    Viewers may ask; a local board refuses with "share first".
+[x] HistoryView server mode: shared boards render the server timeline
+    (day-grouped, actor names, AI amber dot, show-on-board jumps, proposal
+    links, the depth banner); local boards keep the client timeline
+    untouched. Pure helpers node-tested (`test/history-view.test.ts`).
+[ ] Cross-meeting memory / decision lifecycle / semantic search — Stage C2+,
+    deliberately not built (the roadmap's own "not yet" list, restated in
+    docs/17's C1 amendment).
+
+Gate: typecheck 0, tests green across all six packages; the
+stageC1.definition.e2e acceptance scenario passes the continuous story
+(seed → Free 25 → upgrade reveals → ask with citations → viewer asks →
+stranger 404 → both scope guarantees).

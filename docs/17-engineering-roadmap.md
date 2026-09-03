@@ -220,3 +220,56 @@ The freeze resumes on the same terms: production safety, benchmarks, user
 evidence, infrastructure requirements. Gate B (repeat usage) and Gate C
 (adoption blockers) remain UNKNOWN — the next engineering phase still comes
 from users, not from us.
+
+## Amendment (2026-09-03): Stage C1 executed — history and Ask
+
+The owner decision that reopened engineering for C1: the Stage C document's
+first batch (C1: history API + history UI + Ask mode), with three review
+amendments folded in before implementation — `history.depth` bounds the
+ENTIRE context Ask consumes (not just the history list), the two scope
+guarantees (context and citation) are locked by tests, and the Ask context
+builder is a projection, never a second memory layer. Recorded honestly:
+same footing as Stage B — an owner decision grounded in a plan, not Gate
+B/C user evidence.
+
+What Stage C1 shipped (batches, commits, and the acceptance scenario in
+`packages/server/test/stageC1.definition.e2e.test.ts`):
+
+- **The answer call type** (`@lucent/ai`): `generateAnswer` joins
+  `generateOperations` as the second provider surface. Build mutates; Ask
+  reads. The board-historian prompt (registry v2) emits no operations, and
+  its honesty rule — a truncated window is disclosed, never answered as
+  "nothing happened" — is the trust behavior the whole feature rests on.
+  ADR 0020.
+- **The window** (`@lucent/server`): `historyWindow()` is the single piece
+  of arithmetic both the timeline and Ask consume. `history.depth` is
+  enforced at the read boundary and nowhere else — nothing is deleted to
+  enforce a plan, an upgrade instantly widens the window over the same log,
+  and the meeting digest is windowed to the same floor so Ask cannot leak
+  what the timeline refuses to show. ADR 0019.
+- **The routes**: `GET /api/boards/:id/history` (viewer floor; the
+  summarized timeline — actor names, touched ids, the Stage B3 proposal join
+  by appliedSeq — with the honest `hasMore`/`historyDepth` envelope) and
+  `POST /api/boards/:id/ask` (viewer floor; same allowance as Build,
+  metered `mode: ask`; citations validated against real, caller-visible
+  state and dropped into `warnings` while the answer survives).
+- **The surfaces** (`@lucent/web`): the AI pill's Build/Ask segmented
+  toggle (one surface, two directions), amber ✦ citation chips that jump to
+  evidence (node → select+focus, meeting → the transcript with the turn
+  range highlighted — the reverse-provenance interaction, now real —,
+  revision → the history view), and HistoryView upgraded to the server
+  timeline for shared boards (day-grouped, actor-named, depth banner) with
+  the local client timeline untouched.
+
+Explicitly NOT built, per the plan's decisions: history pagination (the
+2,000-entry response ceiling plus `hasMore` is honest; paging when a real
+board hits it), SSE for Ask (answers are short; the seam exists if latency
+ever hurts), semantic search/embeddings, the MCP `get_board_history` tool
+(two-line addition behind the same window when wanted), any Knowledge
+collection (statements stay on nodes; transcript context covers the rest),
+decision/action lifecycles and cross-meeting memory (C2's territory — built
+on canonical state, not on askContext's projection).
+
+The freeze resumes on the same terms. The next C batch (semantic lifecycle)
+reopens on the same rule as this one: a plan, an owner decision, and the
+scope guarantees named before code.
