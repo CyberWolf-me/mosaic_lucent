@@ -53,6 +53,10 @@ export interface Node {
    * plain diagram node carries no issue overhead.
    */
   issue?: IssueFields;
+  /** What this node IS semantically — the statement it carries (Stage C2). */
+  statement?: StatementFields;
+  /** Creation evidence — which meeting/turns produced this node (Stage C2). */
+  provenance?: ProvenanceFields;
   metadata?: Record<string, unknown>;
 }
 
@@ -78,6 +82,64 @@ export interface IssueFields {
   labels?: string[];
   /** Parent work item (an epic id for a story, a story id for a subtask). */
   parentId?: string;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Statement semantics (Stage C2, ADR 0021)                                    */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The six statement kinds. A closed set: each carries a distinct lifecycle
+ * (decisions/proposals supersede, questions resolve, actions complete,
+ * requirements change, risks mitigate), and a new kind requires evidence of
+ * its own lifecycle behavior — not merely a new label — before it joins the
+ * union (ADR 0021's freeze rule).
+ */
+export type StatementKind =
+  | "decision"
+  | "proposal"
+  | "question"
+  | "action"
+  | "requirement"
+  | "risk";
+
+/** Lifecycle statuses shared by every kind (see ADR 0021 for the reasoning). */
+export type StatementStatus = "open" | "resolved" | "rejected" | "superseded";
+
+/**
+ * What a node IS semantically — the decision/proposal/question/action/
+ * requirement/risk it represents, with its lifecycle state and evidence.
+ * The mirror of IssueFields for meaning instead of work tracking: set by
+ * validated operations (SET_STATEMENT/UPDATE_STATEMENT), shared through the
+ * op log, undone by inverse ops. Survives relabels and transforms — the
+ * statement is the node's identity, not its current caption.
+ */
+export interface StatementFields {
+  kind: StatementKind;
+  status: StatementStatus;
+  /** Short kebab-case subject key so "pricing" groups across nodes (C2: a
+   * plain key; entity resolution across wordings is C5's topic work). */
+  topic?: string;
+  /** Nodes this statement replaces. The reducer marks those superseded. */
+  supersedes?: string[];
+  /** Evidence for the statement itself (meeting loop enrichment). */
+  provenance?: ProvenanceFields;
+}
+
+/**
+ * Creation evidence on a node (Stage C2, ADR 0022): which meeting, which
+ * turns, which words produced it. Set once at CREATE_NODE and untouched by
+ * every later operation — a node's origin does not change when its label,
+ * layout, or statement does.
+ */
+export interface ProvenanceFields {
+  meetingId: string;
+  /** Inclusive index range into the meeting's turns. */
+  turnRange?: [number, number];
+  /** The meeting loop's classification of the source turns, in turn order. */
+  turnKinds?: string[];
+  /** The words that produced this node, capped at 240 characters. */
+  quote?: string;
 }
 
 export interface Edge {
@@ -376,6 +438,16 @@ export const BOARD_COLUMNS: ReadonlyArray<{ category: IssueStatusCategory; label
 /** Nodes that carry issue fields, i.e. the work items on a board. */
 export function issueNodes(workspace: Workspace): Node[] {
   return Object.values(workspace.nodes).filter((n) => n.issue);
+}
+
+/**
+ * Nodes that carry a statement, i.e. the semantic layer of a board (Stage
+ * C2): the decisions, proposals, questions, actions, requirements, and risks
+ * it holds. The selector behind every statement-aware surface — chips, the
+ * HUD editor's supersedes candidates, the C6 views to come.
+ */
+export function statementNodes(workspace: Workspace): Node[] {
+  return Object.values(workspace.nodes).filter((n) => n.statement);
 }
 
 /** Group issue nodes by board column, preserving insertion order within each. */

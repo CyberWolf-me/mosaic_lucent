@@ -65,6 +65,9 @@ export function inverseOperations(ops: readonly Operation[], before: Workspace):
             nodeType: captured.node.nodeType,
             label: captured.node.label,
             ...(captured.node.groupId ? { groupId: captured.node.groupId } : {}),
+            // Creation evidence travels with the restore (Stage C2): the
+            // node's origin is as much a fact to undo as its position.
+            ...(captured.node.provenance ? { provenance: { ...captured.node.provenance } } : {}),
           },
           // Restoring the node's position and pin state is what makes undo feel
           // exact: a node the user placed by hand would otherwise pop back at
@@ -87,6 +90,17 @@ export function inverseOperations(ops: readonly Operation[], before: Workspace):
                   op: "SET_ISSUE" as const,
                   id: captured.node.id,
                   issue: { ...captured.node.issue },
+                },
+              ]
+            : []),
+          // And the same for the statement (Stage C2): the node's meaning must
+          // reappear with it, or undo of a delete silently drops a decision.
+          ...(captured.node.statement
+            ? [
+                {
+                  op: "SET_STATEMENT" as const,
+                  id: captured.node.id,
+                  statement: { ...captured.node.statement },
                 },
               ]
             : []),
@@ -125,6 +139,33 @@ export function inverseOperations(ops: readonly Operation[], before: Workspace):
         // including ones cleared to null by the forward op.
         const prev = walking.nodes[op.id]?.issue;
         if (prev) inverses.unshift({ op: "SET_ISSUE", id: op.id, issue: { ...prev } });
+        break;
+      }
+      case "SET_STATEMENT":
+      case "UPDATE_STATEMENT": {
+        // Restore the node's prior statement (or clear it if it had none),
+        // the same full-replay reasoning as UPDATE_ISSUE above.
+        const prev = walking.nodes[op.id]?.statement;
+        const restore: Operation[] = [
+          { op: "SET_STATEMENT", id: op.id, statement: prev ? { ...prev } : null },
+        ];
+        // Supersession restore (Stage C2): applying this statement marked its
+        // targets superseded; undo must give them THEIR prior statements back
+        // too, or "undo the rejection" leaves the rejected proposal buried.
+        const targets =
+          op.op === "SET_STATEMENT"
+            ? (op.statement?.supersedes ?? [])
+            : (op.supersedes ?? []);
+        for (const target of targets) {
+          const prior = walking.nodes[target]?.statement;
+          // Replayed against the walking state, which the SET_STATEMENT above
+          // has not yet touched when inverses run forward — prior is the
+          // statement exactly as it was before the supersession.
+          if (prior) {
+            restore.push({ op: "SET_STATEMENT", id: target, statement: { ...prior } });
+          }
+        }
+        inverses.unshift(...restore);
         break;
       }
       case "MOVE_NODE": {

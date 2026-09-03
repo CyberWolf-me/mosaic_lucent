@@ -181,3 +181,32 @@ describe("repairOperations", () => {
     expect(validateOperations(existing, fixed)).toHaveLength(0);
   });
 });
+
+describe("statement ops keep their trailing bucket (Stage C2)", () => {
+  it("a statement emitted before its node still lands after the create", () => {
+    // The model can emit ops in any order; repair must put SET_STATEMENT
+    // after the CREATE_NODE it targets (trailing bucket > create bucket),
+    // including when the statement references a node created in-batch.
+    const raw: Operation[] = [
+      {
+        op: "SET_STATEMENT",
+        id: "n",
+        statement: { kind: "decision", status: "resolved", supersedes: ["old"] },
+      },
+      { op: "CREATE_NODE", id: "n", nodeType: "decision", label: "New" },
+      { op: "CREATE_NODE", id: "old", nodeType: "decision", label: "Old" },
+      { op: "SET_STATEMENT", id: "old", statement: { kind: "proposal", status: "open" } },
+      { op: "CONNECT_NODES", source: "n", target: "old", relationship: "replaces" },
+    ];
+    const fixed = repairOperations(raw);
+    const kinds = fixed.map((o) => o.op);
+    // Creates first, statement ops after — every statement after every create.
+    const lastCreate = Math.max(...kinds.map((k, i) => (k === "CREATE_NODE" ? i : -1)));
+    const firstStatement = kinds.findIndex((k) => k.endsWith("_STATEMENT"));
+    expect(firstStatement).toBeGreaterThan(lastCreate);
+    // And the repaired batch validates against an empty board.
+    expect(validateOperations(createWorkspace(), fixed)).toEqual([]);
+    const ws = applyOperations(createWorkspace(), fixed);
+    expect(ws.nodes.old?.statement?.status).toBe("superseded");
+  });
+});

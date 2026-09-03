@@ -72,6 +72,9 @@ export function applyOperation(workspace: Workspace, op: Operation): Workspace {
         nodeType: op.nodeType,
         label: op.label,
         ...(op.groupId ? { groupId: op.groupId } : {}),
+        // Creation evidence (Stage C2): stored once, untouched by every later
+        // op. A node's origin is not part of its mutable state.
+        ...(op.provenance ? { provenance: op.provenance } : {}),
       };
       if (op.groupId) {
         const group = next.groups[op.groupId];
@@ -165,6 +168,60 @@ export function applyOperation(workspace: Workspace, op: Operation): Workspace {
           else issue.parentId = op.parentId;
         }
         next.nodes[op.id] = { ...node, issue };
+      }
+      break;
+    }
+
+    case "SET_STATEMENT": {
+      const node = next.nodes[op.id];
+      if (node) {
+        if (op.statement === null) {
+          const { statement: _drop, ...rest } = node;
+          next.nodes[op.id] = rest;
+        } else {
+          next.nodes[op.id] = { ...node, statement: { ...op.statement } };
+          // Supersession is visible (Stage C2): the targets a statement
+          // replaces are marked superseded here, not left to a label
+          // convention. Only the status flips — the target's kind, topic, and
+          // evidence stay, because the story of what was replaced is as much
+          // the board's history as the replacement is.
+          for (const target of op.statement.supersedes ?? []) {
+            const superseded = next.nodes[target];
+            if (superseded?.statement) {
+              next.nodes[target] = {
+                ...superseded,
+                statement: { ...superseded.statement, status: "superseded" },
+              };
+            }
+          }
+        }
+      }
+      break;
+    }
+
+    case "UPDATE_STATEMENT": {
+      const node = next.nodes[op.id];
+      if (node?.statement) {
+        const statement = { ...node.statement };
+        if (op.status !== undefined) statement.status = op.status;
+        if (op.topic !== undefined) {
+          if (op.topic === null) delete statement.topic;
+          else statement.topic = op.topic;
+        }
+        if (op.supersedes !== undefined) statement.supersedes = op.supersedes;
+        next.nodes[op.id] = { ...node, statement };
+        // The same visible supersession as SET_STATEMENT, applied on the patch
+        // path — a "we went with the other option" edit marks the replaced
+        // statement just as a full replacement does.
+        for (const target of op.supersedes ?? []) {
+          const superseded = next.nodes[target];
+          if (superseded?.statement) {
+            next.nodes[target] = {
+              ...superseded,
+              statement: { ...superseded.statement, status: "superseded" },
+            };
+          }
+        }
       }
       break;
     }

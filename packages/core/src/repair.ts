@@ -88,6 +88,54 @@ export function repairOperations(ops: Operation[]): Operation[] {
     const key = isCreate(op) ? undefined : entityKey(op);
     if (key !== undefined && !destroyedAt.has(key)) destroyedAt.set(key, i);
   });
+  // Supersession dependencies (Stage C2): a statement that supersedes node X
+  // must run AFTER the op that gives X its statement (the validator requires
+  // the target to already carry one). Buckets cannot express this — both are
+  // trailing — so each statement op gets an EFFECTIVE index: its own, or one
+  // past the latest op its supersession chain depends on, transitively (n1
+  // supersedes n2, n2 supersedes n3 needs n3's statement first). The `seen`
+  // set bounds the walk; a cyclic batch (which validation would refuse
+  // anyway) cannot loop it.
+  type StatementOp = Extract<Operation, { op: "SET_STATEMENT" | "UPDATE_STATEMENT" }>;
+  const statementOps = ops.filter(
+    (op): op is StatementOp => op.op === "SET_STATEMENT" || op.op === "UPDATE_STATEMENT",
+  );
+  /** The node ids a statement op supersedes, when it supersedes any. */
+  const supersedeTargets = (op: StatementOp): string[] | undefined =>
+    op.op === "SET_STATEMENT"
+      ? (op.statement?.supersedes ?? [])
+      : op.supersedes
+        ? op.supersedes
+        : undefined;
+  const statementTargets = new Map<string, string[]>();
+  for (const op of statementOps) {
+    const targets = supersedeTargets(op);
+    if (targets?.length) statementTargets.set(op.id, [...targets]);
+  }
+  const setterIndex = (target: string): number =>
+    statementOps.findIndex((o) => o.id === target);
+  const effectiveOf = new Map<string, number>();
+  const computeEffective = (op: StatementOp, seen = new Set<string>()): number => {
+    const cached = effectiveOf.get(op.id);
+    if (cached !== undefined) return cached;
+    seen.add(op.id);
+    const i = ops.indexOf(op);
+    let effective = i;
+    for (const target of statementTargets.get(op.id) ?? []) {
+      const setter = statementOps[setterIndex(target)];
+      // Only a setter that lands AFTER this op forces a move; one already
+      // before it satisfies the dependency where it is.
+      if (setter && ops.indexOf(setter) > i && !seen.has(setter.id)) {
+        effective = Math.max(effective, computeEffective(setter, seen) + 1);
+      }
+    }
+    effectiveOf.set(op.id, effective);
+    return effective;
+  };
+  const effective = new Map<number, number>();
+  for (const op of statementOps) {
+    effective.set(ops.indexOf(op), computeEffective(op));
+  }
   return ops
     .map((op, i) => {
       const key = isCreate(op) ? entityKey(op) : undefined;
@@ -96,6 +144,9 @@ export function repairOperations(ops: Operation[]): Operation[] {
       const isRecreate = key !== undefined && (destroyedAt.get(key) ?? Infinity) < i;
       return { op, i, b: isRecreate ? TRAILING_BUCKET : bucket(op) };
     })
-    .sort((a, b) => a.b - b.b || a.i - b.i)
+    // Effective index replaces original index as the within-bucket order, so
+    // a superseding statement lands after its target's setter; ops with no
+    // dependencies keep their own index and the stable original order.
+    .sort((a, b) => a.b - b.b || (effective.get(a.i) ?? a.i) - (effective.get(b.i) ?? b.i))
     .map((x) => x.op);
 }

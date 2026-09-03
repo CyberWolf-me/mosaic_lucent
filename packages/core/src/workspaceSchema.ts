@@ -56,6 +56,36 @@ const nodeSchema = z.object({
       parentId: z.string().min(1).optional(),
     })
     .optional(),
+  // Statement semantics (Stage C2). Restated here rather than imported from
+  // operations.ts, the same accepted duplication as `issue` above (ADR 0014):
+  // the parse contract is a wire-format view of the model, and a change to
+  // either shape should have to be made twice deliberately. A statement or
+  // provenance field missing from THIS schema would be silently stripped on
+  // every parseWorkspace — persisted boards would load without them.
+  statement: z
+    .object({
+      kind: z.enum(["decision", "proposal", "question", "action", "requirement", "risk"]),
+      status: z.enum(["open", "resolved", "rejected", "superseded"]),
+      topic: z.string().min(1).max(60).optional(),
+      supersedes: z.array(z.string().min(1)).max(10).optional(),
+      provenance: z
+        .object({
+          meetingId: z.string().min(1).max(120),
+          turnRange: z.tuple([z.number().int().min(0), z.number().int().min(0)]).optional(),
+          turnKinds: z.array(z.string().min(1)).max(8).optional(),
+          quote: z.string().max(240).optional(),
+        })
+        .optional(),
+    })
+    .optional(),
+  provenance: z
+    .object({
+      meetingId: z.string().min(1).max(120),
+      turnRange: z.tuple([z.number().int().min(0), z.number().int().min(0)]).optional(),
+      turnKinds: z.array(z.string().min(1)).max(8).optional(),
+      quote: z.string().max(240).optional(),
+    })
+    .optional(),
   metadata: z.record(z.string(), z.unknown()).optional(),
 });
 

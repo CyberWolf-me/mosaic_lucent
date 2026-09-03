@@ -55,6 +55,36 @@ export function validateOperations(workspace: Workspace, ops: Operation[]): Vali
       .filter((c) => !c.parentId)
       .map((c) => c.id),
   );
+  // Statement supersession (Stage C2): node id -> the ids its statement
+  // supersedes. Maintained through the batch so the cycle check sees links a
+  // statement earlier in the same batch created, the same presence-simulation
+  // the sets above perform. Nodes carrying a statement is likewise tracked,
+  // because "the target must itself be a statement" is exactly the kind of
+  // rule a dangling link would silently break.
+  const statementOf = new Map<string, NonNullable<Workspace["nodes"][string]["statement"]>>();
+  for (const [id, node] of Object.entries(workspace.nodes)) {
+    if (node.statement) statementOf.set(id, node.statement);
+  }
+
+  /**
+   * True when `from`'s supersession closure reaches `to` — i.e. following
+   * `supersedes` links from `from` (transitively) arrives at `to`. Bounded by
+   * the link count: the walk visits each node once, so a cycle in existing
+   * data cannot loop forever, and the check itself is what keeps cycles out.
+   */
+  const supersedesReaches = (from: string, to: string): boolean => {
+    const seen = new Set<string>();
+    const queue = [...(statementOf.get(from)?.supersedes ?? [])];
+    while (queue.length > 0) {
+      const id = queue.pop()!;
+      if (id === to) return true;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      const links = statementOf.get(id)?.supersedes;
+      if (links) queue.push(...links);
+    }
+    return false;
+  };
 
   ops.forEach((op, index) => {
     const err = (message: string) => errors.push({ index, op: op.op, message });
@@ -91,6 +121,55 @@ export function validateOperations(workspace: Workspace, ops: Operation[]): Vali
         if (op.parentId && !nodes.has(op.parentId))
           err(`parent issue "${op.parentId}" does not exist`);
         break;
+      case "SET_STATEMENT": {
+        if (!nodes.has(op.id)) err(`node "${op.id}" does not exist`);
+        const statement = op.statement;
+        if (statement) {
+          for (const target of statement.supersedes ?? []) {
+            if (target === op.id) {
+              err(`statement on "${op.id}" cannot supersede itself`);
+              continue;
+            }
+            if (!nodes.has(target)) err(`superseded node "${target}" does not exist`);
+            else if (!statementOf.has(target))
+              err(`superseded node "${target}" carries no statement`);
+            else if (supersedesReaches(target, op.id))
+              err(`supersession by "${target}" would cycle back to "${op.id}"`);
+          }
+          statementOf.set(op.id, statement);
+        } else {
+          statementOf.delete(op.id);
+        }
+        break;
+      }
+      case "UPDATE_STATEMENT": {
+        if (!nodes.has(op.id)) err(`node "${op.id}" does not exist`);
+        if (op.supersedes) {
+          for (const target of op.supersedes) {
+            if (target === op.id) {
+              err(`statement on "${op.id}" cannot supersede itself`);
+              continue;
+            }
+            if (!nodes.has(target)) err(`superseded node "${target}" does not exist`);
+            else if (!statementOf.has(target))
+              err(`superseded node "${target}" carries no statement`);
+            else if (supersedesReaches(target, op.id))
+              err(`supersession by "${target}" would cycle back to "${op.id}"`);
+          }
+        }
+        // The patch merges over the live statement for the cycle check: the
+        // NEW list is what will be, and a target may itself have been set
+        // earlier in this batch.
+        if (statementOf.has(op.id)) {
+          const current = statementOf.get(op.id)!;
+          statementOf.set(op.id, {
+            ...current,
+            ...(op.status ? { status: op.status } : {}),
+            ...(op.supersedes ? { supersedes: op.supersedes } : {}),
+          });
+        }
+        break;
+      }
       case "CONNECT_NODES": {
         if (!nodes.has(op.source)) err(`source node "${op.source}" does not exist`);
         if (!nodes.has(op.target)) err(`target node "${op.target}" does not exist`);

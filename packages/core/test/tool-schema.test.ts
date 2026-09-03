@@ -114,6 +114,12 @@ describe("schema still validates what the tool advertises", () => {
       CHANGE_NODE_TYPE: { op: "CHANGE_NODE_TYPE", id: "a", nodeType: "database" },
       SET_ISSUE: { op: "SET_ISSUE", id: "a", issue: { type: "story", status: "To Do" } },
       UPDATE_ISSUE: { op: "UPDATE_ISSUE", id: "a", status: "Done" },
+      SET_STATEMENT: {
+        op: "SET_STATEMENT",
+        id: "a",
+        statement: { kind: "decision", status: "resolved" },
+      },
+      UPDATE_STATEMENT: { op: "UPDATE_STATEMENT", id: "a", status: "rejected" },
       CONNECT_NODES: { op: "CONNECT_NODES", source: "a", target: "b", relationship: "calls" },
       DISCONNECT_NODES: { op: "DISCONNECT_NODES", source: "a", target: "b", relationship: "calls" },
       CREATE_GROUP: { op: "CREATE_GROUP", id: "g", label: "G", children: [] },

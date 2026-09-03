@@ -43,6 +43,82 @@ const issueFieldsSchema = z.object({
 });
 
 /**
+ * Where a node came from (Stage C2): the meeting evidence behind its
+ * creation. The model never emits this — it cannot see meeting ids or turn
+ * indices — so the meeting loop enriches the ops with it before they are
+ * committed (attachProvenance), and from there it rides the one pipeline
+ * everything trusts: validate → apply → log → peers → undo.
+ *
+ * This replaced a client-side post-pass that wrote `metadata.meeting` onto
+ * nodes after the ops were applied. The stamp existed only in the capturing
+ * browser — never in the op log, never on peers, never in undo history — so
+ * "why is this node here?" had a different answer on every machine (ADR
+ * 0022). Provenance on the originating operation is the same idea with one
+ * writer and zero divergence.
+ *
+ * `extractedAt` is deliberately absent: the op log's own `at` already
+ * records when the creation happened, and a second timestamp on the node
+ * would be a second source of truth the moment anyone edits it.
+ */
+export const provenanceFieldsSchema = z.object({
+  meetingId: z.string().min(1).max(120),
+  /** Stable index range into the meeting's turns, inclusive. */
+  turnRange: z.tuple([z.number().int().min(0), z.number().int().min(0)]).refine(
+    (range) => range[1] >= range[0],
+    "turnRange end must be at least its start",
+  ).optional(),
+  /** The meeting loop's classification of the source turns, in turn order. */
+  turnKinds: z.array(z.string().min(1)).max(8).optional(),
+  /** The words that produced this node, capped like the old stamp was. */
+  quote: z.string().max(240).optional(),
+});
+
+/**
+ * The six statement kinds (Stage C2, ADR 0021). A closed set on purpose: each
+ * kind carries a distinct lifecycle — decision/proposal supersede, question
+ * resolves, action completes, requirement changes, risk mitigates — and the
+ * freeze rule is that a NEW kind needs evidence of its own lifecycle, not
+ * merely a new label (`fact`/`constraint` were left out of C2 for exactly
+ * that reason; docs/05's wider taxonomy stays transcript context until a kind
+ * earns independent behavior).
+ */
+export const statementKindSchema = z.enum([
+  "decision",
+  "proposal",
+  "question",
+  "action",
+  "requirement",
+  "risk",
+]);
+
+/**
+ * Lifecycle statuses shared by every kind. Four, not per-kind state machines:
+ * the nuance lives in the label and the op log records the story. Decisions
+ * are born `resolved` (an undecided decision is a proposal); proposals and
+ * questions open; a rejected/superseded statement keeps its history because
+ * the supersession is visible on the target (the reducer flips the target's
+ * status) rather than deleting anything.
+ */
+export const statementStatusSchema = z.enum(["open", "resolved", "rejected", "superseded"]);
+
+const statementFieldsSchema = z.object({
+  kind: statementKindSchema,
+  status: statementStatusSchema,
+  /** Short kebab-case subject key so "pricing" groups across nodes. */
+  topic: z
+    .string()
+    .min(1)
+    .max(60)
+    .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, "topic must be kebab-case")
+    .optional(),
+  /** Node ids this statement replaces. Validated: must exist, carry
+   * statements, and not form a cycle back to this node. */
+  supersedes: z.array(z.string().min(1)).max(10).optional(),
+  /** Evidence for the statement itself, when the meeting loop enriched it. */
+  provenance: provenanceFieldsSchema.optional(),
+});
+
+/**
  * Recursive wireframe element schema. The AI describes UI *structure* — nested
  * regions, rows, fields, buttons — and a flexbox renderer lays it out. No pixel
  * coordinates are ever accepted from the model (docs/03, docs/25).
@@ -97,6 +173,14 @@ const operationSchema = z.discriminatedUnion("op", [
     nodeType: z.string().min(1),
     label: z.string(),
     groupId: z.string().min(1).optional(),
+    /**
+     * Creation evidence (Stage C2): the meeting a node was extracted from.
+     * Optional because plain "make me a flowchart" requests have no source
+     * meeting. The model never sets it; the meeting loop does (see
+     * provenanceFieldsSchema above). Untouched by every later operation —
+     * a node's origin does not change when its label or layout does.
+     */
+    provenance: provenanceFieldsSchema.optional(),
   }),
   z.object({
     op: z.literal("DELETE_NODE"),
@@ -136,6 +220,38 @@ const operationSchema = z.discriminatedUnion("op", [
     storyPoints: z.number().min(0).max(1000).nullable().optional(),
     labels: z.array(z.string()).max(20).optional(),
     parentId: z.string().min(1).nullable().optional(),
+  }),
+  /**
+   * Attach or replace the semantic statement on a node (Stage C2): the
+   * decision/proposal/question/action/requirement/risk the node IS, with its
+   * lifecycle status and its evidence. Setting `statement: null` clears it
+   * back to a plain node. The mirror of SET_ISSUE for meaning instead of
+   * work tracking — one field, one op, one source of truth on the node.
+   */
+  z.object({
+    op: z.literal("SET_STATEMENT"),
+    id: z.string().min(1),
+    statement: statementFieldsSchema.nullable(),
+  }),
+  /**
+   * Patch a statement's lifecycle without resending it — the "we decided" /
+   * "rejected" / "superseded by" / "resolved" edit. `topic: null` clears the
+   * key; `supersedes` replaces the list wholesale; `kind` is deliberately NOT
+   * patchable: kind is the statement's identity, and a change of kind is a
+   * new statement (SET_STATEMENT, visible as its own revision).
+   */
+  z.object({
+    op: z.literal("UPDATE_STATEMENT"),
+    id: z.string().min(1),
+    status: statementStatusSchema.optional(),
+    topic: z
+      .string()
+      .min(1)
+      .max(60)
+      .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/)
+      .nullable()
+      .optional(),
+    supersedes: z.array(z.string().min(1)).max(10).optional(),
   }),
   /**
    * A user dragging a node by hand. This is the one operation that carries
@@ -388,4 +504,45 @@ export function parseOperations(raw: unknown): Operation[] {
 /** Safe variant that returns a result instead of throwing. */
 export function safeParseOperations(raw: unknown) {
   return operationsSchema.safeParse(raw);
+}
+
+/**
+ * Enrich a batch with its meeting evidence (Stage C2) — the op-level
+ * replacement for the old client post-pass. The meeting loop holds the
+ * provenance the model can never see (meeting id, turn range, the words
+ * said); this attaches it to the ops BEFORE they are committed, so it lands
+ * in the op log, on every peer, in the server's board, and in undo history —
+ * everywhere the ops themselves go — instead of only in the capturing
+ * browser's memory.
+ *
+ * Placement rules:
+ * - CREATE_NODE gains `provenance` (creation evidence).
+ * - SET_STATEMENT embeds it in the statement (the evidence for the statement
+ *   the node now carries — e.g. the "let's price it at $15" turn behind a
+ *   decision node).
+ * - Everything else is untouched: provenance is about the CREATION/change
+ *   that produced the object, not a footnote on every later edit.
+ *
+ * Idempotent per op: an op that already carries provenance keeps its own —
+ * a second meeting extraction batch over the same node does not overwrite
+ * the first origin.
+ */
+export function attachProvenance(
+  ops: readonly Operation[],
+  provenance: z.infer<typeof provenanceFieldsSchema>,
+): Operation[] {
+  return ops.map((op) => {
+    if (op.op === "CREATE_NODE") {
+      if (op.provenance) return op;
+      return { ...op, provenance } as Operation;
+    }
+    if (op.op === "SET_STATEMENT") {
+      if (op.statement === null || op.statement.provenance) return op;
+      return {
+        ...op,
+        statement: { ...op.statement, provenance },
+      } as Operation;
+    }
+    return op;
+  });
 }

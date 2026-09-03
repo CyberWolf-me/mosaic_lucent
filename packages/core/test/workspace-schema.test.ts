@@ -215,3 +215,103 @@ describe("validator enforces the locked flag on shapes", () => {
     expect(errors).toHaveLength(1);
   });
 });
+
+describe("statement and provenance persistence (Stage C2)", () => {
+  // A node's statement and provenance are parse-contract fields now: zod
+  // strips unknown keys, so a field missing from nodeSchema would silently
+  // vanish from every stored board the moment it round-tripped. These tests
+  // pin that the fields survive — and that an older board without them still
+  // loads (the tolerant-parse rule).
+  const stated = applyOperations(createWorkspace({ diagramKind: "flowchart" }), [
+    {
+      op: "CREATE_NODE",
+      id: "pricing",
+      nodeType: "decision",
+      label: "Pricing $15/mo",
+      provenance: { meetingId: "mtg_7", turnRange: [4, 6], quote: "fifteen a month" },
+    },
+    {
+      op: "SET_STATEMENT",
+      id: "pricing",
+      statement: {
+        kind: "decision",
+        status: "resolved",
+        topic: "pricing",
+        supersedes: ["old-plan"],
+      },
+    },
+    { op: "CREATE_NODE", id: "old-plan", nodeType: "decision", label: "Old plan" },
+    { op: "SET_STATEMENT", id: "old-plan", statement: { kind: "proposal", status: "superseded" } },
+  ]);
+
+  it("round-trips statement and provenance through parseWorkspace", () => {
+    const result = parseWorkspace(stated);
+    expect(result.ok).toBe(true);
+    expect(result.workspace?.nodes.pricing?.statement).toEqual({
+      kind: "decision",
+      status: "resolved",
+      topic: "pricing",
+      supersedes: ["old-plan"],
+    });
+    expect(result.workspace?.nodes.pricing?.provenance).toEqual({
+      meetingId: "mtg_7",
+      turnRange: [4, 6],
+      quote: "fifteen a month",
+    });
+    expect(result.workspace?.nodes["old-plan"]?.statement).toMatchObject({
+      kind: "proposal",
+      status: "superseded",
+    });
+  });
+
+  it("loads an older board whose nodes carry neither field", () => {
+    const older = {
+      ...createWorkspace(),
+      nodes: {
+        plain: { id: "plain", nodeType: "step", label: "Plain" },
+      },
+    };
+    const result = parseWorkspace(older);
+    expect(result.ok).toBe(true);
+    expect(result.workspace?.nodes.plain?.statement).toBeUndefined();
+    expect(result.workspace?.nodes.plain?.provenance).toBeUndefined();
+  });
+
+  it("tolerates a stored statement whose topic predates the kebab contract", () => {
+    // The op schema enforces kebab-case topics on the way IN; the parse
+    // contract stays tolerant on the way back (this file's first rule), so
+    // an older or foreign board with a free-form topic loads rather than
+    // being refused. The model re-stamps a canonical topic when it next
+    // updates the statement.
+    const odd = {
+      ...createWorkspace(),
+      nodes: {
+        n: {
+          id: "n",
+          nodeType: "decision",
+          label: "N",
+          statement: { kind: "decision", status: "resolved", topic: "Not Kebab" },
+        },
+      },
+    };
+    const result = parseWorkspace(odd);
+    expect(result.ok).toBe(true);
+    expect(result.workspace?.nodes.n?.statement?.topic).toBe("Not Kebab");
+  });
+
+  it("refuses a stored statement whose kind is outside the closed set", () => {
+    const bad = {
+      ...createWorkspace(),
+      nodes: {
+        n: {
+          id: "n",
+          nodeType: "decision",
+          label: "N",
+          statement: { kind: "opinion", status: "open" },
+        },
+      },
+    };
+    const result = parseWorkspace(bad);
+    expect(result.ok).toBe(false);
+  });
+});
