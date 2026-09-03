@@ -12,6 +12,13 @@
 export type TelemetryEvent =
   | { kind: "generate"; ms: number; provider: string; operations: number }
   | { kind: "image"; ms: number; provider: string }
+  /**
+   * The answer path (Stage C1): a question about the board, answered with
+   * citations. Its own kind rather than a generate row with operations: 0 —
+   * answer latency and citation survival are the signals this surface needs
+   * to watch, and folding them into generate would make both unreadable.
+   */
+  | { kind: "ask"; ms: number; provider: string; citations: number }
   | { kind: "error"; route: string; status: number; message: string }
   /**
    * A request we turned away, tagged with why. `plan:<entitlement key>` is a
@@ -38,7 +45,7 @@ export interface ErrorRecord {
 export interface MetricsSnapshot {
   startedAt: number;
   uptimeSeconds: number;
-  requests: { generate: number; image: number };
+  requests: { generate: number; image: number; ask: number };
   errors: { total: number; byStatus: Record<string, number> };
   refusals: { rate: number; quota: number; plan: number };
   latencyMs: { generateP50: number; generateP95: number; generateMax: number };
@@ -71,6 +78,7 @@ export class Telemetry {
   private readonly startedAt = Date.now();
   private generateCount = 0;
   private imageCount = 0;
+  private askCount = 0;
   private operationsEmitted = 0;
   private errorTotal = 0;
   private readonly byStatus = new Map<number, number>();
@@ -113,6 +121,14 @@ export class Telemetry {
       case "image":
         this.imageCount += 1;
         break;
+      case "ask":
+        this.askCount += 1;
+        // Answer latency shares the sample buffer with generate: both are
+        // provider round-trips the same percentile machinery watches, and a
+        // separate buffer would need its own snapshot fields for no new signal.
+        this.latencies.push(event.ms);
+        if (this.latencies.length > LATENCY_SAMPLES) this.latencies.shift();
+        break;
       case "error":
         this.errorTotal += 1;
         this.byStatus.set(event.status, (this.byStatus.get(event.status) ?? 0) + 1);
@@ -154,7 +170,7 @@ export class Telemetry {
     return {
       startedAt: this.startedAt,
       uptimeSeconds: Math.round((Date.now() - this.startedAt) / 1000),
-      requests: { generate: this.generateCount, image: this.imageCount },
+      requests: { generate: this.generateCount, image: this.imageCount, ask: this.askCount },
       errors: {
         total: this.errorTotal,
         byStatus: Object.fromEntries([...this.byStatus].map(([k, v]) => [String(k), v])),

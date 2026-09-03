@@ -106,6 +106,8 @@ import { registerBoardOpsRoutes } from "./routes/boardOps.js";
 import { registerMeetingRoutes } from "./routes/meetings.js";
 import { registerProposalRoutes } from "./routes/proposals.js";
 import { registerSsoRoutes } from "./routes/sso.js";
+import { registerHistoryRoutes } from "./routes/history.js";
+import { registerAskRoutes } from "./routes/ask.js";
 import { mintLiveKitToken } from "./livekit.js";
 import { registerAssetRoutes } from "./routes/assets.js";
 import { registerScimRoutes } from "./routes/scim.js";
@@ -325,6 +327,8 @@ const ROUTE_SEGMENTS = new Set([
   "webhook",
   "checkout",
   "portal",
+  "history",
+  "ask",
 ]);
 
 /**
@@ -1371,6 +1375,7 @@ export function createApp(deps: AppDeps): App {
         break;
       case "generate":
       case "image":
+      case "ask":
         aiDuration.observe(event.ms / 1000, { kind: event.kind, provider: event.provider });
         break;
       default:
@@ -1562,6 +1567,8 @@ export function createApp(deps: AppDeps): App {
   registerMeetingRoutes(router, services);
   registerProposalRoutes(router, services);
   registerSsoRoutes(router, services);
+  registerHistoryRoutes(router, services);
+  registerAskRoutes(router, services);
   /**
    * Asset gateway (M7 / M4 storage): `/api/assets/*`. The handler is built
    * here, not registered through the router, because it consumes a body-cap

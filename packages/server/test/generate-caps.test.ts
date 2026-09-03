@@ -20,6 +20,10 @@ const provider = {
   async generateOperations() {
     return { operations: [] as Operation[] };
   },
+  // Stage C1 made generateAnswer part of the interface; unreachable here.
+  async generateAnswer() {
+    throw new Error("fixed provider cannot answer questions");
+  },
 };
 
 const base = { diagramKind: "flowchart" as const, nodes: [], edges: [] };

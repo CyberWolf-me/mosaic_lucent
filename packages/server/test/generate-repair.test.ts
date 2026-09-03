@@ -36,6 +36,10 @@ function scriptedProvider(responses: GenerateResult[]): LLMProvider & {
       if (!next) throw new Error("script exhausted");
       return next;
     },
+    // Stage C1 made generateAnswer part of the interface; unreachable here.
+    async generateAnswer() {
+      throw new Error("scripted provider cannot answer questions");
+    },
   } as never;
 }
 
