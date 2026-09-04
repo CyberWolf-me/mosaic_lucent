@@ -170,3 +170,59 @@ describe("server search hits (Stage C4)", () => {
     expect(searchHitTarget({ ...turn, meetingId: undefined })).toBeNull();
   });
 });
+
+describe("the C4 scenario shapes, as the definition e2e drives them", () => {
+  // The shapes from the stageC4 definition scenario: Monday's unclassified
+  // mumble and the extraction's statement. The server e2e drives the route;
+  // these pin the palette's grouping + navigation on the exact results it
+  // returns, in the package the functions live in.
+  const mumble = {
+    kind: "turn" as const,
+    id: "mtg_monday",
+    meetingId: "mtg_monday",
+    turnIndex: 0,
+    speaker: "Maya",
+    snippet: "Maybe $20 for the pro tier?",
+    matched: ["pro", "tier"],
+    score: 2,
+  };
+  const statement = {
+    kind: "node" as const,
+    id: "pricing-decision",
+    nodeType: "decision",
+    label: "Pricing decision $15",
+    statement: { kind: "decision", status: "resolved", topic: "pricing" },
+    matched: ["pricing"],
+    score: 12,
+  };
+  const hidden = {
+    kind: "revision" as const,
+    id: "1",
+    seq: 1,
+    label: "pricing retro before the launch",
+    at: 1_700_000_000_000,
+    matched: ["retro"],
+    score: 2,
+  };
+
+  it("groups the mumble and the statement; the navigation rides C1 for both", () => {
+    // What the route returns for the scenario's queries, merged as the
+    // overlay receives them (the route ranked; the palette only groups).
+    const g = groupSearchHits([statement, mumble, hidden]);
+    expect(g.nodes).toEqual([statement]);
+    expect(g.turns).toEqual([mumble]);
+    expect(g.revisions).toEqual([hidden]);
+
+    // The unclassified mumble navigates to its MEETING at its exact turn —
+    // the same ?meeting + ?turn jump a citation uses.
+    expect(searchHitTarget(mumble)).toEqual({
+      kind: "meeting",
+      id: "mtg_monday",
+      turnRange: [0, 0],
+    });
+    // The statement node navigates to the canvas selection.
+    expect(searchHitTarget(statement)).toEqual({ kind: "node", id: "pricing-decision" });
+    // The revision navigates to history.
+    expect(searchHitTarget(hidden)).toEqual({ kind: "revision", id: "1" });
+  });
+});

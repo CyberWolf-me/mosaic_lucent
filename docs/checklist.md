@@ -890,3 +890,70 @@ scenario passes the continuous story, including the turn-precision scope
 (turn N lists exactly what turnRange produced), the meetings-window scope
 (truncation disclosed, the provider request never contains the excluded
 meeting), idempotent end, and the ✦ carrying ?turn=.
+
+## Stage C4 shipped: semantic search (2026-09, docs/17 amendment)
+
+[x] The retriever seam (`@lucent/server`): retrieval.ts — retrieve(query,
+    corpus) with weighted lexical scoring (label 5, topic 4, kind/status
+    and nodeType 3, quote and revision label 2, turn 1), the owner's
+    normalization list (NFKD + case fold, punctuation split with digits
+    surviving, symmetric plural fold, ≥3-char prefix, shared stem), query
+    tokens deduped by folded form and capped at 12, deterministic ranking
+    (score desc, node > turn > revision, key tie-break), top-20. Every hit
+    carries `matched` — explainable results, never similarity scores.
+    25 node tests: folds, weights, ranking, matched reporting, anchored
+    snippets, stable turn indices, the corpus contract.
+[x] The corpus contract is the security story (`@lucent/server`):
+    buildSearchCorpus receives only caller-windowed inputs — the same
+    loadVisibleLog + visibleMeetings arithmetic every read uses. Search
+    sees exactly what Ask sees; a Free caller's revision 26 is absent from
+    the corpus, not filtered from results. visibleMeetings extracted to
+    meetingsWindow.ts so ask and search share one floor.
+[x] Ask retrieves (`@lucent/ai`, `@lucent/server`): AnswerRequest.retrieved
+    (up to 8 hits; omitted when empty) — the unclassified turns, over-cap
+    meetings, and over-cap nodes no digest section ever shows. The
+    "Retrieved evidence" prompt section (enveloped <retrieved-hit>, and
+    retrieved-hit joins HARNESS_TAG_PATTERN — the envelope-family rule
+    caught a forged-closing-tag escape the section's own test wrote);
+    historian v4; a mock retrieval script citing the turn's meeting and
+    naming the turn index; citation validation unchanged (it already
+    accepts the whole window).
+[x] The search API (`@lucent/server`): GET /api/boards/:id/search?q= —
+    viewer floor, no CSRF (a GET), no meter (computation over entitled
+    reads), windowed corpus, windowTruncated disclosure. Route tests pin
+    THE ACCEPTANCE CRITERION: matching content outside a Free 25-revision
+    window is not findable (revision and meeting both), an unclassified
+    turn inside the window is; viewer/404/400 floors; the Pro upgrade
+    widens the searched window instantly; the 20-cap with honest
+    truncation.
+[x] ⌘K on a shared board (`@lucent/web`, `@lucent/i18n`): searchBoard
+    client (authed pattern, AbortSignal); the palette's board family
+    becomes server results (250 ms debounce, stale-drop on query
+    mismatch), grouped nodes/transcript/revisions, navigation through the
+    C1 citation contract via searchHitTarget (no fourth navigation — a
+    turn without a meeting id is null, not a guess). The Ask bridge: one
+    persistent row switches to question mode; Enter submits through ask()
+    with the pill set to Ask; Escape returns to search. Local boards keep
+    the local scan unchanged. Palette i18n keys wired at last (placeholder,
+    groups, empties) + the new search/bridge keys, en + hu; matched tokens
+    render on every row; the window-truncated line shows when the API
+    discloses it. 4 new pure-function palette tests.
+[x] The record: ADR 0024 (one seam, one boundary; embeddings later swap
+    behind the signature and need their own ADR first), docs/17 C4
+    amendment, this checklist section, the changeset, and the stageC4
+    definition e2e.
+[ ] Embeddings / pgvector / any vector store — not built (the seam exists
+    so they can wait for demonstrated lexical misses).
+[ ] Palette "Boards" section — not built (needs client-side orgId plumbing
+    that exists nowhere in the web app; the Dashboard is local-only).
+[ ] Shapes in the server corpus — not built (the local scan covers them;
+    the server corpus is what the local scan cannot see).
+[ ] Pagination, MCP search tool, advanced syntax, saved searches,
+    analytics, cross-org search — not built (deliberately small).
+
+Gate: typecheck 0 across all six packages; tests green (ai 185, core 353,
+i18n 14, mcp 26, server 861+80 PG in CI, web 610); the stageC4 definition
+scenario passes the continuous story: search finds the unclassified turn
+and the topic statement and returns nothing from beyond the Free window;
+the captured historian request contains the retrieved hit; the answer cites
+the meeting; the palette pure functions group and navigate every hit kind.

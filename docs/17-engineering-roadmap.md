@@ -374,3 +374,64 @@ suffice), meeting-to-meeting reference columns (the chain lives in
 statements + provenance), transcript editing/renumbering (the index system
 depends on immutability), the Decisions view (still C6's projection), topic
 entity resolution (C5), semantic search (C4).
+
+## Amendment (2026-09-04): Stage C4 executed — semantic search
+
+The owner's two decisions, taken together: build BOTH the search API and
+the ⌘K surface alongside Ask retrieval (Lucent by C3 had accumulated
+boards, meetings, transcripts, statements, provenance, and history — users
+need a direct "find" mechanism, not only an "explain" one), and keep the
+scorer weighted lexical (deterministic, cheap, explainable, offline-
+testable; embeddings wait for demonstrated lexical misses, and they need
+their own ADR first).
+
+The plan's recon finding shaped the architecture: the ask route already
+loads the entire searchable corpus, so the retriever is pure computation
+over data already fetched — no store, no index, no persistence. And the
+entitlement floor, not the digest caps, is the trust boundary: retrieval
+widens recall inside a window it cannot widen itself.
+
+What Stage C4 shipped (batches, commits, and the acceptance scenario in
+`packages/server/test/stageC4.definition.e2e.test.ts`):
+
+- **The seam** (`@lucent/server`): `retrieve(query, corpus)` — weighted
+  lexical (label 5, topic 4, kind/status and nodeType 3, quote and revision
+  label 2, turn text 1), the owner's normalization list (NFKD fold, digits
+  surviving punctuation, symmetric plural fold, prefix, shared stem),
+  deterministic ranking, top-20. Every hit carries the matched tokens, so
+  a result explains itself ("Matching: pricing, 20"), never a similarity.
+- **Ask retrieves** (`@lucent/ai`, `@lucent/server`): the answer request
+  gains `retrieved` — up to 8 hits over the same window the digest
+  rendered, including the unclassified turns and over-cap content no
+  section ever shows. The historian v4 reads the "Retrieved evidence"
+  section and cites through the existing three kinds; the mock demonstrates
+  it. Citation validation needed no change — it already accepts the whole
+  window.
+- **The search API** (`@lucent/server`): `GET /api/boards/:id/search?q=`
+  mirrors the history route (viewer floor, no CSRF, no meter), windows its
+  corpus with the same arithmetic (`visibleMeetings` moved to
+  `meetingsWindow.ts` so ask and search share one floor), and discloses
+  `windowTruncated` so "no results" never reads as "nothing else exists."
+- **⌘K** (`@lucent/web`, `@lucent/i18n`): on a shared board the palette's
+  board family becomes server results — debounced 250 ms, aborted per
+  keystroke — grouped nodes/transcript/revisions, each row navigating
+  through the C1 citation contract (?reveal / ?meeting+?turn / ?rev, never
+  a fourth navigation). The Ask bridge turns "find" into "understand"
+  without retyping: Enter submits through `ask()`, whose own retrieval
+  surfaces the same evidence — one retriever, two consumers, no
+  result-list-as-context coupling. Local boards keep today's local scan.
+  The palette i18n keys that existed since M7 are finally wired, plus the
+  new groups/bridge/window keys, en + hu.
+
+One defect the envelope-family rule caught on the way: a retrieved hit's
+body could have contained a literal `</retrieved-hit>` and broken the
+envelope — `retrieved-hit` joined `HARNESS_TAG_PATTERN` (ADR 0024 records
+the lesson: every new envelope tag joins the family).
+
+Explicitly NOT built, per the plan's not-built list: embeddings, pgvector,
+any semantic index (the seam exists so these can wait for evidence); a
+palette "Boards" section (needs client-side orgId plumbing that exists
+nowhere in the web app — the Dashboard is local-projects only); shapes in
+the server corpus (the local scan keeps covering them); pagination, an
+MCP search tool, advanced syntax, saved searches, analytics, cross-org
+search, a dedicated search page.
