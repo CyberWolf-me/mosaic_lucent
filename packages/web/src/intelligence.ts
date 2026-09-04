@@ -63,8 +63,14 @@ export interface IntelligenceRow {
   /** Nodes this statement supersedes (the C3 chain, visible per row). */
   supersedes?: string[];
   /** Work-tracking fields when the node ALSO carries an issue — the Board
-   * bridge made visible (assignee), never duplicated. */
+   * bridge made visible (assignee, and the Stage D1 execution fields),
+   * never duplicated. */
   assignee?: string;
+  /** Stage D1: the work's deadline (ISO YYYY-MM-DD), when the issue carries one. */
+  dueDate?: string;
+  /** Stage D1: the issue's execution status — a separate lifecycle from
+   * the statement `status` (semantic) above; neither derives from the other. */
+  executionStatus?: string;
   /** Creation evidence — the ✦ jump's source. */
   provenance?: { meetingId: string; turnRange?: [number, number] };
 }
@@ -85,6 +91,8 @@ function rowOf(node: Node): IntelligenceRow {
     ...(statement.topic ? { topic: statement.topic } : {}),
     ...(statement.supersedes?.length ? { supersedes: statement.supersedes } : {}),
     ...(node.issue?.assignee ? { assignee: node.issue.assignee } : {}),
+    ...(node.issue?.dueDate ? { dueDate: node.issue.dueDate } : {}),
+    ...(node.issue ? { executionStatus: node.issue.status } : {}),
     ...(prov?.meetingId
       ? {
           provenance: {
@@ -94,6 +102,22 @@ function rowOf(node: Node): IntelligenceRow {
         }
       : {}),
   };
+}
+
+/**
+ * Stage D1: is the work overdue? Rendered, computed, never persisted — a
+ * due date past `now` on work that is not completed/cancelled. Pure so the
+ * overdue tint is testable without the DOM.
+ */
+export function isOverdue(dueDate: string | undefined, executionStatus: string | undefined, now: number): boolean {
+  if (!dueDate) return false;
+  if (executionStatus === "completed" || executionStatus === "cancelled") return false;
+  // The due date counts as overdue the day AFTER it: compare date strings
+  // against today's ISO date — timezone-naive by design (the field is a
+  // calendar date, not an instant; ADR 0027's no-timezone rule).
+  const today = new Date(now);
+  const todayIso = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+  return dueDate < todayIso;
 }
 
 /**

@@ -98,7 +98,19 @@ export function summarizeBoard(ws: Workspace): Record<string, unknown> {
       label: n.label,
       ...(n.groupId ? { groupId: n.groupId } : {}),
       ...(n.issue
-        ? { issue: { type: n.issue.type, status: n.issue.status, assignee: n.issue.assignee } }
+        ? {
+            issue: {
+              type: n.issue.type,
+              status: n.issue.status,
+              assignee: n.issue.assignee,
+              // Stage D1: the execution fields, capped for the summary —
+              // an agent that can see the deadline can reason about it.
+              ...(n.issue.dueDate ? { dueDate: n.issue.dueDate } : {}),
+              ...(n.issue.description
+                ? { description: n.issue.description.slice(0, 200) }
+                : {}),
+            },
+          }
         : {}),
       // Stage C2: the semantic layer — what the node IS. An agent that can
       // see a decided thing as decided can supersede it instead of re-opening

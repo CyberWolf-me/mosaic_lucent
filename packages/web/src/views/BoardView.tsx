@@ -173,11 +173,20 @@ function IssueCard({
   onNudge: (dir: -1 | 1) => void;
 }) {
   const issue = node.issue!;
-  // A full sentence for AT: label, type, status, and who it's assigned to.
+  // A full sentence for AT: label, type, status, who it's assigned to, and
+  // (Stage D1) the deadline when the work carries one.
   const cardLabel =
     `${node.label} — ${issue.type}, ${issue.status}` +
     (issue.assignee ? `, assigned to ${issue.assignee}` : "") +
+    (issue.dueDate ? `, due ${issue.dueDate}` : "") +
     (issue.storyPoints !== undefined ? `, ${issue.storyPoints} points` : "");
+  // The due date is overdue when past today and the work isn't finished —
+  // computed here at render, never persisted (ADR 0027).
+  const overdue =
+    issue.dueDate !== undefined &&
+    issue.dueDate < new Date().toISOString().slice(0, 10) &&
+    issue.status !== "completed" &&
+    issue.status !== "cancelled";
   return (
     <div
       className={`issue-card ${dragging ? "dragging" : ""}`}
@@ -199,6 +208,20 @@ function IssueCard({
       }}
     >
       <div className="issue-card-title">{node.label}</div>
+      {issue.dueDate && (
+        <div
+          className="mono"
+          style={{
+            fontSize: 9.5,
+            marginTop: 2,
+            color: overdue ? "var(--sig-red)" : "var(--ink-3)",
+          }}
+          title={overdue ? `Overdue — due ${issue.dueDate}` : `Due ${issue.dueDate}`}
+        >
+          {overdue ? "⚠ " : "▢ "}
+          {issue.dueDate}
+        </div>
+      )}
       <div className="issue-card-meta">
         <span className="issue-type" style={{ color: TYPE_TINT[issue.type] ?? "var(--ink-2)" }}>
           {issue.type}

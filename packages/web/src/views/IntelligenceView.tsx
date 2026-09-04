@@ -8,6 +8,7 @@ import {
   KIND_GLYPH,
   intelligenceSections,
   inboxItems,
+  isOverdue,
   isSettled,
   mergeOps,
   mergePreview,
@@ -98,6 +99,8 @@ export function IntelligenceView(_: { onOpenSettings?: (section?: string) => voi
   const rowHint = (row: IntelligenceRow, kind: StatementKind): string =>
     `${row.status}${row.assignee ? ` · ${t("intel.row.assignee", locale, { name: row.assignee })}` : ""}${
       row.supersedes?.length ? ` · ${t("intel.row.supersedes", locale, { n: row.supersedes.length })}` : ""
+    }${row.dueDate ? ` · ${t("intel.row.due", locale, { date: row.dueDate })}` : ""}${
+      row.executionStatus ? ` · ${row.executionStatus}` : ""
     }${row.topic ? ` · ${row.topic}` : ""} · ${sectionHeader(kind)}`;
 
   return (
@@ -221,6 +224,11 @@ export function IntelligenceView(_: { onOpenSettings?: (section?: string) => voi
                             padding: "7px 10px 7px 28px",
                             borderRadius: 8,
                             opacity: isSettled(row.status) ? 0.55 : 1,
+                            // Stage D1: the overdue tint — rendered, computed
+                            // from today, never persisted.
+                            ...(isOverdue(row.dueDate, row.executionStatus, Date.now())
+                              ? { boxShadow: "inset 2px 0 0 0 var(--sig-red)" }
+                              : {}),
                           }}
                         >
                           <button
@@ -256,6 +264,8 @@ export function IntelligenceView(_: { onOpenSettings?: (section?: string) => voi
                               {row.supersedes?.length
                                 ? ` · ${t("intel.row.supersedes", locale, { n: row.supersedes.length })}`
                                 : ""}
+                              {row.dueDate ? ` · ${t("intel.row.due", locale, { date: row.dueDate })}` : ""}
+                              {row.executionStatus ? ` · ${row.executionStatus}` : ""}
                               {row.topic ? ` · ${row.topic}` : ""}
                             </div>
                           </button>

@@ -3,6 +3,7 @@ import { applyOperations, createWorkspace, inverseOperations, type Operation } f
 import {
   inboxItems,
   intelligenceSections,
+  isOverdue,
   isSettled,
   KIND_GLYPH,
   mergeOps,
@@ -230,5 +231,60 @@ describe("presentation constants", () => {
     expect(isSettled("resolved")).toBe(true);
     expect(isSettled("rejected")).toBe(true);
     expect(isSettled("superseded")).toBe(true);
+  });
+});
+
+describe("the D1 execution fields on the projection (Stage D1, ADR 0027)", () => {
+  function actionBoard() {
+    return boardOf([
+      ...statement("late-action", "action", {
+        topic: "launch",
+        assignee: "sarah",
+        meetingId: "mtg_wed",
+      }),
+      // Both actions carry issues (the helper emits SET_ISSUE when an
+      // assignee is given) so both surface execution fields.
+      ...statement("fresh-action", "action", { topic: "pricing", assignee: "alex" }),
+    ]);
+  }
+
+  it("rows carry dueDate and the execution status from the issue layer", () => {
+    // Extend the seeded board: the first action gets a deadline + status.
+    const ws = applyOperations(actionBoard(), [
+      {
+        op: "UPDATE_ISSUE",
+        id: "late-action",
+        dueDate: "2020-01-01", // far past — the overdue fixture
+        status: "in_progress",
+      },
+      { op: "UPDATE_ISSUE", id: "fresh-action", dueDate: "2100-01-01" },
+    ]);
+    const sections = intelligenceSections(ws);
+    const actions = sections.find((s) => s.kind === "action")!.rows;
+    const late = actions.find((r) => r.id === "late-action")!;
+    const fresh = actions.find((r) => r.id === "fresh-action")!;
+    // The execution status is the ISSUE'S — separate from the statement
+    // lifecycle (both rows are 'open' statements here). The helper seeds a
+    // legacy 'To Do' label; the D1 UPDATE pins the canonical vocabulary on
+    // the late action — legacy and canonical side by side, both rendering.
+    expect(late.executionStatus).toBe("in_progress");
+    expect(late.status).toBe("open"); // the semantic lifecycle unchanged
+    expect(late.dueDate).toBe("2020-01-01");
+    expect(fresh.executionStatus).toBe("To Do"); // legacy label, loads fine
+    expect(fresh.dueDate).toBe("2100-01-01");
+  });
+
+  it("isOverdue: past-due and unfinished — rendered, never persisted", () => {
+    const now = Date.UTC(2026, 8, 9);
+    expect(isOverdue("2026-09-01", "in_progress", now)).toBe(true);
+    expect(isOverdue("2026-09-01", "open", now)).toBe(true);
+    // Finished work is never overdue, however late it finished.
+    expect(isOverdue("2026-09-01", "completed", now)).toBe(false);
+    expect(isOverdue("2026-09-01", "cancelled", now)).toBe(false);
+    // Today's deadline is not yet overdue (the day after counts).
+    expect(isOverdue("2026-09-09", "in_progress", now)).toBe(false);
+    expect(isOverdue("2026-09-10", "in_progress", now)).toBe(false);
+    // No due date, no overdue.
+    expect(isOverdue(undefined, "open", now)).toBe(false);
   });
 });
