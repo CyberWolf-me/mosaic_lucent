@@ -350,9 +350,17 @@ export function buildUserPrompt(request: GenerateRequest): string {
                 n.issue.parentId ? ` · parent: ${n.issue.parentId}` : ""
               }]`
             : "";
+          // The statement suffix (Stage C2): what the node IS semantically and
+          // where its lifecycle stands, so the model can see a decided thing as
+          // decided and supersede it correctly instead of re-deciding it.
+          const statement = n.statement
+            ? ` [${n.statement.kind} · ${n.statement.status}${
+                n.statement.topic ? ` · topic: ${n.statement.topic}` : ""
+              }${n.statement.supersedes?.length ? ` · supersedes: ${n.statement.supersedes.join(", ")}` : ""}]`
+            : "";
           return `  ${n.id} (${n.nodeType}): ${n.label}${
             n.groupId ? ` [group: ${n.groupId}]` : ""
-          }${issue}`;
+          }${issue}${statement}`;
         })
         .join("\n")
     : "  (none)";

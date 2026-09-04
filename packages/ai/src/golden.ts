@@ -214,8 +214,13 @@ export const GOLDEN_SET: readonly GoldenCase[] = [
       ]),
     ),
     // The honest correction updates the existing node's label (or connects
-    // the rejection to it) — either is an update, never silence.
-    expectOperations: [{ op: "CHANGE_TEXT", id: "usage-pricing" }],
+    // the rejection to it) — either is an update, never silence. Stage C2:
+    // the proposal-ness is data now, so the rejection must also flip the
+    // statement, not just the label.
+    expectOperations: [
+      { op: "CHANGE_TEXT", id: "usage-pricing" },
+      { op: "UPDATE_STATEMENT", id: "usage-pricing", status: "rejected" },
+    ],
     forbidOperations: [{ op: "DELETE_NODE", id: "usage-pricing" }],
   },
   {
@@ -231,6 +236,29 @@ export const GOLDEN_SET: readonly GoldenCase[] = [
     ),
     expectOperations: [{ op: "CHANGE_TEXT", id: "target" }],
     forbidOperations: [{ op: "CREATE_NODE", id: "professionals" }],
+  },
+  {
+    id: "decision-born-resolved",
+    // Stage C2: 'we decided $15/month' is a decision BORN resolved, with a
+    // topic so "what did we decide about pricing?" is answerable from data.
+    // The wrong answers: an open status (an undecided "decision"), or no
+    // statement at all (the decision exists only as a label again).
+    message:
+      "From the meeting: Sarah: 'We decided to price it at $15/month.' The board currently shows a node proposing $20/month (id pricing-proposal).",
+    summary: empty,
+    expectOperations: [
+      { op: "CREATE_NODE", nodeType: "decision" },
+      {
+        op: "SET_STATEMENT",
+        id: "pricing-decision",
+        statement: {
+          kind: "decision",
+          status: "resolved",
+          topic: "pricing",
+          supersedes: ["pricing-proposal"],
+        },
+      },
+    ],
   },
   {
     id: "mention-is-not-owner",

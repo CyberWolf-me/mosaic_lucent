@@ -27,6 +27,21 @@ export interface WorkspaceSummary {
       storyPoints?: number;
       parentId?: string;
     };
+    /**
+     * The semantic statement this node carries (Stage C2): what it IS — a
+     * decision, proposal, question, action, requirement, or risk — with its
+     * lifecycle status, topic key, and supersession links. The model needs
+     * this to update a decision it can see ("actually, we changed our mind")
+     * and to avoid re-deciding what is already decided. Provenance is
+     * deliberately omitted: the model cannot emit it, so showing it would be
+     * context the ops can never carry.
+     */
+    statement?: {
+      kind: "decision" | "proposal" | "question" | "action" | "requirement" | "risk";
+      status: "open" | "resolved" | "rejected" | "superseded";
+      topic?: string;
+      supersedes?: string[];
+    };
   }>;
   edges: Array<{ source: string; target: string; relationship: string }>;
   /**
@@ -374,6 +389,18 @@ export function summarizeWorkspace(workspace: Workspace, selection?: string[]): 
               ...(n.issue.priority ? { priority: n.issue.priority } : {}),
               ...(n.issue.storyPoints !== undefined ? { storyPoints: n.issue.storyPoints } : {}),
               ...(n.issue.parentId ? { parentId: n.issue.parentId } : {}),
+            },
+          }
+        : {}),
+      ...(n.statement
+        ? {
+            statement: {
+              kind: n.statement.kind,
+              status: n.statement.status,
+              ...(n.statement.topic ? { topic: n.statement.topic } : {}),
+              ...(n.statement.supersedes?.length
+                ? { supersedes: n.statement.supersedes }
+                : {}),
             },
           }
         : {}),

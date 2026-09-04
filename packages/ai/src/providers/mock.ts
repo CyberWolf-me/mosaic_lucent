@@ -207,11 +207,11 @@ const scripts: Script[] = [
     },
   },
   {
-    // P0-3: statement-kind scripts. A rejection visibly supersedes the
-    // existing proposal (CHANGE_TEXT on the named node, never silence and
-    // never a second contradictory node); a correction replaces the earlier
-    // statement in place. The prompts carry "The board currently shows a
-    // node…" phrasing the golden cases pin.
+    // P0-3: statement-kind scripts (Stage C2: the doctrine as data now). A
+    // rejection visibly supersedes — the statement flips to rejected, never
+    // silence and never a second contradictory node; a correction replaces
+    // the earlier statement in place. The prompts carry "The board currently
+    // shows a node…" phrasing the golden cases pin.
     match: (m) => /not doing usage-based pricing/i.test(m),
     build: () => ({
       explanation:
@@ -221,6 +221,40 @@ const scripts: Script[] = [
           op: "CHANGE_TEXT",
           id: "usage-pricing",
           text: "Rejected: usage-based pricing",
+        },
+        {
+          op: "UPDATE_STATEMENT",
+          id: "usage-pricing",
+          status: "rejected",
+        },
+      ] as Operation[],
+    }),
+  },
+  {
+    // The decided shape (Stage C2): "we decided $15/month" is a decision BORN
+    // resolved, superseding the $20 proposal the board already carries.
+    // Matches the decided verb plus a 15/fifteen anywhere after it — the
+    // golden phrasing is "decided to price it at $15/month".
+    match: (m) => /decided\b[^.]*\b(15|fifteen)\b/i.test(m) || /\b(15|fifteen)\b[^.]*\/month/i.test(m),
+    build: () => ({
+      explanation:
+        "The team decided $15/month: a decision node, born resolved, superseding the $20 proposal.",
+      operations: [
+        {
+          op: "CREATE_NODE",
+          id: "pricing-decision",
+          nodeType: "decision",
+          label: "Pricing at $15/month",
+        },
+        {
+          op: "SET_STATEMENT",
+          id: "pricing-decision",
+          statement: {
+            kind: "decision",
+            status: "resolved",
+            topic: "pricing",
+            supersedes: ["pricing-proposal"],
+          },
         },
       ] as Operation[],
     }),
@@ -277,6 +311,12 @@ const scripts: Script[] = [
           id: "launch-brief",
           issue: { type: "task", status: "To Do", assignee: "David" },
         },
+        // Stage C2: a commitment is an action statement, open until done.
+        {
+          op: "SET_STATEMENT",
+          id: "launch-brief",
+          statement: { kind: "action", status: "open", topic: "launch" },
+        },
       ] as Operation[],
     }),
   },
@@ -331,6 +371,13 @@ const scripts: Script[] = [
           id: "ask-sarah-idea",
           nodeType: "idea",
           label: "Proposal: ask Sarah about pricing",
+        },
+        // Stage C2: the proposal-ness is data now — open, never resolved,
+        // until words that decide arrive.
+        {
+          op: "SET_STATEMENT",
+          id: "ask-sarah-idea",
+          statement: { kind: "proposal", status: "open", topic: "pricing" },
         },
       ] as Operation[],
     }),
