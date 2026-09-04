@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { TopBar, LeftRail } from "../ui/Chrome.js";
 import { Ico } from "../ui/icons.js";
 import { useWorkspace } from "../workspace.js";
@@ -8,6 +8,7 @@ import { getSttProvider, isAnyVoiceSupported, type VoiceSession } from "../stt/i
 import {
   appendMeetingTurns,
   classifyTurn,
+  endMeeting,
   listMeetings,
   promptFromTranscript,
   saveMeeting,
@@ -15,6 +16,7 @@ import {
   type MeetingTurn,
 } from "../meetings.js";
 import { differentialPrompt, shouldExtract } from "../meeting-extract.js";
+import { objectsByTurn } from "../meetingTimeline.js";
 
 /**
  * Meeting mode (E3 / R3): live capture into a transcript that persists per
@@ -57,7 +59,7 @@ const KIND_ORDER: Array<NonNullable<MeetingTurn["kind"]>> = [
 ];
 
 export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: string) => void }) {
-  const { setView, send, boardId, projectName } = useWorkspace();
+  const { setView, send, boardId, projectName, workspace, onCitation } = useWorkspace();
   const { notify } = useToast();
   const [settings] = useSettings();
   const [recording, setRecording] = useState(false);
@@ -219,19 +221,24 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
     voiceRef.current?.stop();
     voiceRef.current = null;
     setRecording(false);
-    // End the running transcript: the extraction checkpoints already hold
-    // everything said; ending it closes the record (and blocks further
-    // appends — minutes are immutable once a meeting ends).
+    // End the running transcript (Stage C3): the extraction checkpoints
+    // already hold everything said; the end route closes the record for
+    // real — before C3 the stop just abandoned the id and the store said
+    // "in progress" forever. Ending also blocks further appends (minutes
+    // are immutable once a meeting ends); idempotent, so a retry is a read.
     if (liveMeetingId && boardId) {
+      const ending = liveMeetingId;
       void (async () => {
-        // Re-save with an end timestamp through the normal path is not
-        // available (no update endpoint by design); the endedAt stays null
-        // and the NEXT save becomes the record. Keep the running id clear so
-        // no later capture appends into it.
-        setLiveMeetingId(null);
-        setLiveMeetingTurnCount(0);
+        const ended = await endMeeting(boardId, ending);
+        if (ended) {
+          // The saved list updates in place: the record it already holds
+          // gained its boundary.
+          setSaved((prev) => prev.map((m) => (m.id === ended.id ? ended : m)));
+        }
       })();
     }
+    setLiveMeetingId(null);
+    setLiveMeetingTurnCount(0);
     // Fallback save when capture ran without the server transcript (local
     // board, or the open call failed): persist what was said in one piece.
     if (turns.length > 0 && boardId && !liveMeetingId) {
@@ -384,6 +391,15 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
 
   const shown = selectedMeeting;
   const displayTurns = shown ? shown.turns : turns;
+  // Reverse provenance (Stage C3): which board objects each turn of the
+  // SELECTED meeting produced. Computed from the workspace this browser
+  // already holds — C2 put provenance in the state, so no server call is
+  // needed. Live capture shows none: its turns are still flowing and the
+  // affordance belongs to the closed record.
+  const reverseByTurn = useMemo(
+    () => (shown ? objectsByTurn(workspace, shown.id, shown.turns.length) : null),
+    [workspace, shown],
+  );
 
   return (
     <div style={{ position: "absolute", inset: 0 }}>
@@ -474,7 +490,12 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
                 board.
               </p>
             )}
-            {displayTurns.map((t, i) => (
+            {displayTurns.map((t, i) => {
+              // Reverse provenance (Stage C3): the objects this turn produced,
+              // rendered under the words that created them — the Stage C
+              // document's "Used to create N objects · View on board".
+              const produced = reverseByTurn?.get(i);
+              return (
               <div
                 key={i}
                 className={`meeting-turn${i === turnFlash ? " highlight" : ""}`}
@@ -496,8 +517,33 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
                     {t.kind}
                   </span>
                 )}
+                {produced && produced.length > 0 && (
+                  <button
+                    className="mono turn-objects-link"
+                    style={{
+                      display: "block",
+                      width: "100%",
+                      textAlign: "left",
+                      marginTop: 4,
+                      fontSize: 10,
+                      letterSpacing: "0.05em",
+                      textTransform: "uppercase",
+                      color: "var(--amber-2)",
+                      background: "transparent",
+                      border: "none",
+                      padding: 0,
+                      cursor: "pointer",
+                    }}
+                    title={`View on board: ${produced.join(", ")}`}
+                    onClick={() => onCitation({ kind: "node", id: produced[0]! })}
+                  >
+                    ✦ {produced.length} object{produced.length === 1 ? "" : "s"} on the board ·
+                    view
+                  </button>
+                )}
               </div>
-            ))}
+              );
+            })}
           </div>
         </div>
 

@@ -120,6 +120,24 @@ export async function appendMeetingTurns(
   return (await res.json()) as MeetingTranscript;
 }
 
+/**
+ * End a live capture (Stage C3): stopRecording used to abandon the id and
+ * the store kept saying "in progress" forever. Idempotent server-side, so
+ * a retry is harmless; null when the board/meeting is unknown (the caller
+ * treats it like the abandon path — nothing to recover locally).
+ */
+export async function endMeeting(
+  boardId: string,
+  meetingId: string,
+): Promise<MeetingTranscript | null> {
+  const res = await apiFetch(
+    `/api/boards/${encodeURIComponent(boardId)}/meetings/${encodeURIComponent(meetingId)}/end`,
+    { method: "POST", body: JSON.stringify({ endedAt: Date.now() }) },
+  );
+  if (!res.ok) return null;
+  return (await res.json()) as MeetingTranscript;
+}
+
 /** The board's saved meetings, newest first; null when the call fails. */
 export async function listMeetings(boardId: string): Promise<MeetingTranscript[] | null> {
   const res = await apiFetch(`/api/boards/${encodeURIComponent(boardId)}/meetings`);

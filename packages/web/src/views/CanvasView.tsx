@@ -1738,14 +1738,23 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
                 onExpand={(label) => void send(`Expand the "${label}" node into its sub-steps.`)}
                 onTransform={() => selectDiagram(nextDiagramKind(workspace.diagramKind))}
                 onComment={() => setCommentTarget(selected)}
-                onOpenMeeting={(meetingId) => {
+                onOpenMeeting={(meetingId, turnRange) => {
                   // The ✦ trust loop: jump to the meeting that created this
                   // node. The meeting id rides in the URL (?meeting=<id>) —
                   // MeetingView reads it on mount and selects that transcript,
-                  // so the canvas needs no meeting state of its own.
+                  // so the canvas needs no meeting state of its own. The turn
+                  // range (Stage C3) lands the jump on the exact turns that
+                  // produced the node — the same contract an Ask meeting
+                  // citation follows.
                   const url = new URL(window.location.href);
-                  if (meetingId) url.searchParams.set("meeting", meetingId);
-                  else url.searchParams.delete("meeting");
+                  if (meetingId) {
+                    url.searchParams.set("meeting", meetingId);
+                    if (turnRange) url.searchParams.set("turn", String(turnRange[0]));
+                    else url.searchParams.delete("turn");
+                  } else {
+                    url.searchParams.delete("meeting");
+                    url.searchParams.delete("turn");
+                  }
                   window.history.replaceState({}, "", url.toString());
                   setView("meeting");
                 }}
@@ -2106,7 +2115,7 @@ function SelectionHud({
   onTransform: () => void;
   onComment: () => void;
   /** Open the meeting a provenance stamp points at (null = the view itself). */
-  onOpenMeeting?: (meetingId: string | null) => void;
+  onOpenMeeting?: (meetingId: string | null, turnRange?: [number, number]) => void;
   /** Commit manual ops through the same validator the AI path uses. */
   onApply?: (ops: import("@lucent/core").Operation[], label: string) => boolean;
 }) {
@@ -2166,7 +2175,13 @@ function ProvenanceButton({
 }: {
   provenance?: { meetingId: string; turnRange?: [number, number]; turnKinds?: string[]; quote?: string };
   legacy?: Record<string, unknown>;
-  onOpenMeeting?: (meetingId: string | null) => void;
+  /**
+   * Stage C3: the jump now carries the turn RANGE when the provenance has
+   * one — the board→evidence link lands on the exact turns instead of the
+   * transcript's top, closing the same contract the Ask citation path has
+   * had since C1 (citationTarget: meeting → ?meeting= + ?turn=).
+   */
+  onOpenMeeting?: (meetingId: string | null, turnRange?: [number, number]) => void;
 }) {
   const source = provenance ?? {
     meetingId: typeof legacy?.meetingId === "string" ? legacy.meetingId : undefined,
@@ -2183,7 +2198,7 @@ function ProvenanceButton({
       onClick={() => {
         const meetingId = source.meetingId;
         if (meetingId && meetingId !== "live-session") {
-          onOpenMeeting?.(meetingId);
+          onOpenMeeting?.(meetingId, range);
         } else {
           // A live-session stamp (capture without a stored transcript)
           // has no meeting to open — go to the view itself.
@@ -2192,7 +2207,7 @@ function ProvenanceButton({
       }}
       title={`Created from meeting discussion: “${quote}”${
         kinds.length ? `\nStatement kinds: ${kinds.join(", ")}` : ""
-      }${range ? `\nTurns: ${range[0]}–${range[1]}` : ""}\nClick to open the source meeting`}
+      }${range ? `\nTurns: ${range[0]}–${range[1]}` : ""}\nClick to open the source meeting${range ? " at those turns" : ""}`}
       style={{
         color: "var(--amber-2)",
         padding: "0 6px",
