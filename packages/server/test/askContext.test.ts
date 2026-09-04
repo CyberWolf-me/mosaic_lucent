@@ -251,3 +251,106 @@ describe("renderBoardDigest: statements and op-level provenance (Stage C2)", () 
     expect(digest).toContain("the old stamp");
   });
 });
+
+describe("C3: the evolution section + turn indices + the honest meetings window", () => {
+  it("renders the supersession chain first-class, with each side's meeting", () => {
+    const ws = applyOperations(createWorkspace(), [
+      {
+        op: "CREATE_NODE",
+        id: "old",
+        nodeType: "decision",
+        label: "$20/month",
+        provenance: { meetingId: "mtg_mon" },
+      },
+      { op: "SET_STATEMENT", id: "old", statement: { kind: "decision", status: "resolved", topic: "pricing" } },
+      {
+        op: "CREATE_NODE",
+        id: "new",
+        nodeType: "decision",
+        label: "$15/month",
+        provenance: { meetingId: "mtg_wed" },
+      },
+      {
+        op: "SET_STATEMENT",
+        id: "new",
+        statement: {
+          kind: "decision",
+          status: "resolved",
+          topic: "pricing",
+          supersedes: ["old"],
+        },
+      },
+    ]);
+    const digest = renderBoardDigest(baseInput({ workspace: ws }));
+    expect(digest).toContain("Statement evolution");
+    expect(digest).toContain("new (decision · resolved · topic: pricing, from meeting mtg_wed)");
+    expect(digest).toContain("replacing old (decision · superseded · topic: pricing, from meeting mtg_mon)");
+  });
+
+  it("statement-embedded provenance names the meeting when the node has none", () => {
+    const ws = applyOperations(createWorkspace(), [
+      { op: "CREATE_NODE", id: "a", nodeType: "decision", label: "A" },
+      { op: "CREATE_NODE", id: "b", nodeType: "decision", label: "B" },
+      { op: "SET_STATEMENT", id: "a", statement: { kind: "proposal", status: "open" } },
+      {
+        op: "SET_STATEMENT",
+        id: "b",
+        statement: {
+          kind: "decision",
+          status: "resolved",
+          supersedes: ["a"],
+          provenance: { meetingId: "mtg_late" },
+        },
+      },
+    ]);
+    const digest = renderBoardDigest(baseInput({ workspace: ws }));
+    expect(digest).toContain("from meeting mtg_late");
+  });
+
+  it("carries turn indices — the classified turn keeps its original array position", () => {
+    const meeting: MeetingTranscript = {
+      id: "mtg_7",
+      boardId: "brd_1",
+      orgId: "org_1",
+      startedAt: T0,
+      endedAt: null,
+      turns: [
+        { speaker: "Alex", at: T0, text: "Hi everyone." }, // index 0: unclassified
+        { speaker: "Sarah", at: T0 + 60_000, text: "Let's price it at $15.", kind: "decision" }, // 1
+        { speaker: "Bo", at: T0 + 120_000, text: "Weather, huh." }, // 2: unclassified
+        { speaker: "Alex", at: T0 + 180_000, text: "I'll prepare the brief.", kind: "action" }, // 3
+      ],
+      createdBy: null,
+      createdAt: T0,
+    };
+    const projected = projectMeetings([meeting]);
+    expect(projected[0]!.turns).toEqual([
+      { index: 1, speaker: "Sarah", at: T0 + 60_000, kind: "decision", text: "Let's price it at $15." },
+      { index: 3, speaker: "Alex", at: T0 + 180_000, kind: "action", text: "I'll prepare the brief." },
+    ]);
+  });
+
+  it("meetingsTruncated says when older meetings fell outside the digest cap", () => {
+    const one = buildAnswerRequest(baseInput({ meetings: [meetingAt(T0)] }));
+    expect(one.meetingsTruncated).toBe(false);
+    const many = buildAnswerRequest({
+      ...baseInput(),
+      meetings: Array.from({ length: 11 }, (_, i) => meetingAt(T0 + i)),
+    });
+    expect(many.meetingsTruncated).toBe(true);
+    expect(many.meetings).toHaveLength(10);
+  });
+});
+
+function meetingAt(at: number): MeetingTranscript {
+  return {
+    id: `mtg_${at}`,
+    boardId: "brd_1",
+    orgId: "org_1",
+    startedAt: at,
+    endedAt: null,
+    turns: [{ speaker: "Alex", at, text: "Decided.", kind: "decision" }],
+    createdBy: null,
+    createdAt: at,
+  };
+}

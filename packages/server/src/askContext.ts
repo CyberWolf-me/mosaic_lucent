@@ -205,24 +205,66 @@ export function renderBoardDigest(input: AskContextInput): string {
     );
   }
 
+  // Statement evolution (Stage C3): the cross-meeting chain, first-class.
+  // Every statement that supersedes another renders as one line — what it
+  // is, where it came from, and what it replaced, with that target's own
+  // origin — so "why did we change pricing?" is answered by READING the
+  // digest rather than correlating supersedes ids against node lines.
+  // Derivable entirely from the current workspace (canonical state), same
+  // as the rest of the digest.
+  const evolution = Object.values(ws.nodes)
+    .filter((n): n is Node & { statement: NonNullable<Node["statement"]> } =>
+      Boolean(n.statement?.supersedes?.length),
+    )
+    .slice(0, ASK_DIGEST_LIMITS.groups)
+    .map((n) => {
+      const origin = (p: { meetingId: string } | undefined) =>
+        p?.meetingId ? `, from meeting ${p.meetingId}` : "";
+      const targets = n.statement.supersedes!
+        .map((id) => {
+          const t = ws.nodes[id];
+          if (!t?.statement) return `  (unknown: ${id})`;
+          return `  replacing ${t.id} (${t.statement.kind} · ${t.statement.status}${
+            t.statement.topic ? ` · topic: ${t.statement.topic}` : ""
+          }${origin(t.provenance ?? t.statement.provenance)})`;
+        })
+        .join("\n");
+      return `  ${n.id} (${n.statement.kind} · ${n.statement.status}${
+        n.statement.topic ? ` · topic: ${n.statement.topic}` : ""
+      }${origin(n.provenance ?? n.statement.provenance)})\n${targets}`;
+    });
+  if (evolution.length) {
+    lines.push(
+      `Statement evolution (newest statements superseding older ones — this is how the work changed across meetings):\n${evolution.join("\n")}`,
+    );
+  }
+
   return lines.join("\n");
 }
 
 /**
  * Project the visible meetings: id, date, speakers, and ONLY the classified
- * turns (decision/action/problem/hypothesis/solution/requirement). Unclassified
- * turns stay in the transcript where search can find them later — not every
- * sentence deserves context-window space, the same judgment the "statements
- * on nodes" decision made about board objects.
+ * turns (decision/action/problem/hypothesis/solution/requirement), each
+ * carrying its stable INDEX (Stage C3) — the same coordinate turnRange and
+ * the transcript jump key on, so an answer naming "turn 4 of meeting M"
+ * lands on the exact words. Unclassified turns stay in the transcript where
+ * search can find them later — not every sentence deserves context-window
+ * space, the same judgment the "statements on nodes" decision made about
+ * board objects.
  */
 export function projectMeetings(
   meetings: MeetingTranscript[],
 ): AnswerMeetingSummary[] {
   return meetings.slice(0, ASK_DIGEST_LIMITS.meetings).map((m) => {
     const classified = m.turns
-      .filter((t): t is typeof t & { kind: NonNullable<typeof t.kind> } => Boolean(t.kind))
+      .map((t, index) => ({ t, index }))
+      .filter(
+        (entry): entry is { t: typeof entry.t & { kind: NonNullable<typeof entry.t.kind> }; index: number } =>
+          Boolean(entry.t.kind),
+      )
       .slice(0, ASK_DIGEST_LIMITS.meetingTurns)
-      .map((t) => ({
+      .map(({ t, index }) => ({
+        index,
         speaker: t.speaker.slice(0, 120),
         at: t.at,
         kind: t.kind,
@@ -256,6 +298,10 @@ export function buildAnswerRequest(input: AskContextInput): AnswerRequest {
     historyTruncated: input.window.hasMore,
     historyDepth: input.window.depth,
     meetings: projectMeetings(input.meetings),
+    // The honest meetings window (Stage C3): the digest caps at
+    // ASK_DIGEST_LIMITS.meetings, and the model must know when older
+    // meetings exist beyond it — the same honesty rule as historyTruncated.
+    meetingsTruncated: input.meetings.length > ASK_DIGEST_LIMITS.meetings,
     nodeIndex: Object.entries(input.workspace.nodes)
       .slice(0, ASK_DIGEST_LIMITS.nodeIndex)
       .map(([id, node]) => ({ id, label: node.label.slice(0, ASK_DIGEST_LIMITS.nodeLabel) })),

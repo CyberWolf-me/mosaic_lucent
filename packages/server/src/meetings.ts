@@ -65,6 +65,16 @@ export interface MeetingStore {
     id: string,
     turns: MeetingTurn[],
   ): Promise<MeetingTranscript | undefined>;
+  /**
+   * End a meeting (Stage C3): set `endedAt` on a still-open capture. A live
+   * recording used to just abandon its id — the store then said "in
+   * progress" forever, which was a lie the cross-meeting chronology would
+   * have inherited. Idempotent by design (the transition-guard pattern): a
+   * second end returns the row unchanged, so a retry or a double-click is a
+   * read, never a second effect. `endedAt < startedAt` is refused by the
+   * route; the store trusts its caller.
+   */
+  end(boardId: string, id: string, endedAt: number): Promise<MeetingTranscript | undefined>;
 }
 
 /** How many meetings `forBoard` returns when the caller does not say. */
@@ -170,6 +180,21 @@ export class InMemoryMeetingStore implements MeetingStore {
     if (row.endedAt !== null) return undefined; // ended minutes are immutable
     if (row.turns.length + turns.length > MAX_TURNS_PER_TRANSCRIPT) return undefined;
     row.turns = [...row.turns, ...turns.map((t) => ({ ...t }))];
+    return { ...row, turns: [...row.turns] };
+  }
+
+  async end(
+    boardId: string,
+    id: string,
+    endedAt: number,
+  ): Promise<MeetingTranscript | undefined> {
+    const row = this.rows.get(id);
+    if (!row || row.boardId !== boardId) return undefined;
+    // Idempotent: an already-ended row returns unchanged (the same
+    // transition-guard contract appendTo enforces from the other side).
+    if (row.endedAt === null && endedAt >= row.startedAt) {
+      row.endedAt = endedAt;
+    }
     return { ...row, turns: [...row.turns] };
   }
 }

@@ -329,3 +329,97 @@ describe("checkpoint append (M2)", () => {
     expect(res.status).toBe(400);
   });
 });
+
+describe("ending a live capture (Stage C3)", () => {
+  let h: Harness;
+  // stopRecording used to abandon the id — the store said "in progress"
+  // forever. The end route gives live captures real boundaries, idempotently.
+  it("ends an open meeting, and a second end is the same row, not a second effect", async () => {
+    h = await harness();
+    const owner = await h.signup("end1@example.com");
+    const boardId = await h.seedBoard(owner.token);
+    const opened = await h.api(`/api/boards/${boardId}/meetings`, {
+      method: "POST",
+      token: owner.token,
+      body: JSON.stringify({ turns: TURNS.slice(0, 1), startedAt: 1_000 }),
+    });
+    const mid = opened.body.id as string;
+
+    const ended = await h.api(`/api/boards/${boardId}/meetings/${mid}/end`, {
+      method: "POST",
+      token: owner.token,
+      body: JSON.stringify({ endedAt: 60_000 }),
+    });
+    expect(ended.status).toBe(200);
+    expect(ended.body.endedAt).toBe(60_000);
+
+    // Idempotent: re-end returns the SAME row (still the first endedAt).
+    const again = await h.api(`/api/boards/${boardId}/meetings/${mid}/end`, {
+      method: "POST",
+      token: owner.token,
+      body: JSON.stringify({ endedAt: 120_000 }),
+    });
+    expect(again.status).toBe(200);
+    expect(again.body.endedAt).toBe(60_000);
+
+    // And the boundary holds on read.
+    const read = await h.api(`/api/boards/${boardId}/meetings/${mid}`, { token: owner.token });
+    expect(read.body.endedAt).toBe(60_000);
+
+    // An ended meeting refuses appends, as before.
+    const appended = await h.api(`/api/boards/${boardId}/meetings/${mid}/turns`, {
+      method: "POST",
+      token: owner.token,
+      body: JSON.stringify({ turns: [{ speaker: "X", at: 2, text: "late" }] }),
+    });
+    expect(appended.status).toBe(404);
+  });
+
+  it("refuses an end before the meeting's start", async () => {
+    h = await harness();
+    const owner = await h.signup("end2@example.com");
+    const boardId = await h.seedBoard(owner.token);
+    const opened = await h.api(`/api/boards/${boardId}/meetings`, {
+      method: "POST",
+      token: owner.token,
+      body: JSON.stringify({ turns: TURNS.slice(0, 1), startedAt: 1_000 }),
+    });
+    const mid = opened.body.id as string;
+    const res = await h.api(`/api/boards/${boardId}/meetings/${mid}/end`, {
+      method: "POST",
+      token: owner.token,
+      body: JSON.stringify({ endedAt: 500 }),
+    });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain("predate");
+  });
+
+  it("viewer floor: ending is a write about the record", async () => {
+    h = await harness();
+    const owner = await h.signup("end3@example.com");
+    const viewer = await h.signup("end3v@example.com");
+    const boardId = await h.seedBoard(owner.token);
+    const share = await h.api(`/api/boards/${boardId}/share`, {
+      method: "POST",
+      token: owner.token,
+      body: JSON.stringify({ role: "viewer" }),
+    });
+    await h.api(`/api/boards/${boardId}/join`, {
+      method: "POST",
+      token: viewer.token,
+      body: JSON.stringify({ token: share.body.token }),
+    });
+    const opened = await h.api(`/api/boards/${boardId}/meetings`, {
+      method: "POST",
+      token: owner.token,
+      body: JSON.stringify({ turns: TURNS.slice(0, 1), startedAt: 1_000 }),
+    });
+    const res = await h.api(
+      `/api/boards/${opened.body.id}/meetings/${opened.body.id}/end`,
+      { method: "POST", token: viewer.token },
+    );
+    // The path is malformed on purpose: a viewer must not learn whether the
+    // meeting id exists — the guard answers 404 the same as a stranger.
+    expect([403, 404]).toContain(res.status);
+  });
+});

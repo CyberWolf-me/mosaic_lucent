@@ -1,4 +1,4 @@
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, desc, eq, isNull, lte } from "drizzle-orm";
 import type { Db } from "../db/client.js";
 import { meetingTranscripts } from "../db/schema.js";
 import {
@@ -83,6 +83,39 @@ export class PostgresMeetingStore implements MeetingStore {
       )
       .returning();
     return rows[0] ? toRow(rows[0]) : undefined;
+  }
+
+  /**
+   * End a still-open meeting (Stage C3): the `isNull(endedAt)` precondition
+   * in the WHERE makes a concurrent double-end affect zero rows — the row
+   * comes back unchanged, the idempotent answer. A `gte(startedAt)` guard
+   * keeps a bad timestamp from back-dating the meeting's end before its
+   * start.
+   */
+  async end(
+    boardId: string,
+    id: string,
+    endedAt: number,
+  ): Promise<MeetingTranscript | undefined> {
+    const rows = await this.target.db
+      .update(meetingTranscripts)
+      .set({ endedAt })
+      .where(
+        and(
+          eq(meetingTranscripts.boardId, boardId),
+          eq(meetingTranscripts.id, id),
+          isNull(meetingTranscripts.endedAt),
+          // endedAt >= startedAt, expressed from the startedAt side: an end
+          // timestamp before the meeting began back-dates the record.
+          lte(meetingTranscripts.startedAt, endedAt),
+        ),
+      )
+      .returning();
+    // Zero rows means the row is unknown OR already ended OR the timestamp
+    // predates the start; the already-ended case must still answer with the
+    // row (idempotent), so read it back when the update touched nothing.
+    if (rows[0]) return toRow(rows[0]);
+    return this.get(boardId, id);
   }
 }
 
