@@ -108,6 +108,7 @@ import { registerProposalRoutes } from "./routes/proposals.js";
 import { registerSsoRoutes } from "./routes/sso.js";
 import { registerHistoryRoutes } from "./routes/history.js";
 import { registerAskRoutes } from "./routes/ask.js";
+import { registerSearchRoutes } from "./routes/search.js";
 import { mintLiveKitToken } from "./livekit.js";
 import { registerAssetRoutes } from "./routes/assets.js";
 import { registerScimRoutes } from "./routes/scim.js";
@@ -1569,6 +1570,7 @@ export function createApp(deps: AppDeps): App {
   registerSsoRoutes(router, services);
   registerHistoryRoutes(router, services);
   registerAskRoutes(router, services);
+  registerSearchRoutes(router, services);
   /**
    * Asset gateway (M7 / M4 storage): `/api/assets/*`. The handler is built
    * here, not registered through the router, because it consumes a body-cap

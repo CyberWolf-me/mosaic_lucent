@@ -4,7 +4,8 @@ import { REQUEST_LIMITS, type AnswerRequest } from "@lucent/ai";
 import type { RegisterRoutes } from "./context.js";
 import { actorNamesFor, loadVisibleLog } from "../historyView.js";
 import { buildAnswerRequest } from "../askContext.js";
-import type { MeetingTranscript, MeetingStore } from "../meetings.js";
+import { visibleMeetings } from "../meetingsWindow.js";
+import type { MeetingStore } from "../meetings.js";
 
 /**
  * The ask route (Stage C1):
@@ -52,20 +53,6 @@ const askBodySchema = z.object({
     .max(REQUEST_LIMITS.historyTurns)
     .optional(),
 });
-
-/**
- * The meetings visible to the caller's window (amendment 1): a meeting whose
- * startedAt precedes the oldest visible revision produced board state only
- * through revisions this caller cannot see, so its transcript is outside the
- * entitlement too. Meetings newer than the window are trivially inside.
- */
-function visibleMeetings(
-  meetings: MeetingTranscript[],
-  oldestVisibleAt: number,
-): MeetingTranscript[] {
-  // forBoard returns newest-first.
-  return meetings.filter((m) => m.startedAt >= oldestVisibleAt);
-}
 
 /** The citation as the client renders it: kind, id, a human label, the anchor. */
 interface CitationView {
