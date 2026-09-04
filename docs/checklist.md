@@ -1015,3 +1015,53 @@ survives (user-actor seed), a model op's 'price' folds onto the board's
 OWN authored key, 'monetization' stays apart, the digest groups both
 spellings under one canonical section, and the HUD hint's evidence is
 derived from real state.
+
+## Stage C6 shipped: the Intelligence view (2026-09, docs/17 amendment)
+
+[x] The projection layer (`@lucent/web`): intelligence.ts — the six
+    sections in fixed order (open first, settled dimmed after; rows carry
+    authored topic, supersedes, provenance, the issue assignee bridge),
+    topicGroups on C5's equivalence rule, inboxItems with evidence,
+    mergePreview/mergeOps (one derivation — preview and ops cannot
+    disagree), suppressionKey (the pair + both statement counts:
+    change-aware, ephemeral). 13 node tests.
+[x] The view (`@lucent/web`): six collapsible sections, always-visible
+    counts, per-kind glyphs + KIND_TINT, the uniform evidence contract
+    (label → ?reveal; ✦ → ?meeting+?turn, hidden without provenance),
+    view-empty states, the four join points (View union, RAIL_ITEMS
+    Sparkle after Meeting, palette, Router). Pure client-side: zero
+    fetches/routes; identical for shared and local boards — statementNodes()'s
+    first UI consumer, exactly as ADR 0021 promised.
+[x] The recommendation inbox (`@lucent/web`): possibleDuplicateTopics
+    surfaced with statement counts + meetings of origin (rule 4 — evidence,
+    never 'looks similar'); Merge previews (N statements, nothing deleted)
+    then confirms UPDATE_STATEMENT ops through applyManual — the same
+    validator, undo, and history as any human edit; a failed validation
+    surfaces the error and keeps the card. Keep suppresses for the session
+    (change-aware: any statement change re-arms the pair). ADR 0025's
+    Recommendation shape gets its first real consumer.
+[x] The record: ADR 0026 (the spec sentence; the surface division Board /
+    Meeting / History / Intelligence / ⌘K / Ask; the inbox as the C5
+    invariant held end to end; the not-built list with the time lens
+    first), docs/17 C6 amendment, this checklist section, the changeset,
+    and the stageC6 definition e2e.
+[ ] The time lens ("only what changed since the last meeting") — not built
+    (temporal projection over statement events; a future stage on the
+    C1/C3 history/meeting infrastructure).
+[ ] Durable dismissals / a persisted inbox — not built (ADR 0023's rule).
+[ ] The general recommendation engine — not built (contradictions, stale
+    objects, ownership conflicts: future detectors; the Recommendation
+    shape is ADR 0025's).
+[ ] Per-kind status machines — not built (the C2 decision stands).
+[ ] REST/MCP intelligence routes, server-side grouping — not built (pure
+    client-side by design).
+[ ] Statement editing from the view; the plan-from-meeting bridge — not
+    built (the HUD edits; the assignee display is the bridge's seam).
+
+Gate: typecheck 0 across all six packages; tests green (ai 185, core 371,
+i18n 14, mcp 26, server 874+80 PG in CI, web 631); the stageC6 definition
+scenario passes the continuous story: all six kinds sectioned and ordered,
+open before settled, the assignee bridge on the action row, the inbox pair
+with evidence, the merge committing through the validated path and the
+board converging, Keep leaving state untouched, and every navigation
+riding the existing citation contract.

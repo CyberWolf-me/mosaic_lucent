@@ -497,3 +497,58 @@ stale objects, ownership conflicts are future detectors), any persisted
 canonical/alias field or entity table (ADR 0023's rule), semantic aliasing
 (monetization ≈ revenue-model is beyond the deterministic fold by
 design), a Topics view or recommendation inbox (C6's projections).
+
+## Amendment (2026-09-04): Stage C6 executed — the Intelligence view
+
+The owner's decisions (1/1/1/1, with refinements): one sectioned
+Intelligence view — not six rail slots, because all six kinds are
+projections of the same statement model and the rail keeps its four
+surface verbs (Board → manipulate, Meeting → listen, History →
+understand change, Intelligence → understand current semantic state; ⌘K →
+find, Ask → explain). All six kinds first-class with per-kind glyphs,
+open prominent and settled dimmed. The recommendation inbox with
+Merge/Keep — C5's loop closes — with a change-aware ephemeral Keep (an
+unchanged pair doesn't re-nag within the session; any change re-arms) and
+a previewed Merge (exactly what will update, nothing deleted, then
+confirm). The time lens explicitly out, with the spec sentence: 
+Intelligence is a projection of the current semantic workspace; it does
+not create new truth, mutate state without approval, or replace History
+as the source for temporal analysis.
+
+What Stage C6 shipped (commits and the acceptance scenario in
+`packages/server/test/stageC6.definition.e2e.test.ts`):
+
+- **The projection layer** (`@lucent/web`, intelligence.ts — pure,
+  node-tested, the historyTimeline convention): intelligenceSections (the
+  six kinds in fixed order, open first / settled after, rows carrying
+  authored topic, supersedes, provenance, and the issue assignee — the
+  Board bridge made visible); topicGroups (C5's own equivalence rule,
+  authored keys as-authored); inboxItems (possibleDuplicateTopics with
+  evidence); mergePreview/mergeOps (one derivation — the preview cannot
+  lie about the batch); suppressionKey (change-aware: the pair plus both
+  statement counts).
+- **The view** (`@lucent/web`): six collapsible sections with
+  always-visible counts, KIND_TINT headers, per-kind glyphs, the uniform
+  evidence contract (label → ?reveal, ✦ → ?meeting+?turn), view-empty
+  states. The four join points: View union, RAIL_ITEMS (Sparkle, after
+  Meeting), palette, Router. Pure client-side — zero fetches, identical
+  for shared and local boards.
+- **The recommendation inbox** (`@lucent/web`): each duplicate pair with
+  statement counts and meetings of origin; Merge previews then confirms
+  UPDATE_STATEMENT ops through applyManual (the same validator, undo, and
+  history as any human edit — only the explicit click applies, the C5
+  invariant end to end); Keep suppresses change-aware-ephemerally. ADR
+  0025's Recommendation shape gets its first real consumer.
+- **The record** (`docs`): ADR 0026, this amendment, the checklist
+  section, the changeset.
+
+Explicitly NOT built, per the plan: the time lens (temporal projection is
+a future stage on the C1/C3 history/meeting infrastructure — Intelligence
+does not replace History), durable dismissals or a persisted inbox (ADR
+0023's rule; the future engine's ADR), the general recommendation engine
+(contradictions, stale objects, ownership conflicts — future detectors),
+per-kind status machines (the C2 decision stands), any REST/MCP
+intelligence route or server-side grouping (pure client-side by design),
+editing statements from the view (the HUD edits; the view reads), the
+"create a plan from today's meeting" bridge (the assignee display is its
+seam).
