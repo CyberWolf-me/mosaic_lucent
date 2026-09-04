@@ -273,3 +273,59 @@ on canonical state, not on askContext's projection).
 The freeze resumes on the same terms. The next C batch (semantic lifecycle)
 reopens on the same rule as this one: a plan, an owner decision, and the
 scope guarantees named before code.
+
+## Amendment (2026-09-04): Stage C2 executed — the semantic lifecycle
+
+The owner decision that reopened engineering for C2, on the same footing as
+C1: the Stage C document's second batch (statements + evidence), with the
+review's three implementation amendments folded in — provenance as a field
+of the ORIGINATING operation (no post-pass, no SET_PROVENANCE synthetic
+event; the review rewrote the proposed implementation before any code), the
+six-kind vocabulary with the freeze rule (a new kind needs a distinct
+lifecycle, not a label; fact/constraint stay transcript context), and chips +
+HUD editor only (no Decision view — C6's projection, built later from this
+same state).
+
+What Stage C2 shipped (batches, commits, and the acceptance scenario in
+`packages/server/test/stageC2.definition.e2e.test.ts`):
+
+- **The statement contract** (`@lucent/core`, ADR 0021): six kinds
+  (decision/proposal/question/action/requirement/risk), four lifecycle
+  statuses, `SET_STATEMENT`/`UPDATE_STATEMENT` mirroring the issue layer,
+  visible supersession (the reducer marks targets superseded, preserving
+  their identity fields), cycle-safe validated supersession graphs,
+  repair ordering for backwards-emitted batches, and undo that restores
+  every superseded target. The identity rule holds: relabel/transform never
+  touch a statement or its provenance.
+- **The model learns statements** (`@lucent/ai`): visual-agent v4 teaches the
+  doctrine as data (decisions born resolved; proposals never decisions;
+  rejections flip or supersede; kind never changes), the summary carries
+  statements so the model can update what it sees, the historian v2 answers
+  "what did we decide about pricing?" from the digest's statement brackets,
+  and the offline mock/golden gate pins the shapes.
+- **The evidence fix** (`@lucent/server`, `@lucent/web`, ADR 0022): the C1-era
+  divergence the C2 recon proved — the meeting stamp existed only in the
+  capturing browser, and the review-gated path stamped nobody — is closed as
+  a correctness fix. Provenance rides the ops (attachProvenance, three
+  writers, one helper), so it lands in history, on peers, in the server
+  board, and in the log, by construction. The convergence contract is a
+  test: undo removes exactly, replay carries exactly.
+- **The surfaces** (`@lucent/web`): the ✦ chip on every statement node
+  (kind · status, settling as it closes), the HUD statement editor (kind/
+  status/topic/supersedes committed through the same validator the AI
+  faces — a statement-less target or a cycle is refused visibly), and the
+  meeting prompts teach the ops mapped from turn kinds.
+
+Explicitly NOT built, per the plan's decisions: Decision/Action/Risk views
+(C6's projections over statementNodes()), per-kind status machines (the
+label + the log carry the nuance), topic entity resolution (C5 — the kebab
+key is the seam), cross-meeting memory (C3), semantic search (C4), statement
+provenance on UPDATE (evidence attaches at creation), and any fact/constraint
+kind (the freeze rule's first application).
+
+Gate: typecheck 0 and tests green across all six packages; the definition
+scenario passes the continuous story (live meeting on a SHARED board →
+decision node with statement + provenance in the ops → second browser sees
+both → ✦ jumps to the transcript → Ask cites the node → a later rejection
+supersedes visibly and undo restores → the gated path stamps everyone →
+relabel preserves meaning → a HUD cycle attempt is refused).

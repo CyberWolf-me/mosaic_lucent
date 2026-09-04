@@ -27,3 +27,5 @@ back to it.
 | [0018](0018-proposals-are-server-records.md) | Proposals are database records with a transition guard (Stage B3)      | Accepted |
 | [0019](0019-history-depth-query-boundary.md) | history.depth bounds reads, never deletes (Stage C1)                    | Accepted |
 | [0020](0020-answer-call-type.md)            | generateAnswer: citations validated at the boundary (Stage C1)         | Accepted |
+| [0021](0021-statements-live-on-nodes.md) | Statements live on nodes as validated operations (Stage C2)         | Accepted |
+| [0022](0022-provenance-rides-the-operation.md) | Provenance is a field of the originating operation (Stage C2)     | Accepted |

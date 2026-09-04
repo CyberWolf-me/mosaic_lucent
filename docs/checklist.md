@@ -798,3 +798,52 @@ Gate: typecheck 0, tests green across all six packages; the
 stageC1.definition.e2e acceptance scenario passes the continuous story
 (seed → Free 25 → upgrade reveals → ask with citations → viewer asks →
 stranger 404 → both scope guarantees).
+
+## Stage C2 shipped: the semantic lifecycle (2026-09, docs/17 amendment)
+
+[x] The statement contract (`@lucent/core`, ADR 0021): SET_STATEMENT /
+    UPDATE_STATEMENT with six kinds (decision/proposal/question/action/
+    requirement/risk — closed set, freeze rule documented: a new kind needs
+    a distinct lifecycle, not a label) and four statuses. Supersession is
+    visible (the reducer marks targets) and validated (no statement-less
+    targets, no self, no cycles; in-batch simulation; repair reorders
+    backwards batches). Undo restores every superseded target; a deleted
+    statement node restores with its meaning; the identity rule — relabel/
+    transform never touch statement or provenance — is pinned by test.
+    Covered by core statement/repair/schema/tool-schema tests (353 green).
+[x] The model learns statements (`@lucent/ai`): summary carries statements
+    (provenance deliberately invisible to the model — it cannot emit it);
+    visual-agent v4 teaches the doctrine as data; the board-historian v2
+    answers "what did we decide about pricing?" from digest brackets; the
+    offline mock emits statement ops and the golden gate (score 1) pins
+    decision-born-resolved (superseding the $20 proposal), rejection-flips,
+    and hedged-is-proposal shapes.
+[x] The evidence fix (`@lucent/server`, `@lucent/web`, ADR 0022): the meeting
+    stamp — which the C2 recon proved never converged (one browser only; the
+    gated path stamped nobody) — now rides the ops through attachProvenance
+    (client send, client local-proposal approval, server B3 approve route:
+    three writers, one helper, idempotent). The approve route enriches from
+    the proposal's full record; the client sends quote/turnKinds it used to
+    drop. Convergence pinned: undo removes exactly, peer replay carries
+    exactly. Pre-C2 boards load unchanged (metadata fallback, no migration).
+[x] Pipeline surfaces (`@lucent/server`, `@lucent/mcp`): generate's summary
+    schema accepts statements and workspaceFromSummary reattaches them
+    (the model can resolve/supersede what it sees; a ghost target skips via
+    partial application with a warning); the Ask digest renders statement
+    brackets and reads node.provenance first; MCP get_board projects
+    statements + fromMeeting; apply_canvas_operations derives the new ops.
+[x] The surfaces (`@lucent/web`): the ✦ chip (kind · status, dimmed when
+    settled, kind-tinted) on every statement node; the HUD statement editor
+    (kind/status/topic/supersedes — picker offers only statement-carrying
+    nodes; commits through applyManual → validateOperations, the same
+    validator the AI faces, refused visibly when wrong); the ✦ provenance
+    button reads the op-level field first; meeting prompts teach statement
+    ops mapped from turn kinds. Pure helpers node-tested.
+[ ] Decision/Action/Risk views — C6's projections, deliberately not built.
+[ ] Topic entity resolution — C5 (C2's topic is a plain kebab key, the seam).
+[ ] Cross-meeting memory (C3), semantic search (C4) — unchanged, not built.
+
+Gate: typecheck 0, tests green across all six packages (core 353, ai 178,
+i18n 14, mcp 26, server 814+80 PG in CI, web 596); stageC2.definition.e2e
+passes the continuous scenario including the two scope guarantees from the
+plan (converged evidence on a shared board; validation refusing a HUD cycle).
