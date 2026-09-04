@@ -231,6 +231,43 @@ const scripts: Script[] = [
     }),
   },
   {
+    // Stage C5: topic REUSE over variant minting. A message that names the
+    // subject with different wording ("the pricing model") over a board
+    // already carrying a statement topic — the mock reads the summary's
+    // existing topics and reuses the key it finds rather than minting
+    // "pricing-model" beside it. The doctrine v5 teaches, made executable
+    // so the offline eval gate exercises it.
+    match: (m) => /pricing model/i.test(m),
+    build: (request) => {
+      // The existing authored key the board carries — real data only.
+      const existing = request.summary.nodes
+        .map((n) => n.statement?.topic)
+        .find((t) => typeof t === "string");
+      return {
+        explanation: existing
+          ? `Reused the board's existing '${existing}' topic for the new pricing statement instead of minting a variant key.`
+          : "Created the pricing statement with a short kebab-case topic.",
+        operations: [
+          {
+            op: "CREATE_NODE",
+            id: "pricing-model-node",
+            nodeType: "decision",
+            label: "Pricing model",
+          },
+          {
+            op: "SET_STATEMENT",
+            id: "pricing-model-node",
+            statement: {
+              kind: "decision",
+              status: "open",
+              ...(existing ? { topic: existing } : { topic: "pricing" }),
+            },
+          },
+        ] as Operation[],
+      };
+    },
+  },
+  {
     // Stage C3: the correction arrives as a LATER MEETING over a board that
     // already holds Monday's decision — the doctrine spans meetings. The
     // mock supersedes the existing statement visibly instead of re-deciding

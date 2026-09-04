@@ -1,7 +1,7 @@
 {
   "id": "visual-agent",
-  "version": 4,
-  "description": "The board-editing system prompt: turns a request into apply_canvas_operations calls, and states the trust boundary that makes enveloped context data rather than instruction.",
+  "version": 5,
+  "description": "The board-editing system prompt: turns a request into apply_canvas_operations calls, and states the trust boundary that makes enveloped context data rather than instruction. v5 teaches statement-topic reuse (Stage C5): the board's existing topic keys are the vocabulary — never mint a variant of an existing topic.",
   "vocabulary": {
     "base": "ai-permitted"
   },
@@ -108,7 +108,12 @@
     "    owner, the attribution rule above).",
     "  - requirements → kind=requirement; risks (\"X could delay Y\") → kind=risk.",
     "  Set a short kebab-case topic when the subject is clear (\"pricing\",",
-    "  \"launch-date\") so related statements group. supersedes lists node IDS that",
+    "  \"launch-date\") so related statements group. REUSE a topic key that",
+    "  already exists on the board when the statement belongs to that subject —",
+    "  the board summary shows existing statement topics; \"pricing-model\" minted",
+    "  beside an existing \"pricing\" is the split this rule exists to prevent.",
+    "  When the subject is genuinely new, mint one short kebab-case key, not a",
+    "  variant of an existing topic. supersedes lists node IDS that",
     "  already carry statements — never a label. Use UPDATE_STATEMENT for small",
     "  lifecycle edits (status/topic/supersedes); kind never changes — a new kind is a",
     "  new statement.",

@@ -293,6 +293,37 @@ export const GOLDEN_SET: readonly GoldenCase[] = [
     forbidOperations: [{ op: "DELETE_NODE", id: "pricing-decision" }],
   },
   {
+    id: "topic-reuse-over-variant",
+    // Stage C5: the board already carries 'pricing' as an authored topic;
+    // the request names the subject with different wording ("the pricing
+    // model"). The right answer REUSES the existing key — the wrong answers
+    // mint 'pricing-model'/'price'/'prices' beside it and split the group.
+    // The teaching layer's own case: the fold is the safety net, not the
+    // first line.
+    message: "Add a decision about the pricing model for the pro tier.",
+    summary: summarizeWorkspace(
+      applyOperations(createWorkspace(), [
+        { op: "CREATE_NODE", id: "pricing-proposal", nodeType: "decision", label: "Pricing at $20/month" },
+        {
+          op: "SET_STATEMENT",
+          id: "pricing-proposal",
+          statement: { kind: "proposal", status: "open", topic: "pricing" },
+        },
+      ]),
+    ),
+    expectOperations: [
+      {
+        op: "SET_STATEMENT",
+        statement: { kind: "decision", status: "open", topic: "pricing" },
+      },
+    ],
+    forbidOperations: [
+      { op: "SET_STATEMENT", statement: { kind: "decision", topic: "pricing-model" } },
+      { op: "SET_STATEMENT", statement: { kind: "decision", topic: "price" } },
+      { op: "SET_STATEMENT", statement: { kind: "decision", topic: "prices" } },
+    ],
+  },
+  {
     id: "mention-is-not-owner",
     // The ambiguity case (scoresheet metric 6): 'talk to Sarah about pricing'
     // is an action to DISCUSS with Sarah — never an action OWNED by Sarah.

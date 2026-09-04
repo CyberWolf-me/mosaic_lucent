@@ -81,7 +81,7 @@ export function promptFromTranscript(meeting: MeetingTranscript): string {
   return [
     "Build a diagram from this meeting transcript. Use one node per distinct point, connect related points, and group them by the bracketed classifications where present.",
     "",
-    "Give statement nodes their meaning with SET_STATEMENT: a decided point is kind=decision status=resolved (born resolved — an undecided 'decision' is a proposal); speculation is kind=proposal status=open; a genuine commitment is kind=action (with SET_ISSUE for its owner); requirements and risks map to their own kinds. Set a short kebab-case topic (e.g. 'pricing') when the subject is clear.",
+    "Give statement nodes their meaning with SET_STATEMENT: a decided point is kind=decision status=resolved (born resolved — an undecided 'decision' is a proposal); speculation is kind=proposal status=open; a genuine commitment is kind=action (with SET_ISSUE for its owner); requirements and risks map to their own kinds. Set a short kebab-case topic (e.g. 'pricing') when the subject is clear — and REUSE a topic key the board already carries when the subject matches (existing statement topics appear in the board summary); minting 'pricing-model' beside an existing 'pricing' splits the group.",
     "",
     "Transcript:",
     lines,
