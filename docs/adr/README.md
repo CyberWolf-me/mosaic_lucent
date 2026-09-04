@@ -31,3 +31,4 @@ back to it.
 | [0022](0022-provenance-rides-the-operation.md) | Provenance is a field of the originating operation (Stage C2)     | Accepted |
 | [0023](0023-cross-meeting-memory-is-projection.md) | Cross-meeting memory is a projection over canonical state (Stage C3) | Accepted |
 | [0024](0024-lexical-retrieval-one-seam-one-boundary.md) | Lexical retrieval: one seam, one boundary, two consumers (Stage C4) | Accepted |
+| [0025](0025-normalize-group-challenge-never-silently-overrule.md) | Topic entity resolution: normalize, group, and challenge — never silently overrule (Stage C5) | Accepted |

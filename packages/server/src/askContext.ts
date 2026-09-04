@@ -1,5 +1,6 @@
 import type { AnswerRequest, AnswerMeetingSummary, AnswerRetrievalHit } from "@lucent/ai";
 import type { Node, Workspace } from "@lucent/core";
+import { canonicalizeTopic, topicsAreVariants } from "@lucent/core";
 import type { LoggedOpEntry } from "./boards.js";
 import type { MeetingTranscript } from "./meetings.js";
 import { buildSearchCorpus, retrieve, SEARCH_LIMITS } from "./retrieval.js";
@@ -51,6 +52,10 @@ export const ASK_DIGEST_LIMITS = {
   meetingTurnText: 400,
   history: 200,
   nodeIndex: 200,
+  /** Distinct topic groups rendered in the statements-by-topic section. */
+  topics: 20,
+  /** Statements listed per topic group. */
+  topicStatements: 8,
 } as const;
 
 /** What the route knows about the window, distilled for the projection. */
@@ -237,6 +242,60 @@ export function renderBoardDigest(input: AskContextInput): string {
   if (evolution.length) {
     lines.push(
       `Statement evolution (newest statements superseding older ones — this is how the work changed across meetings):\n${evolution.join("\n")}`,
+    );
+  }
+
+  // Statements by topic (Stage C5): the grouping payoff. Statements grouped
+  // by TOPIC IDENTITY — canonicalizeTopic normalizes morphology (plurals,
+  // stems, case), then variant-related keys merge under one representative
+  // (the fold's own rule: shortest, then lexicographic) — so a human's
+  // authored 'pricing-model' beside 'pricing' still answers "what happened
+  // with pricing?" as one section. Every authored spelling is noted (the
+  // board's own text is the truth; the header is only the grouping). Still
+  // a pure projection of current state; still derived, never persisted.
+  const topicGroups: Array<{
+    header: string;
+    authored: Set<string>;
+    statements: Array<{ id: string; kind: string; status: string }>;
+  }> = [];
+  for (const node of Object.values(ws.nodes)) {
+    const topic = node.statement?.topic;
+    if (!topic) continue;
+    const key = canonicalizeTopic(topic) || topic;
+    let group = topicGroups.find((g) => topicsAreVariants(g.header, key));
+    if (!group) {
+      group = { header: key, authored: new Set(), statements: [] };
+      topicGroups.push(group);
+      if (topicGroups.length > ASK_DIGEST_LIMITS.topics) break;
+    }
+    group.authored.add(topic);
+    if (group.statements.length < ASK_DIGEST_LIMITS.topicStatements) {
+      group.statements.push({
+        id: node.id,
+        kind: node.statement!.kind,
+        status: node.statement!.status,
+      });
+    }
+  }
+  const topicSections = topicGroups
+    .slice(0, ASK_DIGEST_LIMITS.topics)
+    .map((g) => {
+      const authored = [...g.authored];
+      // The representative the fold would choose: shortest, then
+      // lexicographic — the grouping and the fold converge on the same key.
+      const representative = [...authored]
+        .map(canonicalizeTopic)
+        .sort((x, y) => x.length - y.length || x.localeCompare(y))[0]!;
+      const note =
+        authored.length > 1 || authored[0] !== representative
+          ? ` (authored: ${authored.join(", ")})`
+          : "";
+      const rows = g.statements.map((s) => `  ${s.id}: ${s.kind} · ${s.status}`);
+      return `topic ${representative}${note}:\n${rows.join("\n")}`;
+    });
+  if (topicSections.length) {
+    lines.push(
+      `Statements by topic (each topic's statements grouped — the answer to "what happened with X?" is one section):\n${topicSections.join("\n")}`,
     );
   }
 

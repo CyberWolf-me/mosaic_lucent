@@ -435,3 +435,65 @@ nowhere in the web app — the Dashboard is local-projects only); shapes in
 the server corpus (the local scan keeps covering them); pagination, an
 MCP search tool, advanced syntax, saved searches, analytics, cross-org
 search, a dedicated search page.
+
+## Amendment (2026-09-04): Stage C5 executed — topic entity resolution
+
+The owner's two decisions, plus the refinement that became the stage's
+philosophy: teach + deterministic fold (no LLM resolver — another model call
+per generation to fix "pricing" vs "pricing-model" is the wrong
+architecture), and universal normalization *of machine-authored ops* at
+every boundary. The owner's challenge refined "never rewrite the human"
+into the four-rule C5 contract: safe normalization is automatic;
+human-authored text is never silently rewritten (the precise invariant:
+human-authored semantic fields are immutable by automatic canonicalization
+— recommendations may propose, only an explicit user action may apply);
+semantic uncertainty becomes an evidence-backed recommendation, not a
+merge; recommendations carry evidence. The line for the record: Lucent
+should be willing to disagree with the user, but never silently overrule
+the user.
+
+What Stage C5 shipped (batches, commits, and the acceptance scenario in
+`packages/server/test/stageC5.definition.e2e.test.ts`):
+
+- **The fold + the detector** (`@lucent/core`, topicFold.ts):
+  canonicalizeTopic (morphology only), topicsAreVariants (the safe list
+  falls out — pricing ≡ pricing, pricing-model ⊃ pricing, price ~ pricing
+  by stem; monetization and customer-acquisition stay apart BY DESIGN),
+  foldStatementTopics (one existing candidate = converge; zero = novel;
+  multiple = untouched; batch-internal collisions close transitively on
+  the shortest representative), and possibleDuplicateTopics — variant
+  AUTHORED key pairs with statement counts and meetings of origin, each
+  key in at most one pair.
+- **Teaching** (`@lucent/ai`, `@lucent/web`): visual-agent v5 + both
+  meeting-extraction prompts teach REUSE — the board's existing topics are
+  the vocabulary; a variant minted beside an existing key is the split the
+  rule exists to prevent. A mock reuse script reads the summary's real
+  authored key; the golden case topic-reuse-over-variant pins it (gate
+  stays at score 1).
+- **The fold at the boundaries** (`@lucent/server`): generate (the repaired
+  re-emission folds too), MCP ops, proposal approval, and room commits —
+  ai-actor batches only, the actor model's own discriminator. A user-actor
+  'pricing-model' survives the room exactly as typed, pinned.
+- **The challenge at authoring time** (`@lucent/web`): the HUD's topic
+  field gains suggestions (the board's authored keys, datalist, never
+  forced) and the live rule-3 hint — 'Possible duplicate — Pricing Model
+  may refer to existing Pricing (N statements carry it)' with Use/Keep;
+  Accept sets the field through the same validated edit path (an explicit
+  user action), Keep dismisses for that value. The client send path folds
+  the meeting loop's model ops (the room's ai-only rule deliberately won't
+  touch user-actor sends); local boards fold identically; applyManual has
+  NO fold — the human's edit is the human's.
+- **The read-side payoff** (`@lucent/server`): the Ask digest's
+  statements-by-topic section — statements grouped by topic identity (the
+  same representative rule the fold chooses), authored spellings noted,
+  capped at 20 topics / 8 statements. "What happened with pricing?" reads
+  one section even when the board's own keys disagree on spelling.
+
+Explicitly NOT built, per the plan's not-built list: an LLM resolver round
+(conditional-future, gated on measured duplicate rates, run only on the
+ambiguous branch), a general recommendation engine (the generic
+Recommendation shape is documented in ADR 0025 as C6+ — contradictions,
+stale objects, ownership conflicts are future detectors), any persisted
+canonical/alias field or entity table (ADR 0023's rule), semantic aliasing
+(monetization ≈ revenue-model is beyond the deterministic fold by
+design), a Topics view or recommendation inbox (C6's projections).

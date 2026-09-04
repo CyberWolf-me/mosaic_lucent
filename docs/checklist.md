@@ -957,3 +957,61 @@ scenario passes the continuous story: search finds the unclassified turn
 and the topic statement and returns nothing from beyond the Free window;
 the captured historian request contains the retrieved hit; the answer cites
 the meeting; the palette pure functions group and navigate every hit kind.
+
+## Stage C5 shipped: topic entity resolution (2026-09, docs/17 amendment)
+
+[x] The fold + the detector (`@lucent/core`): topicFold.ts — canonicalizeTopic
+    (morphology: case, separators, plurals, stems; legacy free-form topics
+    normalize too), topicsAreVariants (segment sets equal or proper subset —
+    pricing/pricing-model/price/prices all variants; monetization and
+    customer-acquisition never), foldStatementTopics (exactly-one-candidate
+    converges on the board's own key; zero/novel and multiple/ambiguous stay
+    untouched; batch collisions close transitively on the shortest-
+    then-lexicographic representative; idempotent; clears pass through),
+    possibleDuplicateTopics (authored variant pairs with statement counts +
+    meeting origins, once per key). 18 node tests; coverage floor holds
+    (96.06% statements).
+[x] Teaching (`@lucent/ai`, `@lucent/web`): visual-agent v5 and both
+    meeting-extraction prompts teach topic REUSE; the mock reads the
+    summary's real authored key; golden topic-reuse-over-variant expects
+    reuse and forbids pricing-model/price/prices. Offline gate: score 1.
+[x] The fold at every machine-op boundary (`@lucent/server`): generate.ts
+    (repaired re-emission folds too), routes/boardOps.ts (MCP),
+    routes/proposals.ts approve, room.ts commit — ai-actor batches only;
+    user-actor and actorless batches NEVER fold (pinned). The generate fold
+    never mints and never merges monetization into pricing (pinned).
+[x] The web boundary + the challenge (`@lucent/web`): the send path folds
+    the model's ops (covering the meeting loop's user-actor sends and local
+    boards — the fourth boundary); local proposal approval folds;
+    applyManual has no fold (pinned). The HUD topic field: datalist
+    suggestions (authored keys as-authored) + the rule-3 duplicate hint with
+    statement-count evidence and Use/Keep — Accept sets the field through
+    the same validated edit path; Keep dismisses for that value and
+    re-arms on edit; two candidate keys hint nothing; the value AS an
+    existing key hints nothing. 7 new tests (618 total).
+[x] The read-side payoff (`@lucent/server`): the Ask digest's statements-
+    by-topic section — grouped by topic identity with the fold's own
+    representative rule, authored spellings noted, 20 topics / 8 statements
+    capped, omitted when the board has no topics.
+[x] The record: ADR 0025 (the four-rule contract, the precise invariant
+    with the superseded carve-out, the generic Recommendation shape
+    documented as C6+), docs/17 C5 amendment, this checklist section, the
+    changeset, and the stageC5 definition e2e.
+[ ] LLM resolver round — not built (conditional-future: measured duplicate
+    rates first, ambiguous branch only).
+[ ] General recommendation engine — not built (C6+: contradictions, stale
+    objects, ownership conflicts; the Recommendation shape is documented
+    in ADR 0025).
+[ ] Persisted canonical/alias tables — not built (ADR 0023's rule; the key
+    is derived, never stored).
+[ ] Semantic aliasing (monetization ≈ revenue-model) — beyond the
+    deterministic fold by design.
+[ ] A Topics view / recommendation inbox — C6's projections.
+
+Gate: typecheck 0 across all six packages; tests green (ai 185, core 371,
+i18n 14, mcp 26, server 874+80 PG in CI, web 618); the stageC5 definition
+scenario passes the continuous story: the human's authored 'pricing-model'
+survives (user-actor seed), a model op's 'price' folds onto the board's
+OWN authored key, 'monetization' stays apart, the digest groups both
+spellings under one canonical section, and the HUD hint's evidence is
+derived from real state.

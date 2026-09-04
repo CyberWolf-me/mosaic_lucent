@@ -436,3 +436,56 @@ function meetingAt(at: number): MeetingTranscript {
     createdAt: at,
   };
 }
+
+describe("statements by topic (Stage C5)", () => {
+  it("groups statements under the canonical key, noting authored spellings", () => {
+    // A human's authored 'pricing-model' beside 'pricing' — grouped under
+    // canonical 'pricing' with both spellings noted: the board's own text
+    // stays visible, the grouping is derived.
+    const ws = applyOperations(createWorkspace(), [
+      { op: "CREATE_NODE", id: "a", nodeType: "decision", label: "A" },
+      {
+        op: "SET_STATEMENT",
+        id: "a",
+        statement: { kind: "decision", status: "resolved", topic: "pricing" },
+      },
+      { op: "CREATE_NODE", id: "b", nodeType: "risk", label: "B" },
+      {
+        op: "SET_STATEMENT",
+        id: "b",
+        statement: { kind: "risk", status: "open", topic: "pricing-model" },
+      },
+      { op: "CREATE_NODE", id: "c", nodeType: "question", label: "C" },
+      {
+        op: "SET_STATEMENT",
+        id: "c",
+        statement: { kind: "question", status: "open", topic: "onboarding" },
+      },
+    ]);
+    const request = buildAnswerRequest(baseInput({ workspace: ws }));
+    expect(request.boardDigest).toContain("Statements by topic");
+    // One pricing group joining both spellings, one onboarding group.
+    expect(request.boardDigest).toContain("topic pricing (authored: pricing, pricing-model):");
+    expect(request.boardDigest).toContain("topic onboarding:");
+    expect(request.boardDigest).toContain("a: decision · resolved");
+    expect(request.boardDigest).toContain("b: risk · open");
+  });
+
+  it("an authored key equal to the canonical key notes nothing", () => {
+    const ws = applyOperations(createWorkspace(), [
+      { op: "CREATE_NODE", id: "a", nodeType: "decision", label: "A" },
+      {
+        op: "SET_STATEMENT",
+        id: "a",
+        statement: { kind: "decision", status: "resolved", topic: "pricing" },
+      },
+    ]);
+    const request = buildAnswerRequest(baseInput({ workspace: ws }));
+    expect(request.boardDigest).toContain("topic pricing:\n");
+  });
+
+  it("a board with no topics renders no section", () => {
+    const request = buildAnswerRequest(baseInput());
+    expect(request.boardDigest).not.toContain("Statements by topic");
+  });
+});
