@@ -87,7 +87,7 @@ export const ANSWER_SYSTEM_PROMPT_VERSION: number = BOARD_HISTORIAN.version;
  * model reads `< /untrusted-document >` the same way it reads the canonical
  * form, so a strict match would be a hole rather than a rule.
  */
-const HARNESS_TAG_PATTERN = /<\s*\/?\s*(?:untrusted-[a-z-]*|board-context)/gi;
+const HARNESS_TAG_PATTERN = /<\s*\/?\s*(?:untrusted-[a-z-]*|board-context|retrieved-hit)/gi;
 
 /**
  * Neutralise envelope boundaries inside untrusted text.
@@ -691,6 +691,30 @@ export function buildAnswerUserPrompt(request: AnswerRequest): string {
     // the limit must be stated even when the section itself is empty.
     sections.push(
       "Meeting extracts: none are visible in your context window — meetings exist on this board but are outside the visible range. A question about what was said must be answered with that limit stated.",
+    );
+  }
+
+  // Retrieved evidence (Stage C4): keyword hits from beyond the digest caps —
+  // unclassified turns, meetings past the extract cap, nodes past the node
+  // index cap — found over the SAME window. Each hit is enveloped like a turn
+  // because its text is exactly as third-party as a turn's; the id and
+  // turnIndex attributes are the citable anchors. Section omitted entirely
+  // when the retrieval produced nothing.
+  if (request.retrieved?.length) {
+    const hitLines = request.retrieved.map((hit) =>
+      envelope(
+        "retrieved-hit",
+        {
+          kind: hit.kind,
+          id: hit.id,
+          ...(hit.turnIndex !== undefined ? { turnIndex: hit.turnIndex } : {}),
+          matched: hit.matched.join(" "),
+        },
+        stripInstructionLike(hit.label).text,
+      ),
+    );
+    sections.push(
+      `Retrieved evidence — keyword hits from your visible window that the sections above do not show (unclassified transcript turns, meetings past the extract cap, nodes past the index cap). Cite a turn by its meeting id (name the turnIndex in your answer text), a node by its id, a revision by its number:\n${hitLines.join("\n")}`,
     );
   }
 

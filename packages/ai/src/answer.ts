@@ -100,6 +100,29 @@ export interface AnswerMeetingSummary {
 }
 
 /**
+ * One retrieved hit (Stage C4): keyword evidence from beyond the digest caps
+ * — an unclassified turn, a meeting past the 10-cap, a node past the
+ * 200-node cap — found by lexical retrieval over the SAME windowed context
+ * the rest of the request shows. The hit is evidence to read and cite, not
+ * a new object kind: turn hits cite the meeting (the answer text can name
+ * the turn index, as the historian prompt already teaches for classified
+ * turns), node hits cite the node, revision hits cite the revision.
+ */
+export interface AnswerRetrievalHit {
+  kind: "node" | "turn" | "revision";
+  /** The citable id: node id, revision number, or — for turns — meeting id. */
+  id: string;
+  /** For turns: the meeting the turn belongs to (same as `id`). */
+  meetingId?: string;
+  /** For turns: the stable turn index, the coordinate ?turn= keys on. */
+  turnIndex?: number;
+  /** What matched, for the model to anchor on. */
+  label: string;
+  /** The query tokens that fired — why this hit is here. */
+  matched: string[];
+}
+
+/**
  * The question plus the board's context projection. The caller (the server's
  * askContext) is responsible for windowing: everything here must already be
  * inside the caller's visible-history entitlement, so the entitlement cannot
@@ -129,6 +152,13 @@ export interface AnswerRequest {
    * be answered with the limit stated, never as "that never happened".
    */
   meetingsTruncated: boolean;
+  /**
+   * Keyword evidence beyond the digest caps (Stage C4): lexical hits over
+   * the same windowed context, so the model can answer from the unclassified
+   * turns and over-cap content the digest never shows. Omitted when the
+   * query produced no hits — an empty section is noise.
+   */
+  retrieved?: AnswerRetrievalHit[];
   /** Compact id→label index so the model can cite nodes precisely. */
   nodeIndex: Array<{ id: string; label: string }>;
   /** Recent conversation turns, so follow-up questions resolve. */

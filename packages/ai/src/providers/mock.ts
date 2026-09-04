@@ -556,6 +556,34 @@ interface AnswerScript {
 
 const answerScripts: AnswerScript[] = [
   {
+    // Retrieval-grounded asking (Stage C4): a question whose answer lives in
+    // the unclassified turns the digest never shows. The mock cites the
+    // retrieved turn's MEETING (the only citable kind for a turn, the C3
+    // rule) and names the turnIndex in the answer text — real ids only, the
+    // standing rule, and `retrieved` carries exactly the ids the server
+    // validated into the request.
+    match: (q) => /\b(who said|what did .* say|find|search|where.*discuss)/i.test(q),
+    build: (request) => {
+      const retrieved = request.retrieved ?? [];
+      const turnHit = retrieved.find((h) => h.kind === "turn");
+      if (!turnHit) {
+        return {
+          answer: "No retrieved evidence matches that within your visible window.",
+          citations: [],
+        };
+      }
+      const turnText =
+        turnHit.turnIndex !== undefined ? ` (turn ${turnHit.turnIndex})` : "";
+      return {
+        answer:
+          `The retrieved evidence finds it in meeting ${turnHit.id}${turnText}: ` +
+          `"${turnHit.label}" — matched on ${turnHit.matched.join(", ")}. ` +
+          `That turn is not in the classified extracts, so the digest alone would not have shown it.`,
+        citations: [{ kind: "meeting", id: turnHit.id }],
+      };
+    },
+  },
+  {
     // "Why did we switch/change between meetings?" (Stage C3): the evolution
     // lens. The mock reads the two most recent meetings' classified turns
     // and names the turn indices — real ids only, the C1 rule — so the

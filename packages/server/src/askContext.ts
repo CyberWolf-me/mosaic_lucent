@@ -1,7 +1,8 @@
-import type { AnswerRequest, AnswerMeetingSummary } from "@lucent/ai";
+import type { AnswerRequest, AnswerMeetingSummary, AnswerRetrievalHit } from "@lucent/ai";
 import type { Node, Workspace } from "@lucent/core";
 import type { LoggedOpEntry } from "./boards.js";
 import type { MeetingTranscript } from "./meetings.js";
+import { buildSearchCorpus, retrieve, SEARCH_LIMITS } from "./retrieval.js";
 
 /**
  * The Ask context projection (Stage C1).
@@ -276,6 +277,57 @@ export function projectMeetings(
 }
 
 /**
+ * Project the retrieval hits (Stage C4): `retrieve` over the SAME windowed
+ * inputs the rest of the request derives from, distilled to the
+ * answer-contract shape. Still a projection — the hits are computed here,
+ * never stored, and carry only ids the model may already cite (the corpus
+ * is the caller's window). Turn hits surface the meeting id + turn index
+ * the model cites through the existing three kinds; the snippet, not the
+ * whole turn, is what the answer budget can afford.
+ */
+export function projectRetrieval(
+  question: string,
+  input: AskContextInput,
+): AnswerRetrievalHit[] {
+  const corpus = buildSearchCorpus({
+    workspace: input.workspace,
+    meetings: input.meetings,
+    log: input.log,
+    actorNames: input.actorNames,
+  });
+  return retrieve(question, corpus, SEARCH_LIMITS.forAsk).map((hit) => {
+    if (hit.kind === "turn") {
+      return {
+        kind: "turn" as const,
+        id: hit.meetingId,
+        meetingId: hit.meetingId,
+        turnIndex: hit.turnIndex,
+        label: `${hit.speaker}: ${hit.snippet}`,
+        matched: hit.matched,
+      };
+    }
+    if (hit.kind === "revision") {
+      return {
+        kind: "revision" as const,
+        id: String(hit.seq),
+        label: `rev ${hit.seq} · ${hit.label.slice(0, 80)}${hit.actorName ? ` · ${hit.actorName}` : ""}`,
+        matched: hit.matched,
+      };
+    }
+    return {
+      kind: "node" as const,
+      id: hit.id,
+      label: hit.statement
+        ? `${hit.label} [${hit.statement.kind} · ${hit.statement.status}${
+            hit.statement.topic ? ` · topic: ${hit.statement.topic}` : ""
+          }]`
+        : hit.label,
+      matched: hit.matched,
+    };
+  });
+}
+
+/**
  * Build the whole AnswerRequest. Pure: same inputs, same request, so the
  * route tests can assert on the exact context a Free caller's question
  * produced — the context-scope guarantee (amendment 2) is checkable because
@@ -290,6 +342,7 @@ export function buildAnswerRequest(input: AskContextInput): AnswerRequest {
     actorType: entry.actor?.actorType ?? "user",
     opCount: entry.ops.length,
   }));
+  const retrieved = projectRetrieval(input.question, input);
   return {
     question: input.question,
     boardName: input.boardName,
@@ -302,6 +355,11 @@ export function buildAnswerRequest(input: AskContextInput): AnswerRequest {
     // ASK_DIGEST_LIMITS.meetings, and the model must know when older
     // meetings exist beyond it — the same honesty rule as historyTruncated.
     meetingsTruncated: input.meetings.length > ASK_DIGEST_LIMITS.meetings,
+    // Retrieved evidence (Stage C4): keyword hits over the same window the
+    // digest rendered — including the unclassified turns and over-cap
+    // content no section above shows. Omitted when empty (the prompt layer
+    // treats an empty section as noise).
+    ...(retrieved.length ? { retrieved } : {}),
     nodeIndex: Object.entries(input.workspace.nodes)
       .slice(0, ASK_DIGEST_LIMITS.nodeIndex)
       .map(([id, node]) => ({ id, label: node.label.slice(0, ASK_DIGEST_LIMITS.nodeLabel) })),

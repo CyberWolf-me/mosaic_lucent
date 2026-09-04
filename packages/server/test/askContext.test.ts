@@ -342,6 +342,88 @@ describe("C3: the evolution section + turn indices + the honest meetings window"
   });
 });
 
+describe("retrieved evidence (Stage C4)", () => {
+  const unclassifiedMeeting: MeetingTranscript = {
+    id: "mtg_a",
+    boardId: "brd_1",
+    orgId: "org_1",
+    startedAt: T0,
+    endedAt: null,
+    turns: [
+      // index 0: UNCLASSIFIED — projected nowhere, findable only by retrieval.
+      { speaker: "Maya", at: T0, text: "Maybe $20 for the pro tier" },
+      // index 1: classified — already in the extracts.
+      { speaker: "Tom", at: T0 + 60_000, text: "Agreed, pricing settled.", kind: "decision" },
+    ],
+    createdBy: null,
+    createdAt: T0,
+  };
+
+  it("projects a retrieved turn hit with meeting id, turn index, and snippet label", () => {
+    const request = buildAnswerRequest(
+      baseInput({
+        question: "who said anything about the pro tier?",
+        meetings: [unclassifiedMeeting],
+      }),
+    );
+    const turn = request.retrieved?.find((h) => h.kind === "turn");
+    expect(turn).toBeDefined();
+    if (turn?.kind !== "turn") return;
+    // The citable id is the MEETING (the three-kind contract); the answer
+    // text names the turn index.
+    expect(turn.id).toBe("mtg_a");
+    expect(turn.meetingId).toBe("mtg_a");
+    expect(turn.turnIndex).toBe(0);
+    expect(turn.label).toContain("Maya");
+    expect(turn.label).toContain("20");
+    expect(turn.matched).toContain("pro");
+  });
+
+  it("projects node hits with their statement bracket", () => {
+    const request = buildAnswerRequest(
+      baseInput({ question: "what is the pricing decision?" }),
+    );
+    const node = request.retrieved?.find((h) => h.kind === "node");
+    expect(node).toBeDefined();
+    if (node?.kind !== "node") return;
+    expect(node.id).toBe("pricing");
+    expect(node.label).toContain("Pricing");
+  });
+
+  it("projects revision hits as their revision number", () => {
+    const request = buildAnswerRequest(baseInput({ question: "who added the pricing region?" }));
+    const revision = request.retrieved?.find((h) => h.kind === "revision");
+    expect(revision).toBeDefined();
+    if (revision?.kind !== "revision") return;
+    expect(revision.id).toBe("41"); // "added pricing region"
+    expect(revision.label).toContain("added pricing region");
+  });
+
+  it("omits the field entirely when the question matches nothing", () => {
+    const request = buildAnswerRequest(baseInput({ question: "what changed?" }));
+    // "what changed" matches no node label, turn, or revision label in the
+    // base fixture — no hits, no section.
+    expect(request.retrieved).toBeUndefined();
+  });
+
+  it("caps retrieval evidence at the forAsk budget", () => {
+    const meetings: MeetingTranscript[] = Array.from({ length: 30 }, (_, i) => ({
+      id: `mtg_${i}`,
+      boardId: "brd_1",
+      orgId: "org_1",
+      startedAt: T0 + i,
+      endedAt: null,
+      turns: [{ speaker: "S", at: T0 + i, text: "pricing mumble mumble" }],
+      createdBy: null,
+      createdAt: T0 + i,
+    }));
+    const request = buildAnswerRequest(
+      baseInput({ question: "pricing", meetings }),
+    );
+    expect(request.retrieved?.length).toBeLessThanOrEqual(8);
+  });
+});
+
 function meetingAt(at: number): MeetingTranscript {
   return {
     id: `mtg_${at}`,
