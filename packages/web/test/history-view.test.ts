@@ -164,7 +164,12 @@ describe("mergeChronology + chronologyByDay (Stage C3)", () => {
     expect(rows[1]).toMatchObject({ kind: "revision" });
     // Both rows point at the same item — the event is the point, the
     // revision line the detail.
-    expect(rows[0]!.item.seq).toBe(rows[1]!.item.seq);
+    const statementRow = rows[0];
+    const revisionRow = rows[1];
+    if (statementRow?.kind !== "statement" || revisionRow?.kind !== "revision") {
+      throw new Error("expected a statement row followed by its revision row");
+    }
+    expect(statementRow.item.seq).toBe(revisionRow.item.seq);
   });
 
   it("groups by local calendar day, newest day first, order preserved within", () => {

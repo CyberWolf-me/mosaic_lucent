@@ -847,3 +847,46 @@ Gate: typecheck 0, tests green across all six packages (core 353, ai 178,
 i18n 14, mcp 26, server 814+80 PG in CI, web 596); stageC2.definition.e2e
 passes the continuous scenario including the two scope guarantees from the
 plan (converged evidence on a shared board; validation refusing a HUD cycle).
+
+## Stage C3 shipped: cross-meeting memory (2026-09, docs/17 amendment)
+
+[x] The chain first-class (`@lucent/server`): the Ask digest's
+    statement-evolution section — every supersession as one line with each
+    side's meeting of origin, so "why did we change pricing?" is a read.
+    projectMeetings carries each classified turn's stable index;
+    meetingsTruncated discloses the digest cap (the honest-window rule,
+    even when the cap empties the section).
+[x] The model answers evolution questions (`@lucent/ai`): historian v3
+    (read the chain + name turn indices + disclose the meetings window);
+    AnswerMeetingTurn.index; a cross-meeting mock script (real ids, turn
+    indices, disclosure); the cross-meeting-supersedes golden case
+    (Wednesday's correction supersedes Monday's decision — never re-decided,
+    never deleted). Offline gate at score 1.
+[x] Real meeting boundaries (`@lucent/server`): MeetingStore.end (both
+    implementations, idempotent, PG-guarded) + POST .../meetings/:mid/end
+    (editor floor, 400 before start, 404 unknown). stopRecording calls it;
+    the saved list gains its boundary in place.
+[x] The reverse link (`@lucent/web`): turnObjects/objectsByTurn — pure
+    scans over the workspace (no server call: C2 put provenance in the
+    state). Per-turn '✦ N objects · view' in saved meetings; the canvas ✦
+    carries ?turn= (the C1 citationTarget contract applied to the ✦).
+    Rangeless provenance surfaces on no single turn; live-session matches
+    nothing; ranges clamp to the transcript length. Node-tested.
+[x] The merged project timeline (`@lucent/server`, `@lucent/web`):
+    HistoryItem.statementEvent derived from the log's own statement ops
+    (canonical; a clear is not an event); mergeChronology/chronologyByDay
+    interleave revisions + meeting markers + statement rows (the event
+    first, the revision line the detail), KIND_TINT dots, all three row
+    kinds jumping through the existing citation plumbing. No new view.
+[ ] WS meeting-ended broadcast — not built (meeting lists fetch on mount).
+[ ] Turn-level citation kinds — not built (indices + the three-kind
+    contract suffice).
+[ ] Decisions view (C6), topic resolution (C5), semantic search (C4) —
+    unchanged.
+
+Gate: typecheck 0, tests green across all six packages (ai 178, core 353,
+i18n 14, mcp 26, server 825+80 PG in CI, web 606); the stageC3 definition
+scenario passes the continuous story, including the turn-precision scope
+(turn N lists exactly what turnRange produced), the meetings-window scope
+(truncation disclosed, the provider request never contains the excluded
+meeting), idempotent end, and the ✦ carrying ?turn=.

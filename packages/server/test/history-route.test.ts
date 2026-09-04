@@ -387,6 +387,8 @@ describe("statementEvent derivation (Stage C3)", () => {
 
     const res = await api(h, `/api/boards/${boardId}/history`, { token: alice.token });
     expect(res.status).toBe(200);
+    expect(append.ok).toBe(true);
+    if (!append.ok) return;
     const row = res.body.items.find((i: any) => i.seq === append.seq);
     expect(row.statementEvent).toEqual({
       kind: "decision",

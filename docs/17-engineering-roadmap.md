@@ -329,3 +329,48 @@ decision node with statement + provenance in the ops → second browser sees
 both → ✦ jumps to the transcript → Ask cites the node → a later rejection
 supersedes visibly and undo restores → the gated path stamps everyone →
 relabel preserves meaning → a HUD cycle attempt is refused).
+
+## Amendment (2026-09-04): Stage C3 executed — cross-meeting memory
+
+The owner decision, on the same footing as C1/C2: the Stage C document's
+third batch. The plan's recon finding shaped everything: cross-meeting
+memory is a projection over state C2 already made canonical (statements +
+supersedes chains, op-level provenance with stable turn ranges, append-only
+transcripts, C1's revision window) — so C3 adds NO new store anywhere. The
+memory is the reading of it, forwards and backwards.
+
+What Stage C3 shipped (batches, commits, and the acceptance scenario in
+`packages/server/test/stageC3.definition.e2e.test.ts`):
+
+- **The chain, first-class** (`@lucent/server`, `@lucent/ai`): the Ask
+  digest's statement-evolution section renders every supersession with each
+  side's meeting of origin; the historian v3 answers evolution questions
+  from it, naming turn indices; the answer contract gains those indices
+  and the honest meetings window (`meetingsTruncated` — the cap that was
+  silent since C1 now states itself, even when it empties the section).
+- **Real meeting boundaries** (`@lucent/server`, `@lucent/web`):
+  `MeetingStore.end` + the end route (editor, idempotent, guarded in the
+  WHERE like appendTo). Live captures stop being "in progress" forever;
+  the chronology's meeting rows mean what they say.
+- **The reverse link** (`@lucent/web`): `turnObjects`/`objectsByTurn` scan
+  the workspace the browser holds — no server call, the payoff of ADR
+  0022's ops-level provenance. A turn's row lists '✦ N objects · view'; the
+  canvas ✦ now carries the turnRange (`?turn=`), the same contract the Ask
+  citation path has had since C1.
+- **The merged project timeline** (`@lucent/server`, `@lucent/web`):
+  HistoryView extended, not a new view. Revisions + meeting markers +
+  statement events (derived from the log's own statement ops) in one
+  day-grouped chronology; with no meetings/statements it degrades to
+  exactly the C1 revision list.
+
+Three defects C1/C2 left, closed as part of the batch: live meetings never
+ended; the ✦ jump landed at the transcript top instead of the exact turns;
+the meetings digest truncated silently.
+
+Explicitly NOT built, per the plan's not-built list: a WS meeting-ended
+broadcast (meeting lists fetch on mount; revisit with a live timeline),
+turn-level citation kinds (indices in answer text + the three-kind contract
+suffice), meeting-to-meeting reference columns (the chain lives in
+statements + provenance), transcript editing/renumbering (the index system
+depends on immutability), the Decisions view (still C6's projection), topic
+entity resolution (C5), semantic search (C4).
