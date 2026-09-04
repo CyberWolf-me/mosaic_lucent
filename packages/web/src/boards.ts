@@ -331,6 +331,17 @@ export interface BoardHistoryItem {
   };
   /** Node/object ids the batch referenced — the "show on board" jump. */
   touched: string[];
+  /**
+   * The statement this revision attached or changed (Stage C3): the timeline
+   * renders it as a semantic row — "decision made", "question resolved".
+   */
+  statementEvent?: {
+    kind: "decision" | "proposal" | "question" | "action" | "requirement" | "risk";
+    status: "open" | "resolved" | "rejected" | "superseded";
+    topic?: string;
+    supersedes?: string[];
+    nodeId: string;
+  };
   proposal?: {
     id: string;
     meetingId: string | null;

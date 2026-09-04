@@ -38,6 +38,21 @@ export interface HistoryItem {
   actor: HistoryActorView;
   /** Node/shape ids the batch references, capped; the "show on board" jump. */
   touched: string[];
+  /**
+   * The statement this revision attached or changed (Stage C3), when it did:
+   * the semantic layer of the project timeline — "decision made",
+   * "question resolved", "proposal rejected" become rows. Derived from the
+   * log's own ops, so the event is as old as the revision that made it and
+   * as new as the last statement edit.
+   */
+  statementEvent?: {
+    kind: "decision" | "proposal" | "question" | "action" | "requirement" | "risk";
+    status: "open" | "resolved" | "rejected" | "superseded";
+    topic?: string;
+    supersedes?: string[];
+    /** The node carrying the statement — the row's jump target. */
+    nodeId: string;
+  };
   /** The Stage B3 proposal this revision applied, when it applied one. */
   proposal?: {
     id: string;
@@ -174,6 +189,7 @@ export function historyItems(
           : {}),
       },
       touched: touchedIds(entry),
+      ...(statementEventOf(entry) ?? {}),
       ...(proposal
         ? {
             proposal: {
@@ -190,4 +206,47 @@ export function historyItems(
         : {}),
     };
   });
+}
+
+/**
+ * The statement a revision attached or changed (Stage C3): the timeline's
+ * semantic layer, derived from the log's own ops — canonical state, no
+ * re-reading of the current board. One event per revision (the first
+ * statement op in the batch wins): a batch that makes a decision carries
+ * ONE decision, and a timeline row saying so is what turns the revision
+ * list into a project timeline.
+ */
+export function statementEventOf(
+  entry: LoggedOpEntry,
+): { statementEvent: NonNullable<HistoryItem["statementEvent"]> } | undefined {
+  for (const op of entry.ops) {
+    if (op.op === "SET_STATEMENT") {
+      if (!op.statement) continue; // a clear is not a statement event
+      return {
+        statementEvent: {
+          kind: op.statement.kind,
+          status: op.statement.status,
+          ...(op.statement.topic ? { topic: op.statement.topic } : {}),
+          ...(op.statement.supersedes?.length
+            ? { supersedes: op.statement.supersedes }
+            : {}),
+          nodeId: op.id,
+        },
+      };
+    }
+    if (op.op === "UPDATE_STATEMENT") {
+      return {
+        statementEvent: {
+          // An update keeps the kind it had — kind is identity (ADR 0021).
+          // The timeline row shows the status change; the kind the reader
+          // knows from the node the row links to.
+          kind: "decision",
+          status: op.status ?? "open",
+          ...(op.supersedes?.length ? { supersedes: op.supersedes } : {}),
+          nodeId: op.id,
+        },
+      };
+    }
+  }
+  return undefined;
 }

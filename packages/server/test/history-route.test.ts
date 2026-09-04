@@ -361,3 +361,47 @@ describe("historyWindow arithmetic (the shared seam)", () => {
     expect(empty).toMatchObject({ fromSeq: 1, hasMore: false, head: 0 });
   });
 });
+
+describe("statementEvent derivation (Stage C3)", () => {
+  it("a revision that attached a statement carries its semantic event", async () => {
+    const h = (open = await harness());
+    const alice = await signup(h, "ev@example.com");
+    const boardId = await makeBoard(h, alice.token, "Events");
+    // A revision whose ops make a decision.
+    const append = await h.boardStore.appendOp({
+      boardId,
+      ops: [
+        { op: "CREATE_NODE", id: "d1", nodeType: "decision", label: "Pricing $15" },
+        {
+          op: "SET_STATEMENT",
+          id: "d1",
+          statement: { kind: "decision", status: "resolved", topic: "pricing" },
+        },
+      ],
+      by: alice.id,
+      label: "meeting extraction",
+      at: Date.now(),
+      actor: { actorType: "ai", actorId: "lucent", initiatedBy: alice.id },
+    });
+    expect(append.ok).toBe(true);
+
+    const res = await api(h, `/api/boards/${boardId}/history`, { token: alice.token });
+    expect(res.status).toBe(200);
+    const row = res.body.items.find((i: any) => i.seq === append.seq);
+    expect(row.statementEvent).toEqual({
+      kind: "decision",
+      status: "resolved",
+      topic: "pricing",
+      nodeId: "d1",
+    });
+  });
+
+  it("a plain revision carries no statementEvent", async () => {
+    const h = (open = await harness());
+    const alice = await signup(h, "ev2@example.com");
+    const boardId = await makeBoard(h, alice.token, "Plain");
+    await seedRevisions(h, boardId, alice.id, 1);
+    const res = await api(h, `/api/boards/${boardId}/history`, { token: alice.token });
+    expect(res.body.items[0].statementEvent).toBeUndefined();
+  });
+});

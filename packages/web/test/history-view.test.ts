@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { citationTarget, depthBanner, groupHistoryByDay } from "../src/historyTimeline.js";
+import {
+  citationTarget,
+  classifiedTurns,
+  chronologyByDay,
+  depthBanner,
+  groupHistoryByDay,
+  mergeChronology,
+} from "../src/historyTimeline.js";
 import type { BoardHistoryItem } from "../src/boards.js";
 
 /**
@@ -109,5 +116,69 @@ describe("citationTarget — the navigation contract", () => {
 
   it("an unknown kind is inert, not a guess", () => {
     expect(citationTarget({ kind: "url", id: "https://x" })).toBeNull();
+  });
+});
+
+describe("mergeChronology + chronologyByDay (Stage C3)", () => {
+  const meetingAt = (id: string, at: number, turns = 2): import("../src/meetings.js").MeetingTranscript => ({
+    id,
+    boardId: "brd_1",
+    orgId: "org_1",
+    startedAt: at,
+    endedAt: null,
+    turns: Array.from({ length: turns }, (_, i) => ({
+      speaker: "Alex",
+      at: at + i,
+      text: "words",
+      ...(i === 0 ? { kind: "decision" as const } : {}),
+    })),
+    createdBy: null,
+    createdAt: at,
+  });
+
+  it("interleaves the three streams newest-first", () => {
+    const rows = mergeChronology(
+      [
+        item(3, NOW - 60_000),
+        item(1, NOW - 3 * 3_600_000),
+      ],
+      [meetingAt("mtg_mid", NOW - 2 * 3_600_000)],
+    );
+    expect(rows.map((r) => r.kind)).toEqual(["revision", "meeting", "revision"]);
+    expect(rows[1]).toMatchObject({ kind: "meeting", meeting: { id: "mtg_mid" } });
+  });
+
+  it("a statement-carrying revision yields its semantic row first, then the revision row", () => {
+    const withStatement = {
+      ...item(5, NOW - 60_000),
+      statementEvent: {
+        kind: "decision" as const,
+        status: "resolved" as const,
+        topic: "pricing",
+        nodeId: "d1",
+      },
+    };
+    const rows = mergeChronology([withStatement], []);
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toMatchObject({ kind: "statement" });
+    expect(rows[1]).toMatchObject({ kind: "revision" });
+    // Both rows point at the same item — the event is the point, the
+    // revision line the detail.
+    expect(rows[0]!.item.seq).toBe(rows[1]!.item.seq);
+  });
+
+  it("groups by local calendar day, newest day first, order preserved within", () => {
+    const rows = mergeChronology(
+      [item(9, NOW - 60_000), item(8, NOW - 26 * 3_600_000)],
+      [meetingAt("mtg_y", NOW - 25 * 3_600_000)],
+    );
+    const days = chronologyByDay(rows, NOW);
+    expect(days.map((d) => d.label)).toEqual(["Today", "Yesterday"]);
+    expect(days[1]!.rows.map((r) => r.kind)).toEqual(["meeting", "revision"]);
+  });
+
+  it("classifiedTurns counts only the kinds", () => {
+    expect(classifiedTurns(meetingAt("mtg_k", NOW, 4))).toBe(1);
+    expect(classifiedTurns(meetingAt("mtg_z", NOW, 0))).toBe(0);
   });
 });

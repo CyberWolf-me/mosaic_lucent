@@ -5,7 +5,14 @@ import { DiagramLayer } from "../ui/DiagramLayer.js";
 import { useWorkspace } from "../workspace.js";
 import { useToast } from "../ui/Toast.js";
 import { fetchBoardHistory, type BoardHistory } from "../boards.js";
-import { depthBanner, groupHistoryByDay } from "../historyTimeline.js";
+import { listMeetings, type MeetingTranscript } from "../meetings.js";
+import {
+  classifiedTurns,
+  chronologyByDay,
+  depthBanner,
+  mergeChronology,
+} from "../historyTimeline.js";
+import { KIND_TINT, statementChipText } from "../statementUi.js";
 
 /**
  * Version history. Two sources, one surface (Stage C1):
@@ -25,6 +32,9 @@ export function HistoryView({ onOpenSettings }: { onOpenSettings: (section?: str
   // --- Server mode -----------------------------------------------------------
   const [server, setServer] = useState<BoardHistory | null>(null);
   const [serverError, setServerError] = useState<string | null>(null);
+  // The board's meetings, for the merged chronology (Stage C3): revisions,
+  // meeting markers, and statement events as one timeline.
+  const [meetings, setMeetings] = useState<MeetingTranscript[]>([]);
   useEffect(() => {
     if (!boardId) return;
     let cancelled = false;
@@ -41,12 +51,25 @@ export function HistoryView({ onOpenSettings }: { onOpenSettings: (section?: str
       .catch(() => {
         if (!cancelled) setServerError("The board's history could not be loaded.");
       });
+    void listMeetings(boardId)
+      .then((rows) => {
+        if (!cancelled) setMeetings(rows ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setMeetings([]);
+      });
     return () => {
       cancelled = true;
     };
   }, [boardId]);
 
-  const days = useMemo(() => groupHistoryByDay(server?.items ?? []), [server]);
+  // The merged project chronology (Stage C3): day-grouped rows across the
+  // three streams. When no meetings and no statement events exist, this
+  // degrades to exactly the revision list C1 shipped.
+  const chronoDays = useMemo(
+    () => chronologyByDay(mergeChronology(server?.items ?? [], meetings)),
+    [server, meetings],
+  );
   const banner = server ? depthBanner(server) : null;
 
   // ?rev=<seq>: a citation (or the row itself) deep-links a revision; scroll
@@ -184,7 +207,7 @@ export function HistoryView({ onOpenSettings }: { onOpenSettings: (section?: str
                 className="panel-body"
                 style={{ flex: 1, overflowY: "auto", padding: "10px 8px 20px" }}
               >
-                {days.map((day) => (
+                {chronoDays.map((day) => (
                   <div key={day.key} style={{ marginBottom: 10 }}>
                     <div
                       className="mono"
@@ -198,22 +221,107 @@ export function HistoryView({ onOpenSettings }: { onOpenSettings: (section?: str
                     >
                       {day.label}
                     </div>
-                    {day.items.map((item) => {
+                    {day.rows.map((row, i) => {
+                      // The merged chronology (Stage C3): three row kinds over
+                      // one day-grouped timeline. Statement events and meeting
+                      // markers join the revision rows C1 shipped.
+                      if (row.kind === "meeting") {
+                        return (
+                          <div
+                            key={`m-${row.meeting.id}`}
+                            style={{ display: "flex", gap: 12, position: "relative" }}
+                          >
+                            <div style={{ width: 24, position: "relative", flexShrink: 0 }}>
+                              <div
+                                style={{
+                                  position: "absolute",
+                                  top: 12,
+                                  left: 2,
+                                  width: 20,
+                                  height: 12,
+                                  borderRadius: 4,
+                                  background: "var(--canvas-2)",
+                                  border: "1px solid var(--stroke-2)",
+                                }}
+                              />
+                            </div>
+                            <button
+                              onClick={() => onCitation({ kind: "meeting", id: row.meeting.id })}
+                              title={`Open the transcript: ${row.meeting.turns.length} turns`}
+                              style={{
+                                flex: 1,
+                                textAlign: "left",
+                                padding: "8px 12px 8px 0",
+                                marginBottom: 4,
+                                borderRadius: 8,
+                                background: "transparent",
+                                border: "1px solid transparent",
+                              }}
+                            >
+                              <div
+                                style={{
+                                  display: "flex",
+                                  alignItems: "baseline",
+                                  gap: 8,
+                                  marginBottom: 2,
+                                }}
+                              >
+                                <span
+                                  className="mono"
+                                  style={{ fontSize: 10.5, color: "var(--ink-3)" }}
+                                >
+                                  {new Date(row.at).toLocaleTimeString([], {
+                                    hour: "2-digit",
+                                    minute: "2-digit",
+                                  })}
+                                </span>
+                                <span
+                                  style={{
+                                    fontSize: 13,
+                                    color: "var(--ink-0)",
+                                    fontVariationSettings: "'wght' 500",
+                                    flex: 1,
+                                  }}
+                                >
+                                  Meeting
+                                </span>
+                                <span
+                                  className="mono"
+                                  style={{ fontSize: 9.5, color: "var(--ink-3)" }}
+                                >
+                                  {row.meeting.endedAt === null ? "no end recorded" : "ended"}
+                                </span>
+                              </div>
+                              <div style={{ fontSize: 12, color: "var(--ink-2)" }}>
+                                {row.meeting.turns.length} turn
+                                {row.meeting.turns.length === 1 ? "" : "s"} ·{" "}
+                                {classifiedTurns(row.meeting)} classified
+                              </div>
+                            </button>
+                          </div>
+                        );
+                      }
+                      const item = row.item;
+                      const isStatement = row.kind === "statement";
                       const isAi = item.actor.type === "ai";
                       const flash = item.seq === flashSeq;
+                      const tint = isStatement
+                        ? KIND_TINT[item.statementEvent!.kind]
+                        : undefined;
                       return (
                         <div
-                          key={item.seq}
-                          ref={flash ? revRef : undefined}
+                          key={`${isStatement ? "s" : "r"}-${item.seq}-${i}`}
+                          ref={flash && !isStatement ? revRef : undefined}
                           style={{
                             display: "flex",
                             gap: 12,
                             position: "relative",
                             borderRadius: 8,
                             transition: "background 0.6s",
-                            background: flash
-                              ? "oklch(0.82 0.15 75 / 0.18)"
-                              : "transparent",
+                            background:
+                              flash && !isStatement
+                                ? "oklch(0.82 0.15 75 / 0.18)"
+                                : "transparent",
                           }}
                         >
                           <div style={{ width: 24, position: "relative", flexShrink: 0 }}>
@@ -225,22 +333,34 @@ export function HistoryView({ onOpenSettings }: { onOpenSettings: (section?: str
                                 width: 12,
                                 height: 12,
                                 borderRadius: 999,
-                                background: isAi
-                                  ? "linear-gradient(135deg, var(--amber-2), var(--amber-3))"
-                                  : "var(--canvas-3)",
+                                background: isStatement
+                                  ? tint ?? "var(--canvas-3)"
+                                  : isAi
+                                    ? "linear-gradient(135deg, var(--amber-2), var(--amber-3))"
+                                    : "var(--canvas-3)",
                                 border: `1px solid ${
-                                  isAi ? "oklch(0.82 0.15 75 / 0.5)" : "var(--stroke-2)"
+                                  isStatement
+                                    ? tint ?? "var(--stroke-2)"
+                                    : isAi
+                                      ? "oklch(0.82 0.15 75 / 0.5)"
+                                      : "var(--stroke-2)"
                                 }`,
-                                boxShadow: isAi ? "0 0 8px var(--amber-glow)" : "none",
+                                boxShadow: isAi && !isStatement ? "0 0 8px var(--amber-glow)" : "none",
                               }}
                             />
                           </div>
                           <button
-                            onClick={() => showOnBoard(item.seq, item.touched)}
+                            onClick={() =>
+                              isStatement
+                                ? onCitation({ kind: "node", id: item.statementEvent!.nodeId })
+                                : showOnBoard(item.seq, item.touched)
+                            }
                             title={
-                              item.touched.length
-                                ? `Show on board: ${item.touched.slice(0, 3).join(", ")}`
-                                : "This revision touched no board objects"
+                              isStatement
+                                ? `Show the ${item.statementEvent!.kind} node on the board`
+                                : item.touched.length
+                                  ? `Show on board: ${item.touched.slice(0, 3).join(", ")}`
+                                  : "This revision touched no board objects"
                             }
                             style={{
                               flex: 1,
@@ -272,14 +392,24 @@ export function HistoryView({ onOpenSettings }: { onOpenSettings: (section?: str
                               <span
                                 style={{
                                   fontSize: 13,
-                                  color: "var(--ink-0)",
+                                  color: isStatement ? tint ?? "var(--ink-0)" : "var(--ink-0)",
                                   fontVariationSettings: "'wght' 500",
                                   flex: 1,
                                 }}
                               >
-                                {item.label}
+                                {isStatement
+                                  ? statementChipText(item.statementEvent!)
+                                  : item.label}
                               </span>
-                              {isAi && (
+                              {isStatement && (
+                                <span
+                                  className="mono"
+                                  style={{ fontSize: 9.5, color: "var(--ink-3)" }}
+                                >
+                                  statement
+                                </span>
+                              )}
+                              {isAi && !isStatement && (
                                 <span
                                   className="mono"
                                   style={{ fontSize: 10, color: "var(--amber-2)" }}
@@ -289,11 +419,11 @@ export function HistoryView({ onOpenSettings }: { onOpenSettings: (section?: str
                               )}
                             </div>
                             <div style={{ fontSize: 12, color: "var(--ink-2)" }}>
-                              {item.actor.name} · {item.opCount} op
-                              {item.opCount === 1 ? "" : "s"}
-                              {item.proposal?.meetingId
-                                ? ` · from meeting`
-                                : ""}
+                              {isStatement
+                                ? `${item.actor.name}${item.statementEvent!.supersedes?.length ? " · superseded a previous statement" : ""}${item.statementEvent!.topic ? ` · ${item.statementEvent!.topic}` : ""}`
+                                : `${item.actor.name} · ${item.opCount} op${
+                                    item.opCount === 1 ? "" : "s"
+                                  }${item.proposal?.meetingId ? ` · from meeting` : ""}`}
                             </div>
                           </button>
                         </div>
