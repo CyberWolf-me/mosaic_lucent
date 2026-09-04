@@ -1,6 +1,8 @@
 import type { Operation } from "@lucent/core";
 import {
   applyOperations,
+  existingTopics,
+  foldStatementTopics,
   isHumanOnlyOperation,
   repairOperations,
   stampAuthorship,
@@ -125,7 +127,14 @@ export const registerBoardOpsRoutes: RegisterRoutes = (router, s) => {
     // authenticated human's (or their agent's) act on their board, and the
     // authorship stamp is what comments/votes/reactions attribute to.
     const stamped = stampAuthorship(filtered, user.id);
-    const operations = repairOperations(stamped);
+    // The topic fold (Stage C5): agent-submitted ops are machine-authored —
+    // they are a model's output riding a human's token — so they fold
+    // against the board's existing authored topic keys like any other model
+    // batch. Without this, the MCP path mints 'pricing-model' while the
+    // generate path folds to 'pricing' — the divergence the four-boundary
+    // rule exists to close.
+    const folded = foldStatementTopics(stamped, existingTopics(guard.board.workspace));
+    const operations = repairOperations(folded);
     const errors = validateOperations(guard.board.workspace, operations);
     if (errors.length > 0) {
       send(res, 422, { error: "operations failed validation", errors });

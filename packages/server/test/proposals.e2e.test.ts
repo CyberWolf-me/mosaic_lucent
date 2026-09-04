@@ -433,3 +433,64 @@ describe("Stage C2: approval enriches the ops with the proposal's evidence (ADR 
     expect(board?.workspace.nodes["n1"]?.provenance).toBeUndefined();
   });
 });
+
+describe("Stage C5: approval folds the proposal's topic variants (ADR 0025)", () => {
+  it("a stored variant topic converges on the board's existing key at commit", async () => {
+    // The proposal is the model's output — its statement topics fold against
+    // the board's existing authored keys at approval, alongside the
+    // provenance enrichment: what lands through the room converges for
+    // every peer. A proposal stored before C5 with a variant topic folds
+    // on approval.
+    const h = (open = await harness());
+    const alice = await signup(h, "alice-c5@example.com");
+    const created = await api(h, "/api/boards", {
+      method: "POST",
+      token: alice.token,
+      body: JSON.stringify({ name: "Fold board", workspace: createWorkspace() }),
+    });
+    const boardId = created.body.id as string;
+
+    // The board's existing authored key.
+    const { applyOperations } = await import("@lucent/core");
+    const board = await h.boardStore.get(boardId);
+    if (!board) throw new Error("board missing");
+    await h.boardStore.put({
+      ...board,
+      workspace: applyOperations(board.workspace, [
+        { op: "CREATE_NODE", id: "p1", nodeType: "decision", label: "Pricing" },
+        {
+          op: "SET_STATEMENT",
+          id: "p1",
+          statement: { kind: "decision", status: "resolved", topic: "pricing" },
+        },
+      ]),
+    });
+
+    // The proposal carries the model's variant key.
+    const proposed = await api(h, `/api/boards/${boardId}/proposals`, {
+      method: "POST",
+      token: alice.token,
+      body: JSON.stringify({
+        operations: [
+          { op: "CREATE_NODE", id: "p2", nodeType: "decision", label: "Pricing model" },
+          {
+            op: "SET_STATEMENT",
+            id: "p2",
+            statement: { kind: "decision", status: "open", topic: "pricing-model" },
+          },
+        ],
+        request: "add the pricing model decision",
+      }),
+    });
+    expect(proposed.status).toBe(201);
+    const approved = await api(
+      h,
+      `/api/boards/${boardId}/proposals/${proposed.body.proposal.id}/approve`,
+      { method: "POST", token: alice.token },
+    );
+    expect(approved.status).toBe(200);
+
+    const after = await h.boardStore.get(boardId);
+    expect(after?.workspace.nodes.p2?.statement?.topic).toBe("pricing");
+  });
+});

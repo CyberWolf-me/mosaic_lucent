@@ -3,6 +3,8 @@ import {
   validateOperations,
   isHumanOnlyOperation,
   stampAuthorship,
+  existingTopics,
+  foldStatementTopics,
   type Operation,
   type Workspace,
 } from "@lucent/core";
@@ -333,7 +335,18 @@ export class Room {
     // Stamp authorship: the connection's user owns every authored op in the
     // batch, whatever `by` the client sent, so comments/votes/reactions are
     // attributable end-to-end and nobody can post as a peer (M0.4).
-    const authored = stampAuthorship(filtered, userId);
+    // The topic fold (Stage C5, ADR 0025) — ai-actor batches ONLY: the
+    // actor model already tells machine output from human hands at this
+    // boundary, which is exactly the discriminator the fold needs. A human's
+    // topic stays exactly as typed (rule 2); a model's variant converges on
+    // the board's existing authored key. The meeting-extraction path (a
+    // user-actor batch carrying model ops) folds client-side before send
+    // (web, Batch 4) — never here.
+    const machineAuthored = meta?.actor?.actorType === "ai";
+    const folded = machineAuthored
+      ? foldStatementTopics(filtered, existingTopics(this.workspace))
+      : filtered;
+    const authored = stampAuthorship(folded, userId);
 
     // One commit at a time: between the validation and the append the room's
     // state must not move under us. The chain keeps commits in arrival order;

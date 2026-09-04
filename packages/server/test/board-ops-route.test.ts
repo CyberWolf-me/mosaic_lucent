@@ -250,4 +250,51 @@ describe("POST /api/boards/:id/ops (agent op-apply, R1)", () => {
     });
     expect(res.status).toBe(401);
   });
+
+  it("folds agent-submitted topic variants onto the board's existing key (Stage C5)", async () => {
+    // Agent ops are machine-authored — a model's output riding a human's
+    // token — so they fold like any model batch. Without this site, the MCP
+    // path mints 'prices' while generate folds to 'pricing': the four-way
+    // divergence (AI / MCP / WebSocket / Web) the boundary rule closes.
+    h = await harness();
+    const owner = await h.signup("owner7@example.com");
+    const boardId = await seedBoard(h, owner);
+
+    // Seed the board's existing authored key directly through the store.
+    const { applyOperations } = await import("@lucent/core");
+    const board = await h.boardStore.get(boardId);
+    if (!board) throw new Error("board missing");
+    const seed: Operation[] = [
+      { op: "CREATE_NODE", id: "p1", nodeType: "decision", label: "Pricing" },
+      {
+        op: "SET_STATEMENT",
+        id: "p1",
+        statement: { kind: "decision", status: "resolved", topic: "pricing" },
+      },
+    ];
+    await h.boardStore.put({
+      ...board,
+      workspace: applyOperations(board.workspace, seed),
+    });
+
+    const res = await h.api(`/api/boards/${boardId}/ops`, {
+      method: "POST",
+      token: owner.token,
+      body: JSON.stringify({
+        ops: [
+          { op: "CREATE_NODE", id: "p2", nodeType: "decision", label: "Pricing model" },
+          {
+            op: "SET_STATEMENT",
+            id: "p2",
+            statement: { kind: "decision", status: "open", topic: "prices" },
+          },
+        ],
+      }),
+    });
+    expect(res.status).toBe(200);
+
+    const after = await h.api(`/api/boards/${boardId}`, { token: owner.token });
+    const topic = after.body.workspace.nodes.p2?.statement?.topic;
+    expect(topic).toBe("pricing");
+  });
 });

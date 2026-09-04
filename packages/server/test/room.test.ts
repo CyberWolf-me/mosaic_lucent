@@ -335,3 +335,82 @@ describe("durable commit (allocator + fetcher)", () => {
     expect(result).toMatchObject({ ok: false, error: "stale" });
   });
 });
+
+describe("the topic fold at the room boundary (Stage C5, ADR 0025)", () => {
+  function roomWithPricing() {
+    const ws = applyOperations(createWorkspace(), [
+      { op: "CREATE_NODE", id: "p1", nodeType: "decision", label: "Pricing" },
+      {
+        op: "SET_STATEMENT",
+        id: "p1",
+        statement: { kind: "decision", status: "resolved", topic: "pricing" },
+      },
+    ]);
+    return new Room("brd_1", ws, OWNER);
+  }
+
+  it("an ai-actor batch folds: the model's variant converges on the existing key", async () => {
+    const r = roomWithPricing();
+    const result = await r.commit(
+      OWNER,
+      [
+        { op: "CREATE_NODE", id: "p2", nodeType: "decision", label: "Pricing model" },
+        {
+          op: "SET_STATEMENT",
+          id: "p2",
+          statement: { kind: "decision", status: "open", topic: "pricing-model" },
+        },
+      ],
+      "model proposal approved",
+      { actor: { actorType: "ai", actorId: "lucent", initiatedBy: OWNER, approvedBy: OWNER } },
+    );
+    expect(result.ok).toBe(true);
+    const entry = result.entry;
+    const setOp = entry?.ops.find((o) => o.op === "SET_STATEMENT");
+    expect(
+      setOp && setOp.op === "SET_STATEMENT" ? setOp.statement?.topic : undefined,
+    ).toBe("pricing");
+  });
+
+  it("a user-actor batch NEVER folds: the human's topic survives exactly as typed", async () => {
+    // THE PROTECTED CASE (rule 2): a human who writes 'pricing-model' keeps
+    // it. The fold is machine-ops-only, and the room enforces that by the
+    // actor the batch carries.
+    const r = roomWithPricing();
+    const result = await r.commit(
+      OWNER,
+      [
+        { op: "CREATE_NODE", id: "p2", nodeType: "decision", label: "Pricing model" },
+        {
+          op: "SET_STATEMENT",
+          id: "p2",
+          statement: { kind: "decision", status: "open", topic: "pricing-model" },
+        },
+      ],
+      "manual edit",
+      { actor: { actorType: "user", actorId: OWNER, initiatedBy: OWNER } },
+    );
+    expect(result.ok).toBe(true);
+    const setOp = result.entry?.ops.find((o) => o.op === "SET_STATEMENT");
+    expect(
+      setOp && setOp.op === "SET_STATEMENT" ? setOp.statement?.topic : undefined,
+    ).toBe("pricing-model");
+  });
+
+  it("an actorless batch (a plain human submit) never folds either", async () => {
+    const r = roomWithPricing();
+    const result = await r.commit(OWNER, [
+      { op: "CREATE_NODE", id: "p2", nodeType: "decision", label: "Pricing model" },
+      {
+        op: "SET_STATEMENT",
+        id: "p2",
+        statement: { kind: "decision", status: "open", topic: "pricing-model" },
+      },
+    ]);
+    expect(result.ok).toBe(true);
+    const setOp = result.entry?.ops.find((o) => o.op === "SET_STATEMENT");
+    expect(
+      setOp && setOp.op === "SET_STATEMENT" ? setOp.statement?.topic : undefined,
+    ).toBe("pricing-model");
+  });
+});

@@ -10,6 +10,8 @@ import {
   repairOperations,
   isHumanOnlyOperation,
   stampAuthorship,
+  existingTopics,
+  foldStatementTopics,
 } from "@lucent/core";
 import type { Operation, Shape, Workspace } from "@lucent/core";
 import type { BoardStore } from "./boards.js";
@@ -619,7 +621,12 @@ async function runGeneratePipeline(
     : workspaceFromSummary(parsed.data.summary);
   // Repair likely-mis-ordered model output (e.g. node before its group) before
   // validating, so good-intent batches aren't rejected on ordering alone.
-  let operations = repairOperations(permitted);
+  // The topic fold (Stage C5) runs on every machine-authored batch — the
+  // model's ops, never a human's — converging morphological topic variants
+  // on the board's existing authored keys. Machine-ops-only BY PLACEMENT:
+  // this pipeline is the model's; the web's manual path never calls it.
+  const topics = existingTopics(workspace);
+  let operations = foldStatementTopics(repairOperations(permitted), topics);
   let errors = validateOperations(workspace, operations);
 
   // M5: one bounded repair round. A batch that fails validation goes back to
@@ -640,7 +647,9 @@ async function runGeneratePipeline(
         second.operations.filter((op) => !isHumanOnlyOperation(op.op)),
         userId ?? ASSISTANT_AUTHOR,
       );
-      operations = repairOperations(repairedPermitted);
+      // The repaired re-emission folds too (Stage C5): a second chance at
+      // the topics is not a second chance to split the group.
+      operations = foldStatementTopics(repairOperations(repairedPermitted), topics);
       errors = validateOperations(workspace, operations);
     }
   }

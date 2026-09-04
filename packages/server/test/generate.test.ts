@@ -390,3 +390,94 @@ describe("statements through the generate pipeline (Stage C2)", () => {
     expect(body.warnings?.[0]?.reason).toContain("ghost");
   });
 });
+
+describe("the topic fold at the generate boundary (Stage C5)", () => {
+  it("a model-emitted variant converges on the board's existing authored key", async () => {
+    // The board carries 'launch-date'; the model emits 'launch-dates' — a
+    // morphological variant. The fold (Batch 1) converges the op's topic on
+    // the board's own key before validation, so what lands through the
+    // authoritative pipeline never splits the group.
+    const ws = applyOperations(createWorkspace(), [
+      { op: "CREATE_NODE", id: "old-plan", nodeType: "decision", label: "Launch in September" },
+      {
+        op: "SET_STATEMENT",
+        id: "old-plan",
+        statement: { kind: "decision", status: "resolved", topic: "launch-date" },
+      },
+    ]);
+    const summary = summarizeWorkspace(ws);
+    const result = await handleGenerate(
+      fixedProvider([
+        { op: "CREATE_NODE", id: "new-plan", nodeType: "decision", label: "Launch October 15" },
+        {
+          op: "SET_STATEMENT",
+          id: "new-plan",
+          statement: { kind: "decision", status: "resolved", topic: "launch-dates" },
+        },
+      ]),
+      { message: "we decided October 15 instead", summary },
+    );
+    expect(result.status).toBe(200);
+    const ops = (result.body as { operations: Operation[] }).operations;
+    const setOp = ops.find((o) => o.op === "SET_STATEMENT");
+    expect(
+      setOp && setOp.op === "SET_STATEMENT" ? setOp.statement?.topic : undefined,
+    ).toBe("launch-date");
+  });
+
+  it("a novel topic passes through untouched — the fold never mints", async () => {
+    const ws = applyOperations(createWorkspace(), [
+      { op: "CREATE_NODE", id: "n1", nodeType: "step", label: "One" },
+      {
+        op: "SET_STATEMENT",
+        id: "n1",
+        statement: { kind: "decision", status: "resolved", topic: "pricing" },
+      },
+    ]);
+    const result = await handleGenerate(
+      fixedProvider([
+        { op: "CREATE_NODE", id: "n2", nodeType: "decision", label: "Onboarding" },
+        {
+          op: "SET_STATEMENT",
+          id: "n2",
+          statement: { kind: "decision", status: "resolved", topic: "onboarding" },
+        },
+      ]),
+      { message: "add onboarding decision", summary: summarizeWorkspace(ws) },
+    );
+    expect(result.status).toBe(200);
+    const ops = (result.body as { operations: Operation[] }).operations;
+    const setOp = ops.find((o) => o.op === "SET_STATEMENT");
+    expect(
+      setOp && setOp.op === "SET_STATEMENT" ? setOp.statement?.topic : undefined,
+    ).toBe("onboarding");
+  });
+
+  it("a semantic non-variant stays apart — monetization is never folded into pricing", async () => {
+    const ws = applyOperations(createWorkspace(), [
+      { op: "CREATE_NODE", id: "n1", nodeType: "step", label: "One" },
+      {
+        op: "SET_STATEMENT",
+        id: "n1",
+        statement: { kind: "decision", status: "resolved", topic: "pricing" },
+      },
+    ]);
+    const result = await handleGenerate(
+      fixedProvider([
+        { op: "CREATE_NODE", id: "n2", nodeType: "decision", label: "Monetization" },
+        {
+          op: "SET_STATEMENT",
+          id: "n2",
+          statement: { kind: "decision", status: "resolved", topic: "monetization" },
+        },
+      ]),
+      { message: "add monetization decision", summary: summarizeWorkspace(ws) },
+    );
+    expect(result.status).toBe(200);
+    const ops = (result.body as { operations: Operation[] }).operations;
+    const setOp = ops.find((o) => o.op === "SET_STATEMENT");
+    expect(
+      setOp && setOp.op === "SET_STATEMENT" ? setOp.statement?.topic : undefined,
+    ).toBe("monetization");
+  });
+});
