@@ -7,6 +7,8 @@ import {
   statementChipDim,
   statementChipText,
   statementEditOps,
+  topicDuplicateHint,
+  topicSuggestions,
 } from "../src/statementUi.js";
 
 /**
@@ -143,5 +145,76 @@ describe("statementEditOps — the HUD's op builder", () => {
       supersedes: ["a"],
     });
     expect(validateOperations(cyclicBoard, cycleOps)).toHaveLength(1);
+  });
+});
+
+describe("topic suggestions + the duplicate recommendation (Stage C5, ADR 0025)", () => {
+  function board(...topics: string[]) {
+    const ops: Operation[] = [];
+    topics.forEach((topic, i) => {
+      ops.push({ op: "CREATE_NODE", id: `n${i}`, nodeType: "decision", label: `N${i}` });
+      ops.push({
+        op: "SET_STATEMENT",
+        id: `n${i}`,
+        statement: { kind: "decision", status: "open", topic },
+      });
+    });
+    return applyOperations(createWorkspace(), ops);
+  }
+
+  it("topicSuggestions lists the board's authored keys, as-authored", () => {
+    expect(topicSuggestions(board("pricing", "onboarding", "pricing"))).toEqual([
+      "pricing",
+      "onboarding",
+    ]);
+    expect(topicSuggestions(createWorkspace())).toEqual([]);
+  });
+
+  it("the hint fires on a variant with evidence: statement count, existing key", () => {
+    // The human types 'Pricing Model' over a board carrying 'pricing' (twice).
+    const ws = board("pricing", "pricing", "onboarding");
+    const hint = topicDuplicateHint("Pricing Model", ws);
+    expect(hint).toEqual({ existing: "pricing", statements: 2 });
+  });
+
+  it("the typed value AS an existing key hints nothing — it IS the key", () => {
+    expect(topicDuplicateHint("pricing", board("pricing"))).toBeUndefined();
+  });
+
+  it("the ambiguity guard: two candidate keys hint nothing", () => {
+    // 'pricing-model' matches both 'pricing' and 'model-pricing' — not a
+    // duplicate of either. Same rule as the fold, applied to suggestions.
+    expect(topicDuplicateHint("pricing-model", board("pricing", "model-pricing"))).toBeUndefined();
+  });
+
+  it("a semantic non-variant never hints: monetization beside pricing", () => {
+    expect(topicDuplicateHint("monetization", board("pricing"))).toBeUndefined();
+    expect(topicDuplicateHint("customer-acquisition", board("user-acquisition"))).toBeUndefined();
+  });
+
+  it("an empty or whitespace value hints nothing", () => {
+    expect(topicDuplicateHint("", board("pricing"))).toBeUndefined();
+    expect(topicDuplicateHint("   ", board("pricing"))).toBeUndefined();
+  });
+});
+
+describe("the manual path never folds (Stage C5, rule 2)", () => {
+  it("a human's variant topic commits exactly as typed through statementEditOps", () => {
+    // applyManual runs these ops with NO fold call (pinned by placement —
+    // workspace.tsx's applyManual passes ops straight to validateOperations).
+    // What this pins: the ops the HUD builds carry the topic verbatim, so a
+    // human's 'pricing-model' beside 'pricing' is the human's authored key —
+    // grouped at read time by canonicalization, never rewritten at write
+    // time.
+    const ops = statementEditOps("n1", undefined, {
+      kind: "decision",
+      status: "open",
+      topic: "pricing-model",
+      supersedes: [],
+    });
+    expect(ops).toHaveLength(1);
+    const op = ops[0]!;
+    if (op.op !== "SET_STATEMENT") throw new Error("expected SET_STATEMENT");
+    expect(op.statement?.topic).toBe("pricing-model");
   });
 });

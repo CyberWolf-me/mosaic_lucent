@@ -28,7 +28,13 @@ import { LinkInspector } from "./LinkInspector.js";
 import { Minimap } from "./Minimap.js";
 import { TemplatePicker } from "./TemplatePicker.js";
 import { TimerWidget } from "./TimerWidget.js";
-import { STATEMENT_KINDS, STATEMENT_STATUSES, statementEditOps } from "../statementUi.js";
+import {
+  STATEMENT_KINDS,
+  STATEMENT_STATUSES,
+  statementEditOps,
+  topicDuplicateHint,
+  topicSuggestions,
+} from "../statementUi.js";
 import { ContextMenu, type MenuItem } from "./ContextMenu.js";
 import { EngagementBadges, EngagementBar, VotePanel } from "./Engagement.js";
 import { CommentInbox, CommentPanel, CommentPins, NotificationBell } from "./Comments.js";
@@ -2246,9 +2252,17 @@ function StatementEditor({
   const [kind, setKind] = useState(prior?.kind ?? "decision");
   const [status, setStatus] = useState(prior?.status ?? "open");
   const [topic, setTopic] = useState(prior?.topic ?? "");
+  // Stage C5: the dismissed duplicate hint for the CURRENT typed value —
+  // "Keep" means keep, not nag again on the next render. Any edit to the
+  // field re-arms the hint (a new value is a new question).
+  const [dismissedHint, setDismissedHint] = useState<string | null>(null);
+  const activeHint =
+    dismissedHint !== null && dismissedHint === topic.trim()
+      ? undefined
+      : topicDuplicateHint(topic, workspace);
   const [supersedes, setSupersedes] = useState<ReadonlySet<string>>(
     new Set(prior?.supersedes ?? []),
-  );
+  );;
 
   // Candidates: statement-carrying nodes other than this one. The validator
   // refuses everything else (no statement, self, cycles) — the picker offers
@@ -2367,9 +2381,65 @@ function StatementEditor({
           value={topic}
           placeholder="e.g. pricing"
           onChange={(e) => setTopic(e.target.value)}
+          list="statement-topic-suggestions"
           style={{ width: "100%", marginTop: 4 }}
         />
+        {/* Stage C5: the board's existing authored topics — offered, never
+            forced. Adopting one is one click; typing a new key stays free. */}
+        <datalist id="statement-topic-suggestions">
+          {topicSuggestions(workspace).map((t) => (
+            <option key={t} value={t} />
+          ))}
+        </datalist>
       </label>
+      {/* Stage C5 (ADR 0025, rule 3): the challenge layer. When the typed
+          topic variant-matches exactly one existing authored key, surface
+          the possible duplicate WITH EVIDENCE — statement count — and let
+          the human decide. Accept sets the field (the commit then runs
+          through the same statementEditOps → applyManual → validator path
+          as any edit: an explicit user action, satisfying the invariant);
+          Keep commits exactly as typed. Nothing auto-applies, no LLM is
+          called, and the authored text is never rewritten by anything but
+          the user's own click. */}
+      {(() => {
+        const hint = activeHint;
+        if (!hint) return null;
+        return (
+          <div
+            className="mono"
+            style={{
+              fontSize: 10.5,
+              lineHeight: 1.5,
+              padding: "6px 8px",
+              borderRadius: 8,
+              border: "1px solid var(--amber-2)",
+              color: "var(--ink-1)",
+              background: "var(--canvas-1)",
+            }}
+          >
+            <div>
+              Possible duplicate — &quot;{topic.trim()}&quot; may refer to existing &quot;{hint.existing}&quot; ({hint.statements}{" "}
+              {hint.statements === 1 ? "statement" : "statements"} carry it).
+            </div>
+            <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
+              <button
+                className="btn amber"
+                style={{ height: 22, fontSize: 10.5 }}
+                onClick={() => setTopic(hint.existing)}
+              >
+                Use &quot;{hint.existing}&quot;
+              </button>
+              <button
+                className="btn"
+                style={{ height: 22, fontSize: 10.5 }}
+                onClick={() => setDismissedHint(topic.trim())}
+              >
+                Keep &quot;{topic.trim()}&quot;
+              </button>
+            </div>
+          </div>
+        );
+      })()}
       <label style={{ fontSize: 11, color: "var(--ink-2)" }}>
         Supersedes
         <select

@@ -16,6 +16,8 @@ import {
   attachProvenance,
   computeLayout,
   createWorkspace,
+  existingTopics,
+  foldStatementTopics,
   parseWorkspace,
   parseWorkspaceOrDefault,
   relayoutRegion,
@@ -876,8 +878,21 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
               quote: provenance.turns.join(" ").slice(0, 240),
             })
           : result.operations;
-        // The workspace after this batch, provenance riding the ops.
-        const applyStamped = (): Workspace => applyOperations(workspace, enrichedOps);
+        // The topic fold (Stage C5, ADR 0025): these are the MODEL's ops —
+        // generate or the meeting-extraction loop — so their statement
+        // topics fold against the workspace this browser holds, before send
+        // and before local apply. This covers the meeting loop's
+        // user-actor batches the room's ai-only rule deliberately won't
+        // touch, and local boards fold identically to shared ones (the
+        // fourth boundary of the AI/MCP/WS/Web divergence). The human's
+        // own edits (applyManual) never pass through here.
+        const foldedOps: Operation[] = foldStatementTopics(
+          enrichedOps,
+          existingTopics(workspace),
+        );
+
+        // The workspace after this batch, provenance and folded topics riding the ops.
+        const applyStamped = (): Workspace => applyOperations(workspace, foldedOps);
 
         // Partial-application report (M1): the server may have skipped ops
         // that failed validation while applying the rest. Attach them to the
@@ -908,11 +923,12 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           // pending predecessor; peers' panels open via proposal-created.
           const serverRecord = boardId
             ? await createServerProposal(boardId, {
-                // Enriched ops (Stage C2): the client already carries the
-                // evidence; the server's approve-time enrichment is
-                // idempotent over these and backfills any older client's raw
-                // ops. Either way the committed batch carries provenance.
-                operations: enrichedOps,
+                // Enriched+FOLDED ops (Stage C2 + C5): the client already
+                // carries the evidence; the server's approve-time enrichment
+                // is idempotent over these and backfills any older client's raw
+                // ops. Either way the committed batch carries provenance, and
+                // the approve-time fold (Batch 3) is idempotent over ours.
+                operations: foldedOps,
                 request: text,
                 explanation,
                 ...(provenance?.meetingId ? { meetingId: provenance.meetingId } : {}),
@@ -954,7 +970,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
                 ...(provenance?.turns ? { turns: provenance.turns } : {}),
                 ...(provenance?.turnRange ? { turnRange: provenance.turnRange } : {}),
                 ...(provenance?.turnKinds?.length ? { turnKinds: provenance.turnKinds } : {}),
-                operations: enrichedOps,
+                operations: foldedOps,
                 createdAt: Date.now(),
                 request: text,
                 explanation,
@@ -975,9 +991,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
             { role: "ai", text: explanation, ...skippedNote },
           ];
           setChat(conversation);
-          // The enriched ops, not the raw model batch — the stamp rides into
-          // history and the room with them (Stage C2, ADR 0022).
-          commitAndShare(next, enrichedOps, explanation, conversation, projectName);
+          // The folded ops, not the raw model batch — the stamp and the
+          // folded topic ride into history and the room with them (Stage C2
+          // + C5).
+          commitAndShare(next, foldedOps, explanation, conversation, projectName);
         }
       } catch (err) {
         const conversation: ChatEntry[] = [
@@ -1204,8 +1221,13 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         }
       : undefined;
     const candidateOps = evidence ? attachProvenance(proposal.operations, evidence) : proposal.operations;
-    const partial = applyValidOperations(workspace, candidateOps);
-    const appliedOps = partial.applied.length > 0 ? partial.applied : candidateOps;
+    // The topic fold (Stage C5): a local proposal is the model's output —
+    // fold its topics against the workspace before applying, mirroring the
+    // server's approve-time fold. (The server path above folds at commit;
+    // this browser-local path is local boards' only fold site.)
+    const foldedProposalOps = foldStatementTopics(candidateOps, existingTopics(workspace));
+    const partial = applyValidOperations(workspace, foldedProposalOps);
+    const appliedOps = partial.applied.length > 0 ? partial.applied : foldedProposalOps;
     const next = partial.workspace;
     const skippedNote =
       partial.skipped.length > 0

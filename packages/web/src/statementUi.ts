@@ -1,5 +1,6 @@
-import type { StatementFields } from "@lucent/core";
+import type { StatementFields, Workspace } from "@lucent/core";
 import type { Operation } from "@lucent/core";
+import { canonicalizeTopic, existingTopics, topicsAreVariants } from "@lucent/core";
 
 /**
  * Statement presentation helpers (Stage C2). Pure, node-tested — the web
@@ -107,4 +108,50 @@ export function statementEditOps(
       },
     },
   ];
+}
+
+/* -------------------------------------------------------------------------- */
+/* Topic suggestions + the duplicate recommendation (Stage C5, ADR 0025)      */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The HUD's topic suggestions: the board's existing AUTHORED keys, as the
+ * board holds them (never canonicalized — the user should adopt what the
+ * board actually says). Offered via datalist, never forced.
+ */
+export function topicSuggestions(workspace: Workspace): string[] {
+  return existingTopics(workspace);
+}
+
+/**
+ * The rule-3 recommendation at authoring time: does the topic the human is
+ * typing look like a duplicate of an existing authored key? Deterministic
+ * and evidence-first — the same variant logic the fold uses, applied to
+ * IN-PROGRESS human input, where the fold itself is forbidden (rule 2).
+ *
+ * Returns the evidence-bearing hint when exactly ONE existing key
+ * variant-matches the typed value, undefined otherwise: the ambiguity guard
+ * applies to recommendations too (a typed value matching two keys is not a
+ * duplicate of either), and a value that IS an existing key needs no hint.
+ */
+export function topicDuplicateHint(
+  typed: string,
+  workspace: Workspace,
+): { existing: string; statements: number } | undefined {
+  const value = typed.trim();
+  if (!value) return undefined;
+  // The typed value AS an existing key is not a duplicate — it IS the key.
+  if (existingTopics(workspace).includes(value)) return undefined;
+  const matches = existingTopics(workspace)
+    .map((topic) => {
+      const nodes = Object.values(workspace.nodes).filter(
+        (n) => n.statement?.topic === topic,
+      );
+      return { topic, statements: nodes.length };
+    })
+    .filter(({ topic }) =>
+      topicsAreVariants(canonicalizeTopic(topic), canonicalizeTopic(value)),
+    );
+  if (matches.length !== 1) return undefined;
+  return { existing: matches[0]!.topic, statements: matches[0]!.statements };
 }
