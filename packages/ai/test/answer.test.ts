@@ -61,6 +61,7 @@ const baseRequest: AnswerRequest = {
       speakers: ["Alex", "Sarah"],
       turns: [
         {
+          index: 4,
           speaker: "Sarah",
           at: Date.UTC(2026, 8, 2, 9, 30),
           kind: "decision",
@@ -69,6 +70,7 @@ const baseRequest: AnswerRequest = {
       ],
     },
   ],
+  meetingsTruncated: false,
   nodeIndex: [{ id: "pricing", label: "Pricing ($15/month)" }],
 };
 
@@ -227,6 +229,62 @@ describe("MockProvider.generateAnswer", () => {
     });
     expect(result.answer).toContain("Q3 launch");
     expect(result.citations).toEqual([{ kind: "node", id: "pricing" }]);
+  });
+
+  it("answers a cross-meeting evolution question from the two meetings, with turn indices", async () => {
+    const provider = new MockProvider();
+    const request: AnswerRequest = {
+      ...baseRequest,
+      question: "why did we change the pricing between meetings?",
+      meetings: [
+        {
+          id: "mtg_wed",
+          startedAt: Date.UTC(2026, 8, 4, 9),
+          speakers: ["Sarah"],
+          turns: [{ index: 2, speaker: "Sarah", at: Date.UTC(2026, 8, 4, 9, 5), kind: "decision", text: "Fifteen a month." }],
+        },
+        {
+          id: "mtg_mon",
+          startedAt: Date.UTC(2026, 8, 2, 9),
+          speakers: ["Alex"],
+          turns: [{ index: 0, speaker: "Alex", at: Date.UTC(2026, 8, 2, 9, 5), kind: "decision", text: "Twenty works." }],
+        },
+      ],
+    };
+    const result = await provider.generateAnswer(request);
+    expect(result.answer).toContain("mtg_wed");
+    expect(result.answer).toContain("turn 2");
+    expect(result.answer).toContain("mtg_mon");
+    expect(result.citations).toEqual([{ kind: "meeting", id: "mtg_wed" }, { kind: "meeting", id: "mtg_mon" }]);
+  });
+
+  it("discloses the meetings window when truncated, in the evolution answer too", async () => {
+    const provider = new MockProvider();
+    // Two meetings, so the evolution script runs its full synthesis —
+    // the disclosure rides only the real cross-meeting answer.
+    const result = await provider.generateAnswer({
+      ...baseRequest,
+      question: "how did we switch between meetings?",
+      meetings: [
+        ...baseRequest.meetings,
+        {
+          id: "mtg_earlier",
+          startedAt: Date.UTC(2026, 8, 1, 9),
+          speakers: ["Alex"],
+          turns: [
+            {
+              index: 0,
+              speaker: "Alex",
+              at: Date.UTC(2026, 8, 1, 9, 5),
+              kind: "decision",
+              text: "Twenty a month.",
+            },
+          ],
+        },
+      ],
+      meetingsTruncated: true,
+    });
+    expect(result.answer).toContain("older meetings exist beyond the visible window");
   });
 
   it("answers deterministically — the same request twice yields the same answer", async () => {

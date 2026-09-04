@@ -646,7 +646,10 @@ export function buildAnswerUserPrompt(request: AnswerRequest): string {
   );
 
   // Meeting extracts: classified turns only, each speaker's words enveloped
-  // because a transcript is the definition of third-party text.
+  // because a transcript is the definition of third-party text. Each turn
+  // carries its stable INDEX (Stage C3) — the same coordinate turnRange and
+  // the transcript's ?turn= jump use — so an answer can say "turn 4 of
+  // meeting M" and land every reader on the exact words.
   const shownMeetings = request.meetings.slice(0, ANSWER_LIMITS.meetings);
   if (shownMeetings.length) {
     const meetings = shownMeetings
@@ -658,6 +661,7 @@ export function buildAnswerUserPrompt(request: AnswerRequest): string {
           return envelope(
             "untrusted-turn",
             {
+              index: t.index,
               speaker: t.speaker,
               kind: t.kind,
               at: isoDateTime(t.at),
@@ -672,12 +676,21 @@ export function buildAnswerUserPrompt(request: AnswerRequest): string {
         }${shownNote("the first", shownTurns.length, m.turns.length)}:\n${turnLines.join("\n")}`;
       })
       .join("\n\n");
+    const meetingsWindow = request.meetingsTruncated
+      ? `\nOLDER MEETINGS EXIST beyond the meetings shown above. You see only the ${shownMeetings.length} most recent — a question reaching further back must be answered with that limit stated, never as "that never happened".`
+      : "";
     sections.push(
       `Meeting extracts — classified statements only, each turn is a speaker's untrusted words${shownNote(
         "the most recent",
         shownMeetings.length,
         request.meetings.length,
-      )}:\n${meetings}`,
+      )}:\n${meetings}${meetingsWindow}`,
+    );
+  } else if (request.meetingsTruncated) {
+    // Meetings exist but every one fell outside the projection's window:
+    // the limit must be stated even when the section itself is empty.
+    sections.push(
+      "Meeting extracts: none are visible in your context window — meetings exist on this board but are outside the visible range. A question about what was said must be answered with that limit stated.",
     );
   }
 

@@ -231,6 +231,39 @@ const scripts: Script[] = [
     }),
   },
   {
+    // Stage C3: the correction arrives as a LATER MEETING over a board that
+    // already holds Monday's decision — the doctrine spans meetings. The
+    // mock supersedes the existing statement visibly instead of re-deciding
+    // from scratch, so the offline eval gate exercises cross-meeting
+    // continuity the way the golden case pins it. MUST sit before the
+    // decided-$15 script: both match "$15/month", but only a correction
+    // ("actually…") should supersede — a plain "we decided" is born-resolved
+    // with no predecessor.
+    match: (m) => /actually[^.]*\$?15/i.test(m),
+    build: () => ({
+      explanation:
+        "Wednesday's correction supersedes Monday's $20 decision visibly: the board now shows $15/month as the resolved decision and the old one as superseded.",
+      operations: [
+        {
+          op: "CREATE_NODE",
+          id: "pricing-new",
+          nodeType: "decision",
+          label: "Pricing at $15/month",
+        },
+        {
+          op: "SET_STATEMENT",
+          id: "pricing-new",
+          statement: {
+            kind: "decision",
+            status: "resolved",
+            topic: "pricing",
+            supersedes: ["pricing-decision"],
+          },
+        },
+      ] as Operation[],
+    }),
+  },
+  {
     // The decided shape (Stage C2): "we decided $15/month" is a decision BORN
     // resolved, superseding the $20 proposal the board already carries.
     // Matches the decided verb plus a 15/fifteen anywhere after it — the
@@ -522,6 +555,43 @@ interface AnswerScript {
 }
 
 const answerScripts: AnswerScript[] = [
+  {
+    // "Why did we switch/change between meetings?" (Stage C3): the evolution
+    // lens. The mock reads the two most recent meetings' classified turns
+    // and names the turn indices — real ids only, the C1 rule — so the
+    // offline demo exercises the same cross-meeting shape the evolution
+    // section of the digest teaches.
+    match: (q) =>
+      /(why|how)\s+(did|do)\s+we\s+(change|switch|move)|between.*meetings?|since\s+(monday|tuesday|wednesday|last)/i.test(
+        q,
+      ),
+    build: (request) => {
+      const meetings = request.meetings;
+      if (meetings.length < 2) {
+        return {
+          answer: "I can only see one meeting in the visible window, so I can't trace a change across meetings.",
+          citations: [],
+        };
+      }
+      const [newer, older] = meetings;
+      const newerTurn = newer!.turns[0];
+      const olderTurn = older!.turns[0];
+      const disclosure = request.meetingsTruncated
+        ? " (older meetings exist beyond the visible window — there may be earlier chapters)"
+        : "";
+      const citations: AnswerCitation[] = [
+        { kind: "meeting", id: newer!.id },
+        { kind: "meeting", id: older!.id },
+      ];
+      return {
+        answer:
+          `Between the meetings: in ${older!.id} (turn ${olderTurn?.index ?? 0}) the team said "${olderTurn?.text.slice(0, 60) ?? "(nothing classified)"}". ` +
+          `Later, in ${newer!.id} (turn ${newerTurn?.index ?? 0}), the position changed: "${newerTurn?.text.slice(0, 60) ?? "(nothing classified)"}". ` +
+          `The board's statements reflect the latest position.${disclosure}`,
+        citations,
+      };
+    },
+  },
   {
     // "What changed?" — the lens the C1 acceptance scenario drives. The answer
     // names the revisions it was built from, newest first, and states the

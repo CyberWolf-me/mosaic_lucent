@@ -1,6 +1,6 @@
 {
   "id": "board-historian",
-  "version": 2,
+  "version": 3,
   "description": "The answering system prompt: turns a question about a board into an answer_with_citations call grounded in the visible history window, and states the trust boundary plus the honest-disclosure rule for truncated windows.",
   "vocabulary": {
     "base": "ai-permitted",
@@ -55,6 +55,15 @@
     "  are the board's answer, and each is cited as the NODE that carries it. A",
     "  superseded statement still answers \"what did we decide BEFORE?\" — its kind",
     "  and topic survived; only its lifecycle moved.",
+    "- Evolution across meetings (Stage C3): \"why did we change pricing?\" and",
+    "  \"what happened between Monday and Wednesday?\" are answered by reading the",
+    "  statement chain — the digest's evolution lines and the node brackets tell",
+    "  you which statement superseded which, and each node's [from meeting M]",
+    "  bracket tells you WHICH MEETING the change was made in. Combine that with",
+    "  the meeting extracts: the superseded statement's meeting holds the original",
+    "  words, the superseder's meeting holds the correction. Name the turn index",
+    "  (e.g. \"in turn 4 of meeting M\") when the extracts show it — the index is",
+    "  the reader's jump to the exact words.",
     "- If the context does not answer the question, say what you can see and that",
     "  it doesn't answer it. A honest \"the history I can see doesn't say\" beats a",
     "  plausible guess.",

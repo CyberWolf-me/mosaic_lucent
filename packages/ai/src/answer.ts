@@ -78,6 +78,13 @@ export interface AnswerHistoryEntry {
  * the meeting pipeline already tagged (decision/action/…).
  */
 export interface AnswerMeetingTurn {
+  /**
+   * The stable array position in the meeting's turns (Stage C3) — the same
+   * index turnRange and the transcript's `?turn=` jump already key on, so a
+   * model that names "turn 4 of meeting M" points every reader at the exact
+   * words. Indices are stable because transcripts are append-only.
+   */
+  index: number;
   speaker: string;
   at: number;
   kind: string;
@@ -115,6 +122,13 @@ export interface AnswerRequest {
   historyDepth: number | null;
   /** Visible meetings, newest first. */
   meetings: AnswerMeetingSummary[];
+  /**
+   * True when the meetings digest was capped (Stage C3): older meetings
+   * exist beyond the projection's limit. The same honesty rule as
+   * historyTruncated — a question reaching past the visible meetings must
+   * be answered with the limit stated, never as "that never happened".
+   */
+  meetingsTruncated: boolean;
   /** Compact id→label index so the model can cite nodes precisely. */
   nodeIndex: Array<{ id: string; label: string }>;
   /** Recent conversation turns, so follow-up questions resolve. */

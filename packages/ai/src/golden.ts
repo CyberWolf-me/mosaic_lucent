@@ -261,6 +261,38 @@ export const GOLDEN_SET: readonly GoldenCase[] = [
     ],
   },
   {
+    id: "cross-meeting-supersedes",
+    // Stage C3: the doctrine spans meetings. Wednesday's correction arrives
+    // as a NEW meeting over a board holding Monday's decision — the right
+    // answer supersedes the existing statement visibly, never re-decides it
+    // as if Monday never happened, and never leaves both alive.
+    message:
+      "From Wednesday's meeting: Sarah: 'Actually, we're going with $15/month — the $20 felt too steep.' The board currently shows Monday's decision node (id pricing-decision) at $20/month.",
+    summary: summarizeWorkspace(
+      applyOperations(createWorkspace(), [
+        { op: "CREATE_NODE", id: "pricing-decision", nodeType: "decision", label: "Pricing at $20/month" },
+        {
+          op: "SET_STATEMENT",
+          id: "pricing-decision",
+          statement: { kind: "decision", status: "resolved", topic: "pricing" },
+        },
+      ]),
+    ),
+    expectOperations: [
+      {
+        op: "SET_STATEMENT",
+        id: "pricing-new",
+        statement: {
+          kind: "decision",
+          status: "resolved",
+          topic: "pricing",
+          supersedes: ["pricing-decision"],
+        },
+      },
+    ],
+    forbidOperations: [{ op: "DELETE_NODE", id: "pricing-decision" }],
+  },
+  {
     id: "mention-is-not-owner",
     // The ambiguity case (scoresheet metric 6): 'talk to Sarah about pricing'
     // is an action to DISCUSS with Sarah — never an action OWNED by Sarah.
