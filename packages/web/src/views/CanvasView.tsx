@@ -28,6 +28,7 @@ import { LinkInspector } from "./LinkInspector.js";
 import { Minimap } from "./Minimap.js";
 import { TemplatePicker } from "./TemplatePicker.js";
 import { TimerWidget } from "./TimerWidget.js";
+import { STATEMENT_KINDS, STATEMENT_STATUSES, statementEditOps } from "../statementUi.js";
 import { ContextMenu, type MenuItem } from "./ContextMenu.js";
 import { EngagementBadges, EngagementBar, VotePanel } from "./Engagement.js";
 import { CommentInbox, CommentPanel, CommentPins, NotificationBell } from "./Comments.js";
@@ -1748,6 +1749,10 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
                   window.history.replaceState({}, "", url.toString());
                   setView("meeting");
                 }}
+                // The statement editor commits through applyManual — the same
+                // validateOperations the AI path runs, so a bad manual edit
+                // is rejected exactly like a bad model op.
+                onApply={canEdit ? applyManual : undefined}
               />
             )}
             {/* Live collaborators' cursors and selections track content space. */}
@@ -2092,6 +2097,7 @@ function SelectionHud({
   onTransform,
   onComment,
   onOpenMeeting,
+  onApply,
 }: {
   id: string;
   workspace: import("@lucent/core").Workspace;
@@ -2101,7 +2107,10 @@ function SelectionHud({
   onComment: () => void;
   /** Open the meeting a provenance stamp points at (null = the view itself). */
   onOpenMeeting?: (meetingId: string | null) => void;
+  /** Commit manual ops through the same validator the AI path uses. */
+  onApply?: (ops: import("@lucent/core").Operation[], label: string) => boolean;
 }) {
+  const [statementOpen, setStatementOpen] = useState(false);
   const node = workspace.nodes[id];
   if (!node?.position) return null;
   const w = node.size?.width ?? 160;
@@ -2114,57 +2123,258 @@ function SelectionHud({
       <button onClick={onTransform}>Transform</button>
       <button onClick={() => onExpand(node.label)}>Expand</button>
       <button onClick={onComment}>Comment</button>
-      {/* Meeting provenance (M2/P0-3/Stage A): a node created from a meeting
-          extract can always answer "why is this here?" — the quoted words
-          that produced it plus the statement KINDS the turns carried, and a
-          click that JUMPS to the source meeting, closing the trust loop:
-          AI creates → user questions → evidence. The kinds come from the
-          deterministic classifyTurn stamp, so a decision node and a proposal
-          node are distinguishable at a glance. */}
-      {Boolean(node.metadata?.meeting) && (
-        <button
-          className="mono"
-          onClick={() => {
-            const meetingId = (node.metadata?.meeting as { meetingId?: string }).meetingId;
-            if (meetingId && meetingId !== "live-session") {
-              onOpenMeeting?.(meetingId);
-            } else {
-              // A live-session stamp (capture without a stored transcript)
-              // has no meeting to open — go to the view itself.
-              onOpenMeeting?.(null);
-            }
-          }}
-          title={`Created from meeting discussion: “${String(
-            (node.metadata?.meeting as { quote?: string } | undefined)?.quote ?? "",
-          )}”${
-            Array.isArray(
-              (node.metadata?.meeting as { turnKinds?: unknown[] } | undefined)?.turnKinds,
-            )
-              ? `\nStatement kinds: ${(
-                  (node.metadata?.meeting as { turnKinds?: string[] }).turnKinds ?? []
-                ).join(", ")}`
-              : ""
-          }${(node.metadata?.meeting as { turnRange?: [number, number] }).turnRange ? `\nTurns: ${String((node.metadata?.meeting as { turnRange?: [number, number] }).turnRange![0])}–${String((node.metadata?.meeting as { turnRange?: [number, number] }).turnRange![1])}` : ""}\nClick to open the source meeting`}
-          style={{
-            color: "var(--amber-2)",
-            padding: "0 6px",
-            fontSize: 11,
-            background: "transparent",
-            border: "none",
-            cursor: "pointer",
-          }}
-        >
-          ✦
-          {Array.isArray(
-            (node.metadata?.meeting as { turnKinds?: unknown[] } | undefined)?.turnKinds,
-          ) && (node.metadata?.meeting as { turnKinds?: string[] }).turnKinds!.length > 0
-            ? ` ${(node.metadata?.meeting as { turnKinds?: string[] }).turnKinds!.join("·")}`
-            : ""}
-        </button>
+      {/* Meeting provenance (M2/P0-3/Stage A → Stage C2): a node created from
+          a meeting extract can always answer "why is this here?" — the quoted
+          words that produced it plus the statement KINDS the turns carried,
+          and a click that JUMPS to the source meeting, closing the trust loop:
+          AI creates → user questions → evidence. Stage C2 reads the op-level
+          provenance FIRST (it is what converges to peers/server/history,
+          ADR 0022); the old metadata stamp stays as the pre-C2 fallback. */}
+      {Boolean(node.provenance || node.metadata?.meeting) && (
+        <ProvenanceButton
+          provenance={node.provenance}
+          legacy={node.metadata?.meeting as Record<string, unknown> | undefined}
+          onOpenMeeting={onOpenMeeting}
+        />
+      )}
+      {/* The statement editor (Stage C2): kind/status/topic/supersedes, all
+          committed through onApply → validateOperations — a manual edit is
+          rejected exactly like a bad model op (the review's guardrail: no
+          accidental cycles, no superseding a node with no statement). */}
+      {onApply && (
+        <StatementEditor
+          node={node}
+          workspace={workspace}
+          open={statementOpen}
+          setOpen={setStatementOpen}
+          onApply={onApply}
+        />
       )}
       <div className="sep" />
       <button style={{ padding: "5px 8px" }}>
         <Ico.Down />
+      </button>
+    </div>
+  );
+}
+
+/** The ✦ provenance jump, reading the op-level field with the legacy fallback. */
+function ProvenanceButton({
+  provenance,
+  legacy,
+  onOpenMeeting,
+}: {
+  provenance?: { meetingId: string; turnRange?: [number, number]; turnKinds?: string[]; quote?: string };
+  legacy?: Record<string, unknown>;
+  onOpenMeeting?: (meetingId: string | null) => void;
+}) {
+  const source = provenance ?? {
+    meetingId: typeof legacy?.meetingId === "string" ? legacy.meetingId : undefined,
+    turnRange: legacy?.turnRange as [number, number] | undefined,
+    turnKinds: legacy?.turnKinds as string[] | undefined,
+    quote: typeof legacy?.quote === "string" ? legacy.quote : undefined,
+  };
+  const quote = source.quote ?? "";
+  const kinds = source.turnKinds ?? [];
+  const range = source.turnRange;
+  return (
+    <button
+      className="mono"
+      onClick={() => {
+        const meetingId = source.meetingId;
+        if (meetingId && meetingId !== "live-session") {
+          onOpenMeeting?.(meetingId);
+        } else {
+          // A live-session stamp (capture without a stored transcript)
+          // has no meeting to open — go to the view itself.
+          onOpenMeeting?.(null);
+        }
+      }}
+      title={`Created from meeting discussion: “${quote}”${
+        kinds.length ? `\nStatement kinds: ${kinds.join(", ")}` : ""
+      }${range ? `\nTurns: ${range[0]}–${range[1]}` : ""}\nClick to open the source meeting`}
+      style={{
+        color: "var(--amber-2)",
+        padding: "0 6px",
+        fontSize: 11,
+        background: "transparent",
+        border: "none",
+        cursor: "pointer",
+      }}
+    >
+      ✦{kinds.length > 0 ? ` ${kinds.join("·")}` : ""}
+    </button>
+  );
+}
+
+/**
+ * The per-node statement editor: one popover, three constrained fields. The
+ * supersedes list offers ONLY nodes that carry statements (the validator
+ * would refuse anything else, and the picker should not propose a refusal),
+ * and the commit is a validated op batch — statementEditOps builds the exact
+ * op the model would emit, so manual and AI edits share one contract.
+ */
+function StatementEditor({
+  node,
+  workspace,
+  open,
+  setOpen,
+  onApply,
+}: {
+  node: import("@lucent/core").Node;
+  workspace: import("@lucent/core").Workspace;
+  open: boolean;
+  setOpen: (v: boolean) => void;
+  onApply: (ops: import("@lucent/core").Operation[], label: string) => boolean;
+}) {
+  const prior = node.statement;
+  const [kind, setKind] = useState(prior?.kind ?? "decision");
+  const [status, setStatus] = useState(prior?.status ?? "open");
+  const [topic, setTopic] = useState(prior?.topic ?? "");
+  const [supersedes, setSupersedes] = useState<ReadonlySet<string>>(
+    new Set(prior?.supersedes ?? []),
+  );
+
+  // Candidates: statement-carrying nodes other than this one. The validator
+  // refuses everything else (no statement, self, cycles) — the picker offers
+  // only what can succeed.
+  const candidates = useMemo(
+    () =>
+      Object.values(workspace.nodes).filter(
+        (n) => n.statement && n.id !== node.id,
+      ),
+    [workspace.nodes, node.id],
+  );
+
+  if (!open) {
+    return (
+      <button
+        className="mono"
+        title={prior ? "Edit statement" : "Make this node a statement"}
+        onClick={() => setOpen(true)}
+        style={{
+          color: prior ? "var(--amber-2)" : "var(--ink-3)",
+          padding: "0 6px",
+          fontSize: 11,
+          background: "transparent",
+          border: "none",
+          cursor: "pointer",
+        }}
+      >
+        ✎{prior ? ` ${prior.kind}` : ""}
+      </button>
+    );
+  }
+
+  const commit = () => {
+    // statementEditOps builds the op; applyManual runs the SAME validator
+    // the model's ops run through. A refused edit (cycle, bad topic) returns
+    // false here and the popover stays open — rejected visibly, not silently.
+    const ops = statementEditOps(node.id, prior, {
+      kind,
+      status,
+      topic: topic.trim().length > 0 ? topic.trim() : undefined,
+      supersedes: [...supersedes],
+    });
+    const label = prior ? `Update ${prior.kind} statement` : "Set statement";
+    if (!onApply(ops, label)) return;
+    setOpen(false);
+  };
+
+  return (
+    <div
+      className="statement-editor"
+      style={{
+        position: "absolute",
+        top: 40,
+        left: "50%",
+        transform: "translateX(-50%)",
+        width: 280,
+        padding: 14,
+        borderRadius: 12,
+        border: "1px solid var(--stroke-2)",
+        background: "var(--canvas-0)",
+        boxShadow: "var(--elev-3)",
+        display: "flex",
+        flexDirection: "column",
+        gap: 10,
+        zIndex: 40,
+      }}
+      onMouseDown={(e) => e.stopPropagation()}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <span className="mono" style={{ fontSize: 10, color: "var(--ink-3)", textTransform: "uppercase" }}>
+          Statement
+        </span>
+        <span style={{ flex: 1 }} />
+        <button
+          className="icon-btn"
+          style={{ height: 22, width: 22 }}
+          title="Close"
+          onClick={() => setOpen(false)}
+        >
+          <Ico.Down style={{ transform: "rotate(180deg)" }} />
+        </button>
+      </div>
+      <div style={{ display: "flex", gap: 8 }}>
+        <label style={{ flex: 1, fontSize: 11, color: "var(--ink-2)" }}>
+          Kind
+          <select
+            value={kind}
+            onChange={(e) => setKind(e.target.value as typeof kind)}
+            style={{ width: "100%", marginTop: 4 }}
+          >
+            {STATEMENT_KINDS.map((k) => (
+              <option key={k} value={k}>
+                {k}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label style={{ flex: 1, fontSize: 11, color: "var(--ink-2)" }}>
+          Status
+          <select
+            value={status}
+            onChange={(e) => setStatus(e.target.value as typeof status)}
+            style={{ width: "100%", marginTop: 4 }}
+          >
+            {STATEMENT_STATUSES.map((s) => (
+              <option key={s} value={s}>
+                {s}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+      <label style={{ fontSize: 11, color: "var(--ink-2)" }}>
+        Topic (kebab-case)
+        <input
+          value={topic}
+          placeholder="e.g. pricing"
+          onChange={(e) => setTopic(e.target.value)}
+          style={{ width: "100%", marginTop: 4 }}
+        />
+      </label>
+      <label style={{ fontSize: 11, color: "var(--ink-2)" }}>
+        Supersedes
+        <select
+          multiple
+          value={[...supersedes]}
+          onChange={(e) =>
+            setSupersedes(new Set([...e.target.selectedOptions].map((o) => o.value)))
+          }
+          style={{ width: "100%", marginTop: 4, minHeight: candidates.length ? undefined : 28 }}
+          size={Math.min(4, Math.max(2, candidates.length))}
+        >
+          {candidates.map((n) => (
+            <option key={n.id} value={n.id}>
+              {n.label.slice(0, 32)} ({n.statement!.kind})
+            </option>
+          ))}
+        </select>
+      </label>
+      <button className="btn amber" style={{ height: 28, fontSize: 12 }} onClick={commit}>
+        {prior ? "Update statement" : "Set statement"}
       </button>
     </div>
   );

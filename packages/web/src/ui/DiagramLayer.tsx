@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import type { Workspace } from "@lucent/core";
 import { anchor, ConnectorDefs, makePath, NodeCard, type NodeState } from "./atoms.js";
 import { techMarkFor } from "./techMarks.js";
+import { KIND_TINT } from "../statementUi.js";
 import { DIAGRAM_LABELS } from "../scene.js";
 import {
   boundsWithDrag,
@@ -363,6 +364,10 @@ export function DiagramLayer({
             scale={scale}
             editRequested={renameNodeId === n.id}
             onEditConsumed={onRenameConsumed}
+            // Stage C2: the statement chip — kind·status under the label,
+            // tinted by kind (statementUi's map), dimmed when settled.
+            {...(n.statement ? { statement: n.statement } : {})}
+            {...(n.statement ? { statementTint: KIND_TINT[n.statement.kind] } : {})}
             {...(onRenameNode ? { onRename: (label: string) => onRenameNode(n.id, label) } : {})}
             {...(onMoveNode
               ? {

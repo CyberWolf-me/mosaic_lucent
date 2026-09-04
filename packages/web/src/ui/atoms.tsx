@@ -58,6 +58,8 @@ export function NodeCard({
   onRename,
   editRequested = false,
   onEditConsumed,
+  statement,
+  statementTint,
 }: {
   x: number;
   y: number;
@@ -92,6 +94,14 @@ export function NodeCard({
   editRequested?: boolean;
   /** Called once the requested edit has been consumed, so it fires once. */
   onEditConsumed?: () => void;
+  /**
+   * The node's semantic statement (Stage C2): renders as a kind·status chip
+   * under the label. Presentation-only — the tint map and dim rule live in
+   * statementUi.ts so they are node-testable.
+   */
+  statement?: { kind: string; status: string };
+  /** The chip's tint, by kind (statementUi.KIND_TINT at the call site). */
+  statementTint?: string;
 }) {
   const cls = [
     "node",
@@ -218,6 +228,33 @@ export function NodeCard({
         <div className="node-title">{title}</div>
       )}
       {sub && <div className="node-sub">{sub}</div>}
+      {statement && (
+        <div
+          className="node-statement-chip"
+          style={{
+            marginTop: 6,
+            alignSelf: "flex-start",
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 5,
+            fontSize: 9.5,
+            fontFamily: "var(--font-mono)",
+            letterSpacing: "0.06em",
+            textTransform: "uppercase",
+            padding: "2px 8px",
+            borderRadius: 999,
+            border: `1px solid ${statementTint ?? "var(--stroke-2)"}`,
+            color: statementTint ?? "var(--ink-2)",
+            // A closed lifecycle reads settled — the chip recedes rather
+            // than shouting (statementUi.statementChipDim is the rule; the
+            // status is all the caller needs here).
+            opacity: statement.status === "open" ? 1 : 0.75,
+          }}
+        >
+          <span aria-hidden>✦</span>
+          {statement.kind} · {statement.status}
+        </div>
+      )}
     </div>
   );
 }
