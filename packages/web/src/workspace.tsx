@@ -923,8 +923,19 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
                 request: text,
                 explanation,
                 ...(provenance?.meetingId ? { meetingId: provenance.meetingId } : {}),
-                ...(provenance?.turnRange
-                  ? { provenance: { turnRange: provenance.turnRange } }
+                ...(provenance?.turnRange || provenance?.turnKinds?.length || provenance?.turns?.length
+                  ? {
+                      provenance: {
+                        // Stage C2: the full evidence record, so the server's
+                        // approve-time enrichment (ADR 0022) can stamp the ops
+                        // for every peer, not just the proposer's browser.
+                        ...(provenance.turnRange ? { turnRange: provenance.turnRange } : {}),
+                        ...(provenance.turnKinds?.length ? { turnKinds: provenance.turnKinds } : {}),
+                        ...(provenance.turns?.length
+                          ? { quote: provenance.turns.join(" ").slice(0, 240) }
+                          : {}),
+                      },
+                    }
                   : {}),
               })
             : null;

@@ -149,7 +149,30 @@ export const registerProposalRoutes: RegisterRoutes = (router, s) => {
       // arrive from the client's extraction), so this is the first honest check
       // — and a stale proposal may partially skip, by design: refusing wholesale
       // would make every proposal hostage to the first concurrent edit.
-      const repaired = repairOperations(proposal.operations);
+      //
+      // Stage C2 (ADR 0022): before anything is judged, the batch is enriched
+      // with the proposal's full evidence — meeting id, turns, the words said.
+      // The old client post-pass stamped only the proposer's browser; here the
+      // enrichment happens on the ops THEMSELVES, so the approval that commits
+      // through the room carries provenance to every peer, the log, and undo.
+      // Idempotent per op (attachProvenance), so a proposal whose ops were
+      // already enriched on the client keeps the client's copy.
+      const { attachProvenance } = await import("@lucent/core");
+      const evidence =
+        proposal.meetingId !== null
+          ? {
+              meetingId: proposal.meetingId,
+              ...(proposal.provenance?.turnRange
+                ? { turnRange: proposal.provenance.turnRange }
+                : {}),
+              ...(proposal.provenance?.quote ? { quote: proposal.provenance.quote } : {}),
+              ...(proposal.provenance?.turnKinds?.length
+                ? { turnKinds: proposal.provenance.turnKinds }
+                : {}),
+            }
+          : undefined;
+      const enriched = evidence ? attachProvenance(proposal.operations, evidence) : proposal.operations;
+      const repaired = repairOperations(enriched);
       const partial = applyValidOperations(guard.board.workspace, repaired);
       if (partial.applied.length === 0) {
         send(res, 422, {

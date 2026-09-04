@@ -324,3 +324,69 @@ describe("authorship on the generate path", () => {
     expect(result.status).toBe(200);
   });
 });
+
+describe("statements through the generate pipeline (Stage C2)", () => {
+  it("a summary statement reattaches so the model can update what it can see", async () => {
+    // workspaceFromSummary rebuilds the board from the client's summary; a
+    // statement in the summary must become a SET_STATEMENT in the rebuild,
+    // or the model could never resolve/supersede a decision it was shown.
+    const ws = applyOperations(createWorkspace(), [
+      { op: "CREATE_NODE", id: "old-plan", nodeType: "decision", label: "Launch in September" },
+      {
+        op: "SET_STATEMENT",
+        id: "old-plan",
+        statement: { kind: "decision", status: "resolved", topic: "launch-date" },
+      },
+    ]);
+    const summary = summarizeWorkspace(ws);
+    expect(summary.nodes[0]?.statement).toMatchObject({
+      kind: "decision",
+      status: "resolved",
+      topic: "launch-date",
+    });
+
+    // The pipeline validates a supersession against the REBUILT board — the
+    // statement the summary carried is real state by then.
+    const result = await handleGenerate(
+      fixedProvider([
+        { op: "CREATE_NODE", id: "new-date", nodeType: "decision", label: "Launch October 15" },
+        {
+          op: "SET_STATEMENT",
+          id: "new-date",
+          statement: {
+            kind: "decision",
+            status: "resolved",
+            topic: "launch-date",
+            supersedes: ["old-plan"],
+          },
+        },
+      ]),
+      { message: "we decided October 15 instead", summary },
+    );
+    expect(result.status).toBe(200);
+    const ops = (result.body as { operations: Operation[] }).operations;
+    expect(ops.some((o) => o.op === "SET_STATEMENT")).toBe(true);
+  });
+
+  it("an out-of-summary supersession target skips via partial application, reported", async () => {
+    // Partial application (M1): one bad op never kills the batch. The valid
+    // CREATE_NODE applies; the statement with a ghost target skips, and the
+    // response says why — the same contract a bad edge id already follows.
+    const summary = summarizeWorkspace(createWorkspace());
+    const result = await handleGenerate(
+      fixedProvider([
+        { op: "CREATE_NODE", id: "d1", nodeType: "decision", label: "D1" },
+        {
+          op: "SET_STATEMENT",
+          id: "d1",
+          statement: { kind: "decision", status: "resolved", supersedes: ["ghost"] },
+        },
+      ]),
+      { message: "decide it", summary },
+    );
+    expect(result.status).toBe(200);
+    const body = result.body as { operations: Operation[]; warnings?: Array<{ reason: string }> };
+    expect(body.operations.map((o) => o.op)).toEqual(["CREATE_NODE"]);
+    expect(body.warnings?.[0]?.reason).toContain("ghost");
+  });
+});

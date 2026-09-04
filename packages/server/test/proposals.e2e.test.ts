@@ -327,3 +327,109 @@ describe("server-side proposals end to end (Stage B3)", () => {
     expect(create.status).toBe(404); // the guard's uniform refusal
   });
 });
+
+describe("Stage C2: approval enriches the ops with the proposal's evidence (ADR 0022)", () => {
+  // The review-gated meeting extraction finally stamps EVERYONE's board. The
+  // old client post-pass wrote metadata.meeting onto the proposer's browser
+  // only — peers, the server's stored board, and undo never saw it. Here the
+  // approval enriches the ops themselves before the room commits them, so the
+  // provenance lands wherever the ops land.
+  it("the approved board carries provenance on the applied nodes, and the log entry with it", async () => {
+    const h = (open = await harness());
+    const alice = await signup(h, "alice-c2@example.com");
+    const created = await api(h, "/api/boards", {
+      method: "POST",
+      token: alice.token,
+      body: JSON.stringify({ name: "Shared", workspace: createWorkspace() }),
+    });
+    const boardId = created.body.id as string;
+
+    // A review-gated meeting extraction: the proposal carries the full
+    // evidence record (meeting id, turn range, the words, the kinds).
+    const withEvidence = await api(h, `/api/boards/${boardId}/proposals`, {
+      method: "POST",
+      token: alice.token,
+      body: JSON.stringify({
+        operations: [
+          { op: "CREATE_NODE", id: "pricing", nodeType: "decision", label: "Pricing $15/mo" },
+          {
+            op: "SET_STATEMENT",
+            id: "pricing",
+            statement: { kind: "decision", status: "resolved", topic: "pricing" },
+          },
+        ],
+        request: "map the pricing decision",
+        explanation: "the $15 decision",
+        meetingId: "mtg_7",
+        provenance: {
+          quote: "we'll price it at fifteen a month",
+          turnRange: [3, 4],
+          turnKinds: ["decision"],
+        },
+      }),
+    });
+    expect(withEvidence.status).toBe(201);
+    const pid = withEvidence.body.proposal.id as string;
+
+    const approved = await api(h, `/api/boards/${boardId}/proposals/${pid}/approve`, {
+      method: "POST",
+      token: alice.token,
+    });
+    expect(approved.status).toBe(200);
+
+    // The STORED board carries the statement AND the op-level provenance.
+    const board = await h.boardStore.get(boardId);
+    const pricing = board?.workspace.nodes["pricing"];
+    expect(pricing?.statement).toMatchObject({
+      kind: "decision",
+      status: "resolved",
+      topic: "pricing",
+    });
+    expect(pricing?.provenance).toEqual({
+      meetingId: "mtg_7",
+      turnRange: [3, 4],
+      quote: "we'll price it at fifteen a month",
+      turnKinds: ["decision"],
+    });
+
+    // And the log entry carries the enriched ops — a peer joining fresh
+    // replays the provenance with them.
+    const log = await h.boardStore.loadLog(boardId);
+    const entry = log.find((e) => e.ops.some((o) => "provenance" in o));
+    expect(entry).toBeDefined();
+    const createOp = entry!.ops.find((o) => o.op === "CREATE_NODE");
+    expect(createOp).toMatchObject({
+      op: "CREATE_NODE",
+      id: "pricing",
+      provenance: { meetingId: "mtg_7", turnRange: [3, 4] },
+    });
+  });
+
+  it("a proposal without a meeting skips enrichment and still approves cleanly", async () => {
+    const h = (open = await harness());
+    const alice = await signup(h, "alice-c2b@example.com");
+    const created = await api(h, "/api/boards", {
+      method: "POST",
+      token: alice.token,
+      body: JSON.stringify({ name: "Plain", workspace: createWorkspace() }),
+    });
+    const boardId = created.body.id as string;
+
+    const plain = await api(h, `/api/boards/${boardId}/proposals`, {
+      method: "POST",
+      token: alice.token,
+      body: JSON.stringify({
+        operations: [{ op: "CREATE_NODE", id: "n1", nodeType: "step", label: "Step" }],
+        request: "add a step",
+      }),
+    });
+    expect(plain.status).toBe(201);
+    const approved = await api(h, `/api/boards/${boardId}/proposals/${plain.body.proposal.id}/approve`, {
+      method: "POST",
+      token: alice.token,
+    });
+    expect(approved.status).toBe(200);
+    const board = await h.boardStore.get(boardId);
+    expect(board?.workspace.nodes["n1"]?.provenance).toBeUndefined();
+  });
+});

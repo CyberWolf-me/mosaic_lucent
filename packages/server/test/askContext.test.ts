@@ -199,3 +199,55 @@ describe("the projection stays a projection", () => {
     expect(withMeeting.meetings[0]!.id).toBe("mtg_9");
   });
 });
+
+describe("renderBoardDigest: statements and op-level provenance (Stage C2)", () => {
+  it("renders the statement bracket the historian prompt teaches the model to read", () => {
+    const ws = applyOperations(createWorkspace(), [
+      { op: "CREATE_NODE", id: "pricing", nodeType: "decision", label: "Pricing ($15/month)" },
+      {
+        op: "SET_STATEMENT",
+        id: "pricing",
+        statement: { kind: "decision", status: "resolved", topic: "pricing" },
+      },
+      { op: "CREATE_NODE", id: "old", nodeType: "decision", label: "Old plan" },
+      {
+        op: "SET_STATEMENT",
+        id: "old",
+        statement: { kind: "proposal", status: "superseded", topic: "pricing", supersedes: [] },
+      },
+    ]);
+    const digest = renderBoardDigest(baseInput({ workspace: ws }));
+    expect(digest).toContain("[decision · resolved · topic: pricing]");
+    expect(digest).toContain("[proposal · superseded · topic: pricing]");
+  });
+
+  it("prefers the op-level provenance over the legacy metadata stamp", () => {
+    const ws = applyOperations(createWorkspace(), [
+      {
+        op: "CREATE_NODE",
+        id: "pricing",
+        nodeType: "decision",
+        label: "Pricing",
+        provenance: { meetingId: "mtg_new", quote: "op-level evidence" },
+      },
+    ]);
+    // A legacy stamp still present on the node loses to the canonical field.
+    ws.nodes.pricing!.metadata = { meeting: { meetingId: "mtg_old", quote: "legacy" } };
+    const digest = renderBoardDigest(baseInput({ workspace: ws }));
+    expect(digest).toContain("mtg_new");
+    expect(digest).toContain("op-level evidence");
+    expect(digest).not.toContain("mtg_old");
+  });
+
+  it("falls back to the legacy metadata stamp for pre-C2 boards", () => {
+    const ws = applyOperations(createWorkspace(), [
+      { op: "CREATE_NODE", id: "old-board", nodeType: "decision", label: "Old" },
+    ]);
+    ws.nodes["old-board"]!.metadata = {
+      meeting: { meetingId: "mtg_legacy", quote: "the old stamp" },
+    };
+    const digest = renderBoardDigest(baseInput({ workspace: ws }));
+    expect(digest).toContain("mtg_legacy");
+    expect(digest).toContain("the old stamp");
+  });
+});

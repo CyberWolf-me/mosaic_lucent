@@ -150,11 +150,24 @@ export function renderBoardDigest(input: AskContextInput): string {
       if (issue) {
         parts.push(`[issue: ${issue.type} · ${issue.status}${issue.assignee ? ` · @${issue.assignee}` : ""}]`);
       }
+      // The statement (Stage C2): what this node IS. This is the line that
+      // answers "what did we decide about pricing?" — the digest the
+      // historian prompt's statement clause teaches the model to read.
+      const statement = node.statement;
+      if (statement) {
+        parts.push(
+          `[${statement.kind} · ${statement.status}${
+            statement.topic ? ` · topic: ${statement.topic}` : ""
+          }${statement.supersedes?.length ? ` · supersedes: ${statement.supersedes.join(", ")}` : ""}]`,
+        );
+      }
       // Provenance: the reason Ask exists. Quote plus the stable turn range,
-      // which survives where the quote cannot (Stage A).
-      const prov = asMeetingProvenance(node.metadata?.meeting);
+      // which survives where the quote cannot (Stage A). The op-level field
+      // (Stage C2, ADR 0022) is canonical; the old metadata stamp is the
+      // fallback for boards whose meetings predate the contract.
+      const prov = node.provenance ?? asMeetingProvenance(node.metadata?.meeting);
       if (prov) {
-        const quote = shortText(prov.quote, ASK_DIGEST_LIMITS.quote);
+        const quote = shortText("quote" in prov ? prov.quote : undefined, ASK_DIGEST_LIMITS.quote);
         const turnRange = asTurnRange(prov.turnRange);
         parts.push(
           `[from meeting ${shortText(prov.meetingId, 120) ?? "?"}${

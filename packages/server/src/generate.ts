@@ -71,6 +71,19 @@ const summarySchema = z.object({
             parentId: shortText.optional(),
           })
           .optional(),
+        // Statement semantics (Stage C2): what the node IS. Provenance is
+        // deliberately absent here — the client never sends it in a summary
+        // (the meeting loop attaches it to the ops, not the workspace echo),
+        // and a client that did would be claiming evidence the server did
+        // not witness.
+        statement: z
+          .object({
+            kind: z.enum(["decision", "proposal", "question", "action", "requirement", "risk"]),
+            status: z.enum(["open", "resolved", "rejected", "superseded"]),
+            topic: shortText.optional(),
+            supersedes: z.array(shortText).max(10).optional(),
+          })
+          .optional(),
       }),
     )
     .max(REQUEST_LIMITS.nodes),
@@ -309,6 +322,22 @@ function workspaceFromSummary(summary: GenerateRequestBody["summary"]): Workspac
           ...(n.issue!.assignee ? { assignee: n.issue!.assignee } : {}),
           ...(n.issue!.storyPoints !== undefined ? { storyPoints: n.issue!.storyPoints } : {}),
           ...(n.issue!.parentId ? { parentId: n.issue!.parentId } : {}),
+        },
+      })),
+    // Reattach statements (Stage C2) so the model can UPDATE_STATEMENT what it
+    // can see — a visible decision it can supersede, an open question it can
+    // resolve. Provenance never rebuilds: it is evidence, and evidence is not
+    // re-derivable from a summary.
+    ...summary.nodes
+      .filter((n) => n.statement)
+      .map((n) => ({
+        op: "SET_STATEMENT" as const,
+        id: n.id,
+        statement: {
+          kind: n.statement!.kind,
+          status: n.statement!.status,
+          ...(n.statement!.topic ? { topic: n.statement!.topic } : {}),
+          ...(n.statement!.supersedes?.length ? { supersedes: n.statement!.supersedes } : {}),
         },
       })),
     ...(summary.shapes ?? []).map((s) => ({

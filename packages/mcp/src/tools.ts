@@ -100,6 +100,22 @@ export function summarizeBoard(ws: Workspace): Record<string, unknown> {
       ...(n.issue
         ? { issue: { type: n.issue.type, status: n.issue.status, assignee: n.issue.assignee } }
         : {}),
+      // Stage C2: the semantic layer — what the node IS. An agent that can
+      // see a decided thing as decided can supersede it instead of re-opening
+      // a settled question.
+      ...(n.statement
+        ? {
+            statement: {
+              kind: n.statement.kind,
+              status: n.statement.status,
+              ...(n.statement.topic ? { topic: n.statement.topic } : {}),
+              ...(n.statement.supersedes?.length
+                ? { supersedes: n.statement.supersedes }
+                : {}),
+            },
+          }
+        : {}),
+      ...(n.provenance ? { fromMeeting: n.provenance.meetingId } : {}),
     })),
     edges: Object.values(ws.edges).map((e) => ({
       source: e.source,
