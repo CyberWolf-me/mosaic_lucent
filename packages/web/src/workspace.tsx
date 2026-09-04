@@ -13,6 +13,7 @@ import {
   applyLayout,
   applyOperations,
   applyValidOperations,
+  attachProvenance,
   computeLayout,
   createWorkspace,
   parseWorkspace,
@@ -328,6 +329,8 @@ function touchedIdsOf(ops: readonly Operation[]): Set<string> {
       case "CHANGE_NODE_TYPE":
       case "SET_ISSUE":
       case "UPDATE_ISSUE":
+      case "SET_STATEMENT":
+      case "UPDATE_STATEMENT":
       case "MOVE_NODE":
       case "CONNECT_NODES":
       case "DISCONNECT_NODES": {
@@ -841,54 +844,40 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         }
         const explanation = result.explanation ?? `Applied ${result.operations.length} operations.`;
 
-        // Provenance (M2): stamp meeting extraction onto what it creates, so
-        // any node can answer "why is this here?" — quoted from the transcript
-        // that produced it. Applied here (not in the model) because provenance
-        // is the app's fact about the request, not the model's guess.
+        // Provenance (M2 → Stage C2, ADR 0022): enrich the OPS with the
+        // meeting evidence before anything else touches them, so the stamp
+        // lands in the undo history, on peers via the room, in the server's
+        // board, and in the op log — everywhere the ops go. The old post-pass
+        // wrote metadata.meeting onto the workspace object only this
+        // browser held, which the next remote sync silently overwrote; the
+        // recon for C2 proved that divergence, and ops are the fix.
         //
-        // P0-3: the stamp also carries the turn KINDS (deterministic, from
-        // classifyTurn — the same draft classification the transcript shows)
-        // so the board can render statement kinds from data rather than from
-        // whatever the model happened to put in a label.
+        // attachProvenance adds the field to CREATE_NODE (creation evidence)
+        // and embeds it in SET_STATEMENT (the evidence behind a decision),
+        // idempotently per op.
         const provenance = attachments?.provenance;
-        // The workspace after this batch, with new nodes stamped. Without
-        // provenance this is just the plain application.
-        const applyStamped = (): Workspace => {
-          const next = applyOperations(workspace, result.operations);
-          if (!provenance) return next;
-          const quote = provenance.turns.join(" ").slice(0, 240);
-          const meta = {
-            meetingId: provenance.meetingId,
-            quote,
-            extractedAt: Date.now(),
-            // Stable references (Stage A): the index range survives transcript
-            // normalization where the quote cannot, and a future reverse link
-            // (transcript turn → object) keys on it.
-            ...(provenance.turnRange ? { turnRange: provenance.turnRange } : {}),
-            // Deterministic kinds, per source turn, in turn order (P0-3) —
-            // preferring the kinds the caller derived (the meeting loop's
-            // per-turn classification) over re-deriving from bare text.
-            ...(provenance.turnKinds?.length
-              ? { turnKinds: provenance.turnKinds }
-              : provenance.turns.some((t) => classifyTurn(t))
-                ? {
-                    turnKinds: provenance.turns
-                      .map((t) => classifyTurn(t))
-                      .filter((k): k is NonNullable<ReturnType<typeof classifyTurn>> => Boolean(k)),
-                  }
-                : {}),
-          };
-          // Only nodes this batch ADDED (absent before) carry the stamp.
-          const nodes: Workspace["nodes"] = {};
-          for (const [id, node] of Object.entries(next.nodes)) {
-            if (!workspace.nodes[id]) {
-              nodes[id] = { ...node, metadata: { ...(node.metadata ?? {}), meeting: meta } };
-            } else {
-              nodes[id] = node;
-            }
-          }
-          return { ...next, nodes };
-        };
+        const enrichedOps: Operation[] = provenance
+          ? attachProvenance(result.operations, {
+              meetingId: provenance.meetingId,
+              // Stable references (Stage A): the index range survives
+              // transcript normalization where the quote cannot.
+              ...(provenance.turnRange ? { turnRange: provenance.turnRange } : {}),
+              // Deterministic kinds, per source turn, in turn order (P0-3) —
+              // preferring the kinds the caller derived over re-deriving.
+              ...(provenance.turnKinds?.length
+                ? { turnKinds: provenance.turnKinds }
+                : provenance.turns.some((t) => classifyTurn(t))
+                  ? {
+                      turnKinds: provenance.turns
+                        .map((t) => classifyTurn(t))
+                        .filter((k): k is NonNullable<ReturnType<typeof classifyTurn>> => Boolean(k)),
+                    }
+                  : {}),
+              quote: provenance.turns.join(" ").slice(0, 240),
+            })
+          : result.operations;
+        // The workspace after this batch, provenance riding the ops.
+        const applyStamped = (): Workspace => applyOperations(workspace, enrichedOps);
 
         // Partial-application report (M1): the server may have skipped ops
         // that failed validation while applying the rest. Attach them to the
@@ -919,7 +908,11 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           // pending predecessor; peers' panels open via proposal-created.
           const serverRecord = boardId
             ? await createServerProposal(boardId, {
-                operations: result.operations,
+                // Enriched ops (Stage C2): the client already carries the
+                // evidence; the server's approve-time enrichment is
+                // idempotent over these and backfills any older client's raw
+                // ops. Either way the committed batch carries provenance.
+                operations: enrichedOps,
                 request: text,
                 explanation,
                 ...(provenance?.meetingId ? { meetingId: provenance.meetingId } : {}),
@@ -961,7 +954,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
                 ...(provenance?.turns ? { turns: provenance.turns } : {}),
                 ...(provenance?.turnRange ? { turnRange: provenance.turnRange } : {}),
                 ...(provenance?.turnKinds?.length ? { turnKinds: provenance.turnKinds } : {}),
-                operations: result.operations,
+                operations: enrichedOps,
                 createdAt: Date.now(),
                 request: text,
                 explanation,
@@ -982,7 +975,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
             { role: "ai", text: explanation, ...skippedNote },
           ];
           setChat(conversation);
-          commitAndShare(next, result.operations, explanation, conversation, projectName);
+          // The enriched ops, not the raw model batch — the stamp rides into
+          // history and the room with them (Stage C2, ADR 0022).
+          commitAndShare(next, enrichedOps, explanation, conversation, projectName);
         }
       } catch (err) {
         const conversation: ChatEntry[] = [
@@ -1184,40 +1179,34 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     // same one-simulator partition the server uses, M1) applies the valid
     // remainder and surfaces the skips, instead of blindly committing ops
     // against a board that changed under them.
-    const partial = applyValidOperations(workspace, proposal.operations);
-    const appliedOps = partial.applied.length > 0 ? partial.applied : proposal.operations;
-    let next = partial.workspace;
-    // Review-gated meeting extractions keep their provenance (M2): the stamp
-    // records the transcript and quote behind whatever the batch created —
-    // and, since Stage A, the stable turn range and kinds.
-    if (proposal.meetingId) {
-      const turns = proposal.turns ?? [];
-      const quote = turns.join(" ").slice(0, 240);
-      const meta = {
-        meetingId: proposal.meetingId,
-        quote,
-        extractedAt: Date.now(),
-        ...(proposal.turnRange ? { turnRange: proposal.turnRange } : {}),
-        ...(proposal.turnKinds?.length
-          ? { turnKinds: proposal.turnKinds }
-          : turns.some((t) => classifyTurn(t))
-            ? {
-                turnKinds: turns
-                  .map((t) => classifyTurn(t))
-                  .filter((k): k is NonNullable<ReturnType<typeof classifyTurn>> => Boolean(k)),
-              }
+    //
+    // Stage C2 (ADR 0022): a local proposal's evidence rides its ops, exactly
+    // like the send path and the server's approve path. The proposal record
+    // carries the meeting id/turns/kinds; enrich the ops BEFORE applying, so
+    // the stamp reaches history, peers, and the server with the batch instead
+    // of living in this browser's memory (the divergence this replaces).
+    const evidence = proposal.meetingId
+      ? {
+          meetingId: proposal.meetingId,
+          ...(proposal.turnRange ? { turnRange: proposal.turnRange } : {}),
+          ...(proposal.turnKinds?.length
+            ? { turnKinds: proposal.turnKinds }
+            : proposal.turns?.some((t) => classifyTurn(t))
+              ? {
+                  turnKinds: (proposal.turns ?? [])
+                    .map((t) => classifyTurn(t))
+                    .filter((k): k is NonNullable<ReturnType<typeof classifyTurn>> => Boolean(k)),
+                }
+              : {}),
+          ...((proposal.turns?.length ?? 0) > 0
+            ? { quote: (proposal.turns ?? []).join(" ").slice(0, 240) }
             : {}),
-      };
-      const nodes: Workspace["nodes"] = {};
-      for (const [id, node] of Object.entries(next.nodes)) {
-        if (!workspace.nodes[id]) {
-          nodes[id] = { ...node, metadata: { ...(node.metadata ?? {}), meeting: meta } };
-        } else {
-          nodes[id] = node;
         }
-      }
-      next = { ...next, nodes };
-    }
+      : undefined;
+    const candidateOps = evidence ? attachProvenance(proposal.operations, evidence) : proposal.operations;
+    const partial = applyValidOperations(workspace, candidateOps);
+    const appliedOps = partial.applied.length > 0 ? partial.applied : candidateOps;
+    const next = partial.workspace;
     const skippedNote =
       partial.skipped.length > 0
         ? ` (${partial.skipped.length} skipped — the board changed since this was proposed)`

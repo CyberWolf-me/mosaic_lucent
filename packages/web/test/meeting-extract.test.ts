@@ -124,8 +124,10 @@ describe("differentialPrompt — add, never rebuild", () => {
 
   it("marks casual suggestions as proposals, never decisions (P0-3 contract)", () => {
     const prompt = differentialPrompt([{ text: "Maybe Stripe?" }]);
+    // Stage C2: the proposal-ness is an op now, not a label prefix.
     expect(prompt).toContain("are NEVER decisions");
-    expect(prompt).toContain("Proposal:");
+    expect(prompt).toContain("kind=proposal status=open");
+    expect(prompt).toContain("SET_STATEMENT");
   });
 
   it("teaches rejection as visible supersession, not silence", () => {
@@ -138,7 +140,10 @@ describe("differentialPrompt — add, never rebuild", () => {
   it("teaches correction as in-place replacement", () => {
     const prompt = differentialPrompt([{ text: "Actually, young professionals." }]);
     expect(prompt).toContain("CORRECTION");
-    expect(prompt).toContain("replaces the earlier statement's node in place");
+    // Stage C2: in-place replacement is still the rule, and a decided
+    // correction names the old node in supersedes so the board flips it.
+    expect(prompt).toContain("replaces the earlier statement in place");
+    expect(prompt).toContain("supersedes");
   });
 
   it("teaches the mention-vs-owner attribution rule (the ambiguity case)", () => {

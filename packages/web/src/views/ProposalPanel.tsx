@@ -123,6 +123,24 @@ function describe(op: Operation): { op: OpBadge; title: string; sub: string } {
         title: op.id,
         sub: op.status ? `Move to ${op.status}` : "Update issue",
       };
+    case "SET_STATEMENT":
+      return op.statement
+        ? {
+            op: "mod",
+            title: op.id,
+            sub: `${op.statement.kind} · ${op.statement.status}${op.statement.topic ? ` · ${op.statement.topic}` : ""}`,
+          }
+        : { op: "del", title: op.id, sub: "Clear statement" };
+    case "UPDATE_STATEMENT":
+      return {
+        op: "mod",
+        title: op.id,
+        sub: op.status
+          ? `Statement → ${op.status}`
+          : op.supersedes
+            ? `Supersedes ${op.supersedes.join(", ")}`
+            : "Update statement",
+      };
     case "MOVE_NODE":
       return { op: "move", title: op.id, sub: "Reposition node" };
     case "CREATE_GROUP":

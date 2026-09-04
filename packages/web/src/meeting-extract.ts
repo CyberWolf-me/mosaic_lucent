@@ -74,6 +74,11 @@ const MEETING_SAFE_OPS: ReadonlySet<string> = new Set([
   "CREATE_SHAPE",
   "SET_ISSUE",
   "SET_GROUP_KIND",
+  // Stage C2: statements are meaning, additive by construction — attaching a
+  // decision to a new node changes no existing work, and a rejection's
+  // UPDATE_STATEMENT is the visible supersession this doctrine always wanted.
+  "SET_STATEMENT",
+  "UPDATE_STATEMENT",
 ]);
 
 /** Ops that must never auto-apply in a meeting — always route to review. */
@@ -148,10 +153,12 @@ export function differentialPrompt(
     "Add ONLY what these new turns introduce that is not on the board yet: new concepts as nodes, new relationships as connections, new topics as a new group with a fitting diagram kind (mindmap, flowchart, journey, orgchart, decisiontree, process, or architecture). Connect new nodes to related existing ones. If a turn refines or corrects something already on the board, update that node's label or connections — do not duplicate it. Emit no DELETE operations and do not regenerate existing regions.",
     "",
     "Statement kinds — get these right; they are how the board earns trust:",
-    "- Decisions ('okay, let's…', 'we'll…', 'agreed') are the only decided things on the board.",
-    "- Proposals ('maybe', 'what if', 'we could try') are NEVER decisions. Label the node 'Proposal: …' so a later rejection has something to visibly supersede.",
-    "- A REJECTION ('no, we're not doing X') updates the existing X node: relabel it 'Rejected: X' or connect the rejection to it. Both statements must not survive as if both were true.",
-    "- A CORRECTION ('actually…', 'no, I meant…') replaces the earlier statement's node in place: update its label; do not keep the superseded wording and do not create a second node.",
+    "- A node that IS a statement carries one via SET_STATEMENT: kind is one of decision / proposal / question / action / requirement / risk, status one of open / resolved / rejected / superseded. Set a short kebab-case topic (e.g. 'pricing') when the subject is clear.",
+    "- Decisions ('okay, let's…', 'we'll…', 'agreed') are the only decided things: create the node AND SET_STATEMENT kind=decision status=resolved. An undecided 'decision' is a proposal.",
+    "- Proposals ('maybe', 'what if', 'we could try') are NEVER decisions: kind=proposal status=open.",
+    "- A REJECTION ('no, we're not doing X') updates the existing X statement: UPDATE_STATEMENT status=rejected, or relabel the node 'Rejected: X'. Both statements must not survive as if both were true.",
+    "- A CORRECTION ('actually…', 'no, I meant…') replaces the earlier statement in place: update its label, and if the new wording is itself decided, its SET_STATEMENT may list the old node's id in supersedes — the board marks the old statement superseded by itself. Never a second contradictory node.",
+    "- Turn-kind mapping: decision → kind=decision; hypothesis → kind=proposal; action → kind=action; requirement → kind=requirement; problem and solution turns stay as plain nodes (they are context, not statements).",
     "- ATTRIBUTION: when the conversation establishes a GENUINE commitment or action, create the action node AND emit a SET_ISSUE giving it to the person who committed to it or was explicitly tasked with it — in ANY meeting style, not only planning sessions. A hedged or speculative mention ('we should probably ask Sarah', 'I'll think about it', 'I'll see if that's possible', 'can you imagine if…') is NOT a commitment: no assignee, and often no action at all. A mention is never an owner — 'we should talk to Sarah about pricing' is an action 'Discuss pricing with Sarah' owned by the SPEAKER, not an action owned by Sarah.",
     "- If a turn is small talk, a joke, or off-topic, emit nothing for it.",
   ].join("\n");
