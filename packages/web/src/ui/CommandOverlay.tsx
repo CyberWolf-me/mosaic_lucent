@@ -3,9 +3,15 @@ import { Ico } from "./icons.js";
 import { useWorkspace } from "../workspace.js";
 import type { WorkspaceState } from "../workspace.js";
 import type { Workspace } from "@lucent/core";
+import { searchBoard, type BoardSearchHit, type BoardSearchResponse } from "../boards.js";
+import { resolveLocale, t } from "@lucent/i18n";
 import {
   buildResults,
+  groupSearchHits,
   moveIndex,
+  searchHitHint,
+  searchHitTarget,
+  searchHitTitle,
   type PaletteAction,
   type PaletteBoardHit,
   type PaletteItem,
@@ -17,7 +23,18 @@ import {
  * one cursor across all of them, driven entirely by `palette.ts`'s pure
  * functions. The free-text fallback remains: with no matches, Enter asks
  * Lucent to build what you typed, which is the product's promise anyway.
+ *
+ * Stage C4: on a shared board the board family becomes SERVER search — the
+ * same retriever Ask uses, over the same entitlement window — debounced at
+ * 250 ms with a fresh AbortController per keystroke so a slow network cannot
+ * answer an old query. Results navigate through onCitation (the citation
+ * contract: ?reveal / ?meeting+?turn / ?rev), and the Ask bridge hands the
+ * query to ask() when the user wants understanding rather than navigation.
+ * Local boards keep the local scan; there is nothing server-side to search.
  */
+const SEARCH_DEBOUNCE_MS = 250;
+const SEARCH_MIN_QUERY = 2;
+
 export function CommandOverlay({
   onClose,
   onOpenSettings,
@@ -25,17 +42,28 @@ export function CommandOverlay({
   onClose: () => void;
   onOpenSettings?: (section?: string) => void;
 }) {
-  const { setView, send, workspace, undo, redo, newProject } = useWorkspace() as unknown as {
-    setView: WorkspaceState["setView"];
-    send: WorkspaceState["send"];
-    workspace: Workspace;
-    undo: () => void;
-    redo: () => void;
-    newProject: () => void;
-  };
+  const { setView, send, workspace, undo, redo, newProject, boardId, ask, setPillMode, onCitation } =
+    useWorkspace() as unknown as {
+      setView: WorkspaceState["setView"];
+      send: WorkspaceState["send"];
+      workspace: Workspace;
+      undo: () => void;
+      redo: () => void;
+      newProject: () => void;
+      boardId: string | null;
+      ask: WorkspaceState["ask"];
+      setPillMode: WorkspaceState["setPillMode"];
+      onCitation: WorkspaceState["onCitation"];
+    };
   const [q, setQ] = useState("");
   const [active, setActive] = useState(0);
+  /** Server search results for the current query (null: nothing fetched yet). */
+  const [search, setSearch] = useState<BoardSearchResponse | null>(null);
+  /** The ask-bridge composer: the input becomes the question field. */
+  const [askMode, setAskMode] = useState(false);
+  const [askText, setAskText] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
+  const locale = useMemo(() => resolveLocale(navigator.language), []);
   useEffect(() => {
     inputRef.current?.focus();
   }, []);
@@ -111,9 +139,13 @@ export function CommandOverlay({
     [],
   );
 
-  // Search the board itself, not just view names: nodes by label/type and manual
-  // shapes by their text.
+  // Local scan for local boards: nodes by label/type and shapes by text. On a
+  // shared board the server results (below) replace this family — the server
+  // corpus covers everything the local scan sees plus the transcript and the
+  // revision log, all windowed by entitlement.
+  const useLocalScan = !boardId;
   const boardHits = useMemo<PaletteBoardHit[]>(() => {
+    if (!useLocalScan) return [];
     const needle = q.trim().toLowerCase();
     if (!needle) return [];
     const hits: PaletteBoardHit[] = [];
@@ -133,9 +165,53 @@ export function CommandOverlay({
       }
     }
     return hits.slice(0, 8);
-  }, [q, workspace.nodes, workspace.shapes]);
+  }, [q, useLocalScan, workspace.nodes, workspace.shapes]);
 
-  const results = useMemo(() => buildResults(items, boardHits, q), [items, boardHits, q]);
+  // Server search (shared boards): debounced, aborted per keystroke, and
+  // guarded so a stale response can never render (seq check via closure —
+  // the last request wins, earlier ones resolve to nothing).
+  const searchQuery = useLocalScan ? "" : q.trim();
+  useEffect(() => {
+    if (!searchQuery || searchQuery.length < SEARCH_MIN_QUERY) {
+      setSearch(null);
+      return;
+    }
+    let cancelled = false;
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      void searchBoard(boardId!, searchQuery, controller.signal)
+        .then((res) => {
+          if (!cancelled && res && res.query === searchQuery) setSearch(res);
+        })
+        .catch(() => {
+          // Aborted or offline: keep whatever was showing; an error banner in
+          // a palette is noise the local fallback already covers.
+        });
+    }, SEARCH_DEBOUNCE_MS);
+    return () => {
+      cancelled = true;
+      controller.abort();
+      window.clearTimeout(timer);
+    };
+  }, [boardId, searchQuery]);
+
+  const serverHits = useMemo(
+    () => (search && !useLocalScan ? search.results : []),
+    [search, useLocalScan],
+  );
+  const grouped = useMemo(() => groupSearchHits(serverHits), [serverHits]);
+
+  // The full result list the cursor walks: actions, views, then either the
+  // local board scan or the server's three groups.
+  const results = useMemo(
+    () => ({
+      ...buildResults(items, boardHits, q),
+      search: grouped,
+      total:
+        buildResults(items, boardHits, q).total + (useLocalScan ? 0 : grouped.total),
+    }),
+    [items, boardHits, q, grouped, useLocalScan],
+  );
   useEffect(() => {
     setActive(0);
   }, [q]);
@@ -166,8 +242,30 @@ export function CommandOverlay({
     onClose();
   };
 
+  // Navigate a server hit through the citation contract — the same handler
+  // and the same URL params the AI pill's citations use, so the target view's
+  // flash/highlight behavior comes for free.
+  const runSearchHit = (hit: BoardSearchHit): void => {
+    const target = searchHitTarget(hit);
+    if (target) onCitation(target);
+    onClose();
+  };
+
+  // The Ask bridge: switch the palette into question mode. Enter submits
+  // through ask() — which routes the question through the same retrieval
+  // evidence the search results came from — with the pill set to Ask so the
+  // reply is visibly an answer, not a build request.
+  const submitAsk = (): void => {
+    const question = askText.trim() || q.trim();
+    if (!question) return;
+    setPillMode("ask");
+    void ask(question);
+    onClose();
+  };
+
   // One cursor across the whole list: entries [0, items) are actions+views,
-  // the tail is board hits, and past the end is the free-text fallback.
+  // the tail is board hits (local) or the server groups, and past the end is
+  // the free-text fallback.
   const runAt = (index: number): void => {
     const itemCount = results.actions.length + results.views.length;
     if (index < itemCount) {
@@ -177,11 +275,20 @@ export function CommandOverlay({
         return;
       }
     }
-    const hit = results.board[index - itemCount];
-    if (hit) {
-      setView("canvas");
-      onClose();
-      return;
+    if (useLocalScan) {
+      const hit = results.board[index - itemCount];
+      if (hit) {
+        setView("canvas");
+        onClose();
+        return;
+      }
+    } else {
+      const server = [...grouped.nodes, ...grouped.turns, ...grouped.revisions];
+      const hit = server[index - itemCount];
+      if (hit) {
+        runSearchHit(hit);
+        return;
+      }
     }
     if (q.trim()) {
       setView("canvas");
@@ -245,6 +352,23 @@ export function CommandOverlay({
     </div>
   );
 
+  // A server hit row. Matched tokens ride the hint so a result explains
+  // itself ("Matching: pricing, 20" — the lexical contract), never a score.
+  const searchRow = (hit: BoardSearchHit, index: number): React.ReactNode => (
+    <button
+      key={`${hit.kind}-${hit.id}${hit.turnIndex ?? ""}`}
+      onClick={() => runSearchHit(hit)}
+      onMouseEnter={() => setActive(index)}
+      style={entryStyle(index === active)}
+    >
+      {iconBox(hit.kind === "node" ? <Ico.Grid /> : hit.kind === "turn" ? <Ico.Journey /> : <Ico.History />)}
+      {labelBlock(searchHitTitle(hit), `${searchHitHint(hit)} · ${t("palette.matched", locale, { q: hit.matched.join(", ") })}`)}
+    </button>
+  );
+
+  const searchOffset = results.actions.length + results.views.length;
+  const visibleTotal = results.total;
+
   return (
     <>
       <div
@@ -287,92 +411,172 @@ export function CommandOverlay({
           }}
         >
           <Ico.Search style={{ color: "var(--ink-2)" }} />
-          <input
-            ref={inputRef}
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            aria-label="Search actions, views, or ask Lucent to build something"
-            placeholder="Search actions, views, or ask Lucent to build something…"
-            style={{ flex: 1, fontSize: 14, color: "var(--ink-0)" }}
-            onKeyDown={(e) => {
-              if (e.key === "ArrowDown") {
-                e.preventDefault();
-                setActive((i) => moveIndex(i, 1, results.total));
-              } else if (e.key === "ArrowUp") {
-                e.preventDefault();
-                setActive((i) => moveIndex(i, -1, results.total));
-              } else if (e.key === "Enter") {
-                e.preventDefault();
-                runAt(active);
-              } else if (e.key === "Escape") {
-                // Esc must close from inside the field: the app-level Escape
-                // handler ignores INPUT targets, so handle it here.
-                e.preventDefault();
-                onClose();
-              }
-            }}
-          />
+          {askMode ? (
+            <input
+              ref={inputRef}
+              value={askText}
+              onChange={(e) => setAskText(e.target.value)}
+              aria-label={t("palette.ask.placeholder", locale)}
+              placeholder={t("palette.ask.placeholder", locale)}
+              style={{ flex: 1, fontSize: 14, color: "var(--ink-0)" }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  submitAsk();
+                } else if (e.key === "Escape") {
+                  // Escape returns to search, not out of the palette: the
+                  // user asked for the bridge, not for the door.
+                  e.preventDefault();
+                  setAskMode(false);
+                }
+              }}
+            />
+          ) : (
+            <input
+              ref={inputRef}
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              aria-label={t("palette.hint.placeholder", locale)}
+              placeholder={t("palette.hint.placeholder", locale)}
+              style={{ flex: 1, fontSize: 14, color: "var(--ink-0)" }}
+              onKeyDown={(e) => {
+                if (e.key === "ArrowDown") {
+                  e.preventDefault();
+                  setActive((i) => moveIndex(i, 1, visibleTotal));
+                } else if (e.key === "ArrowUp") {
+                  e.preventDefault();
+                  setActive((i) => moveIndex(i, -1, visibleTotal));
+                } else if (e.key === "Enter") {
+                  e.preventDefault();
+                  runAt(active);
+                } else if (e.key === "Escape") {
+                  // Esc must close from inside the field: the app-level Escape
+                  // handler ignores INPUT targets, so handle it here.
+                  e.preventDefault();
+                  onClose();
+                }
+              }}
+            />
+          )}
           <span className="kbd">Esc</span>
         </div>
         <div style={{ maxHeight: 380, overflowY: "auto", padding: 6 }}>
-          {results.total === 0 && !q.trim() && (
+          {!askMode && results.total === 0 && !q.trim() && (
             <div
               className="mono"
               style={{ padding: 24, textAlign: "center", fontSize: 12.5, color: "var(--ink-3)" }}
             >
-              No matches
+              {t("palette.empty.none", locale)}
             </div>
           )}
-          {results.total === 0 && q.trim() && (
+          {!askMode && results.total === 0 && q.trim() && (
             <div
               className="mono"
               style={{ padding: 24, textAlign: "center", fontSize: 12.5, color: "var(--ink-3)" }}
             >
-              No matches · Press Enter to ask Lucent to build "{q}"
+              {t("palette.empty.ask", locale, { q })}
             </div>
           )}
-          {results.actions.map((it, i) => (
-            <button
-              key={it.id}
-              onClick={() => runAction(it.run)}
-              onMouseEnter={() => setActive(i)}
-              style={entryStyle(i === active)}
+          {askMode ? (
+            <div
+              className="mono"
+              style={{ padding: 24, textAlign: "center", fontSize: 12.5, color: "var(--ink-3)" }}
             >
-              {iconBox(<Ico.Layers />)}
-              {labelBlock(it.label, it.hint)}
-            </button>
-          ))}
-          {results.views.length > 0 && header("Views")}
-          {results.views.map((it, i) => {
-            const index = results.actions.length + i;
-            return (
-              <button
-                key={it.id}
-                onClick={() => runAction(it.run)}
-                onMouseEnter={() => setActive(index)}
-                style={entryStyle(index === active)}
-              >
-                {iconBox(<Ico.Arrow />)}
-                {labelBlock(it.label, it.hint)}
-              </button>
-            );
-          })}
-          {results.board.length > 0 && header("On this board")}
-          {results.board.map((hit, i) => {
-            const index = results.actions.length + results.views.length + i;
-            return (
-              <button
-                key={hit.id}
-                onClick={() => runAt(index)}
-                onMouseEnter={() => setActive(index)}
-                style={entryStyle(index === active)}
-              >
-                {iconBox(<Ico.Grid />)}
-                {labelBlock(hit.title, hit.hint)}
-              </button>
-            );
-          })}
+              {t("palette.ask.hint", locale)}
+            </div>
+          ) : (
+            <>
+              {results.actions.map((it, i) => (
+                <button
+                  key={it.id}
+                  onClick={() => runAction(it.run)}
+                  onMouseEnter={() => setActive(i)}
+                  style={entryStyle(i === active)}
+                >
+                  {iconBox(<Ico.Layers />)}
+                  {labelBlock(it.label, it.hint)}
+                </button>
+              ))}
+              {results.views.length > 0 && header(t("palette.group.views", locale))}
+              {results.views.map((it, i) => {
+                const index = results.actions.length + i;
+                return (
+                  <button
+                    key={it.id}
+                    onClick={() => runAction(it.run)}
+                    onMouseEnter={() => setActive(index)}
+                    style={entryStyle(index === active)}
+                  >
+                    {iconBox(<Ico.Arrow />)}
+                    {labelBlock(it.label, it.hint)}
+                  </button>
+                );
+              })}
+              {useLocalScan
+                ? results.board.length > 0 && header(t("palette.group.board", locale))
+                : null}
+              {useLocalScan &&
+                results.board.map((hit, i) => {
+                  const index = results.actions.length + results.views.length + i;
+                  return (
+                    <button
+                      key={hit.id}
+                      onClick={() => runAt(index)}
+                      onMouseEnter={() => setActive(index)}
+                      style={entryStyle(index === active)}
+                    >
+                      {iconBox(<Ico.Grid />)}
+                      {labelBlock(hit.title, hit.hint)}
+                    </button>
+                  );
+                })}
+              {!useLocalScan && grouped.nodes.length > 0 && header(t("palette.group.nodes", locale))}
+              {!useLocalScan &&
+                grouped.nodes.map((hit, i) => searchRow(hit, searchOffset + i))}
+              {!useLocalScan && grouped.turns.length > 0 && header(t("palette.group.transcript", locale))}
+              {!useLocalScan &&
+                grouped.turns.map((hit, i) => searchRow(hit, searchOffset + grouped.nodes.length + i))}
+              {!useLocalScan && grouped.revisions.length > 0 && header(t("palette.group.revisions", locale))}
+              {!useLocalScan &&
+                grouped.revisions.map((hit, i) =>
+                  searchRow(hit, searchOffset + grouped.nodes.length + grouped.turns.length + i),
+                )}
+              {!useLocalScan && search?.windowTruncated && (
+                <div
+                  className="mono"
+                  style={{ padding: "10px 12px", fontSize: 10.5, color: "var(--ink-3)" }}
+                >
+                  {t("palette.window.truncated", locale, { depth: String(search.historyDepth ?? "—") })}
+                </div>
+              )}
+            </>
+          )}
         </div>
+        {/* The Ask bridge: one persistent row, so "find" can become
+            "understand" without retyping. */}
+        {!askMode && (
+          <button
+            onClick={() => {
+              setAskText(q);
+              setAskMode(true);
+            }}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              width: "100%",
+              padding: "10px 18px",
+              borderTop: "1px solid var(--stroke-1)",
+              background: "transparent",
+              textAlign: "left",
+              color: "var(--ink-2)",
+              fontSize: 12.5,
+            }}
+          >
+            <Ico.Journey />
+            {t("palette.ask.bridge", locale)}
+          </button>
+        )}
       </div>
     </>
   );

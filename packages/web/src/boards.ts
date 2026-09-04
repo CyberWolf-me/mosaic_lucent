@@ -370,6 +370,53 @@ export async function fetchBoardHistory(boardId: string): Promise<BoardHistory |
   return (await res.json()) as BoardHistory;
 }
 
+/** One search result (Stage C4), as the search route returns it. */
+export interface BoardSearchHit {
+  kind: "node" | "turn" | "revision";
+  /** node: the node id · turn: the meeting id · revision: the seq. */
+  id: string;
+  nodeType?: string;
+  label?: string;
+  statement?: { kind: string; status: string; topic?: string };
+  meetingId?: string;
+  turnIndex?: number;
+  speaker?: string;
+  snippet?: string;
+  seq?: number;
+  at?: number;
+  actorName?: string;
+  /** The query tokens that fired — the "Matching: pricing, 20" line. */
+  matched: string[];
+  score: number;
+}
+
+export interface BoardSearchResponse {
+  query: string;
+  results: BoardSearchHit[];
+  historyDepth: number | null;
+  /** Older content exists beyond the entitlement and was not searched. */
+  windowTruncated: boolean;
+  windowCeiling: number;
+}
+
+/**
+ * Search a shared board (Stage C4): one retriever with Ask — same entitlement
+ * window, same corpus. Local (never-shared) boards keep the palette's local
+ * scan: there is nothing server-side to search for them.
+ */
+export async function searchBoard(
+  boardId: string,
+  query: string,
+  signal?: AbortSignal,
+): Promise<BoardSearchResponse | null> {
+  const res = await authed(
+    `/api/boards/${encodeURIComponent(boardId)}/search?q=${encodeURIComponent(query)}`,
+    { signal },
+  );
+  if (!res || !res.ok) return null;
+  return (await res.json()) as BoardSearchResponse;
+}
+
 /** A citation the ask route resolved against real, visible state. */
 export interface AskCitation {
   kind: "node" | "meeting" | "revision";

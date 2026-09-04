@@ -3,7 +3,11 @@ import {
   buildResults,
   filterBoard,
   filterItems,
+  groupSearchHits,
   moveIndex,
+  searchHitHint,
+  searchHitTarget,
+  searchHitTitle,
   type PaletteItem,
 } from "../src/ui/palette.js";
 
@@ -101,5 +105,68 @@ describe("moveIndex", () => {
     expect(moveIndex(0, -1, 3)).toBe(2);
     expect(moveIndex(2, 1, 3)).toBe(0);
     expect(moveIndex(1, 1, 3)).toBe(2);
+  });
+});
+
+describe("server search hits (Stage C4)", () => {
+  const node = {
+    kind: "node" as const,
+    id: "pricing",
+    nodeType: "decision",
+    label: "Pricing decision $15",
+    statement: { kind: "decision", status: "resolved", topic: "pricing" },
+    matched: ["pricing"],
+    score: 12,
+  };
+  const turn = {
+    kind: "turn" as const,
+    id: "mtg_a",
+    meetingId: "mtg_a",
+    turnIndex: 4,
+    speaker: "Maya",
+    snippet: "…maybe $20 for the pro tier…",
+    matched: ["pro", "tier"],
+    score: 2,
+  };
+  const revision = {
+    kind: "revision" as const,
+    id: "41",
+    seq: 41,
+    label: "added pricing region",
+    at: 1_700_000_000_000,
+    actorName: "Alex",
+    matched: ["pricing"],
+    score: 2,
+  };
+
+  it("groups hits into nodes, turns, revisions in arrival order", () => {
+    const g = groupSearchHits([node, revision, turn]);
+    expect(g.nodes).toEqual([node]);
+    expect(g.turns).toEqual([turn]);
+    expect(g.revisions).toEqual([revision]);
+    expect(g.total).toBe(3);
+  });
+
+  it("renders a node hint with its statement, a turn hint with meeting and turn, a revision hint with actor", () => {
+    expect(searchHitHint(node)).toBe("Node · decision · resolved · pricing");
+    expect(searchHitHint(turn)).toBe("Transcript · mtg_a · turn 4");
+    expect(searchHitHint(revision)).toBe("Revision · 41 · Alex");
+  });
+
+  it("titles: node label, speaker-quoted snippet, revision label with date", () => {
+    expect(searchHitTitle(node)).toBe("Pricing decision $15");
+    expect(searchHitTitle(turn)).toBe('Maya: "…maybe $20 for the pro tier…"');
+    expect(searchHitTitle(revision)).toContain("added pricing region");
+    expect(searchHitTitle(revision)).toMatch(/\(\d{4}-\d{2}-\d{2}\)$/);
+  });
+
+  it("maps every hit kind onto the existing citation navigation", () => {
+    expect(searchHitTarget(node)).toEqual({ kind: "node", id: "pricing" });
+    // A turn navigates to its MEETING at its turn — ?meeting= + ?turn=, the
+    // C3 coordinates, never a fourth navigation kind.
+    expect(searchHitTarget(turn)).toEqual({ kind: "meeting", id: "mtg_a", turnRange: [4, 4] });
+    expect(searchHitTarget(revision)).toEqual({ kind: "revision", id: "41" });
+    // A malformed turn hit (no meeting) is not navigable — null, not a guess.
+    expect(searchHitTarget({ ...turn, meetingId: undefined })).toBeNull();
   });
 });
