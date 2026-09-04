@@ -365,6 +365,9 @@ const scripts: Script[] = [
     // Stage A attribution polarity (the gate's F7). The ✓ commitment shapes:
     // a genuine 'I'll…' or 'Sarah will…' is an action WITH an owner, in any
     // meeting style — the golden cases pin the SET_ISSUE assignee.
+    // Stage D1: the deadline the words name finally lands on the op —
+    // dueDate resolved to ISO (A FIXED REFERENCE keeps the offline gate
+    // deterministic), status initialized to the canonical 'assigned'.
     match: (m) => /i'?ll prepare the launch brief/i.test(m),
     build: () => ({
       explanation:
@@ -379,7 +382,13 @@ const scripts: Script[] = [
         {
           op: "SET_ISSUE",
           id: "launch-brief",
-          issue: { type: "task", status: "To Do", assignee: "David" },
+          issue: {
+            type: "task",
+            status: "assigned",
+            assignee: "David",
+            dueDate: "2026-09-11",
+            description: "The final launch brief covering messaging and timeline.",
+          },
         },
         // Stage C2: a commitment is an action statement, open until done.
         {

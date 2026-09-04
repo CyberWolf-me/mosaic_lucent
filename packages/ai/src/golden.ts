@@ -342,6 +342,10 @@ export const GOLDEN_SET: readonly GoldenCase[] = [
   {
     id: "commitment-speaker-owned",
     // ✓ 'I'll…' — a genuine commitment: an action owned by the speaker.
+    // Stage D1 updated the mock's issue shape (the deadline lands, the
+    // status initializes to the canonical 'assigned', and the brief
+    // carries its description). The matcher deep-equals nested objects,
+    // so the expectation names the FULL issue — the exact D1 action.
     message: "From a brainstorm: David: 'I'll prepare the launch brief by Friday.'",
     summary: empty,
     expectOperations: [
@@ -349,9 +353,44 @@ export const GOLDEN_SET: readonly GoldenCase[] = [
       {
         op: "SET_ISSUE",
         id: "launch-brief",
-        issue: { type: "task", status: "To Do", assignee: "David" },
+        issue: {
+          type: "task",
+          status: "assigned",
+          assignee: "David",
+          dueDate: "2026-09-11",
+          description: "The final launch brief covering messaging and timeline.",
+        },
       },
     ],
+  },
+  {
+    id: "action-carries-deadline",
+    // Stage D1: the deadline the words name lands on the op — a resolved
+    // ISO dueDate (never the word 'Friday'), the canonical 'assigned'
+    // initialization, and a description when the words carry one. The mock
+    // script is the fixed-reference determinism stand-in.
+    message:
+      "From a planning meeting: David: 'I'll prepare the launch brief by Friday.'",
+    summary: empty,
+    expectOperations: [
+      { op: "CREATE_NODE", nodeType: "action" },
+      {
+        op: "SET_ISSUE",
+        id: "launch-brief",
+        issue: {
+          type: "task",
+          status: "assigned",
+          assignee: "David",
+          dueDate: "2026-09-11",
+          description: "The final launch brief covering messaging and timeline.",
+        },
+      },
+    ],
+    // The wrong answer: storing the word 'Friday' instead of resolving it.
+    // (A forbid on assignee alone would subset-match the legitimate op —
+    // the actual op DOES carry assignee David; only the unresolved-word
+    // form is wrong.)
+    forbidOperations: [{ op: "SET_ISSUE", issue: { dueDate: "Friday" } }],
   },
   {
     id: "commitment-third-person",
@@ -387,7 +426,8 @@ export const GOLDEN_SET: readonly GoldenCase[] = [
   {
     id: "hedged-mention-no-assignee",
     // ✗ 'we should probably ask Sarah' — a hedged suggestion, not a
-    // commitment. An action node MAY exist; an OWNER must not.
+    // commitment. An action node MAY exist; an OWNER must not — and per
+    // Stage D1, no deadline either: vague words create no executable work.
     message: "From a brainstorm: Jin: 'We should probably ask Sarah about pricing at some point.'",
     summary: empty,
     forbidOperations: [
@@ -396,6 +436,7 @@ export const GOLDEN_SET: readonly GoldenCase[] = [
         id: "review-prototypes",
         issue: { type: "task", status: "To Do", assignee: "Sarah" },
       },
+      { op: "SET_ISSUE", issue: { assignee: "Sarah", dueDate: "2026-09-11" } },
     ],
   },
   {
