@@ -12,3 +12,4 @@ export * from "./history.js";
 export * from "./repair.js";
 export * from "./authorship.js";
 export * from "./partial.js";
+export * from "./topicFold.js";
