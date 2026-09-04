@@ -552,3 +552,55 @@ intelligence route or server-side grouping (pure client-side by design),
 editing statements from the view (the HUD edits; the view reads), the
 "create a plan from today's meeting" bridge (the assignee display is its
 seam).
+
+## Amendment (2026-09-04): Stage D1 executed — the execution model
+
+The owner's decisions (1/1/1/1, with the review's two contract
+clarifications): node-based — an executable Action is an ordinary workspace
+node carrying a C2 action statement plus IssueFields, one system, no
+second store (the parallel-state shape refused since C1); dueDate +
+description in IssueFields (two clean layers: statement = what is this
+semantically, issue = how is the work managed); the six-value execution
+vocabulary as convention + teaching + mapping, NOT a zod enum (existing
+"To Do"/"In Review" boards load unchanged); the Board column as a
+PROJECTION of execution state (open/assigned→todo, in_progress/blocked→
+in_progress, completed/cancelled→done); no derivation between the two
+status systems in any direction ("assigned" is an initialization
+convention — unassigning a completed action leaves it completed);
+dependencies deferred entirely to D3; relative dates resolve
+deterministically against the meeting/message timestamp (never store
+"Friday").
+
+What Stage D1 shipped (commits and the acceptance scenario in
+`packages/server/test/stageD1.definition.e2e.test.ts`):
+
+- **The fields + the vocabulary + the resolver** (`@lucent/core`):
+  IssueFields gains dueDate (ISO regex-validated — the system's first date
+  field) and description (≤2000, the validator authoritative); UPDATE_ISSUE
+  patches both (null clears), the reducer never cross-writes; all five
+  places landed with the persistence round-trip test guarding the strip
+  trap. EXECUTION_STATUSES + executionStatusColumn (categorizeStatus maps
+  the canonical values first, legacy keywords unchanged — pinned);
+  actionNodes (statement.kind=action AND issue — a bare action statement
+  is not work); resolveDueDate (strictly-forward weekdays, 'the Nth'
+  rolled forward, explicit ISO passthrough, unresolvable words store
+  nothing).
+- **Teaching** (`@lucent/ai`, `@lucent/web`): visual-agent v6 (the
+  vocabulary, dueDate resolution, description, the no-derivation rule);
+  the meeting-extract DEADLINES clause (resolve against the MEETING's
+  date); the mock's launch-brief script finally carries the date it always
+  claimed (fixed reference, deterministic gate) with status 'assigned' and
+  a description; golden action-carries-deadline pins the full D1 action,
+  the hedged case forbids a dueDate on vague words. Gate stays at score 1.
+- **The surfaces** (`@lucent/web`, `@lucent/mcp`): the Intelligence action
+  row completes (assignee, due date, execution status beside the statement
+  lifecycle; the overdue tint rendered from Date.now(), never persisted —
+  isOverdue pure and tested); BoardView cards gain the due-date chip (red
+  when overdue) and the accessible deadline; MCP's issue summary exposes
+  dueDate + description (capped 200).
+
+Explicitly NOT built, per the plan and ADR 0027: dependencies in any form
+(D3's ADR must answer the eleven questions), a separate actions store, a
+new operation family, an execution-status enum or transitions, external
+execution links (D4/D6), an execution dashboard (D9), reminders,
+persisted overdue state, calendar/timezone infrastructure.

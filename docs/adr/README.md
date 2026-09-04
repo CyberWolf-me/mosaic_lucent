@@ -33,3 +33,4 @@ back to it.
 | [0024](0024-lexical-retrieval-one-seam-one-boundary.md) | Lexical retrieval: one seam, one boundary, two consumers (Stage C4) | Accepted |
 | [0025](0025-normalize-group-challenge-never-silently-overrule.md) | Topic entity resolution: normalize, group, and challenge — never silently overrule (Stage C5) | Accepted |
 | [0026](0026-intelligence-is-a-projection.md) | Intelligence is a projection: current semantic state, surfaced (Stage C6) | Accepted |
+| [0027](0027-the-action-is-executable-work.md) | The action is executable work: one node, two layers, one vocabulary (Stage D1) | Accepted |

@@ -1065,3 +1065,56 @@ open before settled, the assignee bridge on the action row, the inbox pair
 with evidence, the merge committing through the validated path and the
 board converging, Keep leaving state untouched, and every navigation
 riding the existing citation contract.
+
+## Stage D1 shipped: the execution model (2026-09, docs/17 amendment, ADR 0027)
+
+[x] The fields (`@lucent/core`): IssueFields gains dueDate (ISO YYYY-MM-DD,
+    regex-validated — the first date field in the system) and description
+    (≤2000). SET_ISSUE carries both; UPDATE_ISSUE patches (null clears);
+    the reducer never cross-writes — status independence pinned both ways
+    (unassign a completed action → completed; change status → assignee
+    untouched; the statement lifecycle never derives from issue status).
+    All five places (model, op schema, reducer, inverse, workspaceSchema —
+    looser on load); the persistence round-trip test guards the strip trap;
+    DELETE_NODE's undo restore carries both; undo round-trips SET and
+    UPDATE.
+[x] The vocabulary (`@lucent/core`): EXECUTION_STATUSES (open/assigned/
+    in_progress/blocked/completed/cancelled) — convention, not an enum;
+    executionStatusColumn is the explicit Board projection; categorizeStatus
+    maps the canonical values first, legacy labels ("To Do", "In Review",
+    "Blocked", "Done") keep today's keyword behavior, pinned.
+[x] The selector + resolver (`@lucent/core`): actionNodes selects
+    statement.kind=action AND issue (a bare action statement is not work);
+    resolveDueDate — deterministic relative-date resolution against a
+    reference timestamp (strictly-forward weekdays — today never matches;
+    'next X' is the upcoming X; 'the Nth' rolls forward; ISO passthrough;
+    unresolvable → undefined, never a guess). Two resolver bugs caught by
+    its own tests before commit.
+[x] Teaching (`@lucent/ai`, `@lucent/web`): visual-agent v6 + the
+    meeting-extract DEADLINES clause (resolve against the meeting's date;
+    never store 'Friday'; owner+deadline → assigned as an INITIALIZATION
+    convention, not derivation); the mock's launch-brief script carries
+    dueDate 2026-09-11 + status assigned + a description; golden
+    action-carries-deadline pins the full D1 action; the hedged case forbids
+    a dueDate. Offline gate: score 1.
+[x] The surfaces (`@lucent/web`, `@lucent/mcp`): IntelligenceRow carries
+    dueDate + executionStatus (the assignee-bridge pattern); isOverdue
+    pure/tested (timezone-naive; the day after counts, today doesn't;
+    completed/cancelled never overdue); the overdue tint rendered, never
+    persisted; BoardView cards show the due-date chip + the accessible
+    deadline; MCP's issue summary exposes dueDate + description (≤200).
+[x] The record: ADR 0027 (the D1 contract sentence; the eleven dependency
+    questions as D3's ADR outline), docs/17 D1 amendment, this checklist
+    section, the changeset, and the stageD1 definition e2e.
+[ ] Dependencies — not built (D3's ADR; no dependsOn field exists).
+[ ] External execution links (provider/externalId/url) — not built (D4/D6).
+[ ] An execution dashboard — not built (D9; Board + Intelligence project D1).
+[ ] Reminders, persisted overdue state, calendar/timezone infrastructure —
+    not built (the reference-timestamp rule is D1's whole date policy).
+
+Gate: typecheck 0 across all six packages; tests green (ai 185, core 387,
+i18n 14, mcp 26, server 875+80 PG in CI, web 633); the stageD1 definition
+scenario passes the acceptance story: 20 actions across four creation
+paths, 20/20 persisted/synchronized/undoable/attributable/editable, the
+status sweep (six canonical + legacy compatibility), provenance intact,
+and the C5 negative test (a manual topic edit never canonicalized).
