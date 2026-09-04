@@ -502,6 +502,7 @@ const RAIL_ITEMS: { id: string; icon: keyof typeof Ico; label: string; view: Vie
   { id: "board", icon: "Grid", label: "Board", view: "board" },
   { id: "document", icon: "Book", label: "Document", view: "document" },
   { id: "meeting", icon: "Journey", label: "Meeting", view: "meeting" },
+  { id: "intelligence", icon: "Sparkle", label: "Intelligence", view: "intelligence" },
   { id: "wireframe", icon: "Grid", label: "Wireframe", view: "wireframe" },
 ];
 

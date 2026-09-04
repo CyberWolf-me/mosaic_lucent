@@ -122,6 +122,13 @@ export function CommandOverlay({
         run: { kind: "view", view: "meeting" },
       },
       {
+        id: "v-intelligence",
+        label: "Open intelligence",
+        hint: "Decisions · Actions · Risks",
+        group: "view",
+        run: { kind: "view", view: "intelligence" },
+      },
+      {
         id: "v-wireframe",
         label: "Open wireframe",
         hint: "Checkout · 1440",

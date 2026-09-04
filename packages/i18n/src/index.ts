@@ -69,6 +69,32 @@ export const en: Messages = {
   "palette.ask.hint": "Enter sends your question to Ask; Esc returns to search",
   "toast.inserted": "Inserted {name}.",
   "toast.insert.conflict": "Couldn't insert {name} — it conflicts with the current board.",
+  "intel.title": "Intelligence",
+  "intel.subtitle":
+    "A projection of the current semantic workspace — what is true now, every row traceable to its source.",
+  "intel.section.decision": "Decisions",
+  "intel.section.proposal": "Proposals",
+  "intel.section.question": "Open questions",
+  "intel.section.action": "Actions",
+  "intel.section.requirement": "Requirements",
+  "intel.section.risk": "Risks",
+  "intel.empty.section": "No {kind} yet — statements come from meetings, the HUD editor, and Ask.",
+  "intel.empty.view": "Nothing to show yet",
+  "intel.empty.view.hint":
+    "Statements appear here as meetings, edits, and conversations add them to the board.",
+  "intel.row.assignee": "→ {name}",
+  "intel.row.supersedes": "supersedes {n}",
+  "intel.inbox.title": "Recommendations",
+  "intel.inbox.empty": "No open recommendations — topics look consistent.",
+  "intel.inbox.dup": "Possible duplicate topic: “{dup}” ≈ “{existing}”",
+  "intel.inbox.evidence": "{a} statements on “{existing}”, {b} on “{dup}”, from {m} meeting(s)",
+  "intel.inbox.merge": "Merge",
+  "intel.inbox.keep": "Keep separate",
+  "intel.inbox.merge.preview":
+    "Merge “{dup}” → “{existing}”. This will update {n} statement(s). Nothing will be deleted.",
+  "intel.inbox.merge.confirm": "Merge",
+  "intel.inbox.merge.cancel": "Cancel",
+  "intel.inbox.merge.failed": "The merge did not validate against the current board.",
 };
 
 /**
@@ -108,6 +134,32 @@ export const hu: Messages = {
   "palette.ask.hint": "Az Enter elküldi a kérdést; az Esc visszaáll keresésre",
   "toast.inserted": "{name} beszúrva.",
   "toast.insert.conflict": "{name} nem szúrható be — ütközik a tábla jelenlegi állapotával.",
+  "intel.title": "Intelligencia",
+  "intel.subtitle":
+    "A jelenlegi szemantikai munkaterület vetülete — mi igaz most, minden sor visszavezethető a forrására.",
+  "intel.section.decision": "Döntések",
+  "intel.section.proposal": "Javaslatok",
+  "intel.section.question": "Nyitott kérdések",
+  "intel.section.action": "Teendők",
+  "intel.section.requirement": "Követelmények",
+  "intel.section.risk": "Kockázatok",
+  "intel.empty.section": "Még nincs {kind} — a statementek érkeznek meetingekből, a szerkesztőből és a Kérdezésből.",
+  "intel.empty.view": "Még nincs mit mutatni",
+  "intel.empty.view.hint":
+    "A statementek akkor jelennek meg itt, ahogy meetingek, szerkesztések és beszélgetések hozzáadják őket a táblához.",
+  "intel.row.assignee": "felelős: {name}",
+  "intel.row.supersedes": "váltja: {n}",
+  "intel.inbox.title": "Javaslatok",
+  "intel.inbox.empty": "Nincs nyitott javaslat — a témák konzisztentének tűnnek.",
+  "intel.inbox.dup": "Lehetséges kettős téma: „{dup}” ≈ „{existing}”",
+  "intel.inbox.evidence": "{a} statement a(z) „{existing}” témán, {b} a(z) „{dup}” témán, {m} meetingből",
+  "intel.inbox.merge": "Egyesítés",
+  "intel.inbox.keep": "Külön tartás",
+  "intel.inbox.merge.preview":
+    "„{dup}” → „{existing}” egyesítés. Ez {n} statementet frissít. Semmi nem törlődik.",
+  "intel.inbox.merge.confirm": "Egyesítés",
+  "intel.inbox.merge.cancel": "Mégse",
+  "intel.inbox.merge.failed": "Az egyesítés nem validálódott a jelenlegi tábla ellen.",
 };
 
 const BUNDLES: Record<Locale, Messages> = { en, hu };

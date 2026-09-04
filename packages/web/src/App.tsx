@@ -10,6 +10,7 @@ import { AdminView } from "./views/AdminView.js";
 import { AnalyticsView } from "./views/AnalyticsView.js";
 import { MobileGate } from "./views/MobileBoardView.js";
 import { MeetingView } from "./views/MeetingView.js";
+import { IntelligenceView } from "./views/IntelligenceView.js";
 import { WireframeView } from "./views/WireframeView.js";
 import { SequenceView } from "./views/SequenceView.js";
 import { ErView } from "./views/ErView.js";
@@ -61,6 +62,8 @@ function Router({ onOpenSettings }: { onOpenSettings: (section?: string) => void
       return <HistoryView onOpenSettings={onOpenSettings} />;
     case "meeting":
       return <MeetingView onOpenSettings={onOpenSettings} />;
+    case "intelligence":
+      return <IntelligenceView onOpenSettings={onOpenSettings} />;
     case "wireframe":
       return <WireframeView onOpenSettings={onOpenSettings} />;
     case "sequence":

@@ -74,6 +74,7 @@ export type View =
   | "canvas"
   | "history"
   | "meeting"
+  | "intelligence"
   | "wireframe"
   | "sequence"
   | "er"
