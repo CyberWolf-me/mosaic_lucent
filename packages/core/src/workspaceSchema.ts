@@ -54,6 +54,13 @@ const nodeSchema = z.object({
       storyPoints: z.number().min(0).max(1000).optional(),
       labels: z.array(z.string()).max(20).optional(),
       parentId: z.string().min(1).optional(),
+      // Stage D1 (ADR 0027): the execution fields — restated deliberately
+      // like every issue field; missing here means stripped on every load.
+      // The load path is deliberately LOOSER than the op schema (no dueDate
+      // regex): a stored board whose date predates the contract loads
+      // rather than being refused (the workspaceSchema precedent).
+      dueDate: z.string().optional(),
+      description: z.string().optional(),
     })
     .optional(),
   // Statement semantics (Stage C2). Restated here rather than imported from

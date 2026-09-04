@@ -167,6 +167,17 @@ export function applyOperation(workspace: Workspace, op: Operation): Workspace {
           if (op.parentId === null) delete issue.parentId;
           else issue.parentId = op.parentId;
         }
+        // Stage D1: the execution fields patch independently — no field ever
+        // derives another (ADR 0027: status stays untouched when the assignee
+        // changes, and vice versa).
+        if (op.dueDate !== undefined) {
+          if (op.dueDate === null) delete issue.dueDate;
+          else issue.dueDate = op.dueDate;
+        }
+        if (op.description !== undefined) {
+          if (op.description === null) delete issue.description;
+          else issue.description = op.description;
+        }
         next.nodes[op.id] = { ...node, issue };
       }
       break;

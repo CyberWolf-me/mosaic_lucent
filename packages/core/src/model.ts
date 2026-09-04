@@ -71,7 +71,10 @@ export type IssuePriority = "highest" | "high" | "medium" | "low" | "lowest";
 
 export interface IssueFields {
   type: IssueType;
-  /** Free-form status label ("To Do", "In Review", "Blocked", "Done"). */
+  /** Free-form status label ("To Do", "In Review", "Blocked", "Done" — or a
+   * Stage D1 canonical execution status: open/assigned/in_progress/blocked/
+   * completed/cancelled). The vocabulary is convention + teaching, not an
+   * enum: existing boards keep whatever labels they already carry. */
   status: string;
   /** Which column a board places this in; derived from status when omitted. */
   statusCategory: IssueStatusCategory;
@@ -82,6 +85,134 @@ export interface IssueFields {
   labels?: string[];
   /** Parent work item (an epic id for a story, a story id for a subtask). */
   parentId?: string;
+  /** Stage D1: the work's deadline, ISO YYYY-MM-DD. The first date field in
+   * the system — words like "by Friday" are resolved at emission against a
+   * reference timestamp (never stored as words), so the same meeting always
+   * produces the same date. */
+  dueDate?: string;
+  /** Stage D1: what the work involves — the action's body text. Capped at
+   * 2000 like Comment.body; the validator is authoritative. */
+  description?: string;
+}
+
+/* -------------------------------------------------------------------------- */
+/* The execution model (Stage D1, ADR 0027)                                   */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The canonical execution-status vocabulary (Stage D1). Deliberately a
+ * documented list, NOT a zod enum: `issue.status` stays a free-form string so
+ * existing boards ("To Do", "In Review", "Done") load unchanged. The
+ * vocabulary is what the AI is taught, what Intelligence renders, and what
+ * `executionStatusColumn` maps — convention over constraint.
+ */
+export const EXECUTION_STATUSES = [
+  "open",
+  "assigned",
+  "in_progress",
+  "blocked",
+  "completed",
+  "cancelled",
+] as const;
+
+export type ExecutionStatus = (typeof EXECUTION_STATUSES)[number];
+
+/**
+ * The Board-column projection of the canonical execution statuses (ADR 0027):
+ * the column is a PRESENTATION of the execution state, never its definition.
+ * Legacy labels keep `categorizeStatus`'s keyword behavior; only these six
+ * values take the explicit mapping.
+ */
+export function executionStatusColumn(status: string): IssueStatusCategory | undefined {
+  switch (status) {
+    case "open":
+    case "assigned":
+      return "todo";
+    case "in_progress":
+    case "blocked":
+      return "in_progress";
+    case "completed":
+    case "cancelled":
+      return "done";
+    default:
+      return undefined;
+  }
+}
+
+/**
+ * Resolve a relative deadline phrase to an ISO date, against a reference
+ * timestamp (Stage D1's determinism rule: same words + same reference =
+ * same date; never store "Friday"). Pure — callers pass the meeting/message
+ * time the phrase was spoken in. Recognized: weekday names ("by Friday",
+ * "next Monday" — strictly forward, today never matches), "tomorrow",
+ * "today", "end of week" (Friday), and "the Nth"/"before the Nth" (day of
+ * the reference's month; a past date rolls to the next month — "the 15th"
+ * said on the 20th means next month's). Returns undefined when the words
+ * name no date: an unresolvable deadline stores nothing, never a guess.
+ */
+export function resolveDueDate(words: string, referenceAt: number): string | undefined {
+  const text = words.toLowerCase();
+  const ref = new Date(referenceAt);
+  if (Number.isNaN(ref.getTime())) return undefined;
+  const iso = (d: Date): string =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  const addDays = (n: number): Date => {
+    const d = new Date(ref);
+    d.setDate(d.getDate() + n);
+    return d;
+  };
+  // The next strictly-forward weekday (0=Sunday…6=Saturday). Both "by
+  // Friday" and "by next Friday" said mid-week mean the upcoming Friday —
+  // the way people speak (ADR 0027's reference rule); the only case the
+  // "next" word matters for is handled by strict forwardness itself, since
+  // TODAY never matches.
+  const WEEKDAYS: Record<string, number> = {
+    sunday: 0,
+    monday: 1,
+    tuesday: 2,
+    wednesday: 3,
+    thursday: 4,
+    friday: 5,
+    saturday: 6,
+  };
+  const nextWeekday = (target: number): Date => {
+    const delta = ((target - ref.getDay() + 7) % 7) || 7;
+    return addDays(delta);
+  };
+  const nextWeek = /next\s+(sunday|monday|tuesday|wednesday|thursday|friday|saturday)/.exec(text);
+  if (nextWeek) return iso(nextWeekday(WEEKDAYS[nextWeek[1]!]!));
+  const thisWeek = /(^|[^a-z])(sunday|monday|tuesday|wednesday|thursday|friday|saturday)/.exec(text);
+  if (thisWeek) return iso(nextWeekday(WEEKDAYS[thisWeek[2]!]!));
+  if (/\btomorrow\b/.test(text)) return iso(addDays(1));
+  if (/\btoday\b/.test(text)) return iso(ref);
+  if (/\bend of (the )?week\b/.test(text)) return iso(nextWeekday(WEEKDAYS.friday!));
+  // "the 15th" / "before the 3rd" — day of month, rolled forward when past.
+  const nth = /\b(?:by |before |on )?the (\d{1,2})(?:st|nd|rd|th)\b/.exec(text);
+  if (nth) {
+    const day = Number(nth[1]);
+    if (day >= 1 && day <= 31) {
+      let d = new Date(ref.getFullYear(), ref.getMonth(), day);
+      if (d < ref) d = new Date(ref.getFullYear(), ref.getMonth() + 1, day);
+      return iso(d);
+    }
+  }
+  // An explicit ISO date passes through verbatim (the AI may have one).
+  const explicit = /\b(\d{4}-\d{2}-\d{2})\b/.exec(words);
+  if (explicit) return explicit[1]!;
+  return undefined;
+}
+
+/**
+ * The executable actions on a board (Stage D1): nodes that ARE actions
+ * (statement.kind === "action") AND carry work-tracking fields — the C2
+ * statement says "this is work to do"; the issue fields make it executable.
+ * A bare action statement without an issue is still just a statement
+ * ("maybe we should redesign onboarding" is not work), so it is excluded.
+ */
+export function actionNodes(workspace: Workspace): Node[] {
+  return Object.values(workspace.nodes).filter(
+    (n) => n.statement?.kind === "action" && n.issue,
+  );
 }
 
 /* -------------------------------------------------------------------------- */
@@ -416,6 +547,11 @@ export function parseMentions(body: string): string[] {
  */
 export function categorizeStatus(status: string): IssueStatusCategory {
   const s = status.trim().toLowerCase();
+  // The canonical execution statuses take the explicit D1 projection first
+  // (ADR 0027) — the Board column is a presentation of execution state.
+  // Legacy labels fall through to the keyword behavior unchanged.
+  const canonical = executionStatusColumn(s);
+  if (canonical) return canonical;
   if (/(^|\b)(done|closed|resolved|complete|completed|shipped|merged)\b/.test(s)) return "done";
   if (
     /(^|\b)(in progress|in-progress|doing|active|review|in review|testing|qa|blocked|started)\b/.test(

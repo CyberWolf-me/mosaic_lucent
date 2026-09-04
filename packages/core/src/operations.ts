@@ -40,6 +40,16 @@ const issueFieldsSchema = z.object({
   storyPoints: z.number().min(0).max(1000).optional(),
   labels: z.array(z.string()).max(20).optional(),
   parentId: z.string().min(1).optional(),
+  /** Stage D1: the work's deadline. ISO YYYY-MM-DD — resolved from words at
+   * emission ("by Friday" never stores "Friday"); the field is the first
+   * date in the system, so the format is strict. */
+  dueDate: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, "dueDate must be an ISO YYYY-MM-DD date")
+    .optional(),
+  /** Stage D1: what the work actually involves. Capped like Comment.body —
+   * the server/core validator is authoritative even where a textarea isn't. */
+  description: z.string().max(2000).optional(),
 });
 
 /**
@@ -208,7 +218,9 @@ const operationSchema = z.discriminatedUnion("op", [
   }),
   /**
    * Patch individual issue fields — the common "move this card to In Progress"
-   * or "assign to Sam" edit, without resending the whole issue.
+   * or "assign to Sam" edit, without resending the whole issue. Null clears;
+   * undefined leaves untouched. Status and the D1 execution fields patch
+   * independently — no field ever derives another (ADR 0027).
    */
   z.object({
     op: z.literal("UPDATE_ISSUE"),
@@ -220,6 +232,12 @@ const operationSchema = z.discriminatedUnion("op", [
     storyPoints: z.number().min(0).max(1000).nullable().optional(),
     labels: z.array(z.string()).max(20).optional(),
     parentId: z.string().min(1).nullable().optional(),
+    dueDate: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/, "dueDate must be an ISO YYYY-MM-DD date")
+      .nullable()
+      .optional(),
+    description: z.string().max(2000).nullable().optional(),
   }),
   /**
    * Attach or replace the semantic statement on a node (Stage C2): the
