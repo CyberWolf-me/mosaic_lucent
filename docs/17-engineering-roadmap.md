@@ -685,3 +685,53 @@ Explicitly NOT built, per ADR 0029: cross-board dependencies, a
 dependency-editing UI, Gantt/timeline rendering, auto-unblocking or any
 automatic status transition (upstream completing never writes downstream
 status), blocked notifications, SLA analytics, persisted anything.
+
+## Amendment (2026-09-05): Stage D4 executed — the integration platform
+
+The owner's milestone, taken as the recommended options: the
+ExecutionProvider interface + ExternalTask/mapStatus/subscribeToChanges in
+@lucent/server (the LLMProvider mirror — injected, not imported; ZERO core
+changes, the acceptance gate's literal demand); the IntegrationStore with
+TWO record families (connections — org-scoped, SsoStore shape, credential
+REFERENCE never a secret value; task links — board-scoped by (board,
+node, provider), store-side, keeping the workspace blob free of provider
+strings); reference-first credentials (no cipher enters the codebase in
+D4); and NO proposal-pipeline changes (an external action is not a canvas
+op — D5's approval machinery takes the Stripe-event-ledger precedent, not
+B3).
+
+What Stage D4 shipped (commits and the acceptance scenario in
+`packages/server/test/stageD4.definition.e2e.test.ts`):
+
+- **The seam** (`0ebe806`): src/integrations/ — provider.ts (the
+  interface + the normalized shapes), fake.ts (the FakeProvider: NOT a
+  stub — deterministic ids, a deliberately different external vocabulary
+  so mapStatus is a real translation, recorded calls, the declared D7
+  change bus live in-memory), integrations.ts (the store: idempotent
+  connection upserts, disable-not-delete, fingerprinted admin views,
+  board-scoped links). 14 unit tests.
+- **The wiring** (`173fe8c`): the integrations bundle threads through
+  AppDeps/RouteServices/main.ts (undefined → 503, fail-closed; role guard
+  before store check — a 503 is not an org oracle, pinned). The connection
+  routes (owner floor: fingerprinted list, idempotent PUT refusing
+  providers nothing implements with a 400, DELETE → disabled) and the link
+  read (viewer floor). 5 route tests.
+- **The acceptance path** (`92b0ea9`): POST .../integrations/:provider/sync
+  (editor floor, requires an ACTIVE connection): actionNodes() →
+  createTask per unlinked node → the registry links them; drift-only
+  updates; one node's provider failure fails that node, never the batch.
+  Labeled honestly as D5's PRE-APPROVAL SKELETON. The definition e2e —
+  the owner's acceptance, first-run green: 10 actions → one sync → 10/10
+  created + linked (deterministic fake-1..10, urls, translated statuses);
+  second sync → 10/10 skipped (the link is the idempotency key); drift →
+  updateTask + lastSyncedStatus moves (in_progress → active); unlink +
+  re-sync re-creates; the workspace blob carries ZERO provider strings
+  throughout; a viewer cannot sync, links are viewer-readable.
+
+Explicitly NOT built, per ADR 0030: any real provider (D6); the approval/
+idempotency/outbox machinery (D5); the PG store pair + migration (lands
+with D6 when Linear demands persistence); reversible encryption at rest
+(none enters the codebase in D4; the TOTP threat-model note governs any
+future stored token); webhook routes (D7); subscribeToChanges server
+plumbing; OAuth flows; the web UI's "synced to X" chip beyond the link
+GET; MCP link exposure.

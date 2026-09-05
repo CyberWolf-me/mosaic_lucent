@@ -36,3 +36,4 @@ back to it.
 | [0027](0027-the-action-is-executable-work.md) | The action is executable work: one node, two layers, one vocabulary (Stage D1) | Accepted |
 | [0028](0028-the-plan-is-a-projection.md) | The plan is a projection, proposed and approved (Stage D2) | Accepted |
 | [0029](0029-the-execution-graph.md) | The execution graph: typed edges, cycle rejection, derived truth (Stage D3) | Accepted |
+| [0030](0030-the-adapter-architecture.md) | The adapter architecture: one seam, proven fake-first (Stage D4) | Accepted |

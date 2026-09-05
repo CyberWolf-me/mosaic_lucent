@@ -1192,3 +1192,46 @@ passes the acceptance story: 10 tasks, 6 dependencies landing, the cycle
 dedup + the overdue at-risk with blocked-not-excluded), recovery (blocked
 → completed vanishes; dueDate moves → at-risk vanishes), DELETE+undo
 round-trips, and the derived truth rendering on every surface.
+
+## Stage D4 shipped: the integration platform (2026-09, docs/17 amendment, ADR 0030)
+
+[x] The seam (`@lucent/server`, src/integrations/): ExecutionProvider +
+    ExternalTask + Create/UpdateTaskInput + ExternalTaskChange in
+    provider.ts — in the SERVER package (the LLMProvider mirror; core
+    untouched, the acceptance's literal demand). The FakeProvider: a test
+    double that behaves like a real system (deterministic fake-N ids, the
+    todo/active/done/blocked/canceled vocabulary so mapStatus translates
+    for real, every call recorded, the D7 change bus live in-memory). 14
+    tests.
+[x] The store (src/integrations/integrations.ts): connections (org-scoped,
+    credential REFERENCE — env var name / vault pointer, never a secret
+    value; idempotent upsert per (org,provider); disable-not-delete;
+    fingerprinted admin views, never the full reference) + task links
+    (board-scoped by (board,node,provider) → externalId/url/
+    lastSyncedStatus — store-side, so the workspace blob carries zero
+    provider strings, pinned by test).
+[x] The wiring: the integrations bundle in AppDeps/RouteServices/main.ts
+    (undefined → 503 fail-closed; role guard BEFORE the store check —
+    pinned: anonymous 401, owner 503). The connection routes (owner floor)
+    + the link read (viewer floor). 5 route tests.
+[x] The acceptance path: POST /api/boards/:id/integrations/:provider/sync
+    (editor floor, ACTIVE connection required): createTask per unlinked
+    action node → link; drift-only updateTask; per-node failure reporting
+    (never the batch). stageD4.definition.e2e — 10 actions → 10/10
+    created+linked (fake-1..10 + urls + translated statuses); re-sync →
+    10/10 skipped; drift → updateTask + lastSyncedStatus moves; unlink +
+    re-sync re-creates; the blob provider-string-free throughout; viewer
+    sync 404 / links viewer-readable.
+[x] The record: ADR 0030, docs/17 D4 amendment, this section, the changeset.
+[ ] Any real provider — D6 (Linear first; the adapter makes it one file +
+    a putConnection call).
+[ ] The approval/idempotency/outbox machinery — D5 (the sync route is the
+    labeled pre-approval skeleton; the Stripe event ledger is its shape).
+[ ] The PG store pair + migration — D6 (InMemory ships per the
+    optional-store pattern).
+[ ] Webhook routes, subscribeToChanges plumbing, OAuth, encryption at
+    rest, the web "synced to X" chip, MCP link exposure — D5–D8 territory.
+
+Gate: typecheck 0 across all six packages; server 900 passing (+20 in D4:
+14 seam + 5 routes + 1 definition); no PG surface (the InMemory pair
+ships; no LUCENT_TEST_DATABASE_URL dependency).
