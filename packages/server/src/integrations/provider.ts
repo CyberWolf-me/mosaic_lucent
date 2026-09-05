@@ -90,8 +90,35 @@ export interface ExecutionProvider {
    * vocabulary (open/assigned/in_progress/blocked/completed/cancelled).
    * Providers own their external words; Lucent's vocabulary stays one set —
    * the ADR 0027 doctrine, applied at the adapter boundary.
+   *
+   * Stage D6's correction (the review's rule): NEVER GUESS. An unknown
+   * external status (a custom workflow state, "In QA", "Deployed") returns
+   * undefined — the surfaces preserve Lucent's current state and surface a
+   * warning, the same discipline as citation validation: untrusted input
+   * drops with a visible reason, never a silent overwrite. mapStatus
+   * returning a value is a claim the provider KNOWS the word.
    */
-  mapStatus(externalStatus: string): ExecutionStatus;
+  mapStatus(externalStatus: string): ExecutionStatus | undefined;
+  /**
+   * The reverse direction (Stage D6): Lucent's canonical word → the
+   * provider's external status NAME. Implementations resolve names to the
+   * provider's own state ids at call time (Linear's WorkflowState UUIDs,
+   * fetched once and cached per provider instance — one query per batch,
+   * not per item).
+   */
+  toExternalStatus?(lucentStatus: string): string;
+  /**
+   * THE AMBIGUOUS-CREATE RECOVERY (Stage D6, ADR 0032's effect contract):
+   * after an uncertain timeout the executor calls recoverCreate with the
+   * stable Lucent marker stamped into the task's description; the provider
+   * searches its own store — found means the create LANDED (link it, 0
+   * duplicates), not found means it never arrived (retry the create).
+   * Providers with native idempotency keys may leave this unimplemented;
+   * Linear-style providers MUST implement it — that is what makes
+   * "at-least-once delivery + provider-specific reconciliation" the real
+   * contract instead of a hope.
+   */
+  recoverCreate?(marker: string): Promise<ExternalTask | undefined>;
   /**
    * D7's inbound sync seam — DECLARED in D4, plumbed when webhooks ship.
    * Returns an unsubscribe function. The FakeProvider implements it as an
@@ -99,3 +126,18 @@ export interface ExecutionProvider {
    */
   subscribeToChanges?(listener: (change: ExternalTaskChange) => void): () => void;
 }
+
+/**
+ * The provider factory (Stage D6): the map holds FACTORIES, not instances,
+ * because a Linear credential is per-ORG (the connection's credentialRef)
+ * while the map is process-global. The route resolves the connection
+ * (existence/active guards are its 404/409 answers), then invokes the
+ * factory with it; the factory resolves credentialRef → the actual key and
+ * reads the connection's provider config (e.g. Linear's teamId). The ADR
+ * 0030 interface stays frozen — this changes only who constructs the
+ * provider, never what the provider is.
+ */
+export type ExecutionProviderFactory = (connection: {
+  credentialRef: string;
+  config?: Record<string, string>;
+}) => ExecutionProvider;

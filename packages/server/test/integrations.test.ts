@@ -57,8 +57,9 @@ describe("FakeProvider", () => {
     expect(fake.mapStatus("blocked")).toBe("blocked");
     expect(fake.mapStatus("done")).toBe("completed");
     expect(fake.mapStatus("canceled")).toBe("cancelled");
-    // An unknown word degrades to open — the honest default, never a crash.
-    expect(fake.mapStatus("whatever")).toBe("open");
+    // An unknown word returns undefined — NEVER a guess (ADR 0032's rule,
+    // the D6 correction): the surface preserves Lucent state and warns.
+    expect(fake.mapStatus("whatever")).toBeUndefined();
   });
 
   it("records every call so tests assert what the platform asked for", async () => {

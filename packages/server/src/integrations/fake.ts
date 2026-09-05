@@ -126,8 +126,9 @@ export class FakeProvider implements ExecutionProvider {
     );
   }
 
-  /** The D1 vocabulary translated into the fake's external words. */
-  mapStatus(externalStatus: string): ExecutionStatus {
+  /** The D1 vocabulary translated into the fake's external words. An
+   * UNKNOWN word returns undefined — never a guess (ADR 0032's rule). */
+  mapStatus(externalStatus: string): ExecutionStatus | undefined {
     switch (externalStatus) {
       case "active":
         return "in_progress";
@@ -138,8 +139,9 @@ export class FakeProvider implements ExecutionProvider {
       case "canceled":
         return "cancelled";
       case "todo":
-      default:
         return "open";
+      default:
+        return undefined;
     }
   }
 
@@ -160,6 +162,21 @@ export class FakeProvider implements ExecutionProvider {
       default:
         return "todo";
     }
+  }
+
+  /**
+   * The D6 recovery seam, live in the fake: find a task whose title or
+   * description carries the Lucent marker. The fake stores tasks whole, so
+   * the scan is direct; Linear's real implementation queries
+   * description-contains.
+   */
+  async recoverCreate(marker: string): Promise<ExternalTask | undefined> {
+    for (const task of this.tasks.values()) {
+      if (task.title.includes(marker)) return task;
+      // The fake's createTask doesn't store descriptions; the byKey map is
+      // the marker-indexed path for keyed creates.
+    }
+    return undefined;
   }
 
   /**

@@ -56,7 +56,7 @@ async function makeHarness(withIntegrations = true) {
       ? {
           integrations: {
             store: new InMemoryIntegrationStore(),
-            providers: new Map([["fake", fake]]),
+            providers: new Map([["fake", () => fake]]),
           },
         }
       : {}),

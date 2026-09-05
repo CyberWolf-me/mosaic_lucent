@@ -24,7 +24,38 @@ import type { IntegrationProviderName } from "../integrations/integrations.js";
 const putConnectionSchema = z.object({
   credentialRef: z.string().min(1).max(MAX_CREDENTIAL_REF_CHARS),
   scopes: z.array(z.string().min(1).max(60)).max(10).optional(),
+  /** Stage D6: provider-specific configuration (Linear's teamId). */
+  config: z.record(z.string().min(1).max(60), z.string().min(1).max(200)).optional(),
 });
+
+/**
+ * Stage D6: the connection → the live provider. The route has already
+ * answered 404/409 for existence/status; this resolves credentialRef →
+ * process.env (ADR 0032's TEMPORARY single-deployment mechanism, named in
+ * the ADR) and invokes the factory with the connection's config. An unset
+ * env ref answers 503 — the honest "credential not configured", never a
+ * silent skip.
+ */
+function resolveProvider(
+  integrations: NonNullable<import("./context.js").RouteServices["integrations"]>,
+  providerName: string,
+  connection: { id: string; credentialRef: string; config?: Record<string, string> },
+):
+  | { ok: true; provider: import("../integrations/provider.js").ExecutionProvider }
+  | { ok: false; error: string } {
+  const factory = integrations.providers.get(providerName);
+  if (!factory) {
+    return { ok: false as const, error: `no provider implementation named "${providerName}" is loaded` };
+  }
+  try {
+    return { ok: true as const, provider: factory(connection) };
+  } catch (err) {
+    // The factory's honest errors: an unset env credential, a missing
+    // teamId — the configuration problem, surfaced as the 503/400 the
+    // caller maps it to.
+    return { ok: false as const, error: (err as Error).message };
+  }
+}
 
 export const registerIntegrationRoutes: RegisterRoutes = (router, s) => {
   const { integrations, send, readBody, requireUser, requireOrgRole, requireBoardRole, requireCsrf, meter } = s;
@@ -150,11 +181,6 @@ export const registerIntegrationRoutes: RegisterRoutes = (router, s) => {
     if (!guard.ok) return;
     if (!integrations) return send(res, 503, { error: "integrations are not configured" });
     const providerName = ctx.param("provider");
-    const provider = integrations.providers.get(providerName);
-    if (!provider) {
-      send(res, 400, { error: `no provider implementation named "${providerName}" is loaded` });
-      return;
-    }
     // The connection must exist AND be active — syncing through a disabled
     // or never-configured connection is refused, not silently skipped.
     const connection = await integrations.store.connection(guard.board.orgId, providerName);
@@ -166,6 +192,14 @@ export const registerIntegrationRoutes: RegisterRoutes = (router, s) => {
       send(res, 409, { error: `the ${providerName} connection is ${connection.status}` });
       return;
     }
+    // Stage D6: the factory — the per-org credential resolved through the
+    // connection, not a process-global instance.
+    const resolved = resolveProvider(integrations, providerName, connection);
+    if (!resolved.ok) {
+      send(res, 400, { error: resolved.error });
+      return;
+    }
+    const provider = resolved.provider;
 
     // The board's executable actions (ADR 0027's selector — the model the
     // provider targets) and their existing links.
@@ -266,11 +300,6 @@ router.post("/api/boards/:id/integrations/:provider/propose", async (ctx) => {
   const { actions } = integrations;
   if (!actions) return send(res, 503, { error: "external actions are not configured" });
   const providerName = ctx.param("provider");
-  const provider = integrations.providers.get(providerName);
-  if (!provider) {
-    send(res, 400, { error: `no provider implementation named "${providerName}" is loaded` });
-    return;
-  }
   const connection = await integrations.store.connection(guard.board.orgId, providerName);
   if (!connection) {
     send(res, 404, { error: `no ${providerName} connection is configured for this org` });
@@ -280,6 +309,12 @@ router.post("/api/boards/:id/integrations/:provider/propose", async (ctx) => {
     send(res, 409, { error: `the ${providerName} connection is ${connection.status}` });
     return;
   }
+  const resolved = resolveProvider(integrations, providerName, connection);
+  if (!resolved.ok) {
+    send(res, 400, { error: resolved.error });
+    return;
+  }
+  const provider = resolved.provider;
 
   // Compute the per-node plan: creates for unlinked action nodes, updates
   // for linked ones (the same split the sync route applies), each carrying
@@ -313,6 +348,7 @@ router.post("/api/boards/:id/integrations/:provider/propose", async (ctx) => {
     orgId: guard.board.orgId,
     boardId,
     provider: providerName as never,
+    connectionId: connection.id,
     items,
     createdBy: user.id,
     now: Date.now(),
@@ -365,12 +401,25 @@ router.post("/api/boards/:id/integrations/actions/:actionId/approve", async (ctx
     send(res, 404, { error: "no such action" });
     return;
   }
-  const provider = integrations.providers.get(record.provider);
   const connection = await integrations.store.connection(guard.board.orgId, record.provider);
-  if (!provider || !connection || connection.status !== "active") {
+  if (!connection || connection.status !== "active") {
     send(res, 409, { error: `the ${record.provider} connection is unavailable` });
     return;
   }
+  // Stage D6, the review's safety check: the proposal executes through the
+  // EXACT connection it previewed — a disabled/replaced connection between
+  // propose and approve is a 409, never a silent execution through the new
+  // one.
+  if (connection.id !== record.connectionId) {
+    send(res, 409, { error: "Integration connection changed; please create a new preview" });
+    return;
+  }
+  const resolved = resolveProvider(integrations, record.provider, connection);
+  if (!resolved.ok) {
+    send(res, 400, { error: resolved.error });
+    return;
+  }
+  const provider = resolved.provider;
 
   // The decided-once transition guard: a second approve answers the
   // ORIGINAL outcome, never a second effect.

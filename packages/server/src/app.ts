@@ -242,7 +242,9 @@ export interface AppDeps {
    */
   integrations?: {
     store: import("./integrations/integrations.js").IntegrationStore;
-    providers: Map<string, import("./integrations/provider.js").ExecutionProvider>;
+    /** Stage D6: FACTORIES, not instances — a Linear credential is per-org
+     * (the connection's credentialRef) while the map is process-global. */
+    providers: Map<string, import("./integrations/provider.js").ExecutionProviderFactory>;
     /** Stage D5: the external-action proposal records + the execution ledger. */
     actions?: import("./integrations/integrations.js").IntegrationActionStore;
     ledger?: import("./integrations/ledger.js").ExecutionLedger;

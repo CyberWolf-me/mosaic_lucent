@@ -60,7 +60,7 @@ async function makeHarness() {
     telemetry: new Telemetry(),
     authLimiter: new Limiter(1000, 60_000),
     tickets: new InMemoryTicketStore(60_000),
-    integrations: { store, providers: new Map([["fake", fake]]) },
+    integrations: { store, providers: new Map([["fake", () => fake]]) },
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const { port } = server.address() as AddressInfo;

@@ -47,6 +47,14 @@ export interface IntegrationConnection {
    * without re-displaying the material.
    */
   credentialRef: string;
+  /**
+   * Provider-specific configuration (Stage D6, the review's fix): Linear's
+   * teamId lives HERE — on the connection, never on the Action, never in
+   * the workspace, never as an env-only secret. Validated at the
+   * connection boundary (≤10 short entries); the provider factory reads
+   * it at construction.
+   */
+  config?: Record<string, string>;
   /** What the connection may do, provider-specific words (e.g. "issues:write"). */
   scopes: string[];
   status: IntegrationStatus;
@@ -93,7 +101,7 @@ export interface IntegrationStore {
    * flow, the SsoStore putConnection precedent. One connection per provider
    * per org — a second config replaces the first.
    */
-  putConnection(input: NewIntegrationConnection, now: number): Promise<IntegrationConnection>;
+  putConnection(input: NewIntegrationConnection & { config?: Record<string, string> }, now: number): Promise<IntegrationConnection>;
   /** The org's connections, oldest first. */
   connectionsForOrg(orgId: string): Promise<IntegrationConnection[]>;
   connection(orgId: string, provider: string): Promise<IntegrationConnection | undefined>;
@@ -127,7 +135,7 @@ export function newIntegrationId(prefix: "int_" | "lnk_" | "act_"): string {
  * the caller gave none) — the row type requires it. */
 export function normalizeConnection(
   input: NewIntegrationConnection,
-): Required<NewIntegrationConnection> {
+): Required<NewIntegrationConnection> & { config?: Record<string, string> } {
   const provider = INTEGRATION_PROVIDERS.find((p) => p === input.provider);
   if (!provider) {
     throw new Error(
@@ -159,6 +167,7 @@ export function connectionView(c: IntegrationConnection): Record<string, unknown
     orgId: c.orgId,
     provider: c.provider,
     credentialRef: `${c.credentialRef.slice(0, 4)}…(${c.credentialRef.length} chars)`,
+    ...(c.config ? { config: c.config } : {}),
     scopes: c.scopes,
     status: c.status,
     createdBy: c.createdBy,
@@ -173,7 +182,7 @@ export class InMemoryIntegrationStore implements IntegrationStore {
   private readonly links = new Map<string, IntegrationTaskLink>(); // id → row
 
   async putConnection(
-    input: NewIntegrationConnection,
+    input: NewIntegrationConnection & { config?: Record<string, string> },
     now: number,
   ): Promise<IntegrationConnection> {
     const normalized = normalizeConnection(input);
@@ -184,6 +193,7 @@ export class InMemoryIntegrationStore implements IntegrationStore {
       const updated: IntegrationConnection = {
         ...existing,
         credentialRef: normalized.credentialRef,
+        ...(normalized.config ? { config: normalized.config } : {}),
         scopes: normalized.scopes,
         updatedAt: now,
       };
@@ -195,6 +205,7 @@ export class InMemoryIntegrationStore implements IntegrationStore {
       orgId: normalized.orgId,
       provider: normalized.provider,
       credentialRef: normalized.credentialRef,
+      ...(normalized.config ? { config: normalized.config } : {}),
       scopes: normalized.scopes,
       status: "active",
       createdBy: normalized.createdBy,
@@ -338,6 +349,14 @@ export interface IntegrationActionRecord {
   orgId: string;
   boardId: string;
   provider: IntegrationProviderName;
+  /**
+   * The connection the proposal previewed against (Stage D6, the review's
+   * safety check): approval refuses when the connection changed — disabled,
+   * replaced — between propose and approve (409 "connection changed;
+   * create a new preview"). A proposal must execute through the exact
+   * connection its preview showed.
+   */
+  connectionId: string;
   status: IntegrationActionStatus;
   items: IntegrationActionItem[];
   createdBy: string;
@@ -357,6 +376,7 @@ export interface IntegrationActionStore {
     orgId: string;
     boardId: string;
     provider: IntegrationProviderName;
+    connectionId: string;
     items: IntegrationActionItem[];
     createdBy: string;
     now: number;
@@ -389,6 +409,7 @@ export class InMemoryIntegrationActionStore implements IntegrationActionStore {
     orgId: string;
     boardId: string;
     provider: IntegrationProviderName;
+    connectionId: string;
     items: IntegrationActionItem[];
     createdBy: string;
     now: number;
@@ -409,6 +430,7 @@ export class InMemoryIntegrationActionStore implements IntegrationActionStore {
       orgId: input.orgId,
       boardId: input.boardId,
       provider: input.provider,
+      connectionId: input.connectionId,
       status: "pending",
       items: input.items,
       createdBy: input.createdBy,

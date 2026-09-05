@@ -44,6 +44,7 @@ import { InMemorySsoStore } from "./ssoStore.js";
 import { InMemoryIntegrationActionStore, InMemoryIntegrationStore } from "./integrations/integrations.js";
 import { InMemoryExecutionLedger } from "./integrations/ledger.js";
 import { FakeProvider } from "./integrations/fake.js";
+import { linearConnectionFactory } from "./integrations/linear.js";
 import { PostgresSsoStore } from "./store/pg-sso.js";
 import { InMemoryUsageStore, type UsageStore } from "./usageStore.js";
 import { PostgresUsageStore } from "./store/pg-usage.js";
@@ -138,7 +139,7 @@ function makeStores(databaseUrl: string | undefined): {
    * pair and real providers land with D6, when Linear demands persistence). */
   integrations: {
     store: import("./integrations/integrations.js").IntegrationStore;
-    providers: Map<string, import("./integrations/provider.js").ExecutionProvider>;
+    providers: Map<string, import("./integrations/provider.js").ExecutionProviderFactory>;
     actions: import("./integrations/integrations.js").IntegrationActionStore;
     ledger: import("./integrations/ledger.js").ExecutionLedger;
   };
@@ -167,7 +168,10 @@ function makeStores(databaseUrl: string | undefined): {
       ssoStore: new InMemorySsoStore(),
       integrations: {
         store: new InMemoryIntegrationStore(),
-        providers: new Map([['fake', new FakeProvider()]]),
+        providers: new Map<string, import("./integrations/provider.js").ExecutionProviderFactory>([
+        ['fake', () => new FakeProvider()],
+        ['linear', linearConnectionFactory()],
+      ]),
         actions: new InMemoryIntegrationActionStore(),
         ledger: new InMemoryExecutionLedger(),
       },
@@ -198,7 +202,10 @@ function makeStores(databaseUrl: string | undefined): {
     // env-independent either way.
     integrations: {
       store: new InMemoryIntegrationStore(),
-      providers: new Map([['fake', new FakeProvider()]]),
+      providers: new Map<string, import("./integrations/provider.js").ExecutionProviderFactory>([
+        ['fake', () => new FakeProvider()],
+        ['linear', linearConnectionFactory()],
+      ]),
       actions: new InMemoryIntegrationActionStore(),
       ledger: new InMemoryExecutionLedger(),
     },

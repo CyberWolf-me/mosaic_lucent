@@ -144,19 +144,19 @@ describe("InMemoryIntegrationActionStore — the B3 pattern, new kind", () => {
 
   it("one pending per (board, provider): a new proposal supersedes", async () => {
     const store = new InMemoryIntegrationActionStore();
-    const first = await store.propose({ orgId: "o", boardId: "b1", provider: "fake", items: [ITEM("n1")], createdBy: "u", now: 1 });
-    const second = await store.propose({ orgId: "o", boardId: "b1", provider: "fake", items: [ITEM("n2")], createdBy: "u", now: 2 });
+    const first = await store.propose({ orgId: "o", boardId: "b1", provider: "fake", connectionId: "int_1", items: [ITEM("n1")], createdBy: "u", now: 1 });
+    const second = await store.propose({ orgId: "o", boardId: "b1", provider: "fake", connectionId: "int_1", items: [ITEM("n2")], createdBy: "u", now: 2 });
     expect(second.supersededId).toBe(first.record.id);
     const history = await store.actionsForBoard("b1");
     expect(history.map((r) => r.status).sort()).toEqual(["pending", "superseded"]);
     // A DIFFERENT provider gets its own pending slot.
-    const other = await store.propose({ orgId: "o", boardId: "b1", provider: "linear" as never, items: [ITEM("n3")], createdBy: "u", now: 3 });
+    const other = await store.propose({ orgId: "o", boardId: "b1", provider: "linear" as never, connectionId: "int_2", items: [ITEM("n3")], createdBy: "u", now: 3 });
     expect(other.supersededId).toBeNull();
   });
 
   it("decided once: the second decide is a no-op returning the current state", async () => {
     const store = new InMemoryIntegrationActionStore();
-    const { record } = await store.propose({ orgId: "o", boardId: "b1", provider: "fake", items: [ITEM("n1")], createdBy: "u", now: 1 });
+    const { record } = await store.propose({ orgId: "o", boardId: "b1", provider: "fake", connectionId: "int_1", items: [ITEM("n1")], createdBy: "u", now: 1 });
     const first = await store.decide("b1", record.id, "approved", "u", 2);
     expect(first!.status).toBe("approved");
     const second = await store.decide("b1", record.id, "rejected", "u", 3);
@@ -167,7 +167,7 @@ describe("InMemoryIntegrationActionStore — the B3 pattern, new kind", () => {
 
   it("board-scoped: a leaked id from another board is not a read", async () => {
     const store = new InMemoryIntegrationActionStore();
-    const { record } = await store.propose({ orgId: "o", boardId: "b1", provider: "fake", items: [ITEM("n1")], createdBy: "u", now: 1 });
+    const { record } = await store.propose({ orgId: "o", boardId: "b1", provider: "fake", connectionId: "int_1", items: [ITEM("n1")], createdBy: "u", now: 1 });
     expect(await store.action("b2", record.id)).toBeUndefined();
     expect(await store.action("b1", record.id)).toBeDefined();
     expect(await store.decide("b2", record.id, "approved", "u", 2)).toBeUndefined();

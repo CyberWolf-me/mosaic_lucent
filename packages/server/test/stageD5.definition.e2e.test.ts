@@ -71,7 +71,7 @@ async function makeHarness() {
     tickets: new InMemoryTicketStore(60_000),
     integrations: {
       store: new InMemoryIntegrationStore(),
-      providers: new Map([["fake", fake]]),
+      providers: new Map([["fake", () => fake]]),
       actions: new InMemoryIntegrationActionStore(),
       ledger,
     },
