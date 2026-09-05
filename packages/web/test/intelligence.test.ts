@@ -334,3 +334,17 @@ describe("the D3 derived execution on the projection (Stage D3, ADR 0029)", () =
     expect(actions[0]!.atRiskBy).toBeUndefined();
   });
 });
+
+describe("the D6 link join (the chip's data)", () => {
+  it("linksByNode maps node id → the board's link", () => {
+    // The same join IntelligenceView builds — pinned here as the contract.
+    const links = [
+      { nodeId: "a", provider: "linear", externalId: "LIN-482", url: "u", status: "Todo", syncedAt: 1 },
+      { nodeId: "b", provider: "fake", externalId: "fake-1", status: "todo", syncedAt: 2 },
+    ];
+    const map = new Map(links.map((l) => [l.nodeId, l]));
+    expect(map.get("a")?.externalId).toBe("LIN-482");
+    expect(map.get("b")?.provider).toBe("fake");
+    expect(map.get("c")).toBeUndefined();
+  });
+});

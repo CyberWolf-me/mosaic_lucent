@@ -1,8 +1,9 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { IssueStatusCategory, Node, Operation } from "@lucent/core";
 import { BOARD_COLUMNS, boardColumns, derivedExecution, pointsByCategory } from "@lucent/core";
 import { TopBar, LeftRail, StatusBadge } from "../ui/Chrome.js";
 import { AIPill } from "../ui/AIPill.js";
+import { fetchIntegrationLinks, type IntegrationLink } from "../boards.js";
 import { Ico } from "../ui/icons.js";
 import { useWorkspace } from "../workspace.js";
 
@@ -13,7 +14,7 @@ import { useWorkspace } from "../workspace.js";
  * over the same semantic model — no separate task store.
  */
 export function BoardView({ onOpenSettings }: { onOpenSettings: (section?: string) => void }) {
-  const { workspace, chat, send, setView, applyManual } = useWorkspace();
+  const { workspace, chat, send, setView, applyManual, boardId } = useWorkspace();
   const [message, setMessage] = useState("");
   const [dragId, setDragId] = useState<string | null>(null);
   const [overCol, setOverCol] = useState<IssueStatusCategory | null>(null);
@@ -33,6 +34,23 @@ export function BoardView({ onOpenSettings }: { onOpenSettings: (section?: strin
   // card badge reads it; column placement stays on the manual statusCategory
   // (derived informs, never silently refiles).
   const derived = useMemo(() => derivedExecution(workspace, Date.now()), [workspace]);
+  // Stage D6: the external links (the ↗ chips on cards).
+  const [links, setLinks] = useState<IntegrationLink[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const boardLinks = boardId ? await fetchIntegrationLinks(boardId) : [];
+      if (!cancelled) setLinks(boardLinks);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [boardId]);
+  const linksByNode = useMemo(() => {
+    const map = new Map<string, IntegrationLink>();
+    for (const link of links) map.set(link.nodeId, link);
+    return map;
+  }, [links]);
 
   const moveTo = (id: string, category: IssueStatusCategory) => {
     const node = workspace.nodes[id];
@@ -114,6 +132,7 @@ export function BoardView({ onOpenSettings }: { onOpenSettings: (section?: strin
                       key={n.id}
                       node={n}
                       derived={derived.get(n.id)}
+                      link={linksByNode.get(n.id)}
                       dragging={dragId === n.id}
                       onDragStart={() => setDragId(n.id)}
                       onDragEnd={() => {
@@ -167,6 +186,7 @@ const PRIORITY_MARK: Record<string, string> = {
 function IssueCard({
   node,
   derived,
+  link,
   dragging,
   onDragStart,
   onDragEnd,
@@ -175,6 +195,8 @@ function IssueCard({
   node: Node;
   /** Stage D3: computed project truth for this node (undefined = no derived state). */
   derived?: { blockedBy: string[]; atRiskBy: string[] };
+  /** Stage D6: the board's external link for this card (the ↗ chip). */
+  link?: { externalId: string; url?: string; syncedAt: number };
   dragging: boolean;
   onDragStart: () => void;
   onDragEnd: () => void;
@@ -260,6 +282,18 @@ function IssueCard({
         >
           ⌛ at risk {derived.atRiskBy.length}
         </div>
+      )}
+      {link && (
+        <a
+          href={link.url ?? "#"}
+          target="_blank"
+          rel="noreferrer"
+          className="mono"
+          title={`synced ${new Date(link.syncedAt).toISOString().slice(0, 10)}`}
+          style={{ fontSize: 9.5, marginTop: 2, color: "var(--amber-2)", textDecoration: "none" }}
+        >
+          ↗ {link.externalId}
+        </a>
       )}
       <div className="issue-card-meta">
         <span className="issue-type" style={{ color: TYPE_TINT[issue.type] ?? "var(--ink-2)" }}>

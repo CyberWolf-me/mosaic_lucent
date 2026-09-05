@@ -460,3 +460,96 @@ export async function askLucent(
   }
   return (await res.json()) as AskResponse;
 }
+
+/* -------------------------------------------------------------------------- */
+/* Integrations (Stage D6) — the connection state, the links, the proposals   */
+/* -------------------------------------------------------------------------- */
+
+/** One external link, as the link GET returns it. */
+export interface IntegrationLink {
+  nodeId: string;
+  provider: string;
+  externalId: string;
+  url?: string;
+  status: string;
+  syncedAt: number;
+}
+
+/** The org's connection (admin-view shaped: the credential fingerprinted). */
+export interface IntegrationConnectionView {
+  id: string;
+  provider: string;
+  credentialRef: string;
+  config?: Record<string, string>;
+  scopes: string[];
+  status: "active" | "disabled";
+  updatedAt: number;
+}
+
+/** The frozen propose-preview shape (ADR 0031's contract). */
+export interface IntegrationPreview {
+  action: { id: string; provider: string; status: string; createdAt: number; supersededId?: string };
+  preview: {
+    creates: Array<{ nodeId: string; title: string; assignee?: string; dueDate?: string; status: string }>;
+    updates: Array<{ nodeId: string; externalId?: string; title: string; status: string }>;
+    statement: string;
+  };
+}
+
+export interface IntegrationDecisionResult {
+  applied?: number;
+  failed?: number;
+  inFlight?: number;
+  results?: Array<Record<string, unknown>>;
+  duplicate?: boolean;
+  action?: Record<string, unknown>;
+  error?: string;
+}
+
+export async function fetchIntegrationLinks(boardId: string): Promise<IntegrationLink[]> {
+  const res = await authed(`/api/boards/${encodeURIComponent(boardId)}/integrations/links`);
+  if (!res || !res.ok) return [];
+  const body = (await res.json()) as { links?: IntegrationLink[] };
+  return body.links ?? [];
+}
+
+/**
+ * The org's integration connections (the admin list). Returns [] offline or
+ * on failure — a missing connection state renders the honest "not connected"
+ * UX rather than an error.
+ */
+export async function fetchOrgIntegrations(orgId: string): Promise<IntegrationConnectionView[]> {
+  const res = await authed(`/api/orgs/${encodeURIComponent(orgId)}/integrations`);
+  if (!res || !res.ok) return [];
+  const body = (await res.json()) as { integrations?: IntegrationConnectionView[] };
+  return body.integrations ?? [];
+}
+
+export async function proposeIntegration(
+  boardId: string,
+  provider: string,
+): Promise<IntegrationPreview | { error: string; status: number } | null> {
+  const res = await authed(`/api/boards/${encodeURIComponent(boardId)}/integrations/${encodeURIComponent(provider)}/propose`, {
+    method: "POST",
+  });
+  if (!res) return null;
+  if (!res.ok) return { error: (await res.json().catch(() => ({ error: "propose failed" }))).error ?? "propose failed", status: res.status };
+  return (await res.json()) as IntegrationPreview;
+}
+
+export async function decideIntegrationAction(
+  boardId: string,
+  actionId: string,
+  decision: "approve" | "reject",
+): Promise<IntegrationDecisionResult | { error: string; status: number } | null> {
+  const res = await authed(
+    `/api/boards/${encodeURIComponent(boardId)}/integrations/actions/${encodeURIComponent(actionId)}/${decision}`,
+    { method: "POST" },
+  );
+  if (!res) return null;
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({ error: "decision failed" }))) as { error?: string };
+    return { error: body.error ?? "decision failed", status: res.status };
+  }
+  return (await res.json()) as IntegrationDecisionResult;
+}

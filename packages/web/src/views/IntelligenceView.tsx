@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { StatementKind, Workspace } from "@lucent/core";
 import { resolveLocale, t } from "@lucent/i18n";
 import { useWorkspace } from "../workspace.js";
@@ -18,6 +18,13 @@ import {
 } from "../intelligence.js";
 import { KIND_TINT } from "../statementUi.js";
 import { planRequestText } from "../planGate.js";
+import {
+  fetchIntegrationLinks,
+  fetchOrgIntegrations,
+  type IntegrationLink,
+} from "../boards.js";
+import { getCurrentOrgId } from "../orgs.js";
+import { IntegrationPanel } from "./IntegrationPanel.js";
 
 /**
  * The Intelligence view (Stage C6, ADR 0026): the current semantic workspace,
@@ -37,15 +44,34 @@ import { planRequestText } from "../planGate.js";
  * source for temporal analysis.
  */
 export function IntelligenceView(_: { onOpenSettings?: (section?: string) => void }) {
-  const { workspace, onCitation, applyManual, send } = useWorkspace() as unknown as {
+  const { workspace, onCitation, applyManual, send, boardId } = useWorkspace() as unknown as {
     workspace: Workspace;
     onCitation: WorkspaceState["onCitation"];
     applyManual: WorkspaceState["applyManual"];
     send: WorkspaceState["send"];
+    boardId: string | null;
   };
   const locale = useMemo(() => resolveLocale(navigator.language), []);
 
   const sections = useMemo(() => intelligenceSections(workspace), [workspace]);
+  // Stage D6: fetch the links + the org's connection state (the viewer-
+  // floor read + the owner-floor admin list read — the honest connection
+  // states for the Sync button). Re-fetches when a decision lands.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const [boardLinks, orgs] = await Promise.all([
+        boardId ? fetchIntegrationLinks(boardId) : Promise.resolve([]),
+        getCurrentOrgId() ? fetchOrgIntegrations(getCurrentOrgId()!) : Promise.resolve([]),
+      ]);
+      if (cancelled) return;
+      setLinks(boardLinks);
+      setConnections(orgs);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [boardId]);
   const inbox = useMemo(() => inboxItems(workspace), [workspace]);
   const totalStatements = sections.reduce((n, s) => n + s.rows.length, 0);
 
@@ -59,8 +85,19 @@ export function IntelligenceView(_: { onOpenSettings?: (section?: string) => voi
   const [mergeError, setMergeError] = useState<string | null>(null);
   /** Stage D2: the checked statement rows — the plan request's sources. */
   const [checked, setChecked] = useState<ReadonlySet<string>>(new Set());
+  /** Stage D6: the board's external links (the ↗ chips) + the org's
+   * connections (the Sync button's honest states) + the panel. */
+  const [links, setLinks] = useState<IntegrationLink[]>([]);
+  const [connections, setConnections] = useState<Array<{ provider: string; status: string; config?: Record<string, string> }>>([]);
+  const [panelProvider, setPanelProvider] = useState<string | null>(null);
 
   const visibleInbox = inbox.filter((item) => !suppressed.has(suppressionKey(item)));
+  // Stage D6: the chip's join — node id → the board's links.
+  const linksByNode = useMemo(() => {
+    const map = new Map<string, IntegrationLink>();
+    for (const link of links) map.set(link.nodeId, link);
+    return map;
+  }, [links]);
 
   const toggle = (kind: string) => {
     setCollapsed((prev) => {
@@ -180,6 +217,23 @@ export function IntelligenceView(_: { onOpenSettings?: (section?: string) => voi
               {t("intel.plan.from", locale, { n: checked.size })}
             </button>
           )}
+          {/* Stage D6: the whole-board Sync button — the connection-state
+              UX (never pretend self-service while the admin route is
+              API-only). */}
+          {connections.some((c) => c.provider === "linear" && c.status === "active") ? (
+            <button
+              className="btn"
+              style={{ height: 24, fontSize: 11 }}
+              title={t("integrations.sync.title", locale)}
+              onClick={() => setPanelProvider("linear")}
+            >
+              {t("integrations.sync.button", locale)}
+            </button>
+          ) : connections.length > 0 && !connections.some((c) => c.provider === "linear") ? (
+            <span className="mono" style={{ fontSize: 10, color: "var(--ink-3)" }}>
+              {t("integrations.not_connected", locale, { provider: "Linear" })}
+            </span>
+          ) : null}
         </div>
         <div className="panel-body" style={{ overflowY: "auto", padding: 6 }}>
           {totalStatements === 0 ? (
@@ -355,6 +409,24 @@ export function IntelligenceView(_: { onOpenSettings?: (section?: string) => voi
                               ✦
                             </button>
                           )}
+                          {/* Stage D6: the ↗ chip — the board's external link
+                              for this row, straight from the link registry. */}
+                          {(() => {
+                            const link = linksByNode.get(row.id);
+                            if (!link) return null;
+                            return (
+                              <a
+                                href={link.url ?? "#"}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="mono"
+                                title={t("integrations.chip.title", locale, { at: new Date(link.syncedAt).toISOString().slice(0, 10) })}
+                                style={{ fontSize: 11, color: "var(--amber-2)", textDecoration: "none", flexShrink: 0 }}
+                              >
+                                ↗ {link.externalId}
+                              </a>
+                            );
+                          })()}
                         </div>
                       ))
                     ))}
@@ -482,6 +554,16 @@ export function IntelligenceView(_: { onOpenSettings?: (section?: string) => voi
           )}
         </div>
       </div>
+      {panelProvider && (
+        <IntegrationPanel
+          provider={panelProvider}
+          connections={connections}
+          onClose={() => setPanelProvider(null)}
+          onLinksChanged={() => {
+            if (boardId) void fetchIntegrationLinks(boardId).then(setLinks);
+          }}
+        />
+      )}
     </div>
   );
 }
