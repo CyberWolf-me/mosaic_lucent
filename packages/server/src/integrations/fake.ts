@@ -1,0 +1,157 @@
+import type { ExecutionStatus } from "@lucent/core";
+import type {
+  CreateTaskInput,
+  ExternalTask,
+  ExternalTaskChange,
+  ExecutionProvider,
+  UpdateTaskInput,
+} from "./provider.js";
+
+/**
+ * The FakeProvider (Stage D4, ADR 0030): the proof of the adapter
+ * architecture before any real provider exists. Deliberately NOT a stub —
+ * it behaves like a real system (deterministic ids, updatable tasks, a
+ * searchable store, an inbound change bus) so D5's idempotency and D7's
+ * sync work exercise something honest rather than a `resolve({})`.
+ *
+ * Deterministic by design: `fake-1`, `fake-2`, … in call order, so the
+ * acceptance suite can assert exact ids and the offline gates stay stable.
+ * Every mutation is recorded (`calls`) so tests assert WHAT the platform
+ * asked the provider to do, not just what came back.
+ */
+export interface RecordedCall {
+  method: "createTask" | "updateTask" | "getTask" | "searchTasks";
+  externalId?: string;
+  input?: CreateTaskInput | UpdateTaskInput | string;
+  at: number;
+}
+
+export class FakeProvider implements ExecutionProvider {
+  readonly name = "fake";
+
+  private nextId = 1;
+  private readonly tasks = new Map<string, ExternalTask>();
+  readonly calls: RecordedCall[] = [];
+  private readonly listeners = new Set<(change: ExternalTaskChange) => void>();
+
+  /** The fake's external vocabulary — deliberately different words, so
+   * mapStatus is exercised as a real translation, not a passthrough. */
+  static readonly EXTERNAL_STATUSES = ["todo", "active", "blocked", "done", "canceled"] as const;
+
+  createTask(input: CreateTaskInput): Promise<ExternalTask> {
+    this.calls.push({ method: "createTask", input, at: Date.now() });
+    const externalId = `fake-${this.nextId}`;
+    this.nextId += 1;
+    const task: ExternalTask = {
+      provider: this.name,
+      externalId,
+      title: input.title,
+      status: input.status !== undefined ? this.toExternal(input.status) : "todo",
+      ...(input.assignee ? { assignee: input.assignee } : {}),
+      ...(input.dueDate ? { dueDate: input.dueDate } : {}),
+      url: `https://fake.example.com/task/${externalId}`,
+    };
+    this.tasks.set(externalId, task);
+    return Promise.resolve(task);
+  }
+
+  updateTask(externalId: string, input: UpdateTaskInput): Promise<ExternalTask> {
+    this.calls.push({ method: "updateTask", externalId, input, at: Date.now() });
+    const task = this.tasks.get(externalId);
+    if (!task) {
+      return Promise.reject(new Error(`fake task "${externalId}" does not exist`));
+    }
+    const updated: ExternalTask = {
+      ...task,
+      ...(input.title !== undefined ? { title: input.title } : {}),
+      ...(input.status !== undefined ? { status: this.toExternal(input.status) } : {}),
+      ...(input.assignee !== undefined ? { assignee: input.assignee } : {}),
+      ...(input.dueDate !== undefined ? { dueDate: input.dueDate } : {}),
+    };
+    this.tasks.set(externalId, updated);
+    return Promise.resolve(updated);
+  }
+
+  getTask(externalId: string): Promise<ExternalTask> {
+    this.calls.push({ method: "getTask", externalId, at: Date.now() });
+    const task = this.tasks.get(externalId);
+    if (!task) {
+      return Promise.reject(new Error(`fake task "${externalId}" does not exist`));
+    }
+    return Promise.resolve(task);
+  }
+
+  searchTasks(query: string): Promise<ExternalTask[]> {
+    this.calls.push({ method: "searchTasks", input: query, at: Date.now() });
+    const needle = query.toLowerCase();
+    return Promise.resolve(
+      [...this.tasks.values()].filter((t) =>
+        t.title.toLowerCase().includes(needle) || t.externalId.includes(needle),
+      ),
+    );
+  }
+
+  /** The D1 vocabulary translated into the fake's external words. */
+  mapStatus(externalStatus: string): ExecutionStatus {
+    switch (externalStatus) {
+      case "active":
+        return "in_progress";
+      case "blocked":
+        return "blocked";
+      case "done":
+        return "completed";
+      case "canceled":
+        return "cancelled";
+      case "todo":
+      default:
+        return "open";
+    }
+  }
+
+  /** The reverse direction (used when creating: the D1 word goes out). */
+  toExternal(lucentStatus: string): string {
+    switch (lucentStatus) {
+      case "assigned":
+        return "todo";
+      case "in_progress":
+        return "active";
+      case "blocked":
+        return "blocked";
+      case "completed":
+        return "done";
+      case "cancelled":
+        return "canceled";
+      case "open":
+      default:
+        return "todo";
+    }
+  }
+
+  /**
+   * The declared D7 seam, live in the fake: an in-memory change bus. Tests
+   * (and later the webhook receiver) drive `emitChange` and listeners hear
+   * the normalized ExternalTaskChange.
+   */
+  subscribeToChanges(listener: (change: ExternalTaskChange) => void): () => void {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  }
+
+  /** Test hook: pretend the external system moved a task. */
+  emitChange(externalId: string, status: string): void {
+    const change: ExternalTaskChange = {
+      provider: this.name,
+      externalId,
+      status,
+      at: Date.now(),
+    };
+    for (const listener of this.listeners) listener(change);
+  }
+
+  /** Test hook: how many tasks the fake holds. */
+  get taskCount(): number {
+    return this.tasks.size;
+  }
+}
