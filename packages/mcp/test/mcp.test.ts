@@ -200,3 +200,37 @@ describe("BoardSession authorship (M0.4)", () => {
     expect(s.workspace.votes.v1!.by).toBe(ASSISTANT_AUTHOR);
   });
 });
+
+describe("get_board provenance (Stage D2)", () => {
+  it("exposes either evidence kind — meeting origin or plan sources", () => {
+    const s = new BoardSession();
+    s.callTool("apply_canvas_operations", {
+      operations: [
+        {
+          op: "CREATE_NODE",
+          id: "from-meeting",
+          nodeType: "action",
+          label: "Meeting item",
+          provenance: { meetingId: "mtg_1", turnRange: [0, 1] },
+        },
+        {
+          op: "CREATE_NODE",
+          id: "from-plan",
+          nodeType: "action",
+          label: "Plan item",
+          provenance: { createdFrom: ["decision-1", "risk-2"] },
+        },
+      ],
+    });
+    const res = s.callTool("get_board", {});
+    const summary = JSON.parse(res.content[0]!.text as string);
+    const meeting = summary.nodes.find((n: any) => n.id === "from-meeting");
+    const plan = summary.nodes.find((n: any) => n.id === "from-plan");
+    // Meeting evidence: the origin id, not the plan link.
+    expect(meeting.fromMeeting).toBe("mtg_1");
+    expect(meeting.fromStatements).toBeUndefined();
+    // Plan evidence: the sources, no meeting claim (honest — none exists).
+    expect(plan.fromStatements).toEqual(["decision-1", "risk-2"]);
+    expect(plan.fromMeeting).toBeUndefined();
+  });
+});

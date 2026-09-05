@@ -17,6 +17,7 @@ import {
   type IntelligenceRow,
 } from "../intelligence.js";
 import { KIND_TINT } from "../statementUi.js";
+import { planRequestText } from "../planGate.js";
 
 /**
  * The Intelligence view (Stage C6, ADR 0026): the current semantic workspace,
@@ -36,10 +37,11 @@ import { KIND_TINT } from "../statementUi.js";
  * source for temporal analysis.
  */
 export function IntelligenceView(_: { onOpenSettings?: (section?: string) => void }) {
-  const { workspace, onCitation, applyManual } = useWorkspace() as unknown as {
+  const { workspace, onCitation, applyManual, send } = useWorkspace() as unknown as {
     workspace: Workspace;
     onCitation: WorkspaceState["onCitation"];
     applyManual: WorkspaceState["applyManual"];
+    send: WorkspaceState["send"];
   };
   const locale = useMemo(() => resolveLocale(navigator.language), []);
 
@@ -55,6 +57,8 @@ export function IntelligenceView(_: { onOpenSettings?: (section?: string) => voi
   const [previewing, setPreviewing] = useState<string | null>(null);
   /** A merge that failed validation (applyManual returned false). */
   const [mergeError, setMergeError] = useState<string | null>(null);
+  /** Stage D2: the checked statement rows — the plan request's sources. */
+  const [checked, setChecked] = useState<ReadonlySet<string>>(new Set());
 
   const visibleInbox = inbox.filter((item) => !suppressed.has(suppressionKey(item)));
 
@@ -65,6 +69,29 @@ export function IntelligenceView(_: { onOpenSettings?: (section?: string) => voi
       else next.add(kind);
       return next;
     });
+  };
+
+  const toggleChecked = (id: string) => {
+    setChecked((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  /**
+   * Stage D2: "Plan from selection" — the kind-aware input surface. The
+   * checked statement ids flow through the ordinary send with the plan
+   * attachment: the model's ops get gated (PLAN_SAFE_OPS) and stamped
+   * (createdFrom) in the send path, then the >5-op batch opens the proposal
+   * panel like any large change — the B3 gate is the plan's approval.
+   */
+  const planFromSelection = () => {
+    const ids = [...checked];
+    if (ids.length === 0) return;
+    void send(planRequestText(ids.length), undefined, { plan: { statementIds: ids } });
+    setChecked(new Set());
   };
 
   const keepSeparate = (item: InboxItem) => {
@@ -143,6 +170,16 @@ export function IntelligenceView(_: { onOpenSettings?: (section?: string) => voi
           <span className="mono" style={{ fontSize: 10, color: "var(--ink-3)" }}>
             {totalStatements} statement{totalStatements === 1 ? "" : "s"}
           </span>
+          <span style={{ flex: 1 }} />
+          {checked.size > 0 && (
+            <button
+              className="btn amber"
+              style={{ height: 24, fontSize: 11 }}
+              onClick={planFromSelection}
+            >
+              {t("intel.plan.from", locale, { n: checked.size })}
+            </button>
+          )}
         </div>
         <div className="panel-body" style={{ overflowY: "auto", padding: 6 }}>
           {totalStatements === 0 ? (
@@ -231,6 +268,15 @@ export function IntelligenceView(_: { onOpenSettings?: (section?: string) => voi
                               : {}),
                           }}
                         >
+                          {/* Stage D2: the plan-selection checkbox — every
+                              statement row is a candidate plan source. */}
+                          <input
+                            type="checkbox"
+                            aria-label={`Select ${row.label} for planning`}
+                            checked={checked.has(row.id)}
+                            onChange={() => toggleChecked(row.id)}
+                            style={{ marginLeft: 2, flexShrink: 0 }}
+                          />
                           <button
                             title={rowHint(row, section.kind)}
                             onClick={() => onCitation({ kind: "node", id: row.id })}

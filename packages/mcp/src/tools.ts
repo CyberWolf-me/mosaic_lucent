@@ -127,7 +127,12 @@ export function summarizeBoard(ws: Workspace): Record<string, unknown> {
             },
           }
         : {}),
-      ...(n.provenance ? { fromMeeting: n.provenance.meetingId } : {}),
+      // Stage D2: either evidence kind reaches the agent — meeting origin
+      // when it exists, plan sources when that is what the node carries.
+      ...(n.provenance?.meetingId ? { fromMeeting: n.provenance.meetingId } : {}),
+      ...(n.provenance?.createdFrom?.length
+        ? { fromStatements: n.provenance.createdFrom }
+        : {}),
     })),
     edges: Object.values(ws.edges).map((e) => ({
       source: e.source,
