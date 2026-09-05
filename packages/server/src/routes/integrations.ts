@@ -243,4 +243,270 @@ export const registerIntegrationRoutes: RegisterRoutes = (router, s) => {
 
     send(res, 200, { provider: providerName, created, updated, skipped, results });
   });
+// ---- The D5 approval flow: propose → preview → approve → execute ------
+//
+// The external-action safety routes (Stage D5, ADR 0031). The D4 sync
+// route above remains the DIRECT path (scripts/tests; the pre-approval
+// skeleton); these routes are the HUMAN path: an editor proposes, the
+// preview is returned for review, an editor approves, the executor runs
+// each item through the ledger (attempt idempotency) + the provider's
+// idempotency key (effect idempotency) — exactly once externally.
+
+router.post("/api/boards/:id/integrations/:provider/propose", async (ctx) => {
+  const { req, res } = ctx;
+  const route = "/api/boards/:id/integrations/:provider/propose";
+  if (!requireCsrf(req, res, route)) return;
+  const user = await requireUser(req, res);
+  if (!user) return;
+  if (!meter(req, res, route)) return;
+  const boardId = ctx.param("id");
+  const guard = await requireBoardRole(req, res, boardId, "editor", route);
+  if (!guard.ok) return;
+  if (!integrations) return send(res, 503, { error: "integrations are not configured" });
+  const { actions } = integrations;
+  if (!actions) return send(res, 503, { error: "external actions are not configured" });
+  const providerName = ctx.param("provider");
+  const provider = integrations.providers.get(providerName);
+  if (!provider) {
+    send(res, 400, { error: `no provider implementation named "${providerName}" is loaded` });
+    return;
+  }
+  const connection = await integrations.store.connection(guard.board.orgId, providerName);
+  if (!connection) {
+    send(res, 404, { error: `no ${providerName} connection is configured for this org` });
+    return;
+  }
+  if (connection.status !== "active") {
+    send(res, 409, { error: `the ${providerName} connection is ${connection.status}` });
+    return;
+  }
+
+  // Compute the per-node plan: creates for unlinked action nodes, updates
+  // for linked ones (the same split the sync route applies), each carrying
+  // its exactly-once key.
+  const existingLinks = new Map(
+    (await integrations.store.linksForBoard(boardId))
+      .filter((l) => l.provider === providerName)
+      .map((l) => [l.nodeId, l]),
+  );
+  const items = actionNodes(guard.board.workspace).map((node) => {
+    const issue = node.issue!;
+    const link = existingLinks.get(node.id);
+    return {
+      nodeId: node.id,
+      action: link ? ("update" as const) : ("create" as const),
+      title: node.label,
+      ...(issue.assignee ? { assignee: issue.assignee } : {}),
+      ...(issue.dueDate ? { dueDate: issue.dueDate } : {}),
+      status: issue.status,
+      ...(link ? { externalId: link.externalId } : {}),
+      idempotencyKey: `ext_${node.id}`,
+    };
+  });
+
+  if (items.length === 0) {
+    send(res, 422, { error: "no executable actions on this board" });
+    return;
+  }
+
+  const { record, supersededId } = await actions.propose({
+    orgId: guard.board.orgId,
+    boardId,
+    provider: providerName as never,
+    items,
+    createdBy: user.id,
+    now: Date.now(),
+  });
+
+  // THE PREVIEW: what will happen, what will NOT (the honest statement),
+  // never a surprise.
+  const creates = items.filter((i) => i.action === "create");
+  const updates = items.filter((i) => i.action === "update");
+  send(res, 201, {
+    action: {
+      id: record.id,
+      provider: providerName,
+      status: record.status,
+      createdAt: record.createdAt,
+      ...(supersededId ? { supersededId } : {}),
+    },
+    preview: {
+      creates: creates.map((i) => ({
+        nodeId: i.nodeId,
+        title: i.title,
+        ...(i.assignee ? { assignee: i.assignee } : {}),
+        ...(i.dueDate ? { dueDate: i.dueDate } : {}),
+        status: i.status,
+      })),
+      updates: updates.map((i) => ({ nodeId: i.nodeId, externalId: i.externalId, title: i.title, status: i.status })),
+      statement:
+        `Will create ${creates.length} task(s) and update ${updates.length} in ${providerName}. Nothing will be deleted; existing external tasks are only modified beyond status drift if their title, assignee, or due date changed on the board.`,
+    },
+  });
+});
+
+router.post("/api/boards/:id/integrations/actions/:actionId/approve", async (ctx) => {
+  const { req, res } = ctx;
+  const route = "/api/boards/:id/integrations/actions/:actionId/approve";
+  if (!requireCsrf(req, res, route)) return;
+  const user = await requireUser(req, res);
+  if (!user) return;
+  if (!meter(req, res, route)) return;
+  const boardId = ctx.param("id");
+  const actionId = ctx.param("actionId");
+  const guard = await requireBoardRole(req, res, boardId, "editor", route);
+  if (!guard.ok) return;
+  if (!integrations) return send(res, 503, { error: "integrations are not configured" });
+  const { actions, ledger } = integrations;
+  if (!actions || !ledger) return send(res, 503, { error: "external actions are not configured" });
+
+  const record = await actions.action(boardId, actionId);
+  if (!record) {
+    send(res, 404, { error: "no such action" });
+    return;
+  }
+  const provider = integrations.providers.get(record.provider);
+  const connection = await integrations.store.connection(guard.board.orgId, record.provider);
+  if (!provider || !connection || connection.status !== "active") {
+    send(res, 409, { error: `the ${record.provider} connection is unavailable` });
+    return;
+  }
+
+  // The decided-once transition guard: a second approve answers the
+  // ORIGINAL outcome, never a second effect.
+  const decided = await actions.decide(boardId, actionId, "approved", user.id, Date.now());
+  if (!decided) {
+    send(res, 404, { error: "no such action" });
+    return;
+  }
+  if (record.status !== "pending") {
+    send(res, 200, { action: decided, duplicate: true });
+    return;
+  }
+
+  // THE EXECUTOR: per item, the ledger claims the attempt (keyed by the
+  // owner's triplet) and the provider call carries the item's idempotency
+  // key — attempts deduped by the ledger, effects deduped by the key.
+  // One item's failure fails that item, never the batch.
+  const TIMEOUT_MS = 15_000;
+  const results: Array<Record<string, unknown>> = [];
+  let appliedCount = 0;
+  let failedCount = 0;
+  let inFlight = 0;
+  for (const item of decided.items) {
+    // The ledger key is the composite (boardId, provider, requestId) and
+    // one batch contains MANY items — so the requestId must name the ITEM:
+    // the owner triplet (lucentActionId, requestId, provider) resolved per
+    // node. The provider idempotency key stays item.idempotencyKey.
+    const requestId = `ext_${decided.id}_${user.id}_${item.nodeId}`;
+    const claim = await ledger.claim({
+      boardId,
+      provider: record.provider,
+      requestId,
+      lucentActionId: decided.id,
+      nodeId: item.nodeId,
+    });
+    if (claim.outcome === "duplicate") {
+      results.push({ nodeId: item.nodeId, action: "duplicate", externalId: claim.record.externalId });
+      appliedCount += 1;
+      continue;
+    }
+    if (claim.outcome === "exhausted") {
+      results.push({ nodeId: item.nodeId, action: "exhausted", error: claim.record.error });
+      failedCount += 1;
+      continue;
+    }
+    if (claim.outcome === "in_flight") {
+      inFlight += 1;
+      results.push({ nodeId: item.nodeId, action: "in_flight" });
+      continue;
+    }
+    try {
+      const input = {
+        title: item.title,
+        ...(item.assignee ? { assignee: item.assignee } : {}),
+        ...(item.dueDate ? { dueDate: item.dueDate } : {}),
+        status: item.status,
+        idempotencyKey: item.idempotencyKey,
+      };
+      const timeout = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("provider timeout")), TIMEOUT_MS),
+      );
+      const task =
+        item.action === "create"
+          ? await Promise.race([provider.createTask(input), timeout])
+          : await Promise.race([provider.updateTask(item.externalId!, input), timeout]);
+      await integrations.store.linkTask(
+        {
+          orgId: guard.board.orgId,
+          boardId,
+          nodeId: item.nodeId,
+          provider: record.provider,
+          externalId: task.externalId,
+          ...(task.url ? { url: task.url } : {}),
+          lastSyncedStatus: task.status,
+        },
+        Date.now(),
+      );
+      await ledger.applied(boardId, record.provider, requestId, task.externalId, Date.now());
+      appliedCount += 1;
+      results.push({ nodeId: item.nodeId, action: item.action, externalId: task.externalId, url: task.url });
+    } catch (err) {
+      await ledger.failed(boardId, record.provider, requestId, (err as Error).message, Date.now());
+      failedCount += 1;
+      results.push({ nodeId: item.nodeId, action: "failed", reason: (err as Error).message });
+    }
+  }
+  if (appliedCount > 0) await actions.applied(boardId, actionId, Date.now());
+  send(res, 200, { action: decided, applied: appliedCount, failed: failedCount, inFlight, results });
+});
+
+router.post("/api/boards/:id/integrations/actions/:actionId/reject", async (ctx) => {
+  const { req, res } = ctx;
+  const route = "/api/boards/:id/integrations/actions/:actionId/reject";
+  if (!requireCsrf(req, res, route)) return;
+  const user = await requireUser(req, res);
+  if (!user) return;
+  if (!meter(req, res, route)) return;
+  const boardId = ctx.param("id");
+  const guard = await requireBoardRole(req, res, boardId, "editor", route);
+  if (!guard.ok) return;
+  if (!integrations) return send(res, 503, { error: "integrations are not configured" });
+  const { actions } = integrations;
+  if (!actions) return send(res, 503, { error: "external actions are not configured" });
+  const actionId = ctx.param("actionId");
+  const decided = await actions.decide(boardId, actionId, "rejected", user.id, Date.now());
+  if (!decided) {
+    send(res, 404, { error: "no such action" });
+    return;
+  }
+  // Zero external effects on a rejection — guaranteed by never calling the
+  // provider on this path (pinned by test).
+  send(res, 200, { action: decided });
+});
+
+router.get("/api/boards/:id/integrations/actions", async (ctx) => {
+  const { req, res } = ctx;
+  const boardId = ctx.param("id");
+  const guard = await requireBoardRole(req, res, boardId, "viewer", "/api/boards/:id/integrations/actions");
+  if (!guard.ok) return;
+  if (!integrations) return send(res, 503, { error: "integrations are not configured" });
+  const { actions } = integrations;
+  if (!actions) return send(res, 503, { error: "external actions are not configured" });
+  const rows = await actions.actionsForBoard(boardId);
+  send(res, 200, {
+    actions: rows.map((r) => ({
+      id: r.id,
+      provider: r.provider,
+      status: r.status,
+      itemCount: r.items.length,
+      createdBy: r.createdBy,
+      createdAt: r.createdAt,
+      decidedBy: r.decidedBy,
+      decidedAt: r.decidedAt,
+      appliedAt: r.appliedAt,
+    })),
+  });
+});
+
 };

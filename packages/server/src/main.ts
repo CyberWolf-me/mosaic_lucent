@@ -41,7 +41,8 @@ import { InMemoryProposalStore } from "./proposals.js";
 import { PostgresProposalStore } from "./store/pg-proposals.js";
 import { PostgresAssetStore } from "./store/pg-assets.js";
 import { InMemorySsoStore } from "./ssoStore.js";
-import { InMemoryIntegrationStore } from "./integrations/integrations.js";
+import { InMemoryIntegrationActionStore, InMemoryIntegrationStore } from "./integrations/integrations.js";
+import { InMemoryExecutionLedger } from "./integrations/ledger.js";
 import { FakeProvider } from "./integrations/fake.js";
 import { PostgresSsoStore } from "./store/pg-sso.js";
 import { InMemoryUsageStore, type UsageStore } from "./usageStore.js";
@@ -138,6 +139,8 @@ function makeStores(databaseUrl: string | undefined): {
   integrations: {
     store: import("./integrations/integrations.js").IntegrationStore;
     providers: Map<string, import("./integrations/provider.js").ExecutionProvider>;
+    actions: import("./integrations/integrations.js").IntegrationActionStore;
+    ledger: import("./integrations/ledger.js").ExecutionLedger;
   };
   /** Stage B6: asset metadata — in-memory for dev, Postgres when set. */
   assetStore: import("./assets.js").AssetStore;
@@ -165,6 +168,8 @@ function makeStores(databaseUrl: string | undefined): {
       integrations: {
         store: new InMemoryIntegrationStore(),
         providers: new Map([['fake', new FakeProvider()]]),
+        actions: new InMemoryIntegrationActionStore(),
+        ledger: new InMemoryExecutionLedger(),
       },
       proposals: new InMemoryProposalStore(),
       assetStore: new InMemoryAssetStore(),
@@ -194,6 +199,8 @@ function makeStores(databaseUrl: string | undefined): {
     integrations: {
       store: new InMemoryIntegrationStore(),
       providers: new Map([['fake', new FakeProvider()]]),
+      actions: new InMemoryIntegrationActionStore(),
+      ledger: new InMemoryExecutionLedger(),
     },
     db: target,
   };

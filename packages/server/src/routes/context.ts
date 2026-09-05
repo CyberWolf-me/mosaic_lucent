@@ -93,6 +93,9 @@ export interface RouteServices {
     | {
         store: import("../integrations/integrations.js").IntegrationStore;
         providers: Map<string, import("../integrations/provider.js").ExecutionProvider>;
+        /** Stage D5: the action records + execution ledger (undefined → the D5 routes answer 503). */
+        actions?: import("../integrations/integrations.js").IntegrationActionStore;
+        ledger?: import("../integrations/ledger.js").ExecutionLedger;
       }
     | undefined;
   /**

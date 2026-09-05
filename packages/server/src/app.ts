@@ -243,6 +243,9 @@ export interface AppDeps {
   integrations?: {
     store: import("./integrations/integrations.js").IntegrationStore;
     providers: Map<string, import("./integrations/provider.js").ExecutionProvider>;
+    /** Stage D5: the external-action proposal records + the execution ledger. */
+    actions?: import("./integrations/integrations.js").IntegrationActionStore;
+    ledger?: import("./integrations/ledger.js").ExecutionLedger;
   };
   /**
    * M4.3: Stripe billing integration — the REST client, the endpoint signing
