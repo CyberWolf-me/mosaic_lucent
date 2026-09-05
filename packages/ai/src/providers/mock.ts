@@ -44,6 +44,48 @@ function coreLabel(message: string): string {
 
 const scripts: Script[] = [
   {
+    // Stage D3: the ordering script — "can't start until X" becomes a typed
+    // dependency edge, DIRECTION PINNED (the waiting work is the source,
+    // the prerequisite is the target — the exact thing models flip).
+    match: (m) => /can'?t start until|until .*(approved|done|complete)/i.test(m),
+    build: (req) => {
+      // The real prerequisite node if the summary names one; else a
+      // design-approval node the script creates.
+      const named = req.summary.nodes.find((n) =>
+        /design|approv/i.test(n.label),
+      );
+      const targetId = named?.id ?? "design-approval";
+      const ops: Operation[] = named
+        ? []
+        : [
+            {
+              op: "CREATE_NODE",
+              id: targetId,
+              nodeType: "action",
+              label: "Design approval",
+            },
+          ];
+      return {
+        explanation: `Implementation waits on design approval: Implementation depends_on ${targetId} — the waiting work is the source, the prerequisite is the target.`,
+        operations: [
+          ...ops,
+          {
+            op: "CREATE_NODE",
+            id: "implementation",
+            nodeType: "action",
+            label: "Implementation",
+          },
+          {
+            op: "CONNECT_NODES",
+            source: "implementation",
+            target: targetId,
+            relationship: "depends_on",
+          },
+        ] as Operation[],
+      };
+    },
+  },
+  {
     // Stage D2: the plan script — "create the work/plan from these
     // statements" over a summary carrying decisions/actions/requirements/
     // risks (the acceptance fixture's shape). The mock reads the summary's

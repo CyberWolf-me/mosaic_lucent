@@ -511,4 +511,41 @@ export const GOLDEN_SET: readonly GoldenCase[] = [
       { op: "CREATE_NODE", id: "act-0" },
     ],
   },
+  {
+    id: "dependency-edge-from-ordering",
+    // Stage D3: the ordering phrasing becomes a TYPED edge with the right
+    // direction. "Engineering can't start until design is approved" → the
+    // WAITING work depends_on the PREREQUISITE — never the reverse (the
+    // exact thing models flip), and never an untyped relationship.
+    message: "Engineering can't start until the design is approved.",
+    summary: summarizeWorkspace(
+      applyOperations(createWorkspace(), [
+        { op: "CREATE_NODE", id: "design-approval", nodeType: "action", label: "Design approval" },
+        { op: "CREATE_NODE", id: "implementation", nodeType: "action", label: "Implementation" },
+      ] as never),
+    ),
+    expectOperations: [
+      {
+        op: "CONNECT_NODES",
+        source: "implementation",
+        target: "design-approval",
+        relationship: "depends_on",
+      },
+    ],
+    // The flipped direction, and the untyped filler — both wrong.
+    forbidOperations: [
+      {
+        op: "CONNECT_NODES",
+        source: "design-approval",
+        target: "implementation",
+        relationship: "depends_on",
+      },
+      {
+        op: "CONNECT_NODES",
+        source: "implementation",
+        target: "design-approval",
+        relationship: "blocks",
+      },
+    ],
+  },
 ];
