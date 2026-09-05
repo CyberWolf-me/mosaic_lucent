@@ -43,6 +43,11 @@ import { PostgresAssetStore } from "./store/pg-assets.js";
 import { InMemorySsoStore } from "./ssoStore.js";
 import { InMemoryIntegrationActionStore, InMemoryIntegrationStore } from "./integrations/integrations.js";
 import { InMemoryExecutionLedger } from "./integrations/ledger.js";
+import {
+  PostgresExecutionLedger,
+  PostgresIntegrationActionStore,
+  PostgresIntegrationStore,
+} from "./store/pg-integrations.js";
 import { FakeProvider } from "./integrations/fake.js";
 import { linearConnectionFactory } from "./integrations/linear.js";
 import { PostgresSsoStore } from "./store/pg-sso.js";
@@ -135,8 +140,9 @@ function makeStores(databaseUrl: string | undefined): {
   ssoStore: import("./ssoStore.js").SsoStore;
   /** Stage B3: review-gate proposals — in-memory for dev, Postgres when set. */
   proposals: import("./proposals.js").ProposalStore;
-  /** Stage D4: integrations — in-memory store + the FakeProvider (the PG
-   * pair and real providers land with D6, when Linear demands persistence). */
+  /** Stage D6: integrations — the store pair is per-branch (InMemory for
+   * dev, Postgres when the database is set); the provider factories are
+   * env-independent (the credential resolves per-connection). */
   integrations: {
     store: import("./integrations/integrations.js").IntegrationStore;
     providers: Map<string, import("./integrations/provider.js").ExecutionProviderFactory>;
@@ -197,17 +203,17 @@ function makeStores(databaseUrl: string | undefined): {
     ssoStore: new PostgresSsoStore(target),
     proposals: new PostgresProposalStore(target),
     assetStore: new PostgresAssetStore(target),
-    // D4: the integration store stays in-memory until the PG pair lands
-    // with D6 (the ADR records the deferral); the provider map is
-    // env-independent either way.
+    // Stage D6: the PG pairs (ADR 0032) — connections/links, action
+    // records, the execution ledger; the factories stay env-independent
+    // (the per-org credential resolves through the connection at call time).
     integrations: {
-      store: new InMemoryIntegrationStore(),
+      store: new PostgresIntegrationStore(target.db),
       providers: new Map<string, import("./integrations/provider.js").ExecutionProviderFactory>([
         ['fake', () => new FakeProvider()],
         ['linear', linearConnectionFactory()],
       ]),
-      actions: new InMemoryIntegrationActionStore(),
-      ledger: new InMemoryExecutionLedger(),
+      actions: new PostgresIntegrationActionStore(target.db),
+      ledger: new PostgresExecutionLedger(target.db),
     },
     db: target,
   };
@@ -547,6 +553,106 @@ if (billing) {
   }, 5 * 60_000);
   sweep.unref?.();
 }
+
+// Stage D6 (ADR 0032): the execution-ledger sweeper — the stuck-row
+// recovery, on the same interval-and-unref pattern. A crashed executor
+// leaves a `received` row past the stale window (or a `failed` row,
+// immediately reclaimable); the sweep re-claims through the same claim()
+// call (the race-safe path), re-runs the item through the provider with
+// the SAME idempotency key, and marks applied. The replay source is the
+// pending action record's stored items — the payload IS the record.
+const integrationSweep = setInterval(() => {
+  void (async () => {
+    const stale = Date.now() - 60_000;
+    const pending = await stores.integrations.ledger.pending(stale, Date.now(), 50);
+    for (const row of pending) {
+      const record = await stores.integrations.actions.action(row.boardId, row.lucentActionId);
+      if (!record || record.status !== "approved") continue;
+      const item = record.items.find((i) => i.nodeId === row.nodeId);
+      if (!item) continue;
+      const claim = await stores.integrations.ledger.claim({
+        boardId: row.boardId,
+        provider: row.provider,
+        requestId: row.requestId,
+        lucentActionId: row.lucentActionId,
+        nodeId: row.nodeId,
+      });
+      if (claim.outcome !== "claimed") continue;
+      try {
+        const connection = await stores.integrations.store.connection(record.orgId, row.provider);
+        if (!connection || connection.status !== "active") continue;
+        const factory = stores.integrations.providers.get(row.provider);
+        if (!factory) continue;
+        const provider = factory(connection);
+        // The recovery-first retry (ADR 0032's contract): reconcile before
+        // re-creating — recoverCreate(marker) finds an issue the lost
+        // response hid; only a not-found retries the create.
+        let task;
+        if (item.action === "create" && provider.recoverCreate) {
+          const recovered = await provider.recoverCreate(
+            `<!-- lucent-action:${item.idempotencyKey} -->`,
+          );
+          task = recovered ?? (await provider.createTask({
+            title: item.title,
+            ...(item.assignee ? { assignee: item.assignee } : {}),
+            ...(item.dueDate ? { dueDate: item.dueDate } : {}),
+            status: item.status,
+            idempotencyKey: item.idempotencyKey,
+          }));
+        } else if (item.action === "update") {
+          task = await provider.updateTask(item.externalId!, {
+            title: item.title,
+            ...(item.assignee ? { assignee: item.assignee } : {}),
+            ...(item.dueDate ? { dueDate: item.dueDate } : {}),
+            status: item.status,
+          });
+        } else {
+          task = await provider.createTask({
+            title: item.title,
+            ...(item.assignee ? { assignee: item.assignee } : {}),
+            ...(item.dueDate ? { dueDate: item.dueDate } : {}),
+            status: item.status,
+            idempotencyKey: item.idempotencyKey,
+          });
+        }
+        await stores.integrations.store.linkTask(
+          {
+            orgId: record.orgId,
+            boardId: row.boardId,
+            nodeId: item.nodeId,
+            provider: row.provider as never,
+            externalId: task.externalId,
+            ...(task.url ? { url: task.url } : {}),
+            lastSyncedStatus: task.status,
+          },
+          Date.now(),
+        );
+        await stores.integrations.ledger.applied(
+          row.boardId,
+          row.provider,
+          row.requestId,
+          task.externalId,
+          Date.now(),
+        );
+      } catch (err) {
+        await stores.integrations.ledger.failed(
+          row.boardId,
+          row.provider,
+          row.requestId,
+          (err as Error).message,
+          Date.now(),
+        );
+        logger.error("integrations.sweep.item", {
+          error: (err as Error).message,
+          provider: row.provider,
+        });
+      }
+    }
+  })().catch((err: Error) => {
+    logger.error("integrations.sweep.failed", { error: err.message });
+  });
+}, 5 * 60_000);
+integrationSweep.unref?.();
 
 server.listen(config.port, config.host, () => {
   const assetBackend = assetService.describe().blobs;

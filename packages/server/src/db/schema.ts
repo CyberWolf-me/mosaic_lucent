@@ -1152,3 +1152,123 @@ export const proposals = pgTable(
 
 export type DbProposal = typeof proposals.$inferSelect;
 export type DbNewProposal = typeof proposals.$inferInsert;
+
+/* -------------------------------------------------------------------------- */
+/* Integrations (Stage D4–D6, ADR 0030/0031/0032)                              */
+/* -------------------------------------------------------------------------- */
+
+export const integrationConnections = pgTable(
+  "integration_connections",
+  {
+    id: text("id").primaryKey(),
+    orgId: text("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    provider: text("provider").notNull(),
+    /** A REFERENCE (env var name), never the secret itself (ADR 0030). */
+    credentialRef: text("credential_ref").notNull(),
+    /** Provider-specific configuration (Linear's teamId) — D6. */
+    config: jsonb("config"),
+    scopes: jsonb("scopes").notNull(),
+    status: text("status").notNull(),
+    createdBy: text("created_by").notNull(),
+    createdAt: bigint("created_at", { mode: "number" }).notNull(),
+    updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
+  },
+  (t) => ({
+    // One connection per (org, provider) — the putConnection upsert key.
+    orgProviderUniq: uniqueIndex("integration_connections_org_provider_uniq").on(
+      t.orgId,
+      t.provider,
+    ),
+  }),
+);
+
+export const integrationTaskLinks = pgTable(
+  "integration_task_links",
+  {
+    id: text("id").primaryKey(),
+    orgId: text("org_id").notNull(),
+    boardId: text("board_id")
+      .notNull()
+      .references(() => boards.id, { onDelete: "cascade" }),
+    nodeId: text("node_id").notNull(),
+    provider: text("provider").notNull(),
+    externalId: text("external_id").notNull(),
+    url: text("url"),
+    lastSyncedStatus: text("last_synced_status").notNull(),
+    syncedAt: bigint("synced_at", { mode: "number" }).notNull(),
+  },
+  (t) => ({
+    // The linkTask upsert key: one link per (board, node, provider).
+    nodeProviderUniq: uniqueIndex("integration_task_links_node_provider_uniq").on(
+      t.boardId,
+      t.nodeId,
+      t.provider,
+    ),
+    boardIdx: index("integration_task_links_board_idx").on(t.boardId),
+  }),
+);
+
+export const integrationActions = pgTable(
+  "integration_actions",
+  {
+    id: text("id").primaryKey(),
+    orgId: text("org_id").notNull(),
+    boardId: text("board_id")
+      .notNull()
+      .references(() => boards.id, { onDelete: "cascade" }),
+    provider: text("provider").notNull(),
+    /** The connection the proposal previewed (D6's approval safety check). */
+    connectionId: text("connection_id").notNull(),
+    status: text("status").notNull(),
+    /** IntegrationActionItem[] — the payload doubles as the replay source. */
+    items: jsonb("items").notNull(),
+    createdBy: text("created_by").notNull(),
+    createdAt: bigint("created_at", { mode: "number" }).notNull(),
+    decidedBy: text("decided_by"),
+    decidedAt: bigint("decided_at", { mode: "number" }),
+    appliedAt: bigint("applied_at", { mode: "number" }),
+    error: text("error"),
+  },
+  (t) => ({
+    pendingIdx: index("integration_actions_pending_idx").on(
+      t.boardId,
+      t.provider,
+      t.status,
+    ),
+    boardIdx: index("integration_actions_board_idx").on(t.boardId, t.createdAt),
+  }),
+);
+
+export const executionLedger = pgTable(
+  "execution_ledger",
+  {
+    boardId: text("board_id").notNull(),
+    provider: text("provider").notNull(),
+    requestId: text("request_id").notNull(),
+    lucentActionId: text("lucent_action_id").notNull(),
+    nodeId: text("node_id").notNull(),
+    status: text("status").notNull(),
+    attempts: bigint("attempts", { mode: "number" }).notNull(),
+    error: text("error"),
+    beganAt: bigint("began_at", { mode: "number" }).notNull(),
+    appliedAt: bigint("applied_at", { mode: "number" }),
+    externalId: text("external_id"),
+  },
+  (t) => ({
+    // THE COMPOSITE KEY (the owner's triplet): attempts dedupe on it.
+    pk: primaryKey({ columns: [t.boardId, t.provider, t.requestId] }),
+    // The sweep's feed: reclaimable rows, oldest first.
+    sweepIdx: index("execution_ledger_sweep_idx").on(t.status, t.beganAt),
+  }),
+);
+
+export type DbIntegrationConnection = typeof integrationConnections.$inferSelect;
+export type DbNewIntegrationConnection = typeof integrationConnections.$inferInsert;
+export type DbIntegrationTaskLink = typeof integrationTaskLinks.$inferSelect;
+export type DbNewIntegrationTaskLink = typeof integrationTaskLinks.$inferInsert;
+export type DbIntegrationAction = typeof integrationActions.$inferSelect;
+export type DbNewIntegrationAction = typeof integrationActions.$inferInsert;
+export type DbExecutionRecord = typeof executionLedger.$inferSelect;
+export type DbNewExecutionRecord = typeof executionLedger.$inferInsert;

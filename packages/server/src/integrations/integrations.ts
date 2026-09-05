@@ -147,7 +147,26 @@ export function normalizeConnection(
     throw new Error(`credentialRef must be 1..${MAX_CREDENTIAL_REF_CHARS} characters`);
   }
   const scopes = (input.scopes ?? []).map((s) => s.trim()).filter(Boolean).slice(0, MAX_SCOPES);
-  return { orgId: input.orgId, provider, credentialRef: ref, scopes, createdBy: input.createdBy };
+  // Stage D6: provider config — shallow-validated (≤10 entries, short
+  // strings); provider-specific validation is the factory's business at
+  // connect time (the Linear factory 400s on a missing teamId).
+  const rawConfig = (input as { config?: Record<string, string> }).config;
+  const config: Record<string, string> | undefined = rawConfig
+    ? Object.fromEntries(
+        Object.entries(rawConfig)
+          .filter(([k, v]) => k && typeof v === "string")
+          .slice(0, 10)
+          .map(([k, v]) => [k.slice(0, 60), v.slice(0, 200)]),
+      )
+    : undefined;
+  return {
+    orgId: input.orgId,
+    provider,
+    credentialRef: ref,
+    ...(config && Object.keys(config).length > 0 ? { config } : {}),
+    scopes,
+    createdBy: input.createdBy,
+  };
 }
 
 /** Validate a link input; throws the honest reason. */
