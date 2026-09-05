@@ -75,22 +75,28 @@ const nodeSchema = z.object({
       status: z.enum(["open", "resolved", "rejected", "superseded"]),
       topic: z.string().min(1).max(60).optional(),
       supersedes: z.array(z.string().min(1)).max(10).optional(),
+      // Stage D2: createdFrom joins the family. The load path is deliberately
+      // LOOSER than the op schema (meetingId optional, no at-least-one
+      // refine): a stored board whose provenance predates either contract
+      // loads rather than being refused (the workspaceSchema precedent).
       provenance: z
         .object({
-          meetingId: z.string().min(1).max(120),
+          meetingId: z.string().min(1).max(120).optional(),
           turnRange: z.tuple([z.number().int().min(0), z.number().int().min(0)]).optional(),
           turnKinds: z.array(z.string().min(1)).max(8).optional(),
           quote: z.string().max(240).optional(),
+          createdFrom: z.array(z.string().min(1)).max(20).optional(),
         })
         .optional(),
     })
     .optional(),
   provenance: z
     .object({
-      meetingId: z.string().min(1).max(120),
+      meetingId: z.string().min(1).max(120).optional(),
       turnRange: z.tuple([z.number().int().min(0), z.number().int().min(0)]).optional(),
       turnKinds: z.array(z.string().min(1)).max(8).optional(),
       quote: z.string().max(240).optional(),
+      createdFrom: z.array(z.string().min(1)).max(20).optional(),
     })
     .optional(),
   metadata: z.record(z.string(), z.unknown()).optional(),

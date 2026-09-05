@@ -19,9 +19,15 @@ import type { Workspace } from "@lucent/core";
 const LIVE_SESSION = "live-session";
 
 /** True when a provenance record points at the given meeting's real id. */
-function pointsAt(provenance: { meetingId: string } | undefined, meetingId: string): boolean {
+function pointsAt(
+  provenance: { meetingId?: string } | undefined,
+  meetingId: string,
+): boolean {
   // A live-session stamp has no saved transcript to jump to — the same rule
   // the canvas ✦ button applies. Those turns list nothing, honestly.
+  // Stage D2: provenance may carry only createdFrom (plan evidence, no
+  // meeting) — `?.meetingId === meetingId` is false for it, which is the
+  // right answer: a plan item belongs to no transcript turn.
   return provenance?.meetingId === meetingId && meetingId !== LIVE_SESSION;
 }
 
@@ -41,10 +47,10 @@ function coversTurn(
 
 /** Every provenance record a node carries: its creation AND its statement's. */
 function nodeProvenances(node: {
-  provenance?: { meetingId: string; turnRange?: [number, number] };
-  statement?: { provenance?: { meetingId: string; turnRange?: [number, number] } };
-}): Array<{ meetingId: string; turnRange?: [number, number] }> {
-  const records: Array<{ meetingId: string; turnRange?: [number, number] }> = [];
+  provenance?: { meetingId?: string; turnRange?: [number, number] };
+  statement?: { provenance?: { meetingId?: string; turnRange?: [number, number] } };
+}): Array<{ meetingId?: string; turnRange?: [number, number] }> {
+  const records: Array<{ meetingId?: string; turnRange?: [number, number] }> = [];
   if (node.provenance) records.push(node.provenance);
   if (node.statement?.provenance) records.push(node.statement.provenance);
   return records;

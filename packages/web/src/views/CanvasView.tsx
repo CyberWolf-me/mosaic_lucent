@@ -2144,8 +2144,10 @@ function SelectionHud({
           and a click that JUMPS to the source meeting, closing the trust loop:
           AI creates → user questions → evidence. Stage C2 reads the op-level
           provenance FIRST (it is what converges to peers/server/history,
-          ADR 0022); the old metadata stamp stays as the pre-C2 fallback. */}
-      {Boolean(node.provenance || node.metadata?.meeting) && (
+          ADR 0022); the old metadata stamp stays as the pre-C2 fallback.
+          Stage D2: the ✦ MEETING jump requires meeting evidence — a
+          createdFrom-only node (plan evidence) has no transcript to open. */}
+      {Boolean((node.provenance?.meetingId ?? node.metadata?.meeting) || node.statement?.provenance?.meetingId) && (
         <ProvenanceButton
           provenance={node.provenance}
           legacy={node.metadata?.meeting as Record<string, unknown> | undefined}
@@ -2179,7 +2181,12 @@ function ProvenanceButton({
   legacy,
   onOpenMeeting,
 }: {
-  provenance?: { meetingId: string; turnRange?: [number, number]; turnKinds?: string[]; quote?: string };
+  provenance?: {
+    meetingId?: string;
+    turnRange?: [number, number];
+    turnKinds?: string[];
+    quote?: string;
+  };
   legacy?: Record<string, unknown>;
   /**
    * Stage C3: the jump now carries the turn RANGE when the provenance has

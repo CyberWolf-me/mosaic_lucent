@@ -69,19 +69,38 @@ const issueFieldsSchema = z.object({
  * `extractedAt` is deliberately absent: the op log's own `at` already
  * records when the creation happened, and a second timestamp on the node
  * would be a second source of truth the moment anyone edits it.
+ *
+ * Stage D2 (ADR 0022's own extension clause — "when later stages add other
+ * evidence kinds, they extend attachProvenance rather than inventing a
+ * third mechanism"): a second evidence kind joins the family. `createdFrom`
+ * carries the SOURCE STATEMENT node ids a plan item was derived from — the
+ * statement→action link. Either evidence kind alone is valid (a plan from
+ * board selection carries createdFrom only; a meeting extraction carries
+ * meetingId only; a plan from a meeting carries both), so meetingId is
+ * optional with at least-one required.
  */
-export const provenanceFieldsSchema = z.object({
-  meetingId: z.string().min(1).max(120),
-  /** Stable index range into the meeting's turns, inclusive. */
-  turnRange: z.tuple([z.number().int().min(0), z.number().int().min(0)]).refine(
-    (range) => range[1] >= range[0],
-    "turnRange end must be at least its start",
-  ).optional(),
-  /** The meeting loop's classification of the source turns, in turn order. */
-  turnKinds: z.array(z.string().min(1)).max(8).optional(),
-  /** The words that produced this node, capped like the old stamp was. */
-  quote: z.string().max(240).optional(),
-});
+export const provenanceFieldsSchema = z
+  .object({
+    meetingId: z.string().min(1).max(120).optional(),
+    /** Stable index range into the meeting's turns, inclusive. */
+    turnRange: z.tuple([z.number().int().min(0), z.number().int().min(0)]).refine(
+      (range) => range[1] >= range[0],
+      "turnRange end must be at least its start",
+    ).optional(),
+    /** The meeting loop's classification of the source turns, in turn order. */
+    turnKinds: z.array(z.string().min(1)).max(8).optional(),
+    /** The words that produced this node, capped like the old stamp was. */
+    quote: z.string().max(240).optional(),
+    /** Stage D2: the statement node ids this item was derived from — the
+     * plan send path stamps it (attachPlanProvenance), never the model. */
+    createdFrom: z.array(z.string().min(1)).max(20).optional(),
+  })
+  .refine(
+    (p) =>
+      p.meetingId !== undefined ||
+      (p.createdFrom !== undefined && p.createdFrom.length > 0),
+    "provenance needs meeting evidence or source statements (createdFrom)",
+  );
 
 /**
  * The six statement kinds (Stage C2, ADR 0021). A closed set on purpose: each
@@ -559,6 +578,52 @@ export function attachProvenance(
       return {
         ...op,
         statement: { ...op.statement, provenance },
+      } as Operation;
+    }
+    return op;
+  });
+}
+
+/**
+ * Attach the plan's source-statement evidence (Stage D2): the createdFrom
+ * link stamped by the plan send path — a fourth writer alongside the three
+ * ADR 0022 named, extending the same family per its own clause.
+ *
+ * Unlike attachProvenance (whole-object fill), this MERGES: an op that
+ * already carries meeting evidence keeps it and gains createdFrom — a plan
+ * generated from a meeting's decisions carries both evidence kinds, not
+ * one overwriting the other. An op that already has createdFrom keeps its
+ * own (idempotence — the client stamps before send; the server's
+ * approve-time enrichment is a no-op over it).
+ */
+export function attachPlanProvenance(
+  ops: readonly Operation[],
+  statementIds: readonly string[],
+): Operation[] {
+  if (statementIds.length === 0) return [...ops];
+  return ops.map((op) => {
+    if (op.op === "CREATE_NODE") {
+      const existing = op.provenance;
+      if (existing?.createdFrom) return op;
+      return {
+        ...op,
+        ...(existing
+          ? { provenance: { ...existing, createdFrom: [...statementIds] } }
+          : { provenance: { createdFrom: [...statementIds] } }),
+      } as Operation;
+    }
+    if (op.op === "SET_STATEMENT") {
+      if (op.statement === null) return op;
+      const existing = op.statement.provenance;
+      if (existing?.createdFrom) return op;
+      return {
+        ...op,
+        statement: {
+          ...op.statement,
+          ...(existing
+            ? { provenance: { ...existing, createdFrom: [...statementIds] } }
+            : { provenance: { createdFrom: [...statementIds] } }),
+        },
       } as Operation;
     }
     return op;

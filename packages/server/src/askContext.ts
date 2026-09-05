@@ -1,5 +1,5 @@
 import type { AnswerRequest, AnswerMeetingSummary, AnswerRetrievalHit } from "@lucent/ai";
-import type { Node, Workspace } from "@lucent/core";
+import type { Node, ProvenanceFields, Workspace } from "@lucent/core";
 import { canonicalizeTopic, topicsAreVariants } from "@lucent/core";
 import type { LoggedOpEntry } from "./boards.js";
 import type { MeetingTranscript } from "./meetings.js";
@@ -224,8 +224,17 @@ export function renderBoardDigest(input: AskContextInput): string {
     )
     .slice(0, ASK_DIGEST_LIMITS.groups)
     .map((n) => {
-      const origin = (p: { meetingId: string } | undefined) =>
-        p?.meetingId ? `, from meeting ${p.meetingId}` : "";
+      // Stage D2: provenance now carries either evidence kind — the origin
+      // bracket renders meeting evidence when present, and the plan link
+      // when that is what the node carries (a plan item names its sources).
+      const origin = (p: ProvenanceFields | undefined): string => {
+        if (!p) return "";
+        const meeting = p.meetingId ? `, from meeting ${p.meetingId}` : "";
+        const planned = p.createdFrom?.length
+          ? `, planned from ${p.createdFrom.join(", ")}`
+          : "";
+        return meeting + planned;
+      };
       const targets = n.statement.supersedes!
         .map((id) => {
           const t = ws.nodes[id];

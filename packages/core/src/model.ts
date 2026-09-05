@@ -264,13 +264,21 @@ export interface StatementFields {
  * layout, or statement does.
  */
 export interface ProvenanceFields {
-  meetingId: string;
+  /** Meeting evidence (present when the item came from a meeting). */
+  meetingId?: string;
   /** Inclusive index range into the meeting's turns. */
   turnRange?: [number, number];
   /** The meeting loop's classification of the source turns, in turn order. */
   turnKinds?: string[];
   /** The words that produced this node, capped at 240 characters. */
   quote?: string;
+  /**
+   * Stage D2: the source STATEMENT node ids this item was derived from —
+   * the statement→action link plan generation stamps (ADR 0022's first
+   * evidence-family extension). At least one of meetingId/createdFrom is
+   * present on every provenance object.
+   */
+  createdFrom?: string[];
 }
 
 export interface Edge {
