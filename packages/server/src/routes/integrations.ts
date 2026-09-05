@@ -1,4 +1,5 @@
 import * as z from "zod/v4";
+import { actionNodes } from "@lucent/core";
 import type { RegisterRoutes } from "./context.js";
 import { connectionView, MAX_CREDENTIAL_REF_CHARS } from "../integrations/integrations.js";
 import type { IntegrationProviderName } from "../integrations/integrations.js";
@@ -126,5 +127,120 @@ export const registerIntegrationRoutes: RegisterRoutes = (router, s) => {
     });
   });
 
-};
 
+  // ---- The sync route (the D4 acceptance path) -----------------------------
+  //
+  // Stage D5's PRE-APPROVAL SKELETON, labeled honestly: this batch ships the
+  // direct editor action — an authenticated human calls sync, the platform
+  // creates/updates external tasks through the provider, links land in the
+  // registry. D5 replaces the direct call with propose → approve → execute
+  // on the SAME store and provider seam (the Stripe-ledger shape, not B3 —
+  // an external action is not a canvas op), and this route becomes the
+  // executor underneath the approval. The idempotency you see here (the
+  // link makes a second sync skip) is the beginning of D5's story.
+  router.post("/api/boards/:id/integrations/:provider/sync", async (ctx) => {
+    const { req, res } = ctx;
+    const route = "/api/boards/:id/integrations/:provider/sync";
+    if (!requireCsrf(req, res, route)) return;
+    const user = await requireUser(req, res);
+    if (!user) return;
+    if (!meter(req, res, route)) return;
+    const boardId = ctx.param("id");
+    const guard = await requireBoardRole(req, res, boardId, "editor", route);
+    if (!guard.ok) return;
+    if (!integrations) return send(res, 503, { error: "integrations are not configured" });
+    const providerName = ctx.param("provider");
+    const provider = integrations.providers.get(providerName);
+    if (!provider) {
+      send(res, 400, { error: `no provider implementation named "${providerName}" is loaded` });
+      return;
+    }
+    // The connection must exist AND be active — syncing through a disabled
+    // or never-configured connection is refused, not silently skipped.
+    const connection = await integrations.store.connection(guard.board.orgId, providerName);
+    if (!connection) {
+      send(res, 404, { error: `no ${providerName} connection is configured for this org` });
+      return;
+    }
+    if (connection.status !== "active") {
+      send(res, 409, { error: `the ${providerName} connection is ${connection.status}` });
+      return;
+    }
+
+    // The board's executable actions (ADR 0027's selector — the model the
+    // provider targets) and their existing links.
+    const actions = actionNodes(guard.board.workspace);
+    const existingLinks = new Map(
+      (await integrations.store.linksForBoard(boardId))
+        .filter((l) => l.provider === providerName)
+        .map((l) => [l.nodeId, l]),
+    );
+
+    let created = 0;
+    let updated = 0;
+    let skipped = 0;
+    const results: Array<Record<string, unknown>> = [];
+    for (const node of actions) {
+      const issue = node.issue!;
+      const input = {
+        title: node.label,
+        ...(issue.description ? { description: issue.description } : {}),
+        ...(issue.assignee ? { assignee: issue.assignee } : {}),
+        ...(issue.dueDate ? { dueDate: issue.dueDate } : {}),
+        status: issue.status,
+      };
+      const link = existingLinks.get(node.id);
+      try {
+        if (!link) {
+          // CREATE: the action has no external task yet.
+          const task = await provider.createTask(input);
+          const stored = await integrations.store.linkTask(
+            {
+              orgId: guard.board.orgId,
+              boardId,
+              nodeId: node.id,
+              provider: providerName as never,
+              externalId: task.externalId,
+              ...(task.url ? { url: task.url } : {}),
+              lastSyncedStatus: task.status,
+            },
+            Date.now(),
+          );
+          created += 1;
+          results.push({ nodeId: node.id, action: "created", externalId: stored.externalId, url: stored.url });
+        } else {
+          // UPDATE only on drift: the external status moved from what we
+          // last synced (mapStatus both ways through the provider), or the
+          // board's own fields moved. Same external status + same input =
+          // skipped — the link is the idempotency key at the route level.
+          const task = await provider.updateTask(link.externalId, input);
+          if (task.status !== link.lastSyncedStatus) {
+            await integrations.store.linkTask(
+              {
+                orgId: guard.board.orgId,
+                boardId,
+                nodeId: node.id,
+                provider: providerName as never,
+                externalId: link.externalId,
+                ...(task.url ? { url: task.url } : {}),
+                lastSyncedStatus: task.status,
+              },
+              Date.now(),
+            );
+            updated += 1;
+            results.push({ nodeId: node.id, action: "updated", externalId: link.externalId, status: task.status });
+          } else {
+            skipped += 1;
+            results.push({ nodeId: node.id, action: "skipped", externalId: link.externalId });
+          }
+        }
+      } catch (err) {
+        // One provider failure must not 500 the batch: the honest report is
+        // which node failed and why (the partial-application philosophy).
+        results.push({ nodeId: node.id, action: "failed", reason: (err as Error).message });
+      }
+    }
+
+    send(res, 200, { provider: providerName, created, updated, skipped, results });
+  });
+};
