@@ -604,3 +604,43 @@ Explicitly NOT built, per the plan and ADR 0027: dependencies in any form
 new operation family, an execution-status enum or transitions, external
 execution links (D4/D6), an execution dashboard (D9), reminders,
 persisted overdue state, calendar/timezone infrastructure.
+
+## Amendment (2026-09-05): Stage D2 executed — semantic state becomes a plan
+
+The owner's decisions (via the recommended options, all four): createdFrom
+rides the provenance family (ADR 0022's extension clause executed
+verbatim); the input surfaces are the canvas multi-select pill (already
+worked — zero changes) plus Intelligence checkboxes ("Plan from selection");
+the plan gets its own op gate so the anti-conversion rule is MECHANICAL
+(PLAN_SAFE_OPS — creation and organization only; UPDATE_STATEMENT
+deliberately absent, so a proposal can never silently become confirmed
+work); and the plan renders as board content — a CREATE_GROUP region, not
+a view.
+
+What Stage D2 shipped (commits and the acceptance scenario in
+`packages/server/test/stageD2.definition.e2e.test.ts`):
+
+- **createdFrom, the second evidence kind** (`@lucent/core`):
+  provenanceFieldsSchema gains createdFrom (≤20 source statement ids);
+  meetingId becomes optional with an at-least-one refine (either evidence
+  kind; both coexist). attachPlanProvenance MERGES with meeting evidence
+  (fill-don't-overwrite, idempotent). All five places landed; reader
+  guards on the new optionality (askContext renders the plan link;
+  reverse-provenance treats plan items as belonging to no turn; the ✦
+  renders only with meeting evidence). 15 tests.
+- **The planning gate + teaching** (`@lucent/ai`, `@lucent/web`,
+  `@lucent/server`): the summary sees deadlines (dueDate + description in
+  WorkspaceSummary, summarySchema, and the workspaceFromSummary rebuild);
+  planGate.ts (PLAN_SAFE_OPS + gatePlanOps + planRequestText); the send
+  path gates then stamps createdFrom when plan attachments are present;
+  visual-agent v7's planning clause; the mock's plan script (reads the
+  summary's real statements); golden plan-from-statements — the acceptance
+  fixture (4/6/3/5/4/2) with the mechanical forbids. Gate stays at 1.
+- **The Intelligence surface** (`@lucent/web`, `@lucent/mcp`): every row a
+  checkbox; "Plan from selection (N)" sends the plan request; MCP get_board
+  exposes fromStatements for plan items (either evidence kind, honestly).
+
+Explicitly NOT built: the Ask-bridge and region selection (no consumer), a
+plan kind on the proposal record (the request text carries it),
+dependencies (D3), external links (D4/D6), a plan view (D9), automatic
+generation (a human requests every plan), re-planning diffs (History).

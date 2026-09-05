@@ -1118,3 +1118,36 @@ scenario passes the acceptance story: 20 actions across four creation
 paths, 20/20 persisted/synchronized/undoable/attributable/editable, the
 status sweep (six canonical + legacy compatibility), provenance intact,
 and the C5 negative test (a manual topic edit never canonicalized).
+
+## Stage D2 shipped: semantic state → plan (2026-09, docs/17 amendment, ADR 0028)
+
+[x] createdFrom (`@lucent/core`): the provenance family's second evidence
+    kind — source statement ids on CREATE_NODE/SET_STATEMENT, at-least-one
+    refine, attachPlanProvenance merges with meeting evidence. 15 tests
+    (refine/merge/idempotence/persistence/DELETE-restore/legacy-loads).
+[x] The planning gate (`@lucent/web`, `@lucent/ai`, `@lucent/server`):
+    PLAN_SAFE_OPS (mechanically no UPDATE_STATEMENT/DELETE/CHANGE_TEXT),
+    gatePlanOps with honest skip descriptors; SendAttachments.plan; the
+    send path gates → stamps → folds → the >5-op proposal panel. The
+    summary sees dueDate + description (both schema arms).
+[x] Teaching (`@lucent/ai`): visual-agent v7's planning clause; the mock
+    plan script; golden plan-from-statements on the 4/6/3/5/4/2 fixture
+    with mechanical forbids. Offline gate: score 1.
+[x] The surfaces (`@lucent/web`, `@lucent/mcp`): Intelligence checkboxes +
+    Plan-from-selection (N); canvas multi-select needs zero changes; MCP
+    fromStatements (either evidence kind). mcp 27, web 639, i18n 14.
+[x] The record: ADR 0028, docs/17 D2 amendment, this section, the changeset,
+    the stageD2 definition e2e.
+[ ] Ask-citation→selection bridge, region selection — not built (no
+    consumer; revisit on evidence).
+[ ] A plan kind/flag on the proposal record — not built (the request text
+    carries it; no store/migration).
+[ ] Dependencies — D3 (CONNECT_NODES sequences visually; no semantics).
+[ ] External execution links — D4/D6. Plan view/dashboard — D9.
+
+Gate: typecheck 0 across all six packages; ai 185, core 402, i18n 14,
+mcp 27, server 876+80 PG in CI, web 639; the stageD2 definition scenario
+passes the acceptance story: the fixture board, plan-shaped model ops
+(no UPDATE_STATEMENT/DELETE), a plan proposal with createdFrom stamps,
+approval through the AI actor chain, the region rendered, existing actions
+preserved, no proposal/question converted, undo restoring the board.
