@@ -45,6 +45,17 @@ export interface CreateTaskInput {
   dueDate?: string;
   /** The D1 canonical status the task should start in. */
   status?: string;
+  /**
+   * The exactly-once key (Stage D5, ADR 0031): the route threads
+   * `ext_<nodeId>_<recordId>` per node so a timed-out create retried with
+   * the same key returns the SAME external task — the ledger dedupes
+   * attempts, the key dedupes effects (the Stripe client precedent: "the
+   * request may never have reached the provider, and if it did the
+   * idempotency key covers us"). Providers that support idempotent
+   * creates honor it; those that cannot ignore it and accept the retry
+   * contract's window.
+   */
+  idempotencyKey?: string;
 }
 
 /** A later edit to an existing external task (all fields optional). */

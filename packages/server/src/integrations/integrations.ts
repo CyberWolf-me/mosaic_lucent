@@ -118,7 +118,7 @@ export interface IntegrationStore {
   unlink(boardId: string, nodeId: string, provider: string): Promise<boolean>;
 }
 
-export function newIntegrationId(prefix: "int_" | "lnk_"): string {
+export function newIntegrationId(prefix: "int_" | "lnk_" | "act_"): string {
   return prefix + Date.now().toString(36) + randomBytes(3).toString("hex");
 }
 
@@ -289,5 +289,173 @@ export class InMemoryIntegrationStore implements IntegrationStore {
     if (!found) return false;
     this.links.delete(found.id);
     return true;
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/* External action records (Stage D5, ADR 0031)                                */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The external-action proposal record — B3's PATTERN in a new kind, NOT the
+ * B3 pipeline (ADR 0030's ruling: an external action is not a canvas
+ * Operation; extending StoredProposal fails on the non-empty-ops check,
+ * the Operation[] typing, the op-log appliedSeq, the room commit, and the
+ * one-pending-per-board index would make a canvas proposal and an external
+ * batch fight for one slot). Reused from the pattern: the status quartet,
+ * the decided-once transition guard, one-pending-per-(board,provider) by
+ * supersede, the duplicate-decider answer.
+ *
+ * The record STORES its items — the payload doubles as the sweep's replay
+ * source (unlike a Stripe event, an intended external create has no
+ * external authoritative copy to re-fetch).
+ */
+export const INTEGRATION_ACTION_STATUSES = [
+  "pending",
+  "approved",
+  "rejected",
+  "superseded",
+] as const;
+export type IntegrationActionStatus = (typeof INTEGRATION_ACTION_STATUSES)[number];
+
+/** One node's planned external effect within a batch. */
+export interface IntegrationActionItem {
+  nodeId: string;
+  action: "create" | "update";
+  title: string;
+  assignee?: string;
+  dueDate?: string;
+  /** The D1 canonical status word at proposal time. */
+  status: string;
+  /** For updates: the existing external id; for creates: absent. */
+  externalId?: string;
+  /** The exactly-once key the executor threads to the provider. */
+  idempotencyKey: string;
+}
+
+export interface IntegrationActionRecord {
+  id: string;
+  orgId: string;
+  boardId: string;
+  provider: IntegrationProviderName;
+  status: IntegrationActionStatus;
+  items: IntegrationActionItem[];
+  createdBy: string;
+  createdAt: number;
+  decidedBy?: string;
+  decidedAt?: number;
+  appliedAt?: number;
+  error?: string;
+}
+
+export interface IntegrationActionStore {
+  /**
+   * One-pending-per-(board, provider): a new proposal supersedes any
+   * pending predecessor (the B3 create pattern), returning its id.
+   */
+  propose(input: {
+    orgId: string;
+    boardId: string;
+    provider: IntegrationProviderName;
+    items: IntegrationActionItem[];
+    createdBy: string;
+    now: number;
+  }): Promise<{ record: IntegrationActionRecord; supersededId: string | null }>;
+  /** Board-scoped read: a leaked id is not a read. */
+  action(boardId: string, id: string): Promise<IntegrationActionRecord | undefined>;
+  /** The board's action history, newest first. */
+  actionsForBoard(boardId: string): Promise<IntegrationActionRecord[]>;
+  /**
+   * The decided-once transition guard (the B3 decide pattern): a second
+   * decide on an already-decided record is a NO-OP returning the current
+   * state — the caller answers "duplicate", never a second effect.
+   */
+  decide(
+    boardId: string,
+    id: string,
+    decision: "approved" | "rejected",
+    decidedBy: string,
+    now: number,
+  ): Promise<IntegrationActionRecord | undefined>;
+  /** Mark the batch applied (the executor's final write). */
+  applied(boardId: string, id: string, now: number): Promise<void>;
+}
+
+/** The InMemory action-store pair (the proposals.ts convention). */
+export class InMemoryIntegrationActionStore implements IntegrationActionStore {
+  private readonly records = new Map<string, IntegrationActionRecord>();
+
+  async propose(input: {
+    orgId: string;
+    boardId: string;
+    provider: IntegrationProviderName;
+    items: IntegrationActionItem[];
+    createdBy: string;
+    now: number;
+  }): Promise<{ record: IntegrationActionRecord; supersededId: string | null }> {
+    const pending = [...this.records.values()].find(
+      (r) =>
+        r.boardId === input.boardId &&
+        r.provider === input.provider &&
+        r.status === "pending",
+    );
+    let supersededId: string | null = null;
+    if (pending) {
+      supersededId = pending.id;
+      this.records.set(pending.id, { ...pending, status: "superseded" });
+    }
+    const record: IntegrationActionRecord = {
+      id: newIntegrationId("act_"),
+      orgId: input.orgId,
+      boardId: input.boardId,
+      provider: input.provider,
+      status: "pending",
+      items: input.items,
+      createdBy: input.createdBy,
+      createdAt: input.now,
+    };
+    this.records.set(record.id, record);
+    return { record: { ...record }, supersededId };
+  }
+
+  async action(boardId: string, id: string): Promise<IntegrationActionRecord | undefined> {
+    const found = this.records.get(id);
+    // Board-scoped: the id alone is not a read.
+    if (!found || found.boardId !== boardId) return undefined;
+    return { ...found };
+  }
+
+  async actionsForBoard(boardId: string): Promise<IntegrationActionRecord[]> {
+    return [...this.records.values()]
+      .filter((r) => r.boardId === boardId)
+      .sort((a, b) => b.createdAt - a.createdAt)
+      .map((r) => ({ ...r }));
+  }
+
+  async decide(
+    boardId: string,
+    id: string,
+    decision: "approved" | "rejected",
+    decidedBy: string,
+    now: number,
+  ): Promise<IntegrationActionRecord | undefined> {
+    const found = this.records.get(id);
+    if (!found || found.boardId !== boardId) return undefined;
+    // Decided once: a second decide changes nothing.
+    if (found.status !== "pending") return { ...found };
+    const updated: IntegrationActionRecord = {
+      ...found,
+      status: decision,
+      decidedBy,
+      decidedAt: now,
+    };
+    this.records.set(id, updated);
+    return { ...updated };
+  }
+
+  async applied(boardId: string, id: string, now: number): Promise<void> {
+    const found = this.records.get(id);
+    if (!found || found.boardId !== boardId) return;
+    this.records.set(id, { ...found, appliedAt: now });
   }
 }

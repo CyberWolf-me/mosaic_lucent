@@ -31,15 +31,45 @@ export class FakeProvider implements ExecutionProvider {
 
   private nextId = 1;
   private readonly tasks = new Map<string, ExternalTask>();
+  /** Stage D5: idempotencyKey → the task it created, exactly once. */
+  private readonly byKey = new Map<string, ExternalTask>();
   readonly calls: RecordedCall[] = [];
   private readonly listeners = new Set<(change: ExternalTaskChange) => void>();
+  /** Stage D5 test hooks: queued faults. failNext first, then hang. */
+  private failQueue: Array<{ method: RecordedCall["method"]; error: Error }> = [];
+  private hangQueue = 0;
 
   /** The fake's external vocabulary — deliberately different words, so
    * mapStatus is exercised as a real translation, not a passthrough. */
   static readonly EXTERNAL_STATUSES = ["todo", "active", "blocked", "done", "canceled"] as const;
 
+  /** Test hook: the next call(s) to this method reject (one-shot each). */
+  failNext(method: RecordedCall["method"], error = new Error("fake network failure")): void {
+    this.failQueue.push({ method, error });
+  }
+
+  /** Test hook: the next call to this method never settles (the timeout arm). */
+  hangNext(): void {
+    this.hangQueue += 1;
+  }
+
   createTask(input: CreateTaskInput): Promise<ExternalTask> {
     this.calls.push({ method: "createTask", input, at: Date.now() });
+    // Stage D5: a repeated idempotency key returns the SAME task — the
+    // retry-after-timeout contract, honored (Linear's real behavior).
+    if (input.idempotencyKey !== undefined) {
+      const existing = this.byKey.get(input.idempotencyKey);
+      if (existing) return Promise.resolve(existing);
+    }
+    const fault = this.failQueue.shift();
+    if (fault && fault.method === "createTask") return Promise.reject(fault.error);
+    if (this.hangQueue > 0) {
+      this.hangQueue -= 1;
+      return new Promise<ExternalTask>(() => {
+        // Deliberately never settles: the caller's AbortSignal.timeout is
+        // the thing under test.
+      });
+    }
     const externalId = `fake-${this.nextId}`;
     this.nextId += 1;
     const task: ExternalTask = {
@@ -52,11 +82,14 @@ export class FakeProvider implements ExecutionProvider {
       url: `https://fake.example.com/task/${externalId}`,
     };
     this.tasks.set(externalId, task);
+    if (input.idempotencyKey !== undefined) this.byKey.set(input.idempotencyKey, task);
     return Promise.resolve(task);
   }
 
   updateTask(externalId: string, input: UpdateTaskInput): Promise<ExternalTask> {
     this.calls.push({ method: "updateTask", externalId, input, at: Date.now() });
+    const fault = this.failQueue.shift();
+    if (fault && fault.method === "updateTask") return Promise.reject(fault.error);
     const task = this.tasks.get(externalId);
     if (!task) {
       return Promise.reject(new Error(`fake task "${externalId}" does not exist`));
@@ -74,6 +107,8 @@ export class FakeProvider implements ExecutionProvider {
 
   getTask(externalId: string): Promise<ExternalTask> {
     this.calls.push({ method: "getTask", externalId, at: Date.now() });
+    const fault = this.failQueue.shift();
+    if (fault && fault.method === "getTask") return Promise.reject(fault.error);
     const task = this.tasks.get(externalId);
     if (!task) {
       return Promise.reject(new Error(`fake task "${externalId}" does not exist`));
