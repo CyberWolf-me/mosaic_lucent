@@ -1235,3 +1235,39 @@ round-trips, and the derived truth rendering on every surface.
 Gate: typecheck 0 across all six packages; server 900 passing (+20 in D4:
 14 seam + 5 routes + 1 definition); no PG surface (the InMemory pair
 ships; no LUCENT_TEST_DATABASE_URL dependency).
+
+## Stage D5 shipped: external action safety (2026-09, docs/17 amendment, ADR 0031)
+
+[x] The pairing (`@lucent/server`): the execution ledger (the Stripe-event
+    shape generalized; the row STORES the payload — the record IS the
+    replay source) + CreateTaskInput.idempotencyKey (the FakeProvider
+    honors it: repeated key → the SAME task). The ledger dedupes
+    ATTEMPTS; the key dedupes EFFECTS; either alone fails the acceptance.
+    13 ledger/record/hook tests including the negative proof.
+[x] The approval record: IntegrationActionRecord — B3's PATTERN in a new
+    kind (status quartet, one-pending-per-(board,provider) supersede,
+    decided-once guard answering duplicate with the ORIGINAL outcome,
+    board-scoped reads). NOT the B3 pipeline (ADR 0030's five blockers).
+[x] The routes: propose (THE PREVIEW with the nothing-deleted statement),
+    approve (the executor: per item, ledger claim → keyed provider call
+    under a 15s race → link → applied; per-item failure isolation),
+    reject (ZERO external effects, the provider never called — pinned),
+    list (viewer floor). The D4 sync route remains the DIRECT path. The
+    per-ITEM requestId (ext_<record>_<user>_<node>) — a per-batch key
+    defect caught by the route test and hunted with a debug spec.
+[x] The acceptance (stageD5.definition.e2e): the failure arm (timeout →
+    retry → 1 external task, 1 reference, 0 duplicates per node — attempts
+    recorded, effects counted once); the hang arm; the sweep arm (stuck
+    row → window-honest → reclaimable → re-claim → duplicate forever);
+    the unauthorized case (viewer 404s, reads 200). The workspace blob
+    provider-string-free throughout.
+[x] The record: ADR 0031, docs/17 D5 amendment, this section, the changeset.
+[ ] Web surface (the chip + external-action panel) — D6, against the
+    frozen preview shape.
+[ ] Scope enforcement — D6 (recorded metadata today).
+[ ] PG pairs + migration, the background sweeper wiring — D6.
+[ ] Link GC on node deletion — documented, the sweep owns the decision.
+[ ] Real providers (D6), webhooks (D7), AI-initiated proposals (D9).
+
+Gate: typecheck 0; server 922 passing (+22 in D5: 13 core + 5 routes +
+4 acceptance); no PG surface (InMemory pairs ship).

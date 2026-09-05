@@ -735,3 +735,56 @@ with D6 when Linear demands persistence); reversible encryption at rest
 future stored token); webhook routes (D7); subscribeToChanges server
 plumbing; OAuth flows; the web UI's "synced to X" chip beyond the link
 GET; MCP link exposure.
+
+## Amendment (2026-09-05): Stage D5 executed — external action safety
+
+The owner's milestone, taken as the recommended options: the ledger-dedupes-
+attempts/key-dedupes-effects PAIRING (the acceptance's literal truth —
+either alone fails: the ledger alone gives at-most-one-visible-attempt, a
+timed-out create may have landed = LIN-482 AND LIN-483); the approval
+record as a new kind in the integrations store (ADR 0030's anti-B3 ruling
+confirmed by five concrete blockers); the board-editor floor (org-owner
+control structural via connection configuration — no second permission
+system); and server-only (the chip + panel land in D6 against the frozen
+preview shape).
+
+What Stage D5 shipped (commits and the acceptance in
+`packages/server/test/stageD5.definition.e2e.test.ts`):
+
+- **The exactly-once core** (`2d5e3a6`): the execution ledger
+  (src/integrations/ledger.ts — the Stripe-event shape generalized: claim
+  triad + exhausted, stale window, max attempts, the pending() sweep feed;
+  THE ONE GENERALIZATION: the row stores the payload — an intended
+  external create has no external copy to re-fetch, the record IS the
+  replay source); CreateTaskInput.idempotencyKey (the stripe.ts client
+  precedent — the FakeProvider honors it: repeated key → the SAME
+  fake-N); the IntegrationActionRecord kind (B3's pattern — status
+  quartet, one-pending-per-(board,provider) supersede, decided-once
+  guard, board-scoped reads); FakeProvider fault hooks (failNext,
+  hangNext). 13 tests including the negative proof (WITHOUT a key the
+  retry duplicates — the failure mode the executor's keys prevent).
+- **The routes** (`40f1cba`): propose (the per-node plan + THE PREVIEW:
+  creates with fields, updates, the nothing-deleted statement);
+  approve (decided-once guard → the executor: per item, ledger claim →
+  keyed provider call under a 15s race → link → applied; per-item failure
+  isolation); reject (ZERO effects — the provider never called, pinned);
+  list (viewer). One real defect caught by the route test: the first
+  draft keyed the ledger per-BATCH (ten items shared one composite key →
+  the first item's claim made nine answer duplicate) — the requestId now
+  names the ITEM (ext_<record>_<user>_<node>). 5 route tests.
+- **The acceptance** (`3560ef1`): four continuous tests — the failure arm
+  (10 proposed; first approve → 9 applied, 1 failed; the retry through a
+  FRESH record with STABLE per-node keys → taskCount 10 not 11, 10
+  distinct external ids, 10 links, 0 duplicates; the failed attempt
+  RECORDED while only ten effects exist — attempts and effects counted
+  separately, the pairing's proof); the hang arm (the hook proven); the
+  sweep arm (a crashed executor's row: nothing in the window, failed →
+  immediately reclaimable, the sweeper re-claims through the same claim,
+  applied → duplicate forever); the unauthorized case (viewer → 404 on
+  every mutation, 200 on reads).
+
+Explicitly NOT built, per ADR 0031: web surface (D6), scope enforcement
+(D6's vocabularies), the PG pairs + migration (D6), a background sweeper
+process (the function ships; main.ts wiring with D6), link GC (documented,
+the sweep owns the decision), real providers (D6), webhooks (D7),
+AI-initiated proposals (D9).
