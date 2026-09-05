@@ -216,6 +216,166 @@ export function actionNodes(workspace: Workspace): Node[] {
 }
 
 /* -------------------------------------------------------------------------- */
+/* The execution graph (Stage D3, ADR 0029)                                   */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The dependency relationship vocabulary (Stage D3). Convention + validator
+ * rules + teaching — NOT a zod enum (ADR 0027's doctrine, applied to
+ * relationships): the `relationship` string stays free-form, and these
+ * three values carry semantics — cycle rejection for depends_on/blocks,
+ * nothing for related_to.
+ */
+export const DEPENDENCY_RELATIONSHIPS = ["depends_on", "blocks", "related_to"] as const;
+
+/**
+ * The normalized upstream adjacency (Stage D3): `depends_on` is canonical —
+ * `A depends_on B` means A waits on B — and `blocks` is the same edge viewed
+ * from upstream (`A blocks B` ≡ `B depends_on A`). Both forms collapse into
+ * ONE graph so a cycle can never hide across the two spellings; `related_to`
+ * is excluded from dependency semantics entirely (it never propagates, and
+ * cannot form a cycle the validator would reject).
+ *
+ * Returns `deps.get(id)` = the upstream ids `id` waits on.
+ */
+export function dependsOnGraph(workspace: Workspace): Map<string, string[]> {
+  const deps = new Map<string, string[]>();
+  for (const edge of Object.values(workspace.edges)) {
+    if (edge.relationship === "depends_on") {
+      const list = deps.get(edge.source) ?? [];
+      list.push(edge.target);
+      deps.set(edge.source, list);
+    } else if (edge.relationship === "blocks") {
+      // A blocks B ≡ B depends_on A — normalize to the canonical form.
+      const list = deps.get(edge.target) ?? [];
+      list.push(edge.source);
+      deps.set(edge.target, list);
+    }
+  }
+  return deps;
+}
+
+/**
+ * Does `from` reach `to` following the upstream adjacency? The same
+ * seen-bounded walk as the validator's supersession check — hang-safe by
+ * construction, so a cyclic graph passed in (it can happen when callers
+ * build the adjacency themselves) walks each node at most once.
+ */
+export function dependencyReaches(
+  deps: ReadonlyMap<string, readonly string[]>,
+  from: string,
+  to: string,
+): boolean {
+  const seen = new Set<string>();
+  const queue = [...(deps.get(from) ?? [])];
+  while (queue.length > 0) {
+    const id = queue.pop()!;
+    if (id === to) return true;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    queue.push(...(deps.get(id) ?? []));
+  }
+  return false;
+}
+
+/**
+ * Overdue-unfinished — the at-risk predicate (Stage D3, the review's
+ * settled clarification): past its due date AND not completed/cancelled.
+ * Blocked is deliberately NOT excluded: a blocked-but-overdue upstream
+ * contributes to at-risk precisely when the project is in trouble —
+ * excluding it would make the risk chain go quiet at the worst moment.
+ * Timezone-naive by design (the due date is a calendar date, ADR 0027):
+ * the date counts as overdue the day AFTER it.
+ */
+export function isOverdueUnfinished(
+  dueDate: string | undefined,
+  status: string | undefined,
+  now: number,
+): boolean {
+  if (!dueDate) return false;
+  if (status === "completed" || status === "cancelled") return false;
+  const today = new Date(now);
+  const todayIso = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+  return dueDate < todayIso;
+}
+
+/** The derived execution state of one node — computed project truth. */
+export interface DerivedExecution {
+  /** Upstream ids whose manual status is `blocked` or that are themselves
+   * derived-blocked — transitive, deduplicated, computed fresh every read. */
+  blockedBy: string[];
+  /** Upstream ids that are overdue-unfinished (past due, not completed/
+   * cancelled — blocked counts). Analytical signal, never a status. */
+  atRiskBy: string[];
+}
+
+/**
+ * The derived execution state of the board's executable work (Stage D3,
+ * ADR 0029): MANUAL state is `issue.status` — the human's execution call;
+ * DERIVED state is this projection — computed project truth. Never merged,
+ * never written by any op, never aliased onto status.
+ *
+ * Propagation walks through EXECUTABLE nodes only (statement kind action +
+ * issue fields — the `actionNodes` shape): dependency edges between any
+ * nodes exist on the canvas, but the execution graph's traversal honors
+ * executable endpoints, so a Requirement→Action edge contributes while a
+ * Comment→Action edge never enters the graph.
+ *
+ * Pure over (workspace, now): the same board recomputes the same truth.
+ * Recovery is re-computation — upstream unblocks or its deadline moves,
+ * and the derived state disappears because nothing was ever stored.
+ */
+export function derivedExecution(
+  workspace: Workspace,
+  now: number,
+): Map<string, DerivedExecution> {
+  const deps = dependsOnGraph(workspace);
+  const executable = new Set(
+    actionNodes(workspace).map((n) => n.id),
+  );
+  const out = new Map<string, DerivedExecution>();
+
+  // Collect the transitive upstream set of one node, bounded by `seen`
+  // (the diamond case: both paths reach A, A appears once). The walk
+  // traverses EXECUTABLE nodes only: an upstream that is not executable
+  // may itself be a source (its manual status or overdue date counts when
+  // directly depended on) but it FORWARDS nothing — a Comment→Action edge
+  // never enters the execution graph's traversal.
+  const upstreamOf = (id: string, seen: Set<string>): string[] => {
+    const acc: string[] = [];
+    for (const up of deps.get(id) ?? []) {
+      if (seen.has(up)) continue;
+      seen.add(up);
+      acc.push(up);
+      if (executable.has(up)) {
+        acc.push(...upstreamOf(up, seen));
+      }
+    }
+    return acc;
+  };
+
+  for (const node of actionNodes(workspace)) {
+    const seen = new Set<string>([node.id]);
+    const upstream = upstreamOf(node.id, seen);
+    const blockedBy: string[] = [];
+    const atRiskBy: string[] = [];
+    for (const upId of upstream) {
+      const up = workspace.nodes[upId];
+      if (!up) continue;
+      const upIssue = up.issue;
+      if (upIssue && upIssue.status === "blocked") {
+        if (!blockedBy.includes(upId)) blockedBy.push(upId);
+      }
+      if (isOverdueUnfinished(upIssue?.dueDate, upIssue?.status, now)) {
+        if (!atRiskBy.includes(upId)) atRiskBy.push(upId);
+      }
+    }
+    out.set(node.id, { blockedBy, atRiskBy });
+  }
+  return out;
+}
+
+/* -------------------------------------------------------------------------- */
 /* Statement semantics (Stage C2, ADR 0021)                                    */
 /* -------------------------------------------------------------------------- */
 

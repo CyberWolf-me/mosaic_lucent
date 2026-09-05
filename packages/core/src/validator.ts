@@ -86,6 +86,39 @@ export function validateOperations(workspace: Workspace, ops: Operation[]): Vali
     return false;
   };
 
+  // Dependency adjacency (Stage D3, ADR 0029): node id -> the upstream ids
+  // it waits on, depends_on canonical, blocks normalized to the same form
+  // (A blocks B ≡ B depends_on A) so a cycle cannot hide across spellings.
+  // Maintained through the batch exactly like `statementOf` — the cycle
+  // check must catch a loop formed entirely WITHIN one AI-generated batch,
+  // not only against pre-existing edges. related_to carries no dependency
+  // semantics and never enters the adjacency.
+  const dependsOnOf = new Map<string, string[]>();
+  for (const edge of Object.values(workspace.edges)) {
+    if (edge.relationship === "depends_on") {
+      const list = dependsOnOf.get(edge.source) ?? [];
+      list.push(edge.target);
+      dependsOnOf.set(edge.source, list);
+    } else if (edge.relationship === "blocks") {
+      const list = dependsOnOf.get(edge.target) ?? [];
+      list.push(edge.source);
+      dependsOnOf.set(edge.target, list);
+    }
+  }
+  /** The same seen-bounded walk as supersedesReaches, over the dependency graph. */
+  const dependencyReaches = (from: string, to: string): boolean => {
+    const seen = new Set<string>();
+    const queue = [...(dependsOnOf.get(from) ?? [])];
+    while (queue.length > 0) {
+      const id = queue.pop()!;
+      if (id === to) return true;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      queue.push(...(dependsOnOf.get(id) ?? []));
+    }
+    return false;
+  };
+
   ops.forEach((op, index) => {
     const err = (message: string) => errors.push({ index, op: op.op, message });
 
@@ -174,6 +207,25 @@ export function validateOperations(workspace: Workspace, ops: Operation[]): Vali
         if (!nodes.has(op.source)) err(`source node "${op.source}" does not exist`);
         if (!nodes.has(op.target)) err(`target node "${op.target}" does not exist`);
         if (op.source === op.target) err(`cannot connect node "${op.source}" to itself`);
+        // The dependency cycle rule (Stage D3, ADR 0029): adding a
+        // dependency edge is refused when the OTHER endpoint already
+        // reaches this one — including through edges earlier in the same
+        // batch. depends_on and blocks normalize to one upstream graph, so
+        // a cycle cannot hide across the two spellings. related_to carries
+        // no semantics and cycles freely.
+        if (op.relationship === "depends_on" || op.relationship === "blocks") {
+          const dependent = op.relationship === "blocks" ? op.target : op.source;
+          const upstream = op.relationship === "blocks" ? op.source : op.target;
+          if (dependencyReaches(upstream, dependent)) {
+            err(
+              `dependency "${op.source}" ${op.relationship} "${op.target}" would form a cycle (via ${upstream} → … → ${dependent})`,
+            );
+          } else {
+            const list = dependsOnOf.get(dependent) ?? [];
+            list.push(upstream);
+            dependsOnOf.set(dependent, list);
+          }
+        }
         edges.add(edgeId(op.source, op.target, op.relationship));
         break;
       }
@@ -181,6 +233,16 @@ export function validateOperations(workspace: Workspace, ops: Operation[]): Vali
         const id = edgeId(op.source, op.target, op.relationship);
         if (!edges.has(id)) err(`edge ${id} does not exist`);
         edges.delete(id);
+        // Removing a dependency edge is always valid (unblocking can never
+        // form a cycle); the simulated adjacency drops the upstream link so
+        // later ops in the batch validate against the post-disconnect graph.
+        if (op.relationship === "depends_on") {
+          const list = dependsOnOf.get(op.source);
+          if (list) dependsOnOf.set(op.source, list.filter((t) => t !== op.target));
+        } else if (op.relationship === "blocks") {
+          const list = dependsOnOf.get(op.target);
+          if (list) dependsOnOf.set(op.target, list.filter((t) => t !== op.source));
+        }
         break;
       }
       case "CREATE_GROUP":
