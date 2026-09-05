@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import type { IssueStatusCategory, Node, Operation } from "@lucent/core";
-import { BOARD_COLUMNS, boardColumns, pointsByCategory } from "@lucent/core";
+import { BOARD_COLUMNS, boardColumns, derivedExecution, pointsByCategory } from "@lucent/core";
 import { TopBar, LeftRail, StatusBadge } from "../ui/Chrome.js";
 import { AIPill } from "../ui/AIPill.js";
 import { Ico } from "../ui/icons.js";
@@ -29,6 +29,10 @@ export function BoardView({ onOpenSettings }: { onOpenSettings: (section?: strin
   const columns = boardColumns(workspace);
   const points = pointsByCategory(workspace);
   const total = BOARD_COLUMNS.reduce((sum, c) => sum + columns[c.category].length, 0);
+  // Stage D3: the derived execution state, computed once per render — the
+  // card badge reads it; column placement stays on the manual statusCategory
+  // (derived informs, never silently refiles).
+  const derived = useMemo(() => derivedExecution(workspace, Date.now()), [workspace]);
 
   const moveTo = (id: string, category: IssueStatusCategory) => {
     const node = workspace.nodes[id];
@@ -109,6 +113,7 @@ export function BoardView({ onOpenSettings }: { onOpenSettings: (section?: strin
                     <IssueCard
                       key={n.id}
                       node={n}
+                      derived={derived.get(n.id)}
                       dragging={dragId === n.id}
                       onDragStart={() => setDragId(n.id)}
                       onDragEnd={() => {
@@ -161,24 +166,29 @@ const PRIORITY_MARK: Record<string, string> = {
 
 function IssueCard({
   node,
+  derived,
   dragging,
   onDragStart,
   onDragEnd,
   onNudge,
 }: {
   node: Node;
+  /** Stage D3: computed project truth for this node (undefined = no derived state). */
+  derived?: { blockedBy: string[]; atRiskBy: string[] };
   dragging: boolean;
   onDragStart: () => void;
   onDragEnd: () => void;
   onNudge: (dir: -1 | 1) => void;
 }) {
   const issue = node.issue!;
-  // A full sentence for AT: label, type, status, who it's assigned to, and
-  // (Stage D1) the deadline when the work carries one.
+  // A full sentence for AT: label, type, status, who it's assigned to,
+  // (Stage D1) the deadline, and (Stage D3) derived blockers/risks.
   const cardLabel =
     `${node.label} — ${issue.type}, ${issue.status}` +
     (issue.assignee ? `, assigned to ${issue.assignee}` : "") +
     (issue.dueDate ? `, due ${issue.dueDate}` : "") +
+    (derived && derived.blockedBy.length > 0 ? `, blocked by ${derived.blockedBy.join(", ")}` : "") +
+    (derived && derived.atRiskBy.length > 0 ? `, at risk from ${derived.atRiskBy.join(", ")}` : "") +
     (issue.storyPoints !== undefined ? `, ${issue.storyPoints} points` : "");
   // The due date is overdue when past today and the work isn't finished —
   // computed here at render, never persisted (ADR 0027).
@@ -220,6 +230,35 @@ function IssueCard({
         >
           {overdue ? "⚠ " : "▢ "}
           {issue.dueDate}
+        </div>
+      )}
+      {/* Stage D3: the derived badge — derived informs, never refiles. The
+          card stays in the human's chosen column; the badge names the
+          upstream truth. */}
+      {derived && derived.blockedBy.length > 0 && (
+        <div
+          className="mono"
+          style={{
+            fontSize: 9.5,
+            marginTop: 2,
+            color: "var(--sig-red)",
+          }}
+          title={`Blocked by: ${derived.blockedBy.join(", ")}`}
+        >
+          ⚠ blocked by {derived.blockedBy.length}
+        </div>
+      )}
+      {derived && derived.atRiskBy.length > 0 && (
+        <div
+          className="mono"
+          style={{
+            fontSize: 9.5,
+            marginTop: 2,
+            color: "var(--amber-2)",
+          }}
+          title={`At risk from: ${derived.atRiskBy.join(", ")}`}
+        >
+          ⌛ at risk {derived.atRiskBy.length}
         </div>
       )}
       <div className="issue-card-meta">

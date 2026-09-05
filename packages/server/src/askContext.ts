@@ -1,6 +1,6 @@
 import type { AnswerRequest, AnswerMeetingSummary, AnswerRetrievalHit } from "@lucent/ai";
 import type { Node, ProvenanceFields, Workspace } from "@lucent/core";
-import { canonicalizeTopic, topicsAreVariants } from "@lucent/core";
+import { canonicalizeTopic, derivedExecution, topicsAreVariants } from "@lucent/core";
 import type { LoggedOpEntry } from "./boards.js";
 import type { MeetingTranscript } from "./meetings.js";
 import { buildSearchCorpus, retrieve, SEARCH_LIMITS } from "./retrieval.js";
@@ -143,6 +143,11 @@ function actorDisplayName(entry: LoggedOpEntry, names: ReadonlyMap<string, strin
 export function renderBoardDigest(input: AskContextInput): string {
   const ws = input.workspace;
   const lines: string[] = [`Board: ${input.boardName} (diagram kind: ${ws.diagramKind})`];
+  // Stage D3: the derived execution state, computed once per digest — the
+  // manual/derived split rendered side by side (status is the human's call;
+  // blockedBy/atRiskBy are computed truth).
+  const derivedMap = derivedExecution(ws, Date.now());
+  const derivedFor = (id: string) => derivedMap.get(id);
 
   const nodeIds = Object.keys(ws.nodes).slice(0, ASK_DIGEST_LIMITS.nodes);
   if (nodeIds.length) {
@@ -155,6 +160,19 @@ export function renderBoardDigest(input: AskContextInput): string {
       const issue = node.issue;
       if (issue) {
         parts.push(`[issue: ${issue.type} · ${issue.status}${issue.assignee ? ` · @${issue.assignee}` : ""}]`);
+      }
+      // The derived execution truth (Stage D3): computed per digest read —
+      // blockedBy/atRiskBy from the dependency graph, so "what's blocking
+      // us?" is answered from structure. Never stored, never aliased onto
+      // the manual status above.
+      const derived = derivedFor(node.id);
+      if (derived) {
+        if (derived.blockedBy.length) {
+          parts.push(`[blocked by: ${derived.blockedBy.slice(0, 6).join(", ")}]`);
+        }
+        if (derived.atRiskBy.length) {
+          parts.push(`[at risk: ${derived.atRiskBy.slice(0, 6).join(", ")}]`);
+        }
       }
       // The statement (Stage C2): what this node IS. This is the line that
       // answers "what did we decide about pricing?" — the digest the

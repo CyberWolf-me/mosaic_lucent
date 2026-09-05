@@ -288,3 +288,49 @@ describe("the D1 execution fields on the projection (Stage D1, ADR 0027)", () =>
     expect(isOverdue(undefined, "open", now)).toBe(false);
   });
 });
+
+describe("the D3 derived execution on the projection (Stage D3, ADR 0029)", () => {
+  function graphBoard() {
+    return applyOperations(
+      boardOf([
+        ...statement("design", "action", { topic: "onboarding", assignee: "sarah" }),
+        ...statement("implementation", "action", { topic: "onboarding", assignee: "alex" }),
+        ...statement("qa", "action", { topic: "onboarding", assignee: "bo" }),
+      ]),
+      [
+        { op: "UPDATE_ISSUE", id: "design", status: "blocked" },
+        { op: "UPDATE_ISSUE", id: "design", dueDate: "2020-01-01" }, // blocked AND overdue
+        { op: "CONNECT_NODES", source: "implementation", target: "design", relationship: "depends_on" },
+        { op: "CONNECT_NODES", source: "qa", target: "implementation", relationship: "depends_on" },
+      ],
+    );
+  }
+
+  it("action rows carry blockedBy and atRiskBy from the derived execution", () => {
+    const ws = graphBoard();
+    const sections = intelligenceSections(ws);
+    const actions = sections.find((s) => s.kind === "action")!.rows;
+    const design = actions.find((r) => r.id === "design")!;
+    const implementation = actions.find((r) => r.id === "implementation")!;
+    const qa = actions.find((r) => r.id === "qa")!;
+    // Design: blocked manually, no upstream.
+    expect(design.blockedBy).toBeUndefined();
+    // Implementation: derived-blocked by design; at-risk from the
+    // blocked-and-overdue design (the settled clarification — compounds).
+    expect(implementation.blockedBy).toEqual(["design"]);
+    expect(implementation.atRiskBy).toEqual(["design"]);
+    // QA: transitively blocked by design through implementation.
+    expect(qa.blockedBy).toEqual(["design"]);
+    // Manual state untouched — the split rendered side by side. (The
+    // helper seeds the legacy To Do label; the manual layer stays whatever
+    // the human set, whatever that is.)
+    expect(implementation.executionStatus).toBe("To Do");
+  });
+
+  it("a board with no dependencies carries no derived fields", () => {
+    const ws = boardOf([...statement("solo", "action", { assignee: "x" })]);
+    const actions = intelligenceSections(ws).find((s) => s.kind === "action")!.rows;
+    expect(actions[0]!.blockedBy).toBeUndefined();
+    expect(actions[0]!.atRiskBy).toBeUndefined();
+  });
+});

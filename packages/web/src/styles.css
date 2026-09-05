@@ -898,6 +898,13 @@ html[data-grid="none"] .canvas-grid {
 .connectors path.dashed {
   stroke-dasharray: 4 4;
 }
+/* Stage D3: a dependency edge (depends_on/blocks) — a quiet dash, slightly
+   fainter than structural edges. Subtle by default (the connector-density
+   restraint); the meaning is in the arrow's label. */
+.connectors path.edge-dep {
+  stroke-dasharray: 3 5;
+  stroke: var(--stroke-2);
+}
 
 /* Node group / frame */
 .frame {

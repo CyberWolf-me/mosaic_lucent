@@ -234,3 +234,29 @@ describe("get_board provenance (Stage D2)", () => {
     expect(plan.fromMeeting).toBeUndefined();
   });
 });
+
+describe("get_board derived execution (Stage D3)", () => {
+  it("exposes derivedBlockers/derivedRisks computed from the dependency graph", () => {
+    const s = new BoardSession();
+    s.callTool("apply_canvas_operations", {
+      operations: [
+        { op: "CREATE_NODE", id: "design", nodeType: "action", label: "Design approval" },
+        { op: "SET_STATEMENT", id: "design", statement: { kind: "action", status: "open" } },
+        { op: "SET_ISSUE", id: "design", issue: { type: "task", status: "blocked", dueDate: "2020-01-01" } },
+        { op: "CREATE_NODE", id: "implementation", nodeType: "action", label: "Implementation" },
+        { op: "SET_STATEMENT", id: "implementation", statement: { kind: "action", status: "open" } },
+        { op: "SET_ISSUE", id: "implementation", issue: { type: "task", status: "open" } },
+        { op: "CONNECT_NODES", source: "implementation", target: "design", relationship: "depends_on" },
+      ],
+    });
+    const res = s.callTool("get_board", {});
+    const summary = JSON.parse(res.content[0]!.text as string);
+    const design = summary.nodes.find((n: any) => n.id === "design");
+    const implementation = summary.nodes.find((n: any) => n.id === "implementation");
+    // The blocker source itself: no derived state.
+    expect(design.derivedBlockers).toBeUndefined();
+    // The dependent: derived blockers + risks (blocked AND overdue upstream).
+    expect(implementation.derivedBlockers).toEqual(["design"]);
+    expect(implementation.derivedRisks).toEqual(["design"]);
+  });
+});

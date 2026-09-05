@@ -1,5 +1,5 @@
 import type { Node, Operation, StatementKind, StatementStatus, Workspace } from "@lucent/core";
-import { statementNodes } from "@lucent/core";
+import { derivedExecution, statementNodes } from "@lucent/core";
 import {
   canonicalizeTopic,
   possibleDuplicateTopics,
@@ -71,6 +71,12 @@ export interface IntelligenceRow {
   /** Stage D1: the issue's execution status — a separate lifecycle from
    * the statement `status` (semantic) above; neither derives from the other. */
   executionStatus?: string;
+  /** Stage D3: upstream ids whose manual status is blocked (or that are
+   * themselves derived-blocked) — computed project truth, never stored. */
+  blockedBy?: string[];
+  /** Stage D3: upstream ids that are overdue-unfinished — an analytical
+   * signal, never a status. */
+  atRiskBy?: string[];
   /** Creation evidence — the ✦ jump's source. */
   provenance?: { meetingId: string; turnRange?: [number, number] };
 }
@@ -126,10 +132,22 @@ export function isOverdue(dueDate: string | undefined, executionStatus: string |
  * dimmed — the lifecycle stays visible, not deleted).
  */
 export function intelligenceSections(workspace: Workspace): IntelligenceSection[] {
+  // Stage D3: the derived execution state — computed once per render, read
+  // by every action row (the manual/derived split: manual state is
+  // issue.status; blockedBy/atRiskBy are computed project truth).
+  const derived = derivedExecution(workspace, Date.now());
   return SECTION_ORDER.map((kind) => {
     const all = statementNodes(workspace)
       .filter((n) => n.statement!.kind === kind)
-      .map(rowOf);
+      .map((n) => {
+        const row = rowOf(n);
+        const d = derived.get(n.id);
+        return {
+          ...row,
+          ...(d && d.blockedBy.length > 0 ? { blockedBy: d.blockedBy } : {}),
+          ...(d && d.atRiskBy.length > 0 ? { atRiskBy: d.atRiskBy } : {}),
+        };
+      });
     const rows = [
       ...all.filter((r) => !isSettled(r.status)),
       ...all.filter((r) => isSettled(r.status)),

@@ -489,3 +489,29 @@ describe("statements by topic (Stage C5)", () => {
     expect(request.boardDigest).not.toContain("Statements by topic");
   });
 });
+
+describe("the derived execution in the digest (Stage D3)", () => {
+  it("renders blocked-by and at-risk brackets from the dependency graph", () => {
+    const ws = applyOperations(createWorkspace(), [
+      { op: "CREATE_NODE", id: "design", nodeType: "action", label: "Design approval" },
+      { op: "SET_STATEMENT", id: "design", statement: { kind: "action", status: "open" } },
+      { op: "SET_ISSUE", id: "design", issue: { type: "task", status: "blocked", dueDate: "2020-01-01" } },
+      { op: "CREATE_NODE", id: "implementation", nodeType: "action", label: "Implementation" },
+      { op: "SET_STATEMENT", id: "implementation", statement: { kind: "action", status: "open" } },
+      { op: "SET_ISSUE", id: "implementation", issue: { type: "task", status: "open" } },
+      { op: "CONNECT_NODES", source: "implementation", target: "design", relationship: "depends_on" },
+    ]);
+    const request = buildAnswerRequest(baseInput({ workspace: ws }));
+    // Both derived brackets ride the implementation line, beside — never
+    // replacing — the manual status.
+    expect(request.boardDigest).toContain("[blocked by: design]");
+    expect(request.boardDigest).toContain("[at risk: design]");
+    expect(request.boardDigest).toContain("[issue: task · blocked"); // design's manual state
+  });
+
+  it("a board with no dependencies renders no derived brackets", () => {
+    const request = buildAnswerRequest(baseInput());
+    expect(request.boardDigest).not.toContain("blocked by:");
+    expect(request.boardDigest).not.toContain("at risk:");
+  });
+});

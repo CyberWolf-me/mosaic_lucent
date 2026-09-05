@@ -261,7 +261,18 @@ export function DiagramLayer({
           const step = Math.ceil(e.parallelIndex / 2) * 18;
           const spread = e.parallelIndex === 0 ? 0 : e.parallelIndex % 2 === 1 ? step : -step;
           const proposed = proposedIds?.has(e.id);
-          const cls = [proposed ? "dashed emerging" : "", "appear"].filter(Boolean).join(" ");
+          // Stage D3: dependency edges (depends_on/blocks) render subtly
+          // distinct — a quiet dash, never high-salience (the review's
+          // rendering restraint). related_to renders like any structural
+          // edge (it IS structural context, not execution).
+          const isDependency =
+            e.relationship === "depends_on" || e.relationship === "blocks";
+          const cls = [
+            proposed ? "dashed emerging" : isDependency ? "edge-dep" : "",
+            "appear",
+          ]
+            .filter(Boolean)
+            .join(" ");
           // Selection focus (P1): an edge stays fully drawn when EITHER
           // endpoint is prominent, so the selected node's relationships
           // remain readable while unrelated clusters recede.

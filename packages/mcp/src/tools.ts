@@ -8,6 +8,7 @@ import {
   ASSISTANT_AUTHOR,
   canvasToolDefinition,
   boardColumns,
+  derivedExecution,
   type Operation,
   type Workspace,
 } from "@lucent/core";
@@ -88,6 +89,10 @@ function errorResult(s: string): ToolResult {
 /** Compact, agent-friendly view of the board. */
 export function summarizeBoard(ws: Workspace): Record<string, unknown> {
   const cols = boardColumns(ws);
+  // Stage D3: the derived execution state, computed once per summary —
+  // blockedBy/atRiskBy per executable node (computed truth, never stored).
+  const derived = derivedExecution(ws, Date.now());
+  const derivedFor = (id: string) => derived.get(id);
   return {
     diagramKind: ws.diagramKind,
     nodeCount: Object.keys(ws.nodes).length,
@@ -132,6 +137,14 @@ export function summarizeBoard(ws: Workspace): Record<string, unknown> {
       ...(n.provenance?.meetingId ? { fromMeeting: n.provenance.meetingId } : {}),
       ...(n.provenance?.createdFrom?.length
         ? { fromStatements: n.provenance.createdFrom }
+        : {}),
+      // Stage D3: the derived execution truth — computed per read, so an
+      // agent can answer "what's blocking this?" from structure, not labels.
+      ...(derivedFor(n.id)?.blockedBy.length
+        ? { derivedBlockers: derivedFor(n.id)!.blockedBy }
+        : {}),
+      ...(derivedFor(n.id)?.atRiskBy.length
+        ? { derivedRisks: derivedFor(n.id)!.atRiskBy }
         : {}),
     })),
     edges: Object.values(ws.edges).map((e) => ({

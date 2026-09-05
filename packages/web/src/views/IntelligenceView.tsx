@@ -314,6 +314,21 @@ export function IntelligenceView(_: { onOpenSettings?: (section?: string) => voi
                               {row.executionStatus ? ` · ${row.executionStatus}` : ""}
                               {row.topic ? ` · ${row.topic}` : ""}
                             </div>
+                            {/* Stage D3: the derived lines — computed project
+                                truth beside the manual state, never merged. */}
+                            {row.blockedBy?.length ? (
+                              <div
+                                className="mono"
+                                style={{ fontSize: 10, color: "var(--sig-red)", marginTop: 1 }}
+                              >
+                                ⚠ {t("intel.row.blocked", locale, { n: row.blockedBy.length })}: {row.blockedBy.join(", ")}
+                              </div>
+                            ) : null}
+                            {row.atRiskBy?.length ? (
+                              <div className="mono" style={{ fontSize: 10, color: "var(--amber-2)", marginTop: 1 }}>
+                                ⌛ {t("intel.row.atrisk", locale, { n: row.atRiskBy.length })}: {row.atRiskBy.join(", ")}
+                              </div>
+                            ) : null}
                           </button>
                           {row.provenance && (
                             <button
