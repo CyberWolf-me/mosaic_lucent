@@ -85,6 +85,17 @@ export interface RouteServices {
   /** F1: SSO connections + domain claims; undefined → the SSO routes answer 503. */
   readonly ssoStore: import("../ssoStore.js").SsoStore | undefined;
   /**
+   * Stage D4: the integration platform — connection+link store and the
+   * provider map, prebuilt (undefined → the integration routes answer 503,
+   * fail-closed like every optional store).
+   */
+  readonly integrations:
+    | {
+        store: import("../integrations/integrations.js").IntegrationStore;
+        providers: Map<string, import("../integrations/provider.js").ExecutionProvider>;
+      }
+    | undefined;
+  /**
    * Append one audit row. A function rather than the OrgStore itself: the
    * route modules never assemble the entry shape (normalizeAuditEntry owns
    * target-type defaults), and never choose whether a failed audit write is

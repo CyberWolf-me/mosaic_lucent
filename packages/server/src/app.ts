@@ -109,6 +109,7 @@ import { registerSsoRoutes } from "./routes/sso.js";
 import { registerHistoryRoutes } from "./routes/history.js";
 import { registerAskRoutes } from "./routes/ask.js";
 import { registerSearchRoutes } from "./routes/search.js";
+import { registerIntegrationRoutes } from "./routes/integrations.js";
 import { mintLiveKitToken } from "./livekit.js";
 import { registerAssetRoutes } from "./routes/assets.js";
 import { registerScimRoutes } from "./routes/scim.js";
@@ -231,6 +232,18 @@ export interface AppDeps {
    * `main.ts` on the same store-per-database rule.
    */
   ssoStore?: import("./ssoStore.js").SsoStore;
+  /**
+   * Stage D4: the integration platform — the connection+link store and the
+   * provider implementations by name, prebuilt (the billing-bundle
+   * precedent). When absent the integration routes answer 503; the app
+   * serves exactly as it did before integrations existed. Built by
+   * `main.ts` (InMemory store + the FakeProvider in dev; the PG pair and
+   * real providers land with D6).
+   */
+  integrations?: {
+    store: import("./integrations/integrations.js").IntegrationStore;
+    providers: Map<string, import("./integrations/provider.js").ExecutionProvider>;
+  };
   /**
    * M4.3: Stripe billing integration — the REST client, the endpoint signing
    * secret, the idempotency ledger and the event dispatcher, all prebuilt.
@@ -427,6 +440,7 @@ export function createApp(deps: AppDeps): App {
     billing,
     meetings,
     ssoStore,
+    integrations,
     proposals: proposalStore,
   } = deps;
 
@@ -1496,6 +1510,7 @@ export function createApp(deps: AppDeps): App {
     usageStore,
     meetings,
     ssoStore,
+    integrations,
     proposals: proposalStore,
     entitlements,
     tickets,
@@ -1571,6 +1586,7 @@ export function createApp(deps: AppDeps): App {
   registerHistoryRoutes(router, services);
   registerAskRoutes(router, services);
   registerSearchRoutes(router, services);
+  registerIntegrationRoutes(router, services);
   /**
    * Asset gateway (M7 / M4 storage): `/api/assets/*`. The handler is built
    * here, not registered through the router, because it consumes a body-cap

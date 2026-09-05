@@ -41,6 +41,8 @@ import { InMemoryProposalStore } from "./proposals.js";
 import { PostgresProposalStore } from "./store/pg-proposals.js";
 import { PostgresAssetStore } from "./store/pg-assets.js";
 import { InMemorySsoStore } from "./ssoStore.js";
+import { InMemoryIntegrationStore } from "./integrations/integrations.js";
+import { FakeProvider } from "./integrations/fake.js";
 import { PostgresSsoStore } from "./store/pg-sso.js";
 import { InMemoryUsageStore, type UsageStore } from "./usageStore.js";
 import { PostgresUsageStore } from "./store/pg-usage.js";
@@ -131,6 +133,12 @@ function makeStores(databaseUrl: string | undefined): {
   ssoStore: import("./ssoStore.js").SsoStore;
   /** Stage B3: review-gate proposals — in-memory for dev, Postgres when set. */
   proposals: import("./proposals.js").ProposalStore;
+  /** Stage D4: integrations — in-memory store + the FakeProvider (the PG
+   * pair and real providers land with D6, when Linear demands persistence). */
+  integrations: {
+    store: import("./integrations/integrations.js").IntegrationStore;
+    providers: Map<string, import("./integrations/provider.js").ExecutionProvider>;
+  };
   /** Stage B6: asset metadata — in-memory for dev, Postgres when set. */
   assetStore: import("./assets.js").AssetStore;
   db: Db | null;
@@ -154,6 +162,10 @@ function makeStores(databaseUrl: string | undefined): {
       usageStore: new InMemoryUsageStore(),
       meetings: new InMemoryMeetingStore(),
       ssoStore: new InMemorySsoStore(),
+      integrations: {
+        store: new InMemoryIntegrationStore(),
+        providers: new Map([['fake', new FakeProvider()]]),
+      },
       proposals: new InMemoryProposalStore(),
       assetStore: new InMemoryAssetStore(),
       db: null,
@@ -176,6 +188,13 @@ function makeStores(databaseUrl: string | undefined): {
     ssoStore: new PostgresSsoStore(target),
     proposals: new PostgresProposalStore(target),
     assetStore: new PostgresAssetStore(target),
+    // D4: the integration store stays in-memory until the PG pair lands
+    // with D6 (the ADR records the deferral); the provider map is
+    // env-independent either way.
+    integrations: {
+      store: new InMemoryIntegrationStore(),
+      providers: new Map([['fake', new FakeProvider()]]),
+    },
     db: target,
   };
 }
@@ -434,6 +453,8 @@ const { server, realtime } = createApp({
   proposals: stores.proposals,
   // F1: SSO connections + domain claims, same rule.
   ssoStore: stores.ssoStore,
+  // Stage D4: the integration platform bundle — store + provider map.
+  integrations: stores.integrations,
   // M4: wire the plan + metering store. Without it the entitlement gates fail
   // open, which is the right answer for a deployment that never configured
   // billing but the wrong one here — every plan limit would go unenforced.
