@@ -35,3 +35,4 @@ back to it.
 | [0026](0026-intelligence-is-a-projection.md) | Intelligence is a projection: current semantic state, surfaced (Stage C6) | Accepted |
 | [0027](0027-the-action-is-executable-work.md) | The action is executable work: one node, two layers, one vocabulary (Stage D1) | Accepted |
 | [0028](0028-the-plan-is-a-projection.md) | The plan is a projection, proposed and approved (Stage D2) | Accepted |
+| [0029](0029-the-execution-graph.md) | The execution graph: typed edges, cycle rejection, derived truth (Stage D3) | Accepted |

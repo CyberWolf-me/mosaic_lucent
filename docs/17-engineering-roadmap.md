@@ -644,3 +644,44 @@ Explicitly NOT built: the Ask-bridge and region selection (no consumer), a
 plan kind on the proposal record (the request text carries it),
 dependencies (D3), external links (D4/D6), a plan view (D9), automatic
 generation (a human requests every plan), re-planning diffs (History).
+
+## Amendment (2026-09-05): Stage D3 executed — dependencies & blockers
+
+The owner approved the plan 9.7/10 with four clarifications, all folded
+in: blocked-but-overdue upstream CONTRIBUTES to at-risk (trouble
+compounds); at_risk is an analytical signal, never a status; dependency
+edges are general node relationships while derivedExecution() propagates
+through executable nodes only; and three extra tests (the diamond dedup,
+blocked-recovery, overdue-recovery).
+
+What Stage D3 shipped (commits and the acceptance scenario in
+`packages/server/test/stageD3.definition.e2e.test.ts`):
+
+- **The execution graph in core** (`13adc5b`): DEPENDENCY_RELATIONSHIPS
+  (depends_on canonical, blocks normalized to the same upstream adjacency,
+  related_to excluded); the validator's cycle rule — the adjacency
+  maintained through the batch (the statementOf precedent) so in-batch
+  cycles are caught, the error names the cycle; derivedExecution — the
+  manual/derived split (manual: issue.status, the human's call; derived:
+  blockedBy/atRiskBy, computed project truth — never merged, never
+  stored, recovery is re-computation); isOverdueUnfinished (past due AND
+  not completed/cancelled — blocked not excluded). 20 tests including the
+  owner's acceptance (10 tasks / 6 deps / 2 blockers / 1 rejected cycle)
+  and the review's three.
+- **Teaching** (`79b7f0f`): visual-agent v8's dependency clause with the
+  direction-explicit example (the waiting work is the source, the
+  prerequisite is the target — never the reverse, named as the exact
+  thing models flip); the mock's ordering script; golden
+  dependency-edge-from-ordering forbidding the flipped direction and the
+  blocks-view. Gate stays at score 1.
+- **The surfaces** (`844802e`): Intelligence rows carry blockedBy/atRiskBy
+  as their own lines; the Board card's ⚠/⌛ badges (column placement on
+  the manual statusCategory — derived informs, never refiles); dependency
+  edges render with the quiet edge-dep dash (the connector-density
+  restraint); MCP exposes derivedBlockers/derivedRisks; the Ask digest
+  gains [blocked by: …]/[at risk: …] brackets.
+
+Explicitly NOT built, per ADR 0029: cross-board dependencies, a
+dependency-editing UI, Gantt/timeline rendering, auto-unblocking or any
+automatic status transition (upstream completing never writes downstream
+status), blocked notifications, SLA analytics, persisted anything.

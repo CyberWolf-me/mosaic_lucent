@@ -1151,3 +1151,44 @@ passes the acceptance story: the fixture board, plan-shaped model ops
 (no UPDATE_STATEMENT/DELETE), a plan proposal with createdFrom stamps,
 approval through the AI actor chain, the region rendered, existing actions
 preserved, no proposal/question converted, undo restoring the board.
+
+## Stage D3 shipped: dependencies & blockers (2026-09, docs/17 amendment, ADR 0029)
+
+[x] The execution graph (`@lucent/core`): DEPENDENCY_RELATIONSHIPS on the
+    free-form relationship string (zero schema change); dependsOnGraph
+    normalizes depends_on + blocks into ONE upstream adjacency; the
+    validator's cycle rule with batch-simulated adjacency (in-batch cycles
+    caught, the error names the cycle, DISCONNECT always valid);
+    derivedExecution — blockedBy (transitive upstream blocked, executable
+    nodes only) and atRiskBy (overdue-unfinished: past due AND not
+    completed/cancelled, blocked NOT excluded); isOverdueUnfinished.
+    20 tests: the owner's acceptance + the diamond + blocked-recovery +
+    overdue-recovery + mixed-form cycles + related_to loops +
+    disconnect-relink + DELETE/undo + executable-only propagation +
+    compounding + independence.
+[x] Teaching (`@lucent/ai`): visual-agent v8's dependency clause with the
+    direction-pinned example; the mock's ordering script; golden
+    dependency-edge-from-ordering (flipped direction and blocks-view
+    forbidden). Offline gate: score 1.
+[x] The surfaces (`@lucent/web`, `@lucent/mcp`, `@lucent/server`):
+    Intelligence blocked-by/at-risk lines (the manual/derived split
+    rendered side by side); the Board ⚠/⌛ badges (no refiling); the
+    edge-dep quiet dash; MCP derivedBlockers/derivedRisks; the Ask digest's
+    derived brackets.
+[x] The record: ADR 0029 (the manual/derived split as the core paragraph;
+    the eleven questions answered with the count reconciled), docs/17 D3
+    amendment, this section, the changeset, the stageD3 definition e2e.
+[ ] Cross-board dependencies — not built (edges are intra-board).
+[ ] Dependency-editing UI — not built (ops are the interface).
+[ ] Gantt/timeline — not built. Auto-unblocking/automatic transitions —
+    not built (upstream completing never writes downstream status).
+[ ] Blocked notifications, SLA analytics, persisted derived state —
+    not built.
+
+Gate: typecheck 0 across all six packages; ai 185, core 422, i18n 14,
+mcp 28, server 879+80 PG in CI, web 641; the stageD3 definition scenario
+passes the acceptance story: 10 tasks, 6 dependencies landing, the cycle
+422ing with the cycle named, 2 blockers propagating (transitive + diamond
+dedup + the overdue at-risk with blocked-not-excluded), recovery (blocked
+→ completed vanishes; dueDate moves → at-risk vanishes), DELETE+undo
+round-trips, and the derived truth rendering on every surface.
