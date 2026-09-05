@@ -8,11 +8,13 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { gatePlanOps } from "./planGate.js";
 import {
   OperationHistory,
   applyLayout,
   applyOperations,
   applyValidOperations,
+  attachPlanProvenance,
   attachProvenance,
   computeLayout,
   createWorkspace,
@@ -148,6 +150,15 @@ export interface SendAttachments {
     /** Kinds of the source turns (decision / proposal / …) when classified. */
     turnKinds?: string[];
   };
+  /**
+   * Stage D2: this request is a PLAN derived from the named statement nodes.
+   * Present → the model's ops are gated against PLAN_SAFE_OPS (no lifecycle
+   * conversion — the acceptance rule is mechanical) and every created node is
+   * stamped with createdFrom (the source statement ids) through
+   * attachPlanProvenance — the fourth provenance writer, exactly where the
+   * meeting loop already stamps its evidence.
+   */
+  plan?: { statementIds: string[] };
 }
 
 export interface WorkspaceState {
@@ -879,6 +890,24 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
               quote: provenance.turns.join(" ").slice(0, 240),
             })
           : result.operations;
+        // The plan gate (Stage D2, ADR 0028): a PLAN request's ops are
+        // filtered against PLAN_SAFE_OOPS before they touch anything —
+        // lifecycle conversion (UPDATE_STATEMENT) is mechanically absent, so
+        // a proposal can never silently become a confirmed task. Skipped
+        // ops join the reply's skippedNote so the gate is honest about
+        // what it refused. Then createdFrom stamps the sources onto every
+        // created node — the fourth provenance writer, at the same place
+        // the meeting loop stamps, before the fold and before the proposal
+        // opens.
+        const plan = attachments?.plan;
+        const gated = plan ? gatePlanOps(enrichedOps) : null;
+        const planStampedOps: Operation[] = gated && plan
+          ? attachPlanProvenance(gated.allowed, plan.statementIds)
+          : enrichedOps;
+        const planSkippedNote =
+          gated && gated.skipped.length > 0
+            ? { skippedOps: gated.skipped.map((s) => ({ op: s.op, reason: s.reason })) }
+            : {};
         // The topic fold (Stage C5, ADR 0025): these are the MODEL's ops —
         // generate or the meeting-extraction loop — so their statement
         // topics fold against the workspace this browser holds, before send
@@ -888,7 +917,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         // fourth boundary of the AI/MCP/WS/Web divergence). The human's
         // own edits (applyManual) never pass through here.
         const foldedOps: Operation[] = foldStatementTopics(
-          enrichedOps,
+          planStampedOps,
           existingTopics(workspace),
         );
 
@@ -899,9 +928,14 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         // that failed validation while applying the rest. Attach them to the
         // reply so the chat can show exactly what didn't land — the old
         // all-or-nothing path lost the whole generation over one bad op.
-        const skippedNote = result.warnings?.length
-          ? { skippedOps: result.warnings.map((w) => ({ op: w.op, reason: w.reason })) }
-          : {};
+        // The plan gate's refusals (Stage D2) join the same report — the
+        // union of what the server skipped and what the gate refused.
+        const skippedNote = {
+          ...((result.warnings?.length
+            ? { skippedOps: result.warnings.map((w) => ({ op: w.op, reason: w.reason })) }
+            : {}) as Record<string, unknown>),
+          ...planSkippedNote,
+        };
 
         // Large batches on an existing diagram present as a proposal to review.
         const isLarge =

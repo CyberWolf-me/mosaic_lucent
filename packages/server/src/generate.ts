@@ -71,6 +71,12 @@ const summarySchema = z.object({
             priority: shortText.optional(),
             storyPoints: z.number().optional(),
             parentId: shortText.optional(),
+            // Stage D2: the D1 execution fields — the server's rebuilt
+            // workspace must carry them or a plan would validate against a
+            // board that lost its deadlines (the five-place rule's summary
+            // arm; ADR 0027).
+            dueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+            description: z.string().max(2000).optional(),
           })
           .optional(),
         // Statement semantics (Stage C2): what the node IS. Provenance is
@@ -307,7 +313,9 @@ function workspaceFromSummary(summary: GenerateRequestBody["summary"]): Workspac
       relationship: e.relationship,
     })),
     // Reattach issue fields so the model can UPDATE_ISSUE or reference a parent
-    // epic that already exists on the board.
+    // epic that already exists on the board. Stage D2: the execution fields
+    // ride the rebuild too — a plan validates against deadlines it must not
+    // lose.
     ...summary.nodes
       .filter((n) => n.issue)
       .map((n) => ({
@@ -324,6 +332,8 @@ function workspaceFromSummary(summary: GenerateRequestBody["summary"]): Workspac
           ...(n.issue!.assignee ? { assignee: n.issue!.assignee } : {}),
           ...(n.issue!.storyPoints !== undefined ? { storyPoints: n.issue!.storyPoints } : {}),
           ...(n.issue!.parentId ? { parentId: n.issue!.parentId } : {}),
+          ...(n.issue!.dueDate ? { dueDate: n.issue!.dueDate } : {}),
+          ...(n.issue!.description ? { description: n.issue!.description } : {}),
         },
       })),
     // Reattach statements (Stage C2) so the model can UPDATE_STATEMENT what it

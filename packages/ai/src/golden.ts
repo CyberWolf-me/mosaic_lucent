@@ -449,4 +449,66 @@ export const GOLDEN_SET: readonly GoldenCase[] = [
     // the turn justifies workspace state.
     forbidOperations: [{ op: "SET_ISSUE", issue: { assignee: "Lena" } }],
   },
+  {
+    id: "plan-from-statements",
+    // Stage D2: the acceptance fixture — 4 decisions, 6 actions, 3
+    // requirements, 5 proposals, 4 questions, 2 risks; "create the work from
+    // these decisions". The right answer: decisions organize (a region),
+    // requirements/risks derive actions, existing actions are preserved
+    // (never re-emitted), and NO proposal or question becomes confirmed
+    // work — mechanically, no UPDATE_STATEMENT/DELETE anywhere in the batch.
+    message: "Create the work from these decisions.",
+    summary: summarizeWorkspace(
+      applyOperations(createWorkspace(), [
+        ...Array.from({ length: 4 }, (_, i) => [
+          { op: "CREATE_NODE" as const, id: `dec-${i}`, nodeType: "decision", label: `Decision ${i}` },
+          { op: "SET_STATEMENT" as const, id: `dec-${i}`, statement: { kind: "decision" as const, status: "resolved" as const } },
+        ]),
+        ...Array.from({ length: 6 }, (_, i) => [
+          { op: "CREATE_NODE" as const, id: `act-${i}`, nodeType: "action", label: `Action ${i}` },
+          { op: "SET_STATEMENT" as const, id: `act-${i}`, statement: { kind: "action" as const, status: "open" as const } },
+          { op: "SET_ISSUE" as const, id: `act-${i}`, issue: { type: "task" as const, status: "assigned", assignee: "Sarah" } },
+        ]),
+        ...Array.from({ length: 3 }, (_, i) => [
+          { op: "CREATE_NODE" as const, id: `req-${i}`, nodeType: "requirement", label: `Requirement ${i}` },
+          { op: "SET_STATEMENT" as const, id: `req-${i}`, statement: { kind: "requirement" as const, status: "open" as const } },
+        ]),
+        ...Array.from({ length: 5 }, (_, i) => [
+          { op: "CREATE_NODE" as const, id: `pro-${i}`, nodeType: "proposal", label: `Proposal ${i}` },
+          { op: "SET_STATEMENT" as const, id: `pro-${i}`, statement: { kind: "proposal" as const, status: "open" as const } },
+        ]),
+        ...Array.from({ length: 4 }, (_, i) => [
+          { op: "CREATE_NODE" as const, id: `que-${i}`, nodeType: "question", label: `Question ${i}` },
+          { op: "SET_STATEMENT" as const, id: `que-${i}`, statement: { kind: "question" as const, status: "open" as const } },
+        ]),
+        ...Array.from({ length: 2 }, (_, i) => [
+          { op: "CREATE_NODE" as const, id: `rsk-${i}`, nodeType: "risk", label: `Risk ${i}` },
+          { op: "SET_STATEMENT" as const, id: `rsk-${i}`, statement: { kind: "risk" as const, status: "open" as const } },
+        ]),
+      ].flat() as never[]),
+    ),
+    expectOperations: [
+      // Decisions create structure: the region.
+      { op: "CREATE_GROUP", id: "plan-region", kind: "process" },
+      // Requirements/risks derive actions (one pinned fully; the mock
+      // derives for all five).
+      {
+        op: "SET_STATEMENT",
+        id: "req-0-action",
+        statement: { kind: "action", status: "open", topic: "plan" },
+      },
+    ],
+    // The mechanical acceptance rules: no lifecycle conversion, no
+    // destruction, and no work minted from a proposal/question node id.
+    forbidOperations: [
+      { op: "UPDATE_STATEMENT" },
+      { op: "DELETE_NODE" },
+      { op: "SET_ISSUE", id: "pro-0" },
+      { op: "SET_ISSUE", id: "que-0" },
+      { op: "SET_STATEMENT", id: "pro-0", statement: { kind: "action" } },
+      { op: "SET_STATEMENT", id: "que-0", statement: { kind: "action" } },
+      // Existing actions are preserved, never re-created or duplicated.
+      { op: "CREATE_NODE", id: "act-0" },
+    ],
+  },
 ];

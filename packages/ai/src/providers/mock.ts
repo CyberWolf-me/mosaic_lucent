@@ -44,6 +44,65 @@ function coreLabel(message: string): string {
 
 const scripts: Script[] = [
   {
+    // Stage D2: the plan script — "create the work/plan from these
+    // statements" over a summary carrying decisions/actions/requirements/
+    // risks (the acceptance fixture's shape). The mock reads the summary's
+    // REAL statement nodes: decisions organize (a region), requirements/
+    // risks derive mitigation actions, existing actions are NOT re-emitted
+    // (preserved as-is), and — the acceptance rule — NO UPDATE_STATEMENT
+    // and no work minted from proposals/questions. Plan-shaped ops only.
+    match: (m) => /create (the )?(work|plan)/i.test(m),
+    build: (req) => {
+      const statements = req.summary.nodes.filter((n) => n.statement);
+      const decisions = statements.filter((n) => n.statement!.kind === "decision");
+      const requirements = statements.filter((n) => n.statement!.kind === "requirement");
+      const risks = statements.filter((n) => n.statement!.kind === "risk");
+      const derived: Operation[] = [];
+      const derivedIds: string[] = [];
+      for (const n of [...requirements, ...risks]) {
+        const id = `${n.id}-action`;
+        derivedIds.push(id);
+        derived.push({
+          op: "CREATE_NODE",
+          id,
+          nodeType: "action",
+          label: `Address: ${n.label.slice(0, 40)}`,
+        });
+        derived.push({
+          op: "SET_STATEMENT",
+          id,
+          statement: { kind: "action", status: "open", topic: "plan" },
+        });
+        derived.push({
+          op: "SET_ISSUE",
+          id,
+          issue: { type: "task", status: "open" },
+        });
+      }
+      return {
+        explanation: `Organized the board's semantic state into a plan: ${
+          decisions.length
+        } decision(s) as the region, ${derivedIds.length} derived action(s) for requirements and risks. Existing actions preserved; proposals and questions untouched.`,
+        operations: [
+          // Decisions create structure: the plan region holds the derived
+          // work (and the decision nodes it organizes around).
+          ...(decisions.length
+            ? [
+                {
+                  op: "CREATE_GROUP",
+                  id: "plan-region",
+                  label: "Launch plan",
+                  children: [...derivedIds, ...decisions.map((d) => d.id)],
+                  kind: "process" as const,
+                } as Operation,
+              ]
+            : []),
+          ...derived,
+        ] as Operation[],
+      };
+    },
+  },
+  {
     // "e-commerce" seed graph from the example MVP session (docs/07).
     match: (m) => /e-?commerce|online store|shop/i.test(m),
     build: () => ({

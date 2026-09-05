@@ -26,6 +26,9 @@ export interface WorkspaceSummary {
       priority?: string;
       storyPoints?: number;
       parentId?: string;
+      /** Stage D2: the execution fields (ADR 0027) — plans must preserve them. */
+      dueDate?: string;
+      description?: string;
     };
     /**
      * The semantic statement this node carries (Stage C2): what it IS — a
@@ -389,6 +392,13 @@ export function summarizeWorkspace(workspace: Workspace, selection?: string[]): 
               ...(n.issue.priority ? { priority: n.issue.priority } : {}),
               ...(n.issue.storyPoints !== undefined ? { storyPoints: n.issue.storyPoints } : {}),
               ...(n.issue.parentId ? { parentId: n.issue.parentId } : {}),
+              // Stage D2: the execution fields — a plan request must see and
+              // preserve deadlines the way it sees assignees (ADR 0027's D1
+              // fields reaching the model surface).
+              ...(n.issue.dueDate ? { dueDate: n.issue.dueDate } : {}),
+              ...(n.issue.description
+                ? { description: n.issue.description.slice(0, 240) }
+                : {}),
             },
           }
         : {}),
