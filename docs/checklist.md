@@ -1379,3 +1379,72 @@ element.click() and form.requestSubmit() work and are the reliable
 drive. And a page reload while signed-out runs the shared-board effect
 against a 401, which CLEARS lucent.sharedBoard — rejoining needs the
 key re-set after sign-in.
+## Stage D7 shipped: inbound sync (2026-09, docs/17 amendment, ADR 0033)
+
+[x] THE SYMMETRIC HUMAN GATE: every inbound change queues for accept —
+    nothing auto-applies. The queue (InboundChangeRecord) renders in the
+    Intelligence 'External changes' section; the MCP projection is
+    read-only (no tool decides an inbound change).
+[x] The receiver (integrations/webhook.ts): the Stripe doctrines
+    verbatim (raw-body Buffer, verify-before-ledger — a tampered body
+    leaves the ledger EMPTY, pinned; signature-is-the-auth — first in
+    the app ladder). Linear's X-Signature HMAC over raw bytes.
+[x] THE SIGNATURE IS THE ORG RESOLUTION: connectionsFor(provider) —
+    every ACTIVE connection's config.webhookSecretRef resolved per
+    delivery; all candidates computed before any match (no timing
+    leak); a webhook resolved to one org never writes another org's
+    queue (pinned). The env-ref temporariness clause restated.
+[x] The three-layer dedupe: delivery (sha256(provider+bytes), the
+    claim protocol), queue (same value refreshes / new value updates
+    in place — never a second row), resolution (board-equals-mapped is
+    not queued).
+[x] The decide routes: GET inbound (viewer floor, joined to the live
+    board value + resolved flag), accept (the REVIEWED SNAPSHOT, never
+    a re-fetch; the SYSTEM ACTOR's first use — actorType system,
+    actorId the provider, initiatedBy the acceptor; room-first + the
+    direct-store fallback; requestId inb_<id> idempotent), dismiss
+    (keep ours; the link still records the provider's word).
+[x] THE NEVER-GUESSES RULE INBOUND: an untranslatable word produces the
+    warning row (mappedValue null) — accept refused with the honest
+    409; the web renders no Accept button (the pure inboundRowActions
+    encodes the rule, node-tested).
+[x] THE CONFLICT SEMANTICS: outbound-authoritative on explicit sync
+    (the sync route supersedes pending rows, reports supersededInbound:
+    n — pinned); the provider's word never silently lost (both
+    decisions update lastSyncedStatus); accept applies the reviewed
+    snapshot.
+[x] The claim ladder corrected + aligned across both twins: FAILED
+    re-claims immediately (the work errored); RECEIVED inside the
+    window is in_flight; past it re-claims. The parity contracts state
+    both arms.
+[x] The PG pairs + migration 0021: integration_webhook_events (PK sha
+    + the sweep index) + integration_inbound_changes (the board scan +
+    the pending-dedupe probe); the claim ladder as SQL-guarded UPDATEs;
+    main.ts swaps; the sweep's refetch-current-truth arm (getTask, not
+    replay — the Stripe doctrine adapted).
+[x] The web: the External changes section, the Sync badge, the
+    integrations-inbound frame, i18n en+hu. MCP list_external_links
+    (remote: links + the pending queue; local: the honest structured
+    no-registry note).
+[x] The acceptance (stageD7.definition.e2e — the stubbed-wire
+    LinearProvider): the signed webhook, one pending row, the accept
+    (the system-actor op in the log, the node changed, the link
+    updated), the duplicate accept (no second op), the redelivery
+    (duplicate), the newer value (the row updates), the explicit sync
+    (supersedes, reports 1), the never-guess word (warning, 409,
+    dismiss), the tampered signature (400, ledger empty), the unlinked
+    issue (ignored), the workspace blob provider-free throughout.
+[x] The record: ADR 0033, docs/17 D7 amendment, this section, the
+    changeset.
+[ ] Inbound create/remove — a future import flow; remove stays the
+    sweep's link-GC decision.
+[ ] Inbound title/assignee/description — status first; the field column
+    anticipates without a schema break.
+[ ] OAuth + multi-tenant credential storage — the env-ref clause
+    restated; replacement needs its own ADR.
+[ ] subscribeToChanges server plumbing — the seam stays declared; the
+    webhook receiver is the inbound path.
+
+Gate: typecheck 0; server 989 (+1 acceptance; the PG parity halves run
+in CI), web 646 (+4), i18n 14, mcp 28, ai 185, core 422; the migration
+SQL committed (0021).

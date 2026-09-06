@@ -838,3 +838,61 @@ the webhook receiver (D7), OAuth + multi-tenant credential storage (the
 env-ref temporariness clause), scope enforcement (Linear's keys carry no
 scope metadata), link GC, per-node propose, a connection-admin UI, MCP
 link exposure, AI-initiated proposals (D9).
+
+## Amendment (2026-09-06): Stage D7 executed — inbound sync, the human-gated queue
+
+ADR 0033's contract paragraph: a verified provider webhook queues a
+change for human review; nothing auto-applies to a board. An accepted
+change commits as the system actor (the union member's first use) with
+the accepting user as the initiator, through the same validated, logged,
+room-broadcast path as any edit. Conflict resolution is named: Lucent
+stays outbound-authoritative on explicit sync (the sync route supersedes
+pending inbound rows and reports the count), the provider's word is
+never silently lost (both decisions update the link's
+lastSyncedStatus), and untranslatable words never write — they warn.
+
+What Stage D7 shipped (commits and the acceptance in
+packages/server/test/stageD7.definition.e2e.test.ts):
+
+- The receiver (6810af9): the Stripe doctrines copied verbatim
+  (raw-body-is-the-message, verify-before-ledger, signature-is-the-
+  auth — the route sits first in the ladder, no session/CSRF/origin);
+  Linear's X-Signature HMAC-SHA256 scheme; THE SIGNATURE IS THE ORG
+  RESOLUTION — every active connection's config.webhookSecretRef
+  resolved through the environment, all candidates computed before any
+  match resolves (no timing leak); the delivery ledger dedupes on
+  sha256(provider + bytes) with the claim protocol; the ingest queues
+  through the three-layer dedupe ladder; the never-guesses rule
+  produces dismiss-only warning rows. 29 tests.
+- The decide routes + the PG pairs (939b868): GET the queue at the
+  viewer floor (joined to the live board value), accept (editor; the
+  reviewed snapshot, the system actor, room-first + fallback; a warning
+  row refused 409), dismiss (keep ours; the link still records the
+  provider's word), the sync supersession arm; migration 0021
+  (integration_webhook_events + integration_inbound_changes), the
+  parity contracts over both twins, the sweep's refetch-current-truth
+  arm. The claim-ladder correction (failed re-claims immediately,
+  received waits the window) both twins aligned. +13 tests.
+- The web + MCP (0a41618): the Intelligence 'External changes' section
+  (the drift sentence, Accept/Keep-ours, warning rows without Accept —
+  the pure inboundRowActions encodes the rule), the Sync button's
+  pending badge, the integrations-inbound frame (the queue refetches
+  on any browser's decision), i18n en+hu, and MCP list_external_links —
+  the read-only projection (no tool decides an inbound change; the
+  symmetric human gate at the agent boundary).
+- The acceptance (this commit): the full story in one test — the
+  signed webhook, one pending row, the accept (system actor in the op
+  log, the node changed, the link updated), the duplicate accept (no
+  second op), the redelivery (duplicate), the newer value (the row
+  updates), the explicit sync (supersedes, reports 1), the never-guess
+  word (warning, 409, dismiss), the tampered signature (400, ledger
+  empty), the unlinked issue (ignored), the workspace blob provider-free
+  throughout.
+
+Explicitly NOT built, per ADR 0033: inbound create/remove (an import
+flow; remove stays the sweep's link-GC decision), inbound title/assignee/
+description (status first — the field column anticipates), OAuth +
+multi-tenant credential storage (the env-ref clause restated for webhook
+secrets), a connection-admin UI, subscribeToChanges server plumbing (the
+seam stays declared; the webhook is the inbound path), D8's providers,
+D9's AI-initiated proposals.
