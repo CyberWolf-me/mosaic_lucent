@@ -111,9 +111,16 @@ describe("the connection surface (org owner)", () => {
       method: "PUT",
       token: owner.token,
       csrf: "csrf",
-      body: JSON.stringify({ credentialRef: "LUCENT_FAKE_TEST_KEY", scopes: ["tasks:write"] }),
+      // config rides the connection (D6: Linear's teamId lives here). The
+      // live pass caught the route parsing it but never passing it through.
+      body: JSON.stringify({
+        credentialRef: "LUCENT_FAKE_TEST_KEY",
+        scopes: ["tasks:write"],
+        config: { teamId: "team_1" },
+      }),
     });
     expect(put.status).toBe(201);
+    expect(put.body.integration.config).toEqual({ teamId: "team_1" });
     // The reference NEVER echoes in full — the SSO fingerprint precedent.
     expect(put.body.integration.credentialRef).toBe("LUCE…(20 chars)");
     expect(put.body.integration.provider).toBe("fake");

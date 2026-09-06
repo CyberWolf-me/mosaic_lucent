@@ -417,6 +417,12 @@ export function linearConnectionFactory(): (
         false,
       );
     }
-    return new LinearProvider({ apiKey, teamId });
+    return new LinearProvider({
+      apiKey,
+      teamId,
+      // A connection-scoped wire override for testing and self-hosted
+      // proxies; unset means the public api.linear.app endpoint.
+      ...(connection.config?.baseUrl ? { baseUrl: connection.config.baseUrl } : {}),
+    });
   };
 }

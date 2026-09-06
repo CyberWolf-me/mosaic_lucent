@@ -108,6 +108,11 @@ export const registerIntegrationRoutes: RegisterRoutes = (router, s) => {
           provider: provider as IntegrationProviderName,
           credentialRef: body.credentialRef,
           scopes: body.scopes,
+          // Stage D6: provider-specific configuration (Linear's teamId, a
+          // test/self-host baseUrl). Parsed by the schema above; dropped here
+          // it silently strips teamId at connect time — the live pass caught
+          // exactly that.
+          ...(body.config ? { config: body.config } : {}),
           createdBy: user.id,
         },
         Date.now(),

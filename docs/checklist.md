@@ -1320,3 +1320,62 @@ Gate: typecheck 0; server 922 passing (+22 in D5: 13 core + 5 routes +
 
 Gate: typecheck 0; server 947 passing (+5 PG in CI runs them for the
 parity), web 642, i18n 14; the migration SQL committed (0020).
+
+## The Stage D6 live browser pass (2026-09-06)
+
+Ran against the real stack: the server on :4387 (in-memory, auth on),
+Vite on :5174 (matching packages/server/.env's LUCENT_WEB_ORIGIN — the
+first run on :5173 403d every cookie-authenticated POST because the
+CSRF origin allowlist read the .env, not the port Vite happened to
+bind), the LinearProvider through a local GraphQL stub
+(:4390) connected via config.baseUrl — a seam the factory lacked and
+this pass added (provider-specific config on the connection, the D6
+design's own answer; the factory now honors config.baseUrl for testing
+and self-hosted proxies).
+
+What the pass verified, live:
+[x] The full happy path IN THE BROWSER: sign-in -> board -> the
+    Intelligence view -> 'Sync to Linear' (active-connection state,
+    Team: team_live_demo from the connection's config) -> Propose -> the
+    frozen preview (the corrected statement, 5 create rows with
+    assignee/date/status) -> Approve -> 5 applied / 0 failed, each row
+    nd_x -> LIN-n with its own ↗ link.
+[x] The wire contract held on a real socket: 5 CreateIssue mutations, 5
+    users queries (the assignee ladder per item), workflowStates fetched
+    EXACTLY ONCE per batch (the per-instance cache, asserted by counting
+    the stub's log lines).
+[x] The update flow: two issue fields changed on the board (one
+    dueDate, two statuses) -> re-propose answers 5 UPDATE rows with
+    LIN-n ids and the new statuses -> approve -> 5 UpdateIssue mutations
+    on the wire, the identifier->uuid resolution through issue(id:).
+[x] The duplicate approval: the same action approved twice -> the
+    second answers {action, duplicate: true} and the wire count does
+    NOT move (5+5 before and after — zero new mutations).
+[x] The viewer floor: a non-member's propose and links calls both 404.
+[x] The workspace-blob invariant ON A REAL BOARD: after 5 creates and
+    5 updates, the stored workspace JSON contains no 'linear', no
+    'LIN-', no 'lucent-action' — the link registry owns all of it.
+[x] The honest errors: before the credential env was set, Propose
+    rendered 'credential ref LUCENT_LINEAR_APIKEY is not set in the
+    environment' in the panel — the ADR 0032 refusal, not a silent skip.
+
+Two real defects the pass caught (both fixed, both pinned):
+1. The connection PUT ROUTE parsed config but never passed it to
+   store.putConnection — teamId was silently stripped at connect time
+   (the same defect class the Batch-2 parity probe found in
+   normalizeConnection; the PG twin was fine, only the route dropped
+   it). Fixed in routes/integrations.ts; pinned by the extended
+   idempotent-put test asserting the config round-trip.
+2. The factory had no wire-override seam, so a live test could not
+   point the provider at a stub without a code change. The connection's
+   config is the designed home for provider-specific configuration, so
+   the factory now honors config.baseUrl (unset = the public
+   api.linear.app). This is the seam self-hosted proxies will want too.
+
+Test-harness notes worth keeping: the IAB pane delivers pointer events
+to the page but element-level click handlers never fire for synthetic
+clicks (React's root delegation never saw them) — in-page
+element.click() and form.requestSubmit() work and are the reliable
+drive. And a page reload while signed-out runs the shared-board effect
+against a 401, which CLEARS lucent.sharedBoard — rejoining needs the
+key re-set after sign-in.
