@@ -553,3 +553,55 @@ export async function decideIntegrationAction(
   }
   return (await res.json()) as IntegrationDecisionResult;
 }
+
+// --- Inbound changes (Stage D7 — the human-gated queue) ---------------------
+
+/** One queued external change, as the route joins it to the live board. */
+export interface InboundChangeView {
+  id: string;
+  provider: string;
+  nodeId: string;
+  nodeLabel: string;
+  externalId: string;
+  url?: string;
+  field: "status";
+  /** The raw provider word at detection — what the human reads. */
+  externalValue: string;
+  /** null = the never-guesses warning row (dismiss-only). */
+  mappedValue: string | null;
+  status: "pending" | "applied" | "dismissed" | "superseded";
+  source: "webhook" | "sweep";
+  detectedAt: number;
+  /** The node's live issue status, for "X says done — the board says todo". */
+  boardValue: string | null;
+  /** True when the board already equals the mapped value. */
+  resolved: boolean;
+  decidedBy?: string;
+  decidedAt?: number;
+  appliedSeq?: number;
+  reason?: string;
+}
+
+export async function fetchInboundChanges(boardId: string): Promise<InboundChangeView[]> {
+  const res = await authed(`/api/boards/${encodeURIComponent(boardId)}/integrations/inbound`);
+  if (!res || !res.ok) return [];
+  const body = (await res.json()) as { inbound?: InboundChangeView[] };
+  return body.inbound ?? [];
+}
+
+export async function decideInboundChange(
+  boardId: string,
+  changeId: string,
+  decision: "accept" | "dismiss",
+): Promise<{ change?: InboundChangeView; duplicate?: boolean; seq?: number; error?: string; status?: number } | null> {
+  const res = await authed(
+    `/api/boards/${encodeURIComponent(boardId)}/integrations/inbound/${encodeURIComponent(changeId)}/${decision}`,
+    { method: "POST" },
+  );
+  if (!res) return null;
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({ error: "decision failed" }))) as { error?: string };
+    return { error: body.error ?? "decision failed", status: res.status };
+  }
+  return (await res.json()) as { change?: InboundChangeView; duplicate?: boolean; seq?: number };
+}

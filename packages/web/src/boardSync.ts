@@ -51,6 +51,9 @@ export interface BoardSyncCallbacks {
     by: string;
     appliedSeq?: number;
   }) => void;
+  /** Stage D7: an inbound-queue decision landed (this browser or a peer's)
+   * — the Intelligence view refetches the queue. */
+  onInboundDecided?: (changeId: string, status: string) => void;
   /**
    * Stage B4: a server-level error the client must not swallow (e.g. "board
    * deleted" from an eviction) — the caller decides what to do about it.
@@ -270,6 +273,16 @@ export class BoardSync {
             ...(typeof msg.appliedSeq === "number" ? { appliedSeq: msg.appliedSeq } : {}),
           });
         }
+        break;
+      }
+      case "integrations-inbound": {
+        // Stage D7: a queue decision (this browser or a peer's) — the
+        // Intelligence view refetches the queue; the accept's op frame
+        // arrives separately and syncs the board itself.
+        this.cb.onInboundDecided?.(
+          typeof msg.id === "string" ? msg.id : "",
+          typeof msg.status === "string" ? msg.status : "",
+        );
         break;
       }
     }

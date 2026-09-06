@@ -86,6 +86,8 @@ export class RemoteBoardSession {
         return this.applyOps(args);
       case "get_board":
         return this.getBoard();
+      case "list_external_links":
+        return this.listExternalLinks();
       case "reset_board":
         // No server route destroys a board's contents, and inventing one
         // for parity with the local session would be a footgun an agent can
@@ -118,6 +120,53 @@ export class RemoteBoardSession {
     this.cached = board.workspace;
     return {
       content: [{ type: "text", text: JSON.stringify(summarizeBoard(board.workspace), null, 2) }],
+    };
+  }
+
+  /**
+   * Stage D7: the link summary projection (ADR 0032's named D7 deliverable).
+   * Read-only — the viewer-floor links route plus the inbound queue, so an
+   * agent can SEE what is linked and what awaits a human, but deciding an
+   * inbound change is a human act (the symmetric human gate; no tool will
+   * exist for it).
+   */
+  private async listExternalLinks(): Promise<ToolResult> {
+    const links = await this.request("GET", `/api/boards/${this.opts.boardId}/integrations/links`);
+    if (!links.ok) {
+      return this.failure(`External links fetch failed (${links.status}).`);
+    }
+    const linksBody = (await links.json()) as {
+      links?: Array<Record<string, unknown>>;
+    };
+    const inbound = await this.request(
+      "GET",
+      `/api/boards/${this.opts.boardId}/integrations/inbound`,
+    );
+    if (!inbound.ok) {
+      return this.failure(`Inbound queue fetch failed (${inbound.status}).`);
+    }
+    const inboundBody = (await inbound.json()) as {
+      inbound?: Array<Record<string, unknown>>;
+    };
+    const pendingOnly = (inboundBody.inbound ?? []).filter(
+      (r) => r["status"] === "pending",
+    );
+    return {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify(
+            {
+              links: linksBody.links ?? [],
+              pendingInboundChanges: pendingOnly,
+              note:
+                "inbound changes are decided by a human in the Lucent UI; this projection is read-only",
+            },
+            null,
+            2,
+          ),
+        },
+      ],
     };
   }
 

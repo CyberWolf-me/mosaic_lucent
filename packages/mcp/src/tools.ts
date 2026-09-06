@@ -49,6 +49,15 @@ export function listTools(): McpTool[] {
       inputSchema: { type: "object", properties: {}, additionalProperties: false },
     },
     {
+      name: "list_external_links",
+      description:
+        "List the board's external task links (which node maps to which issue " +
+        "in a connected system, e.g. Linear), plus any queued inbound status " +
+        "changes awaiting a human accept. Read-only; deciding inbound changes " +
+        "is a human act.",
+      inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    },
+    {
       name: "reset_board",
       description: "Clear the board to an empty workspace. Destructive and not undoable here.",
       inputSchema: {
@@ -186,6 +195,12 @@ export class BoardSession {
         return this.applyOps(args);
       case "get_board":
         return text(JSON.stringify(summarizeBoard(this.ws), null, 2));
+      case "list_external_links":
+        // The local session holds no link registry (links are server-side
+        // state; the workspace blob carries zero provider strings by
+        // design). The honest structured answer, the reset_board
+        // notSupported precedent.
+        return text(JSON.stringify({ links: [], note: "no link registry in the local session" }, null, 2));
       case "reset_board": {
         const kind = typeof args.diagramKind === "string" ? args.diagramKind : undefined;
         this.ws = createWorkspace(

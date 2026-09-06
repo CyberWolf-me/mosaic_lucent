@@ -19,12 +19,15 @@ import {
 import { KIND_TINT } from "../statementUi.js";
 import { planRequestText } from "../planGate.js";
 import {
+  fetchInboundChanges,
   fetchIntegrationLinks,
   fetchOrgIntegrations,
+  type InboundChangeView,
   type IntegrationLink,
 } from "../boards.js";
 import { getCurrentOrgId } from "../orgs.js";
 import { IntegrationPanel } from "./IntegrationPanel.js";
+import { inboundRowActions, inboundRowIsWarning, pendingInboundCount } from "./inboundRows.js";
 
 /**
  * The Intelligence view (Stage C6, ADR 0026): the current semantic workspace,
@@ -60,13 +63,15 @@ export function IntelligenceView(_: { onOpenSettings?: (section?: string) => voi
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      const [boardLinks, orgs] = await Promise.all([
+      const [boardLinks, orgs, inbound] = await Promise.all([
         boardId ? fetchIntegrationLinks(boardId) : Promise.resolve([]),
         getCurrentOrgId() ? fetchOrgIntegrations(getCurrentOrgId()!) : Promise.resolve([]),
+        boardId ? fetchInboundChanges(boardId) : Promise.resolve([] as InboundChangeView[]),
       ]);
       if (cancelled) return;
       setLinks(boardLinks);
       setConnections(orgs);
+      setInbound(inbound);
     })();
     return () => {
       cancelled = true;
@@ -90,6 +95,36 @@ export function IntelligenceView(_: { onOpenSettings?: (section?: string) => voi
   const [links, setLinks] = useState<IntegrationLink[]>([]);
   const [connections, setConnections] = useState<Array<{ provider: string; status: string; config?: Record<string, string> }>>([]);
   const [panelProvider, setPanelProvider] = useState<string | null>(null);
+  /** Stage D7: the inbound queue (the External changes section). */
+  const [inbound, setInbound] = useState<InboundChangeView[]>([]);
+  /** The inbound row whose decision is in flight (one at a time). */
+  const [decidingInbound, setDecidingInbound] = useState<string | null>(null);
+  const pendingInbound = pendingInboundCount(inbound);
+
+  const refreshInbound = async () => {
+    if (!boardId) return;
+    setInbound(await fetchInboundChanges(boardId));
+  };
+
+  const decideInbound = async (changeId: string, decision: "accept" | "dismiss") => {
+    if (!boardId || decidingInbound) return;
+    setDecidingInbound(changeId);
+    try {
+      // decideInboundChange is imported lazily to keep this component's
+      // import list the D6 shape; the decision refreshes the queue and
+      // the links (an accept writes the link's lastSyncedStatus).
+      const { decideInboundChange, fetchIntegrationLinks } = await import("../boards.js");
+      await decideInboundChange(boardId, changeId, decision);
+      const [rows, boardLinks] = await Promise.all([
+        fetchInboundChanges(boardId),
+        fetchIntegrationLinks(boardId),
+      ]);
+      setInbound(rows);
+      setLinks(boardLinks);
+    } finally {
+      setDecidingInbound(null);
+    }
+  };
 
   const visibleInbox = inbox.filter((item) => !suppressed.has(suppressionKey(item)));
   // Stage D6: the chip's join — node id → the board's links.
@@ -223,11 +258,28 @@ export function IntelligenceView(_: { onOpenSettings?: (section?: string) => voi
           {connections.some((c) => c.provider === "linear" && c.status === "active") ? (
             <button
               className="btn"
-              style={{ height: 24, fontSize: 11 }}
+              style={{ height: 24, fontSize: 11, display: "flex", alignItems: "center", gap: 6 }}
               title={t("integrations.sync.title", locale)}
               onClick={() => setPanelProvider("linear")}
             >
               {t("integrations.sync.button", locale)}
+              {/* Stage D7: the pending-inbound badge — the queue is one
+                  click away from the Sync it relates to. */}
+              {pendingInbound > 0 && (
+                <span
+                  className="mono"
+                  aria-label={`${pendingInbound} external changes`}
+                  style={{
+                    fontSize: 10,
+                    padding: "1px 6px",
+                    borderRadius: 999,
+                    background: "var(--sig-amber, #d29922)",
+                    color: "#fff",
+                  }}
+                >
+                  {pendingInbound}
+                </span>
+              )}
             </button>
           ) : connections.length > 0 && !connections.some((c) => c.provider === "linear") ? (
             <span className="mono" style={{ fontSize: 10, color: "var(--ink-3)" }}>
@@ -433,6 +485,110 @@ export function IntelligenceView(_: { onOpenSettings?: (section?: string) => voi
                 </div>
               );
             })
+          )}
+          {/* — Stage D7: External changes — the human-gated inbound queue.
+              Pending rows offer Accept/Keep-ours; a warning row (no
+              translation) offers Keep-ours only — Accept would require
+              guessing a status; decided rows dim with their outcome. — */}
+          {inbound.length > 0 && (
+            <div style={{ padding: "4px 6px 12px" }}>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  padding: "8px 10px 4px",
+                }}
+              >
+                <span
+                  className="mono"
+                  style={{ fontSize: 10.5, letterSpacing: "0.08em", textTransform: "uppercase", flex: 1 }}
+                >
+                  {t("integrations.inbound.title", locale)}
+                </span>
+                <span className="mono" style={{ fontSize: 10.5, color: "var(--ink-3)" }}>
+                  {pendingInbound}
+                </span>
+              </div>
+              <div className="mono" style={{ fontSize: 10, color: "var(--ink-3)", padding: "2px 10px 6px" }}>
+                {t("integrations.inbound.hint", locale)}
+              </div>
+              {inbound.map((row) => {
+                const actions = inboundRowActions(row);
+                const busy = decidingInbound === row.id;
+                return (
+                  <div
+                    key={row.id}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 10,
+                      padding: "7px 10px",
+                      borderRadius: 8,
+                      opacity: row.status === "pending" ? 1 : 0.55,
+                      ...(row.status === "pending" && !inboundRowIsWarning(row)
+                        ? { boxShadow: "inset 2px 0 0 0 var(--amber-2)" }
+                        : {}),
+                    }}
+                  >
+                    <button
+                      onClick={() => onCitation({ kind: "node", id: row.nodeId })}
+                      style={{ flex: 1, minWidth: 0, textAlign: "left", background: "transparent", border: "none", cursor: "pointer", padding: 0 }}
+                    >
+                      <div style={{ fontSize: 12.5, color: "var(--ink-0)" }}>{row.nodeLabel}</div>
+                      <div className="mono" style={{ fontSize: 10.5, color: "var(--ink-3)" }}>
+                        {inboundRowIsWarning(row)
+                          ? t("integrations.inbound.warning", locale, { provider: row.provider, value: row.externalValue })
+                          : row.resolved
+                            ? t("integrations.inbound.resolved", locale, { value: row.mappedValue ?? "" })
+                            : t("integrations.inboard.row", locale, { provider: row.provider, external: row.externalValue, board: row.boardValue ?? "—" })}
+                      </div>
+                      {row.status !== "pending" && (
+                        <div className="mono" style={{ fontSize: 10, color: "var(--ink-3)", marginTop: 1 }}>
+                          {row.status === "applied"
+                            ? t("integrations.inbound.applied", locale)
+                            : row.status === "dismissed"
+                              ? t("integrations.inbound.dismissed", locale)
+                              : t("integrations.inbound.superseded", locale)}
+                        </div>
+                      )}
+                    </button>
+                    {row.url && (
+                      <a
+                        href={row.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        title={t("integrations.chip.title", locale, { at: new Date(row.detectedAt).toLocaleString() })}
+                        className="mono"
+                        style={{ fontSize: 11, color: "var(--amber-2)", padding: "2px 6px", flexShrink: 0 }}
+                      >
+                        ↗ {row.externalId}
+                      </a>
+                    )}
+                    {actions.canAccept && (
+                      <button
+                        className="btn amber"
+                        style={{ height: 22, fontSize: 10.5, flexShrink: 0 }}
+                        disabled={busy}
+                        onClick={() => void decideInbound(row.id, "accept")}
+                      >
+                        {t("integrations.inbound.accept", locale)}
+                      </button>
+                    )}
+                    {actions.canDismiss && (
+                      <button
+                        className="btn"
+                        style={{ height: 22, fontSize: 10.5, flexShrink: 0 }}
+                        disabled={busy}
+                        onClick={() => void decideInbound(row.id, "dismiss")}
+                      >
+                        {t("integrations.inbound.dismiss", locale)}
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           )}
         </div>
       </div>

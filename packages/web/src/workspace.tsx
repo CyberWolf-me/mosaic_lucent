@@ -575,6 +575,13 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         setProposal((p) => (p && p.id === event.id ? null : p));
         if (serverProposalRef.current?.id === event.id) serverProposalRef.current = null;
       },
+      // Stage D7: an inbound-queue decision (accept/dismiss, this browser
+      // or a peer's). The Intelligence view refetches the queue through
+      // its own effect; the board state itself converges through the op
+      // frame the accept committed. This callback exists so the frame is
+      // not silently dropped (the default handler would log an unknown
+      // message kind).
+      onInboundDecided: () => {},
     });
     syncRef.current = sync;
     sync.connect();
