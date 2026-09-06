@@ -541,7 +541,7 @@ export function IntelligenceView(_: { onOpenSettings?: (section?: string) => voi
                           ? t("integrations.inbound.warning", locale, { provider: row.provider, value: row.externalValue })
                           : row.resolved
                             ? t("integrations.inbound.resolved", locale, { value: row.mappedValue ?? "" })
-                            : t("integrations.inboard.row", locale, { provider: row.provider, external: row.externalValue, board: row.boardValue ?? "—" })}
+                            : t("integrations.inbound.row", locale, { provider: row.provider, external: row.externalValue, board: row.boardValue ?? "—" })}
                       </div>
                       {row.status !== "pending" && (
                         <div className="mono" style={{ fontSize: 10, color: "var(--ink-3)", marginTop: 1 }}>

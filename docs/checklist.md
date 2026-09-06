@@ -1448,3 +1448,44 @@ key re-set after sign-in.
 Gate: typecheck 0; server 989 (+1 acceptance; the PG parity halves run
 in CI), web 646 (+4), i18n 14, mcp 28, ai 185, core 422; the migration
 SQL committed (0021).
+
+## The Stage D7 live browser pass (2026-09-06)
+
+Ran against the real stack (the server on :4387 rebuilt with the D7
+routes, the linear stub on :4390 through the connection's
+config.baseUrl seam, Vite on :5174, the webhook secret in the env and
+its REF on the connection's config — the env-ref clause exercised
+exactly as designed).
+
+What the pass verified, live:
+[x] The signed webhook against the REAL first-in-ladder route (no
+    session, no CSRF — the signature alone): a signed issueUpdate
+    (LIN-6 Done) answers {received: true, outcome: "processed"}.
+[x] The Intelligence 'External changes' section renders the pending
+    row: 'Write the launch spec / linear says Done — the board says
+    open', the ↗ LIN-6 chip, Accept + Keep-ours; the Sync button
+    carries the pending badge (1).
+[x] ACCEPT IN THE BROWSER: the node's issue status changed to
+    'completed' on the real board; the history timeline (the public
+    history API) shows the SYSTEM-ACTOR row — 'sync from linear',
+    actor {type: system, name: linear, initiatedBy: D7 Owner} — the
+    first system row the product has ever rendered; the badge drops
+    to zero; the row shows 'accepted'.
+[x] The queue-level dedupe live: 'In QA' (the never-guess word)
+    queued a warning row, then a 'Done' webhook UPDATED the same
+    pending row — one row, the provider's current word, exactly the
+    "what the provider currently says" semantics.
+[x] The tampered signature: a forged X-Signature answers 400 on the
+    real route.
+[x] The conflict arm: an explicit sync answers {updated: 1, skipped: 1,
+    supersededInbound: 1} — the pending inbound row superseded by the
+    board's push.
+[x] The workspace invariant on the live board after everything: the
+    blob carries no 'linear', no 'LIN-', no 'lucent-action'.
+
+One defect the pass caught (fixed + committed with this note): the
+IntelligenceView rendered the raw key 'integrations.inboard.row' in
+the drift sentence — a key rename (inboard→inbound) landed in the i18n
+file but not the view. The test suites could not catch it because the
+unit tests pin the pure row ACTIONS, not the t() key names; the live
+pass reads what the screen actually says, which is the point of it.
