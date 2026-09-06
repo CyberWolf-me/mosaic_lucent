@@ -43,6 +43,8 @@ import { PostgresAssetStore } from "./store/pg-assets.js";
 import { InMemorySsoStore } from "./ssoStore.js";
 import { InMemoryIntegrationActionStore, InMemoryIntegrationStore } from "./integrations/integrations.js";
 import { InMemoryExecutionLedger } from "./integrations/ledger.js";
+import { InMemoryIntegrationWebhookEventStore } from "./integrations/webhook.js";
+import { InMemoryInboundChangeStore } from "./integrations/inbound.js";
 import {
   PostgresExecutionLedger,
   PostgresIntegrationActionStore,
@@ -148,6 +150,9 @@ function makeStores(databaseUrl: string | undefined): {
     providers: Map<string, import("./integrations/provider.js").ExecutionProviderFactory>;
     actions: import("./integrations/integrations.js").IntegrationActionStore;
     ledger: import("./integrations/ledger.js").ExecutionLedger;
+    /** Stage D7: the webhook delivery ledger + the inbound queue. */
+    webhookEvents: import("./integrations/webhook.js").IntegrationWebhookEventStore;
+    inbound: import("./integrations/inbound.js").InboundChangeStore;
   };
   /** Stage B6: asset metadata — in-memory for dev, Postgres when set. */
   assetStore: import("./assets.js").AssetStore;
@@ -180,6 +185,9 @@ function makeStores(databaseUrl: string | undefined): {
       ]),
         actions: new InMemoryIntegrationActionStore(),
         ledger: new InMemoryExecutionLedger(),
+        // Stage D7: the webhook delivery ledger + the inbound queue.
+        webhookEvents: new InMemoryIntegrationWebhookEventStore(),
+        inbound: new InMemoryInboundChangeStore(),
       },
       proposals: new InMemoryProposalStore(),
       assetStore: new InMemoryAssetStore(),
@@ -214,6 +222,11 @@ function makeStores(databaseUrl: string | undefined): {
       ]),
       actions: new PostgresIntegrationActionStore(target.db),
       ledger: new PostgresExecutionLedger(target.db),
+      // Stage D7 (Batch 1): the InMemory queue twins — the PG pairs land
+      // with migration 0021 in Batch 2. Delivery dedupe stays per-process
+      // until then, the same posture the D5 ledger had before D6.
+      webhookEvents: new InMemoryIntegrationWebhookEventStore(),
+      inbound: new InMemoryInboundChangeStore(),
     },
     db: target,
   };

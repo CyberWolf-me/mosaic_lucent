@@ -116,6 +116,8 @@ import { registerScimRoutes } from "./routes/scim.js";
 import { PUBLIC_TEMPLATES } from "./publicTemplates.js";
 import type { ScimUserAccess } from "./scim.js";
 import { createStripeWebhookReceiver, type StripeWebhookReceiver } from "./billing/webhook.js";
+import { createIntegrationWebhookReceiver, MAX_WEBHOOK_BYTES } from "./integrations/webhook.js";
+import { ingestInboundChange } from "./integrations/inbound.js";
 import { openPortal, startCheckout, type BillingIntegration } from "./billing/service.js";
 
 /**
@@ -251,6 +253,10 @@ export interface AppDeps {
     /** Stage D6: the executor's per-item provider-call race timeout
      * (default 15s; tests inject a short one so the hang arm is fast). */
     executionTimeoutMs?: number;
+    /** Stage D7: the webhook delivery ledger + the inbound queue. When
+     * absent the webhook route answers 503 — the fail-closed bundle rule. */
+    webhookEvents?: import("./integrations/webhook.js").IntegrationWebhookEventStore;
+    inbound?: import("./integrations/inbound.js").InboundChangeStore;
   };
   /**
    * M4.3: Stripe billing integration — the REST client, the endpoint signing
@@ -1647,6 +1653,88 @@ export function createApp(deps: AppDeps): App {
   const handleRequest = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     if (req.method === "OPTIONS") {
       send(res, 204, {});
+      return;
+    }
+
+    // --- Stage D7: the integration webhook receiver ------------------------
+    //
+    // Deliberately FIRST in the ladder, and with no auth guards — the
+    // billing webhook precedent (see the /api/billing/webhook comment
+    // below): the caller is Linear's infrastructure, not a user. It has
+    // no cookie, no CSRF token and no bearer token; its authentication
+    // *is* the HMAC signature over the raw body, verified inside
+    // `receive`. No `requireCsrf`, no `requireUser`, no `meter`. The
+    // receiver resolves WHICH org signed by matching every active
+    // connection's webhook secret (the org resolution), so nothing about
+    // the caller is trusted before the signature holds. A Buffer body —
+    // the raw-body-is-the-message doctrine.
+    if (
+      req.method === "POST" &&
+      /^\/api\/integrations\/[a-z]+\/webhook$/.test(req.url?.split("?")[0] ?? "")
+    ) {
+      const provider = (req.url!.split("?")[0]!.match(/^\/api\/integrations\/([a-z]+)\/webhook$/) ?? [])[1]!;
+      if (!deps.integrations?.webhookEvents || !deps.integrations?.inbound || !deps.integrations) {
+        send(res, 503, { error: "integrations are not configured" });
+        return;
+      }
+      const { integrations } = deps;
+      if (!integrations.providers.has(provider)) {
+        send(res, 404, { error: `no provider implementation named "${provider}" is loaded` });
+        return;
+      }
+      let payload: Buffer;
+      try {
+        payload = await readRawBody(req, MAX_WEBHOOK_BYTES);
+      } catch (err) {
+        send(res, 400, { error: "bad request", detail: (err as Error).message });
+        return;
+      }
+      // Org resolution input: every ACTIVE connection for this provider,
+      // each with its webhookSecretRef resolved through the environment.
+      // Secrets read per-delivery so a rotation takes effect without a
+      // restart (the same temporariness clause as credentialRef).
+      const connections = await integrations.store.connectionsFor(provider);
+      const candidates = connections.flatMap((connection) => {
+        const ref = connection.config?.webhookSecretRef;
+        const secret = ref ? process.env[ref] : undefined;
+        return secret
+          ? [{ connectionId: connection.id, orgId: connection.orgId, secret }]
+          : [];
+      });
+      const receiver = createIntegrationWebhookReceiver({
+        provider,
+        candidates,
+        events: integrations.webhookEvents!,
+        onChange: async (change, orgId) => {
+          // A verified change lands in the human-gated queue. The
+          // provider instance is per-delivery (mapStatus is pure), and
+          // ingest touches no wire.
+          const resolved = integrations.providers.get(provider);
+          const connection = connections.find((c) => c.orgId === orgId);
+          if (!resolved || !connection) return;
+          await ingestInboundChange(
+            {
+              linksForExternalId: (p, externalId) =>
+                integrations.store.linksForExternalId(p, externalId),
+              boardNodeStatus: async (boardId, nodeId) => {
+                const board = await boardStore.get(boardId);
+                if (!board) return null;
+                const node = board.workspace.nodes[nodeId];
+                return node?.issue?.status ?? null;
+              },
+              store: integrations.inbound!,
+              provider: resolved(connection),
+            },
+            change,
+            orgId,
+          );
+        },
+      });
+      const result = await receiver.receive({
+        payload,
+        signature: req.headers["x-signature"],
+      });
+      send(res, result.status, result.body);
       return;
     }
 

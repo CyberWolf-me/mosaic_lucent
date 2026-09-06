@@ -138,6 +138,20 @@ export class PostgresIntegrationStore implements IntegrationStore {
     return row ? rowToConnection(row) : undefined;
   }
 
+  async connectionsFor(provider: string): Promise<IntegrationConnection[]> {
+    const rows = await this.db
+      .select()
+      .from(integrationConnections)
+      .where(
+        and(
+          eq(integrationConnections.provider, provider),
+          eq(integrationConnections.status, "active"),
+        ),
+      )
+      .orderBy(integrationConnections.createdAt);
+    return rows.map(rowToConnection);
+  }
+
   async setConnectionStatus(
     orgId: string,
     provider: string,
@@ -205,6 +219,19 @@ export class PostgresIntegrationStore implements IntegrationStore {
       .from(integrationTaskLinks)
       .where(
         and(eq(integrationTaskLinks.boardId, boardId), eq(integrationTaskLinks.nodeId, nodeId)),
+      );
+    return rows.map(rowToLink);
+  }
+
+  async linksForExternalId(provider: string, externalId: string): Promise<IntegrationTaskLink[]> {
+    const rows = await this.db
+      .select()
+      .from(integrationTaskLinks)
+      .where(
+        and(
+          eq(integrationTaskLinks.provider, provider),
+          eq(integrationTaskLinks.externalId, externalId),
+        ),
       );
     return rows.map(rowToLink);
   }

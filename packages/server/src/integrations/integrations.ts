@@ -105,6 +105,12 @@ export interface IntegrationStore {
   /** The org's connections, oldest first. */
   connectionsForOrg(orgId: string): Promise<IntegrationConnection[]>;
   connection(orgId: string, provider: string): Promise<IntegrationConnection | undefined>;
+  /**
+   * Stage D7: every ACTIVE connection for one provider, across orgs — the
+   * webhook receiver's org-resolution input (it resolves each candidate's
+   * webhookSecretRef and matches the signature to find the org).
+   */
+  connectionsFor(provider: string): Promise<IntegrationConnection[]>;
   /** Disable (never hard-delete — the audit trail keeps the reference). */
   setConnectionStatus(
     orgId: string,
@@ -122,11 +128,17 @@ export interface IntegrationStore {
   linksForBoard(boardId: string): Promise<IntegrationTaskLink[]>;
   /** The node's links (one per connected provider). */
   linksForNode(boardId: string, nodeId: string): Promise<IntegrationTaskLink[]>;
+  /**
+   * Stage D7: every link pointing at one external task — the inbound
+   * ingest's entry point (a webhook names LIN-482; the links say which
+   * boards' which nodes that is).
+   */
+  linksForExternalId(provider: string, externalId: string): Promise<IntegrationTaskLink[]>;
   /** Drop a link (unlink; deleting the node should cascade this). */
   unlink(boardId: string, nodeId: string, provider: string): Promise<boolean>;
 }
 
-export function newIntegrationId(prefix: "int_" | "lnk_" | "act_"): string {
+export function newIntegrationId(prefix: "int_" | "lnk_" | "act_" | "inb_"): string {
   return prefix + Date.now().toString(36) + randomBytes(3).toString("hex");
 }
 
@@ -252,6 +264,13 @@ export class InMemoryIntegrationStore implements IntegrationStore {
     return found ? { ...found } : undefined;
   }
 
+  async connectionsFor(provider: string): Promise<IntegrationConnection[]> {
+    return [...this.connections.values()]
+      .filter((c) => c.provider === provider && c.status === "active")
+      .sort((a, b) => a.createdAt - b.createdAt)
+      .map((c) => ({ ...c }));
+  }
+
   async setConnectionStatus(
     orgId: string,
     provider: string,
@@ -309,6 +328,12 @@ export class InMemoryIntegrationStore implements IntegrationStore {
   async linksForNode(boardId: string, nodeId: string): Promise<IntegrationTaskLink[]> {
     return [...this.links.values()]
       .filter((l) => l.boardId === boardId && l.nodeId === nodeId)
+      .map((l) => ({ ...l }));
+  }
+
+  async linksForExternalId(provider: string, externalId: string): Promise<IntegrationTaskLink[]> {
+    return [...this.links.values()]
+      .filter((l) => l.provider === provider && l.externalId === externalId)
       .map((l) => ({ ...l }));
   }
 
