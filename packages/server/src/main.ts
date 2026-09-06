@@ -54,6 +54,7 @@ import {
 } from "./store/pg-integrations.js";
 import { FakeProvider } from "./integrations/fake.js";
 import { linearConnectionFactory } from "./integrations/linear.js";
+import { githubConnectionFactory } from "./integrations/github.js";
 import { PostgresSsoStore } from "./store/pg-sso.js";
 import { InMemoryUsageStore, type UsageStore } from "./usageStore.js";
 import { PostgresUsageStore } from "./store/pg-usage.js";
@@ -184,6 +185,7 @@ function makeStores(databaseUrl: string | undefined): {
         providers: new Map<string, import("./integrations/provider.js").ExecutionProviderFactory>([
         ['fake', () => new FakeProvider()],
         ['linear', linearConnectionFactory()],
+        ['github', githubConnectionFactory()],
       ]),
         actions: new InMemoryIntegrationActionStore(),
         ledger: new InMemoryExecutionLedger(),
@@ -221,6 +223,7 @@ function makeStores(databaseUrl: string | undefined): {
       providers: new Map<string, import("./integrations/provider.js").ExecutionProviderFactory>([
         ['fake', () => new FakeProvider()],
         ['linear', linearConnectionFactory()],
+        ['github', githubConnectionFactory()],
       ]),
       actions: new PostgresIntegrationActionStore(target.db),
       ledger: new PostgresExecutionLedger(target.db),

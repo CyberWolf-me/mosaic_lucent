@@ -102,12 +102,19 @@ function actionContract(name: string, make: () => IntegrationActionStore, prefix
       });
       const b = await store.propose({
         orgId: "o", boardId: board, provider: "fake", connectionId: "int_1",
-        items: [{ nodeId: "n2", action: "create", title: "T2", status: "open", idempotencyKey: "ext_n2" }],
+        items: [{ nodeId: "n2", action: "create", title: "T2", status: "open", idempotencyKey: "ext_n2",
+          // Stage D8: the capability warnings ride the item (the jsonb
+          // round-trip — the approve gate reads them back from the store).
+          warnings: [{ field: "dueDate", reason: "GitHub has no due-date field" }] }],
         createdBy: "u", now: 2,
       });
       expect(b.supersededId).toBe(a.record.id);
       expect(b.record.connectionId).toBe("int_1");
       expect(b.record.items).toHaveLength(1);
+      // The warnings round-trip verbatim.
+      expect(b.record.items[0]!.warnings).toEqual([
+        { field: "dueDate", reason: "GitHub has no due-date field" },
+      ]);
 
       const decided = await store.decide(board, b.record.id, "approved", "u", 3);
       expect(decided!.status).toBe("approved");

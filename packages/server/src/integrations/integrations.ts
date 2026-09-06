@@ -386,6 +386,13 @@ export interface IntegrationActionItem {
   externalId?: string;
   /** The exactly-once key the executor threads to the provider. */
   idempotencyKey: string;
+  /**
+   * Stage D8, ADR 0034's honesty layer: what the provider CANNOT represent
+   * faithfully for this item, computed by capabilityWarnings at propose time.
+   * The approve route refuses a warning-carrying record unless the caller
+   * acknowledged them — capability loss is part of the human gate.
+   */
+  warnings?: Array<{ field: string; reason: string }>;
 }
 
 export interface IntegrationActionRecord {

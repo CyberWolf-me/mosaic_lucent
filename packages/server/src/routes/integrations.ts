@@ -348,6 +348,17 @@ router.post("/api/boards/:id/integrations/:provider/propose", async (ctx) => {
   const items = actionNodes(guard.board.workspace).map((node) => {
     const issue = node.issue!;
     const link = existingLinks.get(node.id);
+    // Stage D8, ADR 0034's honesty layer: the provider declares what it
+    // CANNOT represent faithfully for this item BEFORE anything executes.
+    // The warnings ride the item into the record and the preview; approve
+    // refuses until the human acknowledges them.
+    const fields = {
+      title: node.label,
+      ...(issue.assignee ? { assignee: issue.assignee } : {}),
+      ...(issue.dueDate ? { dueDate: issue.dueDate } : {}),
+      ...(issue.status ? { status: issue.status } : {}),
+    };
+    const warnings = provider.capabilityWarnings?.(fields);
     return {
       nodeId: node.id,
       action: link ? ("update" as const) : ("create" as const),
@@ -357,6 +368,7 @@ router.post("/api/boards/:id/integrations/:provider/propose", async (ctx) => {
       status: issue.status,
       ...(link ? { externalId: link.externalId } : {}),
       idempotencyKey: `ext_${node.id}`,
+      ...(warnings && warnings.length > 0 ? { warnings } : {}),
     };
   });
 
@@ -376,7 +388,8 @@ router.post("/api/boards/:id/integrations/:provider/propose", async (ctx) => {
   });
 
   // THE PREVIEW: what will happen, what will NOT (the honest statement),
-  // never a surprise.
+  // never a surprise — and, since D8, what the provider cannot represent
+  // faithfully (per item, the stored warnings verbatim).
   const creates = items.filter((i) => i.action === "create");
   const updates = items.filter((i) => i.action === "update");
   send(res, 201, {
@@ -394,8 +407,15 @@ router.post("/api/boards/:id/integrations/:provider/propose", async (ctx) => {
         ...(i.assignee ? { assignee: i.assignee } : {}),
         ...(i.dueDate ? { dueDate: i.dueDate } : {}),
         status: i.status,
+        ...(i.warnings ? { warnings: i.warnings } : {}),
       })),
-      updates: updates.map((i) => ({ nodeId: i.nodeId, externalId: i.externalId, title: i.title, status: i.status })),
+      updates: updates.map((i) => ({
+        nodeId: i.nodeId,
+        externalId: i.externalId,
+        title: i.title,
+        status: i.status,
+        ...(i.warnings ? { warnings: i.warnings } : {}),
+      })),
       statement:
         `Will create ${creates.length} task(s) and update ${updates.length} in ${providerName}. Nothing will be deleted. Existing external tasks will only be modified in the fields explicitly shown in the update rows.`,
     },
@@ -441,6 +461,33 @@ router.post("/api/boards/:id/integrations/actions/:actionId/approve", async (ctx
     return;
   }
   const provider = resolved.provider;
+
+  // Stage D8, ADR 0034's honesty gate: a warning-carrying record executes
+  // only when the caller EXPLICITLY acknowledged the capability loss —
+  // the human gate covers what the provider will drop, not just what it
+  // will touch. The warnings are echoed back so the caller never has to
+  // remember what they are acknowledging.
+  const warnings = record.items.flatMap((item) =>
+    (item.warnings ?? []).map((w) => ({ nodeId: item.nodeId, ...w })),
+  );
+  if (warnings.length > 0) {
+    let acknowledged = false;
+    try {
+      const raw = await readBody(req);
+      const body = raw ? (JSON.parse(raw) as { acknowledgeWarnings?: unknown }) : {};
+      acknowledged = body.acknowledgeWarnings === true;
+    } catch {
+      acknowledged = false;
+    }
+    if (!acknowledged) {
+      send(res, 409, {
+        error: "the provider cannot represent some fields faithfully",
+        warnings,
+        acknowledgeWarnings: true,
+      });
+      return;
+    }
+  }
 
   // The decided-once transition guard: a second approve answers the
   // ORIGINAL outcome, never a second effect.

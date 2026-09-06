@@ -125,6 +125,25 @@ export interface ExecutionProvider {
    * in-memory bus so tests exercise the shape without network anything.
    */
   subscribeToChanges?(listener: (change: ExternalTaskChange) => void): () => void;
+  /**
+   * THE CAPABILITY-HONESTY SEAM (Stage D8, ADR 0034): what this create/update
+   * CANNOT represent faithfully. The propose route calls it per item and
+   * stores the warnings on the action record; the preview shows them; the
+   * approve route refuses a warning-carrying record unless the caller
+   * acknowledged them — the human gate covers capability loss, not just
+   * effect scope. Nothing drops silently.
+   *
+   * Providers with fully faithful fields (Linear, the FakeProvider) leave
+   * this unimplemented. A provider like GitHub warns: dueDate has no native
+   * field; every non-open Lucent status collapses to GitHub "open"; an
+   * unresolvable assignee is omitted, not guessed.
+   */
+  capabilityWarnings?(input: {
+    title: string;
+    assignee?: string;
+    dueDate?: string;
+    status?: string;
+  }): Array<{ field: string; reason: string }>;
 }
 
 /**
