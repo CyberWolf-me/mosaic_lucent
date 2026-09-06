@@ -248,6 +248,9 @@ export interface AppDeps {
     /** Stage D5: the external-action proposal records + the execution ledger. */
     actions?: import("./integrations/integrations.js").IntegrationActionStore;
     ledger?: import("./integrations/ledger.js").ExecutionLedger;
+    /** Stage D6: the executor's per-item provider-call race timeout
+     * (default 15s; tests inject a short one so the hang arm is fast). */
+    executionTimeoutMs?: number;
   };
   /**
    * M4.3: Stripe billing integration — the REST client, the endpoint signing

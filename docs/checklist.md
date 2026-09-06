@@ -1271,3 +1271,52 @@ ships; no LUCENT_TEST_DATABASE_URL dependency).
 
 Gate: typecheck 0; server 922 passing (+22 in D5: 13 core + 5 routes +
 4 acceptance); no PG surface (InMemory pairs ship).
+
+## Stage D6 shipped: Linear (2026-09, docs/17 amendment, ADR 0032)
+
+[x] The effect contract corrected: at-least-once delivery + provider-
+    specific reconciliation. Linear's reconciliation = the lucent-action
+    marker in the description + recoverCreate(marker) before any retry;
+    key-native providers (the FakeProvider models them) ride the key.
+    The sweeper replays recovery-first.
+[x] The LinearProvider (`@lucent/server`): the StripeClient seam; the
+    raw-key Authorization header; mapStatus NEVER GUESSES (unknown →
+    undefined, pinned); toExternalStatus + the once-per-batch states
+    cache; the deterministic assignee ladder (AMBIGUOUS errors, never
+    guesses); externalId = the identifier, UUIDs resolved internally.
+    15 wire-contract tests (the scripted-GraphQL responder).
+[x] The factory map: providers are (connection) => provider — the
+    per-org credential through the connection; the ADR 0030 interface
+    frozen. resolveProvider: the 404/409 guards + process.env[ref] + the
+    honest unset-ref error. The env-ref documented TEMPORARY (ADR 0032's
+    clause).
+[x] The review's fixes: teamId in connection.config (never the Action,
+    never the workspace); connectionId on the action record (approve
+    refuses a changed connection — 409, pinned); the corrected preview
+    statement; the connection-state UX on the Sync button.
+[x] The PG pairs: 4 tables + the migration (0020); the composite-PK
+    ledger with the status-guarded re-claim; main.ts's PG branch swaps;
+    the sweeper wires; the parity suites over both pairs (a real InMemory
+    defect found: normalizeConnection had lost the config block).
+[x] The web: the ↗ chips (Intelligence + Board), the Sync button's
+    three states, the IntegrationPanel (the frozen preview rendered),
+    the clients, i18n en+hu.
+[x] The acceptance (stageD6.definition.e2e — the stubbed-wire
+    LinearProvider): 10 → 10 issues with correct fields + the marker +
+    provenance; THE RECOVERY (the hang lands the issue, the response is
+    lost, the retry reconciles — 1 issue, 1 link, 0 duplicates, exactly
+    ten issueCreate mutations); partial failure (9/1, retryable); the
+    connection-changed 409; duplicate approval (0 new mutations); viewer
+    404s; the workspace blob provider-free.
+[x] The record: ADR 0032 (the contract paragraph, the effect-contract
+    correction, the env-ref clause, the never-guesses rule, the
+    outbound-authoritative line), docs/17, this section, the changeset.
+[ ] Inbound sync, conflict resolution, webhooks — D7 (the Stripe
+    receiver's doctrines are the precedent; Linear's X-Signature HMAC).
+[ ] OAuth + multi-tenant credential storage — the env-ref replacement
+    needs its own ADR.
+[ ] Scope enforcement — Linear's keys carry no scope metadata (the
+    second-system refusal).
+
+Gate: typecheck 0; server 947 passing (+5 PG in CI runs them for the
+parity), web 642, i18n 14; the migration SQL committed (0020).

@@ -96,6 +96,8 @@ export interface RouteServices {
         /** Stage D5: the action records + execution ledger (undefined → the D5 routes answer 503). */
         actions?: import("../integrations/integrations.js").IntegrationActionStore;
         ledger?: import("../integrations/ledger.js").ExecutionLedger;
+        /** Stage D6: the executor's race timeout (default 15s). */
+        executionTimeoutMs?: number;
       }
     | undefined;
   /**

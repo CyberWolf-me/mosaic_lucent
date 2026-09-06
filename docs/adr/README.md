@@ -38,3 +38,4 @@ back to it.
 | [0029](0029-the-execution-graph.md) | The execution graph: typed edges, cycle rejection, derived truth (Stage D3) | Accepted |
 | [0030](0030-the-adapter-architecture.md) | The adapter architecture: one seam, proven fake-first (Stage D4) | Accepted |
 | [0031](0031-exactly-once-externally.md) | Exactly once, externally: the ledger and the key (Stage D5) | Accepted |
+| [0032](0032-the-first-real-provider.md) | The first real provider: the effect contract corrected, Linear shipped (Stage D6) | Accepted |

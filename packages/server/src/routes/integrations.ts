@@ -376,7 +376,7 @@ router.post("/api/boards/:id/integrations/:provider/propose", async (ctx) => {
       })),
       updates: updates.map((i) => ({ nodeId: i.nodeId, externalId: i.externalId, title: i.title, status: i.status })),
       statement:
-        `Will create ${creates.length} task(s) and update ${updates.length} in ${providerName}. Nothing will be deleted; existing external tasks are only modified beyond status drift if their title, assignee, or due date changed on the board.`,
+        `Will create ${creates.length} task(s) and update ${updates.length} in ${providerName}. Nothing will be deleted. Existing external tasks will only be modified in the fields explicitly shown in the update rows.`,
     },
   });
 });
@@ -437,7 +437,7 @@ router.post("/api/boards/:id/integrations/actions/:actionId/approve", async (ctx
   // owner's triplet) and the provider call carries the item's idempotency
   // key — attempts deduped by the ledger, effects deduped by the key.
   // One item's failure fails that item, never the batch.
-  const TIMEOUT_MS = 15_000;
+  const TIMEOUT_MS = integrations.executionTimeoutMs ?? 15_000;
   const results: Array<Record<string, unknown>> = [];
   let appliedCount = 0;
   let failedCount = 0;

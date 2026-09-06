@@ -788,3 +788,53 @@ Explicitly NOT built, per ADR 0031: web surface (D6), scope enforcement
 process (the function ships; main.ts wiring with D6), link GC (documented,
 the sweep owns the decision), real providers (D6), webhooks (D7),
 AI-initiated proposals (D9).
+
+## Amendment (2026-09-05): Stage D6 executed — Linear, the first real provider
+
+The owner's review (9.2 → 10/10 with the fixes) found one critical
+contradiction — D5's "ledger + key" guarantee does not transfer to Linear,
+which has no idempotency-key header — and the corrected EFFECT CONTRACT
+leads ADR 0032: at-least-once delivery with provider-specific effect
+deduplication or outcome reconciliation. Linear's reconciliation is the
+stable lucent-action marker stamped into the task description + a
+recoverCreate(marker) search before any retry create; the sweeper replays
+stuck rows recovery-first.
+
+What Stage D6 shipped (commits and the acceptance in
+`packages/server/test/stageD6.definition.e2e.test.ts`):
+
+- **The provider + the factory** (`c88a853`): LinearProvider (the
+  StripeClient seam; the raw-key Authorization header — NO Bearer, the
+  documented divergence; the GraphQL error envelope → LinearError), the
+  factory map (per-org credentials through the connection — the ADR 0030
+  interface frozen), mapStatus→undefined (never guesses — "In QA" is not
+  "open"), toExternalStatus + the once-per-instance workflowStates cache,
+  the deterministic assignee ladder (email > name > unique partial >
+  AMBIGUOUS), teamId in connection.config, connectionId on the action
+  record (approve refuses a changed connection with 409), and the
+  corrected preview statement. 15 wire-contract tests.
+- **The PG pairs** (`bbd1dbc`): four tables + the migration SQL; the
+  composite-PK ledger with the status-guarded re-claim; main.ts's PG
+  branch swaps; the sweeper wires (interval + recovery-first replay);
+  the same-suite-over-both parity. One real InMemory defect found by the
+  parity probe: normalizeConnection had lost its config block — the
+  upsert silently dropped teamId.
+- **The web** (`edf74c3`): the ↗ chips, the Sync button's three honest
+  connection states, the IntegrationPanel (the frozen preview rendered —
+  the statement, creates/updates rows, Approve/Reject, the results with
+  ↗ links, the 409 as the panel error), the clients, i18n en+hu.
+- **The acceptance** (this commit): 10 actions → the honest preview →
+  approve → 10 issues with correct title/assignee/dueDate, LIN-N ids,
+  the marker in every description, the connectionId provenance; the
+  AMBIGUOUS-CREATE RECOVERY (the wire lands the issue, the response
+  hangs, the retry's recoverCreate finds it — 1 issue, 1 link, 0
+  duplicates, exactly ten issueCreate mutations on the wire); partial
+  provider failure (9 linked, 1 failed, retryable); the
+  connection-changed 409; duplicate approval (0 new wire mutations);
+  viewer 404s; the workspace blob provider-free throughout.
+
+Explicitly NOT built, per ADR 0032: inbound sync + conflict resolution +
+the webhook receiver (D7), OAuth + multi-tenant credential storage (the
+env-ref temporariness clause), scope enforcement (Linear's keys carry no
+scope metadata), link GC, per-node propose, a connection-admin UI, MCP
+link exposure, AI-initiated proposals (D9).
