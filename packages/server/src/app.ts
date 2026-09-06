@@ -116,7 +116,7 @@ import { registerScimRoutes } from "./routes/scim.js";
 import { PUBLIC_TEMPLATES } from "./publicTemplates.js";
 import type { ScimUserAccess } from "./scim.js";
 import { createStripeWebhookReceiver, type StripeWebhookReceiver } from "./billing/webhook.js";
-import { createIntegrationWebhookReceiver, MAX_WEBHOOK_BYTES } from "./integrations/webhook.js";
+import { createIntegrationWebhookReceiver, MAX_WEBHOOK_BYTES, webhookSchemes } from "./integrations/webhook.js";
 import { ingestInboundChange } from "./integrations/inbound.js";
 import { openPortal, startCheckout, type BillingIntegration } from "./billing/service.js";
 
@@ -1682,6 +1682,15 @@ export function createApp(deps: AppDeps): App {
         send(res, 404, { error: `no provider implementation named "${provider}" is loaded` });
         return;
       }
+      // Stage D8: the scheme registry — the provider-specific half of the
+      // receiver (header format, verify, parse). A provider with no scheme
+      // (Jira: Atlassian's Connect JWT/QSH model is its own project, not
+      // a guess) answers the honest 404: no inbound exists for it.
+      const scheme = webhookSchemes.get(provider);
+      if (!scheme) {
+        send(res, 404, { error: `no inbound webhook scheme for "${provider}"` });
+        return;
+      }
       let payload: Buffer;
       try {
         payload = await readRawBody(req, MAX_WEBHOOK_BYTES);
@@ -1703,6 +1712,7 @@ export function createApp(deps: AppDeps): App {
       });
       const receiver = createIntegrationWebhookReceiver({
         provider,
+        scheme,
         candidates,
         events: integrations.webhookEvents!,
         onChange: async (change, orgId) => {
@@ -1730,9 +1740,11 @@ export function createApp(deps: AppDeps): App {
           );
         },
       });
+      // The scheme owns the header name — GitHub signs X-Hub-Signature-256,
+      // Linear X-Signature; the route guesses neither.
       const result = await receiver.receive({
         payload,
-        signature: req.headers["x-signature"],
+        signature: req.headers[scheme.signatureHeader],
       });
       send(res, result.status, result.body);
       return;

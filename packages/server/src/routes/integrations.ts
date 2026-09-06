@@ -2,6 +2,7 @@ import * as z from "zod/v4";
 import { actionNodes } from "@lucent/core";
 import type { RegisterRoutes } from "./context.js";
 import { connectionView, MAX_CREDENTIAL_REF_CHARS } from "../integrations/integrations.js";
+import { webhookSchemes } from "../integrations/webhook.js";
 import type { IntegrationProviderName } from "../integrations/integrations.js";
 
 /**
@@ -70,7 +71,15 @@ export const registerIntegrationRoutes: RegisterRoutes = (router, s) => {
     if (!guard.ok) return;
     if (!integrations) return send(res, 503, { error: "integrations are not configured" });
     const connections = await integrations.store.connectionsForOrg(orgId);
-    send(res, 200, { integrations: connections.map(connectionView) });
+    // Stage D8: supportsInbound per provider — a scheme in the webhook
+    // registry means inbound changes exist for it, which is what the UI's
+    // label follows ("Sync with" vs "Send to").
+    send(res, 200, {
+      integrations: connections.map((c) => ({
+        ...connectionView(c),
+        supportsInbound: webhookSchemes.has(c.provider),
+      })),
+    });
   });
 
   router.put("/api/orgs/:id/integrations/:provider", async (ctx) => {

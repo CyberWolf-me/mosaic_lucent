@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import { createHmac } from "node:crypto";
 import {
   createIntegrationWebhookReceiver,
+  githubWebhookScheme,
+  linearWebhookScheme,
   InMemoryIntegrationWebhookEventStore,
   integrationWebhookEventId,
   parseLinearWebhook,
@@ -140,6 +142,7 @@ describe("the receiver — the Stripe protocol, Linear's scheme", () => {
     const changes: Array<{ change: { provider: string; externalId: string; status: string; at: number }; orgId: string }> = [];
     const receiver = createIntegrationWebhookReceiver({
       provider: "linear",
+      scheme: linearWebhookScheme,
       candidates: candidates(),
       events,
       onChange: async (change, orgId) => {
@@ -176,6 +179,7 @@ describe("the receiver — the Stripe protocol, Linear's scheme", () => {
     const events = new InMemoryIntegrationWebhookEventStore();
     const receiver = createIntegrationWebhookReceiver({
       provider: "linear",
+      scheme: linearWebhookScheme,
       candidates: [],
       events,
       onChange: async () => {},
@@ -206,6 +210,7 @@ describe("the receiver — the Stripe protocol, Linear's scheme", () => {
     const events2 = new InMemoryIntegrationWebhookEventStore();
     const receiver2 = createIntegrationWebhookReceiver({
       provider: "linear",
+      scheme: linearWebhookScheme,
       candidates: candidates(),
       events: events2,
       onChange: async () => {},
@@ -230,6 +235,7 @@ describe("the receiver — the Stripe protocol, Linear's scheme", () => {
     let calls = 0;
     const receiver = createIntegrationWebhookReceiver({
       provider: "linear",
+      scheme: linearWebhookScheme,
       candidates: candidates(),
       events,
       onChange: async () => {
@@ -348,5 +354,98 @@ describe("ingest — the verified change into the human-gated queue", () => {
     const deps = { ...h.deps, boardNodeStatus: async () => null };
     const outcome = await ingestInboundChange(deps, { provider: "linear", externalId: "LIN-1", status: "Done" }, ORG_A);
     expect(outcome.count).toBe(2);
+  });
+});
+
+describe("the github scheme — X-Hub-Signature-256, the composed words (D8)", () => {
+  const GH_ORG = "org_gh";
+  const GH_SECRET = "whsec_gh";
+
+  function ghSign(body: string): string {
+    return `sha256=${createHmac("sha256", GH_SECRET).update(Buffer.from(body, "utf8")).digest("hex")}`;
+  }
+
+  function ghHarness() {
+    const events = new InMemoryIntegrationWebhookEventStore();
+    const changes: Array<{ change: { provider: string; externalId: string; status: string; at: number }; orgId: string }> = [];
+    const receiver = createIntegrationWebhookReceiver({
+      provider: "github",
+      scheme: githubWebhookScheme,
+      candidates: [{ connectionId: "int_gh", orgId: GH_ORG, secret: GH_SECRET }],
+      events,
+      onChange: async (change, orgId) => {
+        changes.push({ change, orgId });
+      },
+      now: () => 1_000,
+    });
+    return { receiver, events, changes };
+  }
+
+  function issueEvent(action: string, over: { number: number; state: string; state_reason?: string | null }): string {
+    return JSON.stringify({
+      action,
+      issue: {
+        number: over.number,
+        state: over.state,
+        state_reason: over.state_reason ?? null,
+        title: "Some issue",
+      },
+    });
+  }
+
+  it("verifies the sha256= prefixed signature and resolves the org", async () => {
+    const h = ghHarness();
+    const body = issueEvent("closed", { number: 482, state: "closed", state_reason: "not_planned" });
+    const result = await h.receiver.receive({ payload: Buffer.from(body), signature: ghSign(body) });
+    expect(result).toMatchObject({ status: 200, outcome: "processed" });
+    expect(h.changes).toEqual([
+      {
+        change: { provider: "github", externalId: "482", status: "closed:not_planned", at: 1_000 },
+        orgId: GH_ORG,
+      },
+    ]);
+  });
+
+  it("a bare hex signature (Linear's shape) is rejected — the prefix is required", async () => {
+    const h = ghHarness();
+    const body = issueEvent("opened", { number: 1, state: "open" });
+    const bare = ghSign(body).slice("sha256=".length);
+    const result = await h.receiver.receive({ payload: Buffer.from(body), signature: bare });
+    expect(result).toMatchObject({ status: 400, outcome: "invalid_signature", body: { error: "malformed_header" } });
+    expect(h.changes).toHaveLength(0);
+  });
+
+  it("a tampered body under the right prefix: 400, the ledger stays empty", async () => {
+    const h = ghHarness();
+    const body = issueEvent("closed", { number: 9, state: "closed", state_reason: "completed" });
+    const tampered = issueEvent("opened", { number: 9, state: "open" });
+    const result = await h.receiver.receive({ payload: Buffer.from(tampered), signature: ghSign(body) });
+    expect(result).toMatchObject({ status: 400, outcome: "invalid_signature" });
+    expect((await h.events.pending(0, 1_000 + 1, 10)).length).toBe(0);
+  });
+
+  it("opened/reopened emit the plain state word; edited is ignored (status-first)", async () => {
+    const h = ghHarness();
+    const opened = issueEvent("opened", { number: 2, state: "open" });
+    const reopened = issueEvent("reopened", { number: 2, state: "open" });
+    const edited = issueEvent("edited", { number: 2, state: "open" });
+    await h.receiver.receive({ payload: Buffer.from(opened), signature: ghSign(opened) });
+    await h.receiver.receive({ payload: Buffer.from(reopened), signature: ghSign(reopened) });
+    const editedResult = await h.receiver.receive({ payload: Buffer.from(edited), signature: ghSign(edited) });
+    expect(editedResult).toMatchObject({ status: 200, outcome: "ignored" });
+    // opened + reopened processed; edited ignored — two changes only.
+    expect(h.changes).toHaveLength(2);
+    expect(h.changes[0]!.change).toMatchObject({ externalId: "2", status: "open" });
+  });
+
+  it("a redelivery of the identical bytes is a duplicate (the D7 regression, per provider)", async () => {
+    const h = ghHarness();
+    const body = issueEvent("closed", { number: 3, state: "closed", state_reason: "completed" });
+    const delivery = { payload: Buffer.from(body), signature: ghSign(body) };
+    const first = await h.receiver.receive(delivery);
+    expect(first).toMatchObject({ outcome: "processed" });
+    const second = await h.receiver.receive(delivery);
+    expect(second).toMatchObject({ status: 200, outcome: "duplicate" });
+    expect(h.changes).toHaveLength(1);
   });
 });

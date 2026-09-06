@@ -169,8 +169,156 @@ export function parseLinearWebhook(provider: string, raw: Buffer, at: number): P
 }
 
 /* -------------------------------------------------------------------------- */
-/* The delivery ledger — the claim protocol, the Stripe events precedent       */
+/* The webhook scheme registry (Stage D8, ADR 0034)                            */
 /* -------------------------------------------------------------------------- */
+
+/**
+ * WHAT ONE PROVIDER'S WEBHOOK DELIVERIES LOOK LIKE. The receiver owns the
+ * generic half — claim ledger, org resolution, dedupe, queue ingest — and
+ * each scheme owns exactly the provider-specific half: which header carries
+ * the signature, how it verifies against the candidate secrets, and how the
+ * verified bytes reduce to a change. A provider with no inbound scheme
+ * (Jira in D8: Atlassian's Connect JWT/QSH model is its own project, not a
+ * guess to make) answers the honest 404 at the route.
+ */
+export interface WebhookScheme {
+  readonly name: string;
+  /** The request header the signature arrives in (lowercased). */
+  readonly signatureHeader: string;
+  /** Verify the raw bytes against the candidates; resolve the org. */
+  verify(
+    raw: Buffer,
+    candidates: SignatureCandidate[],
+    header: string | string[] | undefined | null,
+  ): LinearSignatureResult;
+  /** Reduce the verified bytes to a change or an honest ignore. */
+  parse(provider: string, raw: Buffer, at: number): ParseResult;
+}
+
+/** The Linear scheme — the two functions the D7 receiver was built on,
+ * unchanged (behavior-pinned by the receiver suite). */
+export const linearWebhookScheme: WebhookScheme = {
+  name: "linear",
+  signatureHeader: "x-signature",
+  verify: verifyLinearSignature,
+  parse: parseLinearWebhook,
+};
+
+/**
+ * The GitHub scheme. `X-Hub-Signature-256` carries `sha256=<hex>` (the
+ * documented prefix — stripped before the same constant-time compare).
+ * The payload is the issues webhook: `{ action, issue: { number, state,
+ * state_reason } }`; the status word COMPOSES state+state_reason — the
+ * exact external observation ("closed:not_planned") the inbound queue
+ * stores as externalValue and mapStatus translates. Only the status-
+ * relevant actions emit: opened/reopened/closed. `edited` is ignored
+ * (D7 is status-first; title/body edits are not status drift).
+ */
+export const githubWebhookScheme: WebhookScheme = {
+  name: "github",
+  signatureHeader: "x-hub-signature-256",
+  verify(raw, candidates, header) {
+    const headerValue = Array.isArray(header) ? header[0] : header;
+    if (headerValue === undefined || headerValue === null || headerValue === "") {
+      return {
+        ok: false,
+        reason: "missing_header",
+        detail: "no X-Hub-Signature-256 header",
+      };
+    }
+    // `sha256=<hex>`: reject the wrong prefix or a non-hex remainder.
+    const value = headerValue.trim().toLowerCase();
+    const GITHUB_PREFIX = "sha256=";
+    if (!value.startsWith(GITHUB_PREFIX)) {
+      return {
+        ok: false,
+        reason: "malformed_header",
+        detail: "X-Hub-Signature-256 must be sha256=<hex>",
+      };
+    }
+    const signature = value.slice(GITHUB_PREFIX.length);
+    // Same compare as Linear, with the same guards — the raw bytes are the
+    // message in both schemes.
+    if (signature.length !== SIGNATURE_HEX_LENGTH || !/^[0-9a-f]{64}$/.test(signature)) {
+      return {
+        ok: false,
+        reason: "malformed_header",
+        detail: "X-Hub-Signature-256 is not a 64-char hex digest",
+      };
+    }
+    if (candidates.length === 0) {
+      return {
+        ok: false,
+        reason: "no_candidate_secrets",
+        detail: "no active connection carries a resolvable webhookSecretRef",
+      };
+    }
+    let match: SignatureCandidate | null = null;
+    for (const candidate of candidates) {
+      const expected = createHmac("sha256", candidate.secret).update(raw).digest("hex");
+      if (
+        expected.length === SIGNATURE_HEX_LENGTH &&
+        timingSafeEqual(Buffer.from(expected, "hex"), Buffer.from(signature, "hex"))
+      ) {
+        match = candidate;
+      }
+    }
+    if (!match) {
+      return { ok: false, reason: "no_match", detail: "signature matches no active connection secret" };
+    }
+    return { ok: true, match };
+  },
+  parse(provider, raw, at) {
+    let body: {
+      action?: unknown;
+      issue?: { number?: unknown; state?: unknown; state_reason?: unknown } | null;
+    };
+    try {
+      body = JSON.parse(raw.toString("utf8"));
+    } catch {
+      return { kind: "ignored", reason: "unreadable payload" } as ParseResult;
+    }
+    const action = typeof body.action === "string" ? body.action : "";
+    if (action !== "opened" && action !== "reopened" && action !== "closed") {
+      return { kind: "ignored", reason: `action "${action}" does not change status` } as ParseResult;
+    }
+    const issue = body.issue;
+    const number = issue && typeof issue.number === "number" ? issue.number : null;
+    if (number === null) {
+      return { kind: "ignored", reason: "the issue webhook carries no issue.number" } as ParseResult;
+    }
+    const state = issue && typeof issue.state === "string" ? issue.state : "";
+    const stateReason =
+      issue && typeof issue.state_reason === "string" ? issue.state_reason : null;
+    if (!state) {
+      return { kind: "ignored", reason: "the issue carries no state" } as ParseResult;
+    }
+    // The composed word — the exact observation (closed:not_planned).
+    const word = state === "closed" && stateReason ? `closed:${stateReason}` : state;
+    return {
+      kind: "change",
+      change: { provider, externalId: String(number), status: word, at },
+    } as ParseResult;
+  },
+};
+
+/** The registry the route reads. A provider absent from this map answers
+ * the honest 404 — no inbound scheme exists for it (yet or ever). The
+ * fake entry exists so the route machinery stays testable end to end
+ * without a real provider (the D4 test-double's role; it parses the same
+ * Linear-shaped test payloads the D7 route suite was built on). */
+export const fakeWebhookScheme: WebhookScheme = {
+  name: "fake",
+  signatureHeader: "x-signature",
+  verify: verifyLinearSignature,
+  parse: parseLinearWebhook,
+};
+
+export const webhookSchemes: ReadonlyMap<string, WebhookScheme> = new Map([
+  ["linear", linearWebhookScheme],
+  ["github", githubWebhookScheme],
+  ["fake", fakeWebhookScheme],
+]);
 
 export const INTEGRATION_EVENT_STATUSES = [
   "received",
@@ -331,6 +479,12 @@ export interface IntegrationWebhookReceiverOptions {
   /** The provider name the route matched (e.g. "linear"). */
   provider: string;
   /**
+   * The provider's scheme (Stage D8): which header carries the signature,
+   * how it verifies, how the bytes parse. The receiver keeps the generic
+   * half — claim, ledger, dedupe, ingest.
+   */
+  scheme: WebhookScheme;
+  /**
    * The candidate secrets, pre-resolved by the caller (the route reads
    * active connections + their `config.webhookSecretRef` values through
    * the environment). Computed here as HMACs, all before any match.
@@ -392,7 +546,9 @@ export function createIntegrationWebhookReceiver(
     const raw = delivery.payload;
 
     // Doctrine 1 + 2: verify the exact bytes, before anything is ledgered.
-    const verified = verifyLinearSignature(raw, candidates, delivery.signature);
+    // The scheme owns the header format and the compare; the org resolution
+    // (all candidates computed before any match) is either scheme's.
+    const verified = options.scheme.verify(raw, candidates, delivery.signature);
     if (!verified.ok) {
       // The reason only — never the body, which is attacker-controlled.
       return result(400, "invalid_signature", null, { error: verified.reason });
@@ -408,7 +564,7 @@ export function createIntegrationWebhookReceiver(
       });
     }
 
-    const parsed = parseLinearWebhook(provider, raw, now);
+    const parsed = options.scheme.parse(provider, raw, now);
     const externalId = parsed.kind === "change" ? parsed.change.externalId : null;
     const eventId = integrationWebhookEventId(provider, raw);
 
