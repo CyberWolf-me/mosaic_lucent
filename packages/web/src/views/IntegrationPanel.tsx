@@ -29,7 +29,14 @@ export function IntegrationPanel({
   onLinksChanged,
 }: {
   provider: string;
-  connections: Array<{ provider: string; status: string; config?: Record<string, string> }>;
+  connections: Array<{
+    provider: string;
+    status: string;
+    config?: Record<string, string>;
+    /** Stage D8: a webhook scheme exists for the provider = inbound exists
+     * — the UI's honesty layer (the label, the context copy). */
+    supportsInbound?: boolean;
+  }>;
   onClose: () => void;
   onLinksChanged: () => void;
 }) {
@@ -40,11 +47,25 @@ export function IntegrationPanel({
   const [error, setError] = useState<string | null>(null);
   const [results, setResults] = useState<IntegrationDecisionResult | null>(null);
   const [links, setLinks] = useState<IntegrationLink[] | null>(null);
+  /** Stage D8: the ack the approve route requires when the provider cannot
+   * represent some fields faithfully — set when the warnings render and
+   * the human chooses to proceed. */
+  const [ackWarnings, setAckWarnings] = useState(false);
+  /** The 409's warnings when an un-acked approve was refused — rendered so
+   * the Send anyway choice is informed, never a blind click. */
+  const [refusedWarnings, setRefusedWarnings] = useState<Array<{ nodeId: string; field: string; reason: string }> | null>(null);
 
   const connection = connections.find((c) => c.provider === provider);
-  const teamLabel = connection?.config?.teamId
-    ? t("integrations.team", locale, { team: connection.config.teamId })
-    : "";
+  // The provider-specific config label: Linear shows the team, GitHub the
+  // repo, Jira the project — the connection layer's own detail.
+  const configLabel =
+    connection?.config?.teamId
+      ? t("integrations.team", locale, { team: connection.config.teamId })
+      : connection?.config?.repo
+        ? t("integrations.repo", locale, { repo: connection.config.repo })
+        : connection?.config?.projectKey
+          ? t("integrations.project", locale, { project: connection.config.projectKey })
+          : "";
 
   const propose = async () => {
     if (!boardId) return;
@@ -61,20 +82,34 @@ export function IntegrationPanel({
       return;
     }
     setPreview(result);
+    setRefusedWarnings(null);
   };
 
-  const decide = async (decision: "approve" | "reject") => {
+  const decide = async (decision: "approve" | "reject", ackNow = ackWarnings) => {
     if (!boardId || !preview) return;
     setBusy(true);
     setError(null);
-    const result = await decideIntegrationAction(boardId, preview.action.id, decision);
+    // The D8 ack: a warning-carrying record executes only when the human
+    // confirmed the capability loss (Send anyway passes it directly — a
+    // setState would not be visible to this closure).
+    const result = await decideIntegrationAction(boardId, preview.action.id, decision, {
+      ...(ackNow ? { acknowledgeWarnings: true } : {}),
+    });
     setBusy(false);
     if (result === null) {
       setError(t("integrations.error.offline", locale));
       return;
     }
     if ("error" in result) {
-      setError(result.error ?? "decision failed");
+      // The capability 409 carries the warnings — surface them for the
+      // Send anyway choice instead of a bare error string.
+      if (Array.isArray((result as { warnings?: unknown }).warnings)) {
+        setRefusedWarnings(
+          ((result as { warnings?: Array<{ nodeId: string; field: string; reason: string }> }).warnings) ?? [],
+        );
+      } else {
+        setError(result.error ?? "decision failed");
+      }
       return;
     }
     setResults(result);
@@ -145,9 +180,9 @@ export function IntegrationPanel({
           <div style={{ fontSize: 13, fontVariationSettings: "'wght' 550", flex: 1 }}>
             {t("integrations.panel.title", locale, { provider })}
           </div>
-          {teamLabel && (
+          {configLabel && (
             <span className="mono" style={{ fontSize: 10, color: "var(--ink-3)" }}>
-              {teamLabel}
+              {configLabel}
             </span>
           )}
           <button className="icon-btn" title="Close" onClick={close}>
@@ -191,6 +226,14 @@ export function IntegrationPanel({
                     <div className="mono" style={{ fontSize: 10, color: "var(--ink-3)" }}>
                       {[c.assignee, c.dueDate, c.status].filter(Boolean).join(" · ")}
                     </div>
+                    {/* Stage D8: the capability warnings — what this provider
+                        CANNOT represent faithfully for this item. Never a
+                        silent drop; approve requires the explicit ack. */}
+                    {c.warnings?.map((w) => (
+                      <div key={w.field} className="mono" style={{ fontSize: 10, color: "var(--amber-2)", marginTop: 1 }}>
+                        ⚠ {w.reason}
+                      </div>
+                    ))}
                   </div>
                 </div>
               ))}
@@ -205,6 +248,11 @@ export function IntegrationPanel({
                     <div className="mono" style={{ fontSize: 10, color: "var(--ink-3)" }}>
                       {[u.externalId, u.status].filter(Boolean).join(" · ")}
                     </div>
+                    {u.warnings?.map((w) => (
+                      <div key={w.field} className="mono" style={{ fontSize: 10, color: "var(--amber-2)", marginTop: 1 }}>
+                        ⚠ {w.reason}
+                      </div>
+                    ))}
                   </div>
                 </div>
               ))}
@@ -258,6 +306,22 @@ export function IntegrationPanel({
               {error}
             </div>
           )}
+
+          {/* The D8 capability refusal: the 409's warnings, rendered for
+              the Send anyway choice — the human sees exactly what they are
+              consenting to before the button exists. */}
+          {refusedWarnings && !results && (
+            <div style={{ padding: "10px 12px" }}>
+              <div className="mono" style={{ fontSize: 10, color: "var(--amber-2)", marginBottom: 4 }}>
+                {t("integrations.warnings.title", locale)}
+              </div>
+              {refusedWarnings.map((w, i) => (
+                <div key={i} className="mono" style={{ fontSize: 10.5, color: "var(--amber-2)", lineHeight: 1.5 }}>
+                  ⚠ {w.reason}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         {connection && connection.status === "active" && (
@@ -267,13 +331,35 @@ export function IntegrationPanel({
                 {busy ? "…" : t("integrations.panel.propose", locale)}
               </button>
             )}
-            {preview && !results && (
+            {preview && !results && !refusedWarnings && (
               <>
                 <button className="btn amber" style={{ height: 28, fontSize: 12 }} disabled={busy} onClick={() => decide("approve")}>
                   {busy ? "…" : t("integrations.panel.approve", locale)}
                 </button>
                 <button className="btn" style={{ height: 28, fontSize: 12 }} disabled={busy} onClick={() => decide("reject")}>
                   {t("integrations.panel.reject", locale)}
+                </button>
+              </>
+            )}
+            {preview && !results && refusedWarnings && (
+              <>
+                {/* Send anyway: the ack the approve route demands. The
+                    warnings are rendered above; this is the informed
+                    consent, not a blind override. */}
+                <button
+                  className="btn amber"
+                  style={{ height: 28, fontSize: 12 }}
+                  disabled={busy}
+                  onClick={() => {
+                    setAckWarnings(true);
+                    setRefusedWarnings(null);
+                    void decide("approve", true);
+                  }}
+                >
+                  {t("integrations.panel.sendAnyway", locale)}
+                </button>
+                <button className="btn" style={{ height: 28, fontSize: 12 }} onClick={() => setRefusedWarnings(null)}>
+                  {t("integrations.panel.cancel", locale)}
                 </button>
               </>
             )}

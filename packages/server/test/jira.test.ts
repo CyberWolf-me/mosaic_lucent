@@ -207,8 +207,10 @@ describe("the assignee ladder — email > name > unique partial, resolving to ac
     await expect(p["resolveAssignee"]("sarah")).rejects.toThrow(/uniquely resolve assignee "sarah"/);
     // One search per instance.
     expect(seen.filter((c) => c.path.includes("assignable")).length).toBe(1);
-    // Not found is the honest error too.
-    await expect(p["resolveAssignee"]("ghost")).rejects.toThrow(/was not found/);
+    // Not-found returns null → the create/update omits the assignee quietly
+    // (ADR 0034's ladder contract: unresolvable warns + omits, never a
+    // failed item — same as GitHub's).
+    expect(await p["resolveAssignee"]("ghost")).toBeNull();
   });
 });
 

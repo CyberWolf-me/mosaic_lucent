@@ -29,6 +29,15 @@ import { getCurrentOrgId } from "../orgs.js";
 import { IntegrationPanel } from "./IntegrationPanel.js";
 import { inboundRowActions, inboundRowIsWarning, pendingInboundCount } from "./inboundRows.js";
 
+/** Stage D8: the providers' display names — the buttons' labels, the
+ * not-connected note. One map; adding a provider touches this plus its
+ * adapter, nothing else in this view. */
+const PROVIDER_DISPLAY_NAME: Record<string, string> = {
+  linear: "Linear",
+  github: "GitHub",
+  jira: "Jira",
+};
+
 /**
  * The Intelligence view (Stage C6, ADR 0026): the current semantic workspace,
  * surfaced. Six collapsible sections — every statement kind first-class —
@@ -93,7 +102,9 @@ export function IntelligenceView(_: { onOpenSettings?: (section?: string) => voi
   /** Stage D6: the board's external links (the ↗ chips) + the org's
    * connections (the Sync button's honest states) + the panel. */
   const [links, setLinks] = useState<IntegrationLink[]>([]);
-  const [connections, setConnections] = useState<Array<{ provider: string; status: string; config?: Record<string, string> }>>([]);
+  const [connections, setConnections] = useState<
+    Array<{ provider: string; status: string; config?: Record<string, string>; supportsInbound?: boolean }>
+  >([]);
   const [panelProvider, setPanelProvider] = useState<string | null>(null);
   /** Stage D7: the inbound queue (the External changes section). */
   const [inbound, setInbound] = useState<InboundChangeView[]>([]);
@@ -252,40 +263,56 @@ export function IntelligenceView(_: { onOpenSettings?: (section?: string) => voi
               {t("intel.plan.from", locale, { n: checked.size })}
             </button>
           )}
-          {/* Stage D6: the whole-board Sync button — the connection-state
-              UX (never pretend self-service while the admin route is
-              API-only). */}
-          {connections.some((c) => c.provider === "linear" && c.status === "active") ? (
-            <button
-              className="btn"
-              style={{ height: 24, fontSize: 11, display: "flex", alignItems: "center", gap: 6 }}
-              title={t("integrations.sync.title", locale)}
-              onClick={() => setPanelProvider("linear")}
-            >
-              {t("integrations.sync.button", locale)}
-              {/* Stage D7: the pending-inbound badge — the queue is one
-                  click away from the Sync it relates to. */}
-              {pendingInbound > 0 && (
-                <span
-                  className="mono"
-                  aria-label={`${pendingInbound} external changes`}
-                  style={{
-                    fontSize: 10,
-                    padding: "1px 6px",
-                    borderRadius: 999,
-                    background: "var(--sig-amber, #d29922)",
-                    color: "#fff",
-                  }}
+          {/* Stage D8: one button per ACTIVE connection, generated from the
+              connections — the label follows the architecture: "Sync with"
+              when the provider has inbound (supportsInbound), "Send to"
+              when outbound-only. The D7 pending badge rides the button of
+              the provider whose queue it is (per-provider, pendingInbound
+              counts all for now — the queue view is shared). */}
+          {connections
+            .filter((c) => c.status === "active")
+            .map((c) => {
+              const name = PROVIDER_DISPLAY_NAME[c.provider] ?? c.provider;
+              return (
+                <button
+                  key={c.provider}
+                  className="btn"
+                  style={{ height: 24, fontSize: 11, display: "flex", alignItems: "center", gap: 6 }}
+                  title={t("integrations.sync.title", locale)}
+                  onClick={() => setPanelProvider(c.provider)}
                 >
-                  {pendingInbound}
-                </span>
-              )}
-            </button>
-          ) : connections.length > 0 && !connections.some((c) => c.provider === "linear") ? (
+                  {t(
+                    c.supportsInbound ? "integrations.sync.with" : "integrations.send.to",
+                    locale,
+                    { provider: name },
+                  )}
+                  {/* Stage D7: the pending-inbound badge — the queue is one
+                      click away from the Sync it relates to. */}
+                  {c.supportsInbound && pendingInbound > 0 && (
+                    <span
+                      className="mono"
+                      aria-label={`${pendingInbound} external changes`}
+                      style={{
+                        fontSize: 10,
+                        padding: "1px 6px",
+                        borderRadius: 999,
+                        background: "var(--sig-amber, #d29922)",
+                        color: "#fff",
+                      }}
+                    >
+                      {pendingInbound}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          {connections.length > 0 && connections.every((c) => c.status !== "active") && (
             <span className="mono" style={{ fontSize: 10, color: "var(--ink-3)" }}>
-              {t("integrations.not_connected", locale, { provider: "Linear" })}
+              {t("integrations.not_connected", locale, {
+                provider: PROVIDER_DISPLAY_NAME[connections[0]!.provider] ?? connections[0]!.provider,
+              })}
             </span>
-          ) : null}
+          )}
         </div>
         <div className="panel-body" style={{ overflowY: "auto", padding: 6 }}>
           {totalStatements === 0 ? (
@@ -472,7 +499,12 @@ export function IntelligenceView(_: { onOpenSettings?: (section?: string) => voi
                                 target="_blank"
                                 rel="noreferrer"
                                 className="mono"
-                                title={t("integrations.chip.title", locale, { at: new Date(link.syncedAt).toISOString().slice(0, 10) })}
+                                title={t("integrations.chip.title", locale, {
+                                  at: new Date(link.syncedAt).toISOString().slice(0, 10),
+                                  // D8: the provider's raw word — the user
+                                  // can see what the external system shows.
+                                  ...(link.status ? { external: link.status } : {}),
+                                })}
                                 style={{ fontSize: 11, color: "var(--amber-2)", textDecoration: "none", flexShrink: 0 }}
                               >
                                 ↗ {link.externalId}

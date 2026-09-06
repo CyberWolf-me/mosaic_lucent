@@ -486,12 +486,27 @@ export interface IntegrationConnectionView {
   updatedAt: number;
 }
 
-/** The frozen propose-preview shape (ADR 0031's contract). */
+/** The frozen propose-preview shape (ADR 0031's contract; D8 adds the
+ * per-item capability warnings — ADR 0034's honesty layer). */
 export interface IntegrationPreview {
   action: { id: string; provider: string; status: string; createdAt: number; supersededId?: string };
   preview: {
-    creates: Array<{ nodeId: string; title: string; assignee?: string; dueDate?: string; status: string }>;
-    updates: Array<{ nodeId: string; externalId?: string; title: string; status: string }>;
+    creates: Array<{
+      nodeId: string;
+      title: string;
+      assignee?: string;
+      dueDate?: string;
+      status: string;
+      /** What this provider CANNOT represent faithfully for the item. */
+      warnings?: Array<{ field: string; reason: string }>;
+    }>;
+    updates: Array<{
+      nodeId: string;
+      externalId?: string;
+      title: string;
+      status: string;
+      warnings?: Array<{ field: string; reason: string }>;
+    }>;
     statement: string;
   };
 }
@@ -541,15 +556,30 @@ export async function decideIntegrationAction(
   boardId: string,
   actionId: string,
   decision: "approve" | "reject",
-): Promise<IntegrationDecisionResult | { error: string; status: number } | null> {
+  options?: { acknowledgeWarnings?: boolean },
+): Promise<IntegrationDecisionResult | { error: string; status: number; warnings?: Array<{ nodeId: string; field: string; reason: string }> } | null> {
   const res = await authed(
     `/api/boards/${encodeURIComponent(boardId)}/integrations/actions/${encodeURIComponent(actionId)}/${decision}`,
-    { method: "POST" },
+    {
+      method: "POST",
+      // The D8 ack: a warning-carrying record executes only with the
+      // explicit acknowledgeWarnings body.
+      ...(options?.acknowledgeWarnings
+        ? { body: JSON.stringify({ acknowledgeWarnings: true }) }
+        : {}),
+    },
   );
   if (!res) return null;
   if (!res.ok) {
-    const body = (await res.json().catch(() => ({ error: "decision failed" }))) as { error?: string };
-    return { error: body.error ?? "decision failed", status: res.status };
+    const body = (await res.json().catch(() => ({ error: "decision failed" }))) as {
+      error?: string;
+      warnings?: Array<{ nodeId: string; field: string; reason: string }>;
+    };
+    return {
+      error: body.error ?? "decision failed",
+      status: res.status,
+      ...(Array.isArray(body.warnings) ? { warnings: body.warnings } : {}),
+    };
   }
   return (await res.json()) as IntegrationDecisionResult;
 }

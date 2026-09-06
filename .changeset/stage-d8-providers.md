@@ -1,0 +1,7 @@
+---
+"@lucent/server": minor
+"@lucent/web": minor
+"@lucent/i18n": minor
+---
+
+Stage D8 — GitHub + Jira, the second and third ExecutionProviders (ADR 0034). THE CAPABILITY-HONESTY LAYER: the optional capabilityWarnings seam — what a provider cannot represent faithfully is stored on the action items, shown in the preview, and approve REFUSES with 409 until acknowledgeWarnings: true; nothing drops silently. THE HARDENED recoverCreate CONTRACT: 0-after-poll → retry; 1 → recover; >1 → the honest ambiguous failure — plus a poll budget for the eventual-index window. The GitHub adapter (REST v3, the recorded divergences: no dueDate, the lossy status map; the reliable-only assignee ladder with email deliberately not offered). The Jira adapter (ADF descriptions, THE TRANSITIONS CONTRACT — 0/1/>1, never the first match; the conservative mapStatus; the three-field config schema) + assertSafeOutboundUrl (the SSRF boundary: https only, no localhost/private IPs/userinfo, authoritative at connect time). The webhook scheme registry (the receiver's generic half + per-provider schemes; the github X-Hub-Signature-256 scheme with the composed externalValue; a scheme-less provider answers the honest 404 — Jira inbound deferred, the Connect JWT/QSH named). The UI: warning rows + Send anyway, per-provider Sync-with/Send-to buttons, the chip tooltip's raw word, i18n en+hu. The multi-provider acceptance: three providers through the untouched routes on one board.

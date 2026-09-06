@@ -896,3 +896,74 @@ multi-tenant credential storage (the env-ref clause restated for webhook
 secrets), a connection-admin UI, subscribeToChanges server plumbing (the
 seam stays declared; the webhook is the inbound path), D8's providers,
 D9's AI-initiated proposals.
+
+## Amendment (2026-09-06): Stage D8 executed — GitHub + Jira, the honesty layer
+
+ADR 0034's contract paragraph: D8 ships GitHub and Jira as the second
+and third real ExecutionProviders, proving the adapter formula end to
+end — one provider implementation + one factory entry + one
+provider-specific configuration schema. The refined doctrine: Lucent
+is authoritative for the fields it explicitly manages; each provider
+must either represent those fields faithfully or surface an explicit
+loss/unsupported-field warning before execution. Figma and Slack are
+NOT adapters — a design-artifact surface and a communication surface
+are different seams, recorded as future interface families.
+
+What Stage D8 shipped (commits, the acceptance in
+packages/server/test/stageD8.definition.e2e.test.ts, and the review's
+seven fixes folded in):
+
+- **The capability-honesty seam** (42e4a5f): the optional
+  capabilityWarnings method (the interface's documented evolution);
+  the propose route stores the warnings on the action items; THE
+  APPROVE ROUTE REFUSES A WARNING-CARRYING RECORD WITH 409 UNLESS
+  acknowledgeWarnings: true — the human gate covers capability loss.
+  The GitHub adapter: REST v3 (Bearer + api-version + the mandatory
+  UA), the two recorded divergences (no dueDate; the lossy status
+  collapse), the reliable-only assignee ladder (email deliberately
+  not offered — documented), the hardened recovery (0/1/>1 + the
+  poll budget), the repo-syntax + traversal validation.
+- **The webhook scheme registry** (ab92538): the receiver's generic
+  half stays; each WebhookScheme owns the header/verify/parse. The
+  github scheme: x-hub-signature-256 with the sha256= prefix, the
+  composed externalValue (closed:not_planned), edited ignored. A
+  provider with no scheme answers the honest 404 — Jira inbound is
+  deferred (Atlassian's Connect JWT/QSH is its own project, named,
+  not guessed). supportsInbound on the connections GET.
+- **The Jira adapter + the SSRF boundary** (273143e): Basic auth,
+  ADF descriptions with the marker in a text node, THE TRANSITIONS
+  CONTRACT (0 → honest error; 1 → post; >1 → ambiguous, never the
+  first match), the conservative mapStatus (custom statuses
+  undefined — the never-guesses showcase), the three-field
+  configuration schema (site + projectKey + issueType), and
+  assertSafeOutboundUrl — https only, no localhost/private IPs/
+  userinfo, authoritative at factory time (the review's SSRF ask).
+- **The UI honesty layer + the acceptance** (this commit): the
+  panel's warning rows + Send anyway (the informed consent), the
+  per-provider buttons ('Sync with {provider}' when supportsInbound,
+  'Send to' when outbound-only — the label follows the architecture),
+  the chip tooltip carrying the provider's raw word, the
+  per-provider config label (team/repo/project), i18n en+hu.
+
+The acceptance (the multi-provider board): 2 linear + 2 github + 2
+jira nodes through the UNTOUCHED routes; the capability-loss arm
+(dueDate+blocked → 2 warnings → 409 without ack → applied with ack,
+GitHub state=open, no dueDate); the >1 ambiguous recovery (a
+re-proposed node reuses its key — the honest refusal) + the 0→1
+recovery (a fresh node: the create lands, the response is lost, the
+poll finds it); the Jira transition (resolved → posted; no
+counterpart → the honest error); the signed GitHub webhook
+(closed:not_planned → the queue stores the composed word → accept →
+the system-actor row actorId github); cross-provider same action
+(spec → github + jira + linear links on one node); unlink isolation
+(drop github → jira + linear remain); duplicate approval; the
+workspace blob free of linear/github/jira strings; viewer 404s.
+
+Explicitly NOT built, per ADR 0034: Figma/Slack adapters (the
+boundary is recorded; ArtifactProvider and CommunicationProvider are
+future families, not built); Jira inbound webhooks (the Connect
+JWT/QSH lift — named); GitHub dueDate (no native field — warned,
+never silent); GitHub edited webhooks, label-as-status, Projects v2;
+Jira boards; OAuth + multi-tenant credentials (the env-ref clause
+unchanged); scope enforcement (unchanged refusal); subscribeToChanges
+plumbing (unchanged).

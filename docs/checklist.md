@@ -1489,3 +1489,87 @@ the drift sentence — a key rename (inboard→inbound) landed in the i18n
 file but not the view. The test suites could not catch it because the
 unit tests pin the pure row ACTIONS, not the t() key names; the live
 pass reads what the screen actually says, which is the point of it.
+
+## Stage D8 shipped: GitHub + Jira (2026-09, docs/17 amendment, ADR 0034)
+
+[x] THE INTERFACE FINDING: GitHub and Jira fit the frozen
+    ExecutionProvider; Figma and Slack do NOT (a design-artifact
+    surface and a communication surface are different seams — the
+    future ArtifactProvider/CommunicationProvider families are
+    recorded, not built; forcing mapStatus("message") is the garbage
+    the owner's rule forbids). The formula, rephrased per the review:
+    one provider implementation + one factory entry + one
+    provider-specific configuration schema.
+[x] THE CAPABILITY-HONESTY LAYER: the optional capabilityWarnings
+    method; the propose route stores the warnings on the action items
+    (jsonb, the parity round-trip pinned); the preview carries them;
+    THE APPROVE ROUTE REFUSES A WARNING-CARRYING RECORD WITH 409
+    UNLESS acknowledgeWarnings: true — nothing drops silently. The
+    panel renders the warnings + Send anyway. Linear/Fake warn
+    nothing.
+[x] THE REFINED DOCTRINE: Lucent is authoritative for the fields it
+    explicitly manages; each provider represents them faithfully OR
+    warns before execution (replacing D6's "Lucent owns status").
+[x] The GitHub adapter: REST v3 (Bearer + api-version + the
+    mandatory User-Agent), number-as-externalId, the marker in the
+    body, the two recorded divergences (dueDate never sent; the lossy
+    status map — open/assigned/in_progress/blocked all collapse to
+    GitHub open, warned), the reliable-only assignee ladder (exact
+    login > unique partial; EMAIL NOT OFFERED — a PAT's scope cannot
+    reliably map email→login, documented), 17 wire-contract tests.
+[x] THE HARDENED recoverCreate CONTRACT (both new providers, Linear
+    retroactively documented): 0-after-poll → retry; 1 → recover;
+    >1 → the honest ambiguous failure. The poll budget (500ms/1s/2s,
+    injectable) covers the eventual-index window. The acceptance
+    demonstrates the >1 arm live (key reuse) + the 0→1 arm (a fresh
+    node).
+[x] THE SSRF BOUNDARY: assertSafeOutboundUrl at FACTORY time —
+    https only, no userinfo, no localhost, no private/loopback/
+    link-local IP literals. The Jira site is a user-configured
+    outbound destination; the policy lets self-hosted Jira on real
+    hosts pass and never targets the server's internal network.
+    GitHub's repo validates owner/repo INCLUDING the dot-segment
+    traversal check.
+[x] The Jira adapter: Basic auth, ADF descriptions (the marker in a
+    text node), THE TRANSITIONS CONTRACT (status moves only through
+    listed transitions; 0 → the honest error; >1 → ambiguous, never
+    the first match), the conservative mapStatus (the well-known
+    defaults only — every company-managed custom status undefined),
+    the three-field schema (site + projectKey + issueType), the same
+    hardened recovery JQL-scoped. 14 tests.
+[x] THE WEBHOOK SCHEME REGISTRY: the receiver keeps the generic half;
+    each scheme owns header/verify/parse. linearWebhookScheme = the
+    D7 functions unchanged; the github scheme (x-hub-signature-256,
+    the sha256= prefix required — a bare hex is rejected, pinned; the
+    composed externalValue 'closed:not_planned'; edited ignored).
+    A provider with no scheme answers the honest 404 — JIRA INBOUND
+    IS DEFERRED (Atlassian's Connect JWT/QSH, named). supportsInbound
+    rides the connections GET.
+[x] The UI honesty layer: the warning rows + Send anyway; the
+    per-provider buttons ('Sync with {provider}' when supportsInbound,
+    'Send to' otherwise — the label follows the architecture); the
+    chip tooltip carries the provider's raw word; the per-provider
+    config label (team/repo/project); i18n en+hu.
+[x] The acceptance (stageD8.definition.e2e — three stubbed wires, the
+    untouched routes): the multi-provider board; the capability-loss
+    arm; the ambiguous + 0→1 recoveries; the Jira transition + the
+    no-counterpart error; the signed GitHub webhook (the composed
+    word in the queue → accept → the system-actor row actorId
+    github); cross-provider same action (spec → github + jira +
+    linear); unlink isolation; duplicate approval; the workspace blob
+    free of linear/github/jira; viewer 404s.
+[x] The record: ADR 0034, docs/17 D8 amendment, this section, the
+    changeset.
+[ ] Figma/Slack adapters — the recorded future families; their own
+    ADRs when a real integration demands them.
+[ ] Jira inbound webhooks — the Connect JWT/QSH scheme, its own
+    project; the sweeper's getTask refetch is the interim inbound.
+[ ] GitHub dueDate — no native field; warned, never silent.
+[ ] A Jira status-configuration mechanism — the honest answer to
+    custom statuses, when users ask for it; never hardcoding fifty
+    states.
+[ ] OAuth + multi-tenant credential storage — the env-ref clause
+    unchanged; its own ADR.
+
+Gate: typecheck 0; server 1029, web 646, i18n 14, mcp 28, ai 185,
+core 422.

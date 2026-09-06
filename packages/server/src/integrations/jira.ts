@@ -419,9 +419,12 @@ export class JiraProvider implements ExecutionProvider {
   /**
    * The assignee ladder: exact email > exact display name > unique partial
    * — all three reliable against the v3 user search, resolving to
-   * accountId. Cached per instance. AMBIGUOUS errors never guess.
+   * accountId. Cached per instance. AMBIGUOUS throws the honest error
+   * (never a guess); NOT-FOUND returns null → the create/update omits the
+   * assignee quietly — the same contract as GitHub's ladder (ADR 0034:
+   * unresolvable is a warning-and-omit, not a failed item).
    */
-  private async resolveAssignee(assignee: string): Promise<{ accountId: string; label: string }> {
+  private async resolveAssignee(assignee: string): Promise<{ accountId: string; label: string } | null> {
     const key = assignee.trim().toLowerCase();
     await this.ensureAssigneeIndex();
     const index = this.assigneeIndex!;
@@ -434,7 +437,7 @@ export class JiraProvider implements ExecutionProvider {
     if (partial.length > 1) {
       throw new JiraError(`unable to uniquely resolve assignee "${assignee}"`, 0, false);
     }
-    throw new JiraError(`assignee "${assignee}" was not found`, 0, false);
+    return null;
   }
 
   private async ensureAssigneeIndex(): Promise<void> {
