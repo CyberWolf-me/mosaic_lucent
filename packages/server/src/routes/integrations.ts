@@ -58,7 +58,7 @@ function resolveProvider(
 }
 
 export const registerIntegrationRoutes: RegisterRoutes = (router, s) => {
-  const { integrations, send, readBody, requireUser, requireOrgRole, requireBoardRole, requireCsrf, meter } = s;
+  const { integrations, send, readBody, requireUser, requireOrgRole, requireBoardRole, requireCsrf, meter, commitForBoard, broadcastProposal, auditRow } = s;
 
   // ---- The org admin surface (owner floor — credentials live here) --------
   router.get("/api/orgs/:id/integrations", async (ctx) => {
@@ -280,7 +280,23 @@ export const registerIntegrationRoutes: RegisterRoutes = (router, s) => {
       }
     }
 
-    send(res, 200, { provider: providerName, created, updated, skipped, results });
+    // Stage D7: the supersession arm. Lucent is OUTBOUND-AUTHORITATIVE on
+    // explicit sync — the board's pushed value is the newer human decision.
+    // Every pending inbound record for the fields this sync pushed becomes
+    // `superseded`, and the response says how many, so the UI can say
+    // "3 queued external changes were overtaken by this sync".
+    const supersededInbound = integrations.inbound
+      ? await integrations.inbound.supersedePending(
+          boardId,
+          actions.map((n) => n.id),
+          providerName,
+          "status",
+          "superseded by an explicit sync",
+          Date.now(),
+        )
+      : 0;
+
+    send(res, 200, { provider: providerName, created, updated, skipped, supersededInbound, results });
   });
 // ---- The D5 approval flow: propose → preview → approve → execute ------
 //
@@ -561,6 +577,259 @@ router.get("/api/boards/:id/integrations/actions", async (ctx) => {
       appliedAt: r.appliedAt,
     })),
   });
+});
+
+// ---- The D7 inbound queue: the human-gated mirror of the approval flow ----
+//
+//   GET   /api/boards/:id/integrations/inbound            — the queue (viewer)
+//   POST  /api/boards/:id/integrations/inbound/:cid/accept — apply (editor)
+//   POST  /api/boards/:id/integrations/inbound/:cid/dismiss — keep ours (editor)
+//
+// The symmetric human gate: D5/D6 made every outbound effect human-
+// approved; here every inbound change queues for accept — nothing
+// auto-applies. Accept applies the REVIEWED SNAPSHOT (the record's
+// externalValue through mapStatus), never a re-fetch; if the provider
+// moved again, its webhook produced a newer pending row. Both accept and
+// dismiss update the link's lastSyncedStatus — the provider's word is a
+// fact about the provider, and only accept changes the board.
+
+router.get("/api/boards/:id/integrations/inbound", async (ctx) => {
+  const { req, res } = ctx;
+  const boardId = ctx.param("id");
+  const guard = await requireBoardRole(req, res, boardId, "viewer", "/api/boards/:id/integrations/inbound");
+  if (!guard.ok) return;
+  if (!integrations) return send(res, 503, { error: "integrations are not configured" });
+  const { inbound } = integrations;
+  if (!inbound) return send(res, 503, { error: "inbound changes are not configured" });
+  const rows = await inbound.forBoard(boardId);
+  // The join the UI renders from: the live board value beside the record,
+  // so "Linear says Done — the board says todo" is one row, and a record
+  // whose board value already matches renders resolved.
+  const links = new Map(
+    (await integrations.store.linksForBoard(boardId)).map((l) => [`${l.provider}:${l.nodeId}`, l]),
+  );
+  send(res, 200, {
+    inbound: rows.map((r) => {
+      const link = links.get(`${r.provider}:${r.nodeId}`);
+      const node = guard.board.workspace.nodes[r.nodeId];
+      const boardValue = node?.issue?.status ?? null;
+      return {
+        id: r.id,
+        provider: r.provider,
+        nodeId: r.nodeId,
+        nodeLabel: node?.label ?? r.nodeId,
+        externalId: r.externalId,
+        ...(link?.url ? { url: link.url } : {}),
+        field: r.field,
+        externalValue: r.externalValue,
+        mappedValue: r.mappedValue ?? null,
+        /** mappedValue === null AND status pending = the never-guesses
+         * warning row: dismiss-only, the UI must not offer Accept. */
+        status: r.status,
+        source: r.source,
+        detectedAt: r.detectedAt,
+        boardValue,
+        resolved: r.status === "pending" && r.mappedValue !== undefined && r.mappedValue === boardValue,
+        decidedBy: r.decidedBy,
+        decidedAt: r.decidedAt,
+        appliedSeq: r.appliedSeq,
+        reason: r.reason,
+      };
+    }),
+  });
+});
+
+router.post("/api/boards/:id/integrations/inbound/:changeId/accept", async (ctx) => {
+  const { req, res } = ctx;
+  const route = "/api/boards/:id/integrations/inbound/:changeId/accept";
+  if (!requireCsrf(req, res, route)) return;
+  const user = await requireUser(req, res);
+  if (!user) return;
+  if (!meter(req, res, route)) return;
+  const boardId = ctx.param("id");
+  const changeId = ctx.param("changeId");
+  const guard = await requireBoardRole(req, res, boardId, "editor", route);
+  if (!guard.ok) return;
+  if (!integrations) return send(res, 503, { error: "integrations are not configured" });
+  const { inbound } = integrations;
+  if (!inbound) return send(res, 503, { error: "inbound changes are not configured" });
+
+  const record = await inbound.change(boardId, changeId);
+  if (!record) {
+    send(res, 404, { error: "no such inbound change on this board" });
+    return;
+  }
+  if (record.status !== "pending") {
+    send(res, 200, { change: record, duplicate: true });
+    return;
+  }
+  // THE NEVER-GUESSES REFUSAL (ADR 0032's rule, inbound): an untranslatable
+  // word cannot be accepted — Lucent would have to guess a status to
+  // write. The row is dismiss-only; the honest 409 says why.
+  if (record.mappedValue === undefined) {
+    send(res, 409, {
+      error: `Lucent has no translation for "${record.externalValue}"; the board keeps its state`,
+    });
+    return;
+  }
+
+  // Apply the REVIEWED SNAPSHOT: a SET_ISSUE carrying the mapped value on
+  // the record's fields. The system actor's first use — the timeline
+  // honestly shows "Lucent ← the provider, accepted by <user>".
+  const node = guard.board.workspace.nodes[record.nodeId];
+  const currentIssue = node?.issue;
+  const ops: import("@lucent/core").Operation[] = [
+    {
+      op: "SET_ISSUE",
+      id: record.nodeId,
+      issue: currentIssue
+        ? { ...currentIssue, status: record.mappedValue }
+        : { type: "task", status: record.mappedValue },
+    },
+  ];
+  const { validateOperations, applyOperations } = await import("@lucent/core");
+  const errors = validateOperations(guard.board.workspace, ops);
+  if (errors.length > 0) {
+    send(res, 422, {
+      error: "the inbound change no longer applies to this board",
+      detail: errors.map((e) => `${e.op}: ${e.message}`).join("; "),
+    });
+    return;
+  }
+
+  const requestId = `inb_${record.id}`;
+  const actor: import("../boards.js").OperationActor = {
+    actorType: "system",
+    actorId: record.provider,
+    initiatedBy: user.id,
+  };
+  let seq: number;
+  let persistedByRoom = false;
+  const roomResult = await commitForBoard(boardId, user.id, ops, `sync from ${record.provider}`, {
+    requestId,
+    actor,
+  });
+  if (roomResult?.ok && roomResult.entry) {
+    seq = roomResult.entry.seq;
+    persistedByRoom = true;
+    for (const absorbed of roomResult.absorbed ?? []) {
+      broadcastProposal(boardId, { type: "op", entry: absorbed });
+    }
+    broadcastProposal(boardId, { type: "op", entry: roomResult.entry });
+  } else {
+    const append = await s.boardStore.appendOp({
+      boardId,
+      ops,
+      by: user.id,
+      label: `sync from ${record.provider}`,
+      at: Date.now(),
+      requestId,
+      actor,
+    });
+    if (!append.ok) {
+      send(res, 409, { error: "stale board", reason: append.reason, head: append.head });
+      return;
+    }
+    seq = append.seq;
+    persistedByRoom = append.duplicate === true;
+    if (!persistedByRoom) {
+      const updated = applyOperations(guard.board.workspace, ops);
+      await s.boardStore.put({ ...guard.board, workspace: updated, updatedAt: Date.now() });
+    }
+  }
+
+  // The link's lastSyncedStatus is a fact about the provider: accept
+  // records it (the board now agrees with the provider).
+  const link = (await integrations.store.linksForNode(boardId, record.nodeId)).find(
+    (l) => l.provider === record.provider,
+  );
+  if (link) {
+    await integrations.store.linkTask(
+      {
+        orgId: guard.board.orgId,
+        boardId,
+        nodeId: record.nodeId,
+        provider: record.provider,
+        externalId: link.externalId,
+        ...(link.url !== undefined ? { url: link.url } : {}),
+        lastSyncedStatus: record.externalValue,
+      },
+      Date.now(),
+    );
+  }
+
+  const decided = await inbound.decide(boardId, changeId, "applied", user.id, Date.now(), {
+    appliedSeq: seq,
+  });
+  broadcastProposal(boardId, {
+    type: "integrations-inbound",
+    id: changeId,
+    status: "applied",
+    by: user.id,
+  });
+  void auditRow(req, user.id, guard.board.orgId, "integration.inbound.accept", changeId);
+  send(res, 200, { change: decided, applied: ops.length, seq, persistedByRoom });
+});
+
+router.post("/api/boards/:id/integrations/inbound/:changeId/dismiss", async (ctx) => {
+  const { req, res } = ctx;
+  const route = "/api/boards/:id/integrations/inbound/:changeId/dismiss";
+  if (!requireCsrf(req, res, route)) return;
+  const user = await requireUser(req, res);
+  if (!user) return;
+  if (!meter(req, res, route)) return;
+  const boardId = ctx.param("id");
+  const changeId = ctx.param("changeId");
+  const guard = await requireBoardRole(req, res, boardId, "editor", route);
+  if (!guard.ok) return;
+  if (!integrations) return send(res, 503, { error: "integrations are not configured" });
+  const { inbound } = integrations;
+  if (!inbound) return send(res, 503, { error: "inbound changes are not configured" });
+
+  const record = await inbound.change(boardId, changeId);
+  if (!record) {
+    send(res, 404, { error: "no such inbound change on this board" });
+    return;
+  }
+  if (record.status !== "pending") {
+    send(res, 200, { change: record, duplicate: true });
+    return;
+  }
+
+  // Dismiss keeps the board — but the link still records the provider's
+  // word: lastSyncedStatus is the honest "what the provider says now",
+  // not "what the board agreed to". A later sync pushes the board's value
+  // back (outbound-authoritative), and a later webhook re-queues if the
+  // provider moves again.
+  const link = (await integrations.store.linksForNode(boardId, record.nodeId)).find(
+    (l) => l.provider === record.provider,
+  );
+  if (link) {
+    await integrations.store.linkTask(
+      {
+        orgId: guard.board.orgId,
+        boardId,
+        nodeId: record.nodeId,
+        provider: record.provider,
+        externalId: link.externalId,
+        ...(link.url !== undefined ? { url: link.url } : {}),
+        lastSyncedStatus: record.externalValue,
+      },
+      Date.now(),
+    );
+  }
+
+  const decided = await inbound.decide(boardId, changeId, "dismissed", user.id, Date.now(), {
+    reason: "kept the board's value",
+  });
+  broadcastProposal(boardId, {
+    type: "integrations-inbound",
+    id: changeId,
+    status: "dismissed",
+    by: user.id,
+  });
+  void auditRow(req, user.id, guard.board.orgId, "integration.inbound.dismiss", changeId);
+  send(res, 200, { change: decided });
 });
 
 };

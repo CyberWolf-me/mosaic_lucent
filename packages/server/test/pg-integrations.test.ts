@@ -7,9 +7,17 @@ import {
   PostgresExecutionLedger,
   PostgresIntegrationActionStore,
   PostgresIntegrationStore,
+  PostgresIntegrationWebhookEventStore,
+  PostgresInboundChangeStore,
 } from "../src/store/pg-integrations.js";
 import type { IntegrationActionStore, IntegrationStore } from "../src/integrations/integrations.js";
 import type { ExecutionLedger as ExecutionLedgerStore } from "../src/integrations/ledger.js";
+import { InMemoryIntegrationWebhookEventStore, type IntegrationWebhookEventStore } from "../src/integrations/webhook.js";
+import {
+  InMemoryInboundChangeStore,
+  type InboundChangeStore,
+  type InboundChangeRecord,
+} from "../src/integrations/inbound.js";
 
 /**
  * The D6 integration-store parity suites (the billing-events convention): the
@@ -161,12 +169,128 @@ function ledgerContract(name: string, make: () => ExecutionLedgerStore, prefix: 
 }
 
 /* -------------------------------------------------------------------------- */
+/* The D7 webhook-event ledger contract                                        */
+/* -------------------------------------------------------------------------- */
+
+function webhookEventContract(name: string, make: () => IntegrationWebhookEventStore, prefix: string) {
+  describe(`webhook event ledger parity — ${name}`, () => {
+    it("claim → processed → duplicate; the redelivered bytes are one event", async () => {
+      const store = make();
+      const id = `${prefix}-ev1`;
+      const key = { id, provider: "fake", orgId: "org1", externalId: "FAKE-1", now: 1_000, staleAfterMs: 100 };
+      const first = await store.claim(key);
+      expect(first.outcome).toBe("claimed");
+      await store.markProcessed(id, "org1", 1_050);
+      const dup = await store.claim(key);
+      expect(dup.outcome).toBe("duplicate");
+      // pending() never lists a processed row.
+      expect((await store.pending(0, 9_999, 50)).some((e) => e.id === id)).toBe(false);
+    });
+
+    it("a received row inside the window is in_flight; past it re-claims with attempts bumped", async () => {
+      const store = make();
+      const id = `${prefix}-ev2`;
+      const key = { id, provider: "fake", orgId: "org1", externalId: null, now: 1_000, staleAfterMs: 100 };
+      await store.claim(key);
+      const inWindow = await store.claim({ ...key, now: 1_050 });
+      expect(inWindow.outcome).toBe("in_flight");
+      const reclaimed = await store.claim({ ...key, now: 1_101 });
+      expect(reclaimed.outcome).toBe("claimed");
+      if (reclaimed.outcome === "claimed") expect(reclaimed.event.attempts).toBe(2);
+    });
+
+    it("failed rows re-claim immediately; pending feeds the sweep with stale filtering", async () => {
+      const store = make();
+      const id = `${prefix}-ev3`;
+      const key = { id, provider: "fake", orgId: null, externalId: "FAKE-3", now: 5_000, staleAfterMs: 100 };
+      await store.claim(key);
+      await store.markFailed(id, "queue down", 5_010);
+      const reclaimed = await store.claim({ ...key, now: 5_020 });
+      expect(reclaimed.outcome).toBe("claimed");
+      // The sweep's feed: the re-claimed row (claimedAt 5_020, window
+      // 100ms) is stale from now=5_120; at 5_100 it is 80ms old — not yet.
+      expect((await store.pending(5_100 - 100, 5_100, 50)).some((e) => e.id === id)).toBe(false);
+      expect((await store.pending(5_120 - 100, 5_120, 50)).some((e) => e.id === id)).toBe(true);
+      // Ignored rows never feed the sweep.
+      const id2 = `${prefix}-ev4`;
+      await store.claim({ ...key, id: id2, now: 5_100 });
+      await store.markIgnored(id2, 5_110);
+      expect((await store.pending(9_999, 9_999, 50)).some((e) => e.id === id2)).toBe(false);
+    });
+  });
+}
+
+/* -------------------------------------------------------------------------- */
+/* The D7 inbound-queue contract                                               */
+/* -------------------------------------------------------------------------- */
+
+function inboundContract(name: string, make: () => InboundChangeStore, prefix: string) {
+  describe(`inbound queue parity — ${name}`, () => {
+    const board = `${prefix}-qb`;
+
+    it("put dedupes the pending row per (board, node, provider, field); forBoard is pending-first", async () => {
+      const store = make();
+      const base = {
+        orgId: "org1",
+        boardId: board,
+        provider: "fake" as const,
+        nodeId: "n1",
+        externalId: "FAKE-1",
+        field: "status" as const,
+      };
+      await store.put({ ...base, externalValue: "done", mappedValue: "completed" }, "webhook", 1_000);
+      await store.put({ ...base, externalValue: "done", mappedValue: "completed" }, "webhook", 2_000);
+      let rows = await store.forBoard(board);
+      expect(rows.filter((r) => r.status === "pending")).toHaveLength(1);
+      // A NEW value updates the pending row, never a second one.
+      await store.put({ ...base, externalValue: "active", mappedValue: "in_progress" }, "webhook", 3_000);
+      rows = await store.forBoard(board);
+      const pending = rows.filter((r) => r.status === "pending");
+      expect(pending).toHaveLength(1);
+      expect(pending[0]).toMatchObject({ externalValue: "active", detectedAt: 3_000 });
+      // The warning row: mappedValue undefined round-trips as null.
+      await store.put({ ...base, externalValue: "In QA", mappedValue: undefined }, "webhook", 4_000);
+      rows = await store.forBoard(board);
+      expect(rows.find((r) => r.status === "pending")!.mappedValue).toBeUndefined();
+    });
+
+    it("decide is once, board-scoped; supersedePending flips the named fields", async () => {
+      const store = make();
+      const base = {
+        orgId: "org1",
+        boardId: board,
+        provider: "fake" as const,
+        externalId: "FAKE-2",
+        field: "status" as const,
+      };
+      const a = await store.put({ ...base, nodeId: "nA", externalValue: "done", mappedValue: "completed" }, "webhook", 1_000);
+      await store.put({ ...base, nodeId: "nB", externalValue: "done", mappedValue: "completed" }, "webhook", 1_100);
+      // Board-scoped read.
+      expect(await store.change(`${prefix}-other`, a.id)).toBeUndefined();
+      const decided = await store.decide(board, a.id, "applied", "u1", 2_000, { appliedSeq: 42 });
+      expect(decided).toMatchObject({ status: "applied", appliedSeq: 42, decidedBy: "u1" });
+      // Decided once: a second decide keeps the first outcome.
+      const again = await store.decide(board, a.id, "dismissed", "u2", 3_000);
+      expect(again).toMatchObject({ status: "applied", decidedBy: "u1" });
+      // Supersession touches only the named nodes' pending rows.
+      const count = await store.supersedePending(board, ["nA", "nB"], "fake", "status", "superseded by sync", 4_000);
+      expect(count).toBe(1); // nA is decided; only nB was pending
+      const rows = await store.forBoard(board);
+      expect(rows.find((r) => r.nodeId === "nB")).toMatchObject({ status: "superseded" });
+      expect(rows.find((r) => r.nodeId === "nA")).toMatchObject({ status: "applied" });
+    });
+  });
+}
+
+/* -------------------------------------------------------------------------- */
 /* The halves                                                                 */
 /* -------------------------------------------------------------------------- */
 
 connectionContract("in-memory", () => new InMemoryIntegrationStore(), `int${tag}`);
 actionContract("in-memory", () => new InMemoryIntegrationActionStore(), `act${tag}`);
 ledgerContract("in-memory", () => new InMemoryExecutionLedger({ staleAfterMs: 60_000 }), `led${tag}`);
+webhookEventContract("in-memory", () => new InMemoryIntegrationWebhookEventStore(), `whe${tag}`);
+inboundContract("in-memory", () => new InMemoryInboundChangeStore(), `inb${tag}`);
 
 describeIf("Postgres integration parity (needs LUCENT_TEST_DATABASE_URL)", () => {
   let target: Db;
@@ -182,4 +306,6 @@ describeIf("Postgres integration parity (needs LUCENT_TEST_DATABASE_URL)", () =>
   connectionContract("postgres", () => new PostgresIntegrationStore(target.db), `pgi${tag}`);
   actionContract("postgres", () => new PostgresIntegrationActionStore(target.db), `pga${tag}`);
   ledgerContract("postgres", () => new PostgresExecutionLedger(target.db, { staleAfterMs: 60_000 }), `pgl${tag}`);
+  webhookEventContract("postgres", () => new PostgresIntegrationWebhookEventStore(target.db), `pgw${tag}`);
+  inboundContract("postgres", () => new PostgresInboundChangeStore(target.db), `pgn${tag}`);
 });

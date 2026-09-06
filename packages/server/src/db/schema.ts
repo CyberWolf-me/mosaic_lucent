@@ -1272,3 +1272,72 @@ export type DbIntegrationAction = typeof integrationActions.$inferSelect;
 export type DbNewIntegrationAction = typeof integrationActions.$inferInsert;
 export type DbExecutionRecord = typeof executionLedger.$inferSelect;
 export type DbNewExecutionRecord = typeof executionLedger.$inferInsert;
+
+/* -------------------------------------------------------------------------- */
+/* Inbound sync (Stage D7, ADR 0033)                                           */
+/* -------------------------------------------------------------------------- */
+
+export const integrationWebhookEvents = pgTable(
+  "integration_webhook_events",
+  {
+    /** sha256(provider + ":" + raw bytes) — identical bytes, one row. */
+    id: text("id").primaryKey(),
+    provider: text("provider").notNull(),
+    orgId: text("org_id"),
+    externalId: text("external_id"),
+    status: text("status").notNull(),
+    attempts: bigint("attempts", { mode: "number" }).notNull(),
+    error: text("error"),
+    claimedAt: bigint("claimed_at", { mode: "number" }).notNull(),
+    receivedAt: bigint("received_at", { mode: "number" }).notNull(),
+  },
+  (t) => ({
+    // The sweep's feed: reclaimable rows, oldest first.
+    sweepIdx: index("integration_webhook_events_sweep_idx").on(t.status, t.claimedAt),
+  }),
+);
+
+export const integrationInboundChanges = pgTable(
+  "integration_inbound_changes",
+  {
+    id: text("id").primaryKey(),
+    orgId: text("org_id").notNull(),
+    boardId: text("board_id")
+      .notNull()
+      .references(() => boards.id, { onDelete: "cascade" }),
+    provider: text("provider").notNull(),
+    nodeId: text("node_id").notNull(),
+    externalId: text("external_id").notNull(),
+    field: text("field").notNull(),
+    /** The raw provider word at detection — what the human reads. */
+    externalValue: text("external_value").notNull(),
+    /** mapStatus of externalValue; null = the never-guesses warning row. */
+    mappedValue: text("mapped_value"),
+    status: text("status").notNull(),
+    source: text("source").notNull(),
+    detectedAt: bigint("detected_at", { mode: "number" }).notNull(),
+    decidedBy: text("decided_by"),
+    decidedAt: bigint("decided_at", { mode: "number" }),
+    appliedSeq: bigint("applied_seq", { mode: "number" }),
+    reason: text("reason"),
+  },
+  (t) => ({
+    // The queue's read: pending first per board.
+    boardIdx: index("integration_inbound_changes_board_idx").on(t.boardId, t.status),
+    // The queue-level dedupe probe: the pending row for one field of one
+    // node of one provider. Not unique — history rows keep their ids; the
+    // dedupe is decided in code (like the ledger's claim ladder).
+    pendingIdx: index("integration_inbound_changes_pending_idx").on(
+      t.boardId,
+      t.nodeId,
+      t.provider,
+      t.field,
+      t.status,
+    ),
+  }),
+);
+
+export type DbIntegrationWebhookEvent = typeof integrationWebhookEvents.$inferSelect;
+export type DbNewIntegrationWebhookEvent = typeof integrationWebhookEvents.$inferInsert;
+export type DbIntegrationInboundChange = typeof integrationInboundChanges.$inferSelect;
+export type DbNewIntegrationInboundChange = typeof integrationInboundChanges.$inferInsert;

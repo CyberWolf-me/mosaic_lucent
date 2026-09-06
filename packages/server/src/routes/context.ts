@@ -98,6 +98,8 @@ export interface RouteServices {
         ledger?: import("../integrations/ledger.js").ExecutionLedger;
         /** Stage D6: the executor's race timeout (default 15s). */
         executionTimeoutMs?: number;
+        /** Stage D7: the inbound queue (undefined → the inbound routes answer 503). */
+        inbound?: import("../integrations/inbound.js").InboundChangeStore;
       }
     | undefined;
   /**

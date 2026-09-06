@@ -1,4 +1,4 @@
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, lte, or, sql } from "drizzle-orm";
 import type { Db } from "../db/client.js";
 
 // The drizzle handle type (Db["db"]) — the trio takes the handle, matching
@@ -8,7 +8,9 @@ import {
   executionLedger,
   integrationActions,
   integrationConnections,
+  integrationInboundChanges,
   integrationTaskLinks,
+  integrationWebhookEvents,
 } from "../db/schema.js";
 import type {
   IntegrationActionRecord,
@@ -28,6 +30,16 @@ import type {
   ExecutionRecord,
 } from "../integrations/ledger.js";
 import { DEFAULT_STALE_AFTER_MS, isReclaimable } from "../integrations/ledger.js";
+import type {
+  InboundChangeRecord,
+  InboundChangeStore,
+  InboundField,
+} from "../integrations/inbound.js";
+import type {
+  IntegrationEventClaim,
+  IntegrationWebhookEvent,
+  IntegrationWebhookEventStore,
+} from "../integrations/webhook.js";
 
 /**
  * The Postgres integration stores (Stage D6, ADR 0032) — the twins of the
@@ -569,5 +581,303 @@ export class PostgresExecutionLedger implements ExecutionLedgerStore {
       .map(rowToExecution)
       .filter((r) => isReclaimable(r, now, staleAfterMs))
       .slice(0, limit);
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/* The webhook delivery ledger (Stage D7, ADR 0033)                            */
+/* -------------------------------------------------------------------------- */
+
+type DbWebhookEventRow = typeof integrationWebhookEvents.$inferSelect;
+
+function rowToWebhookEvent(row: DbWebhookEventRow): IntegrationWebhookEvent {
+  return {
+    id: row.id,
+    provider: row.provider,
+    orgId: row.orgId,
+    externalId: row.externalId,
+    status: row.status as IntegrationWebhookEvent["status"],
+    attempts: row.attempts,
+    ...(row.error !== null ? { error: row.error } : {}),
+    claimedAt: row.claimedAt,
+    receivedAt: row.receivedAt,
+  };
+}
+
+export class PostgresIntegrationWebhookEventStore implements IntegrationWebhookEventStore {
+  constructor(private readonly db: Handle) {}
+
+  async claim(input: {
+    id: string;
+    provider: string;
+    orgId: string | null;
+    externalId: string | null;
+    now: number;
+    staleAfterMs: number;
+  }): Promise<IntegrationEventClaim> {
+    // First-INSERT-wins on the PK — the pg-stripe-events doctrine.
+    const inserted = await this.db
+      .insert(integrationWebhookEvents)
+      .values({
+        id: input.id,
+        provider: input.provider,
+        orgId: input.orgId,
+        externalId: input.externalId,
+        status: "received",
+        attempts: 1,
+        claimedAt: input.now,
+        receivedAt: input.now,
+      })
+      .onConflictDoNothing({ target: integrationWebhookEvents.id })
+      .returning();
+    if (inserted.length > 0) {
+      return { outcome: "claimed", event: rowToWebhookEvent(inserted[0]!) };
+    }
+    const [existing] = await this.db
+      .select()
+      .from(integrationWebhookEvents)
+      .where(eq(integrationWebhookEvents.id, input.id));
+    if (!existing) throw new Error("webhook claim raced and lost its row");
+    const record = rowToWebhookEvent(existing);
+    // The claim ladder, the InMemory twin's order: FAILED re-claims
+    // immediately; RECEIVED inside the window is in_flight; past it,
+    // re-claim; anything decided is a duplicate.
+    if (record.status === "failed") {
+      const reclaimed = await this.db
+        .update(integrationWebhookEvents)
+        .set({ claimedAt: input.now, attempts: record.attempts + 1 })
+        .where(
+          and(
+            eq(integrationWebhookEvents.id, input.id),
+            eq(integrationWebhookEvents.status, "failed"),
+          ),
+        )
+        .returning();
+      if (reclaimed.length > 0) {
+        return { outcome: "claimed", event: rowToWebhookEvent(reclaimed[0]!) };
+      }
+      return { outcome: "duplicate", event: record };
+    }
+    if (record.status === "received") {
+      const stale = input.now - record.claimedAt > input.staleAfterMs;
+      if (!stale) return { outcome: "in_flight", event: record };
+      // The status-guarded re-claim: the loser's UPDATE matches zero rows.
+      const reclaimed = await this.db
+        .update(integrationWebhookEvents)
+        .set({ claimedAt: input.now, attempts: record.attempts + 1 })
+        .where(
+          and(
+            eq(integrationWebhookEvents.id, input.id),
+            eq(integrationWebhookEvents.status, "received"),
+            lte(integrationWebhookEvents.claimedAt, input.now - input.staleAfterMs),
+          ),
+        )
+        .returning();
+      if (reclaimed.length > 0) {
+        return { outcome: "claimed", event: rowToWebhookEvent(reclaimed[0]!) };
+      }
+      return { outcome: "in_flight", event: record };
+    }
+    return { outcome: "duplicate", event: record };
+  }
+
+  async pending(staleAt: number, now: number, limit: number): Promise<IntegrationWebhookEvent[]> {
+    const rows = await this.db
+      .select()
+      .from(integrationWebhookEvents)
+      .where(inArray(integrationWebhookEvents.status, ["received", "failed"]))
+      .orderBy(integrationWebhookEvents.claimedAt)
+      .limit(limit * 2);
+    return rows
+      .map(rowToWebhookEvent)
+      .filter((e) => e.claimedAt <= staleAt && e.claimedAt <= now)
+      .slice(0, limit);
+  }
+
+  async markProcessed(id: string, orgId: string | null, now: number): Promise<void> {
+    await this.db
+      .update(integrationWebhookEvents)
+      .set({ status: "processed", orgId, claimedAt: now })
+      .where(eq(integrationWebhookEvents.id, id));
+  }
+
+  async markIgnored(id: string, now: number): Promise<void> {
+    await this.db
+      .update(integrationWebhookEvents)
+      .set({ status: "ignored", claimedAt: now })
+      .where(eq(integrationWebhookEvents.id, id));
+  }
+
+  async markFailed(id: string, error: string, now: number): Promise<void> {
+    await this.db
+      .update(integrationWebhookEvents)
+      .set({ status: "failed", error: error.slice(0, 500), claimedAt: now })
+      .where(eq(integrationWebhookEvents.id, id));
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/* The inbound queue (Stage D7, ADR 0033)                                      */
+/* -------------------------------------------------------------------------- */
+
+type DbInboundRow = typeof integrationInboundChanges.$inferSelect;
+
+function rowToInbound(row: DbInboundRow): InboundChangeRecord {
+  return {
+    id: row.id,
+    orgId: row.orgId,
+    boardId: row.boardId,
+    provider: row.provider as IntegrationProviderName,
+    nodeId: row.nodeId,
+    externalId: row.externalId,
+    field: row.field as InboundField,
+    externalValue: row.externalValue,
+    mappedValue: (row.mappedValue as InboundChangeRecord["mappedValue"]) ?? undefined,
+    status: row.status as InboundChangeRecord["status"],
+    source: row.source as InboundChangeRecord["source"],
+    detectedAt: row.detectedAt,
+    ...(row.decidedBy !== null ? { decidedBy: row.decidedBy } : {}),
+    ...(row.decidedAt !== null ? { decidedAt: row.decidedAt } : {}),
+    ...(row.appliedSeq !== null ? { appliedSeq: row.appliedSeq } : {}),
+    ...(row.reason !== null ? { reason: row.reason } : {}),
+  };
+}
+
+export class PostgresInboundChangeStore implements InboundChangeStore {
+  constructor(private readonly db: Handle) {}
+
+  async put(
+    input: Omit<InboundChangeRecord, "id" | "status" | "detectedAt" | "source">,
+    source: InboundChangeRecord["source"],
+    now: number,
+  ): Promise<InboundChangeRecord> {
+    // The queue-level dedupe, code-decided (the InMemory twin's ladder):
+    // a pending row for the same (board, node, provider, field) updates
+    // in place; no row, insert. Two workers racing both update the same
+    // row — the LAST webhook wins, which is the honest "the provider
+    // currently says" semantics.
+    const pending = await this.db
+      .select()
+      .from(integrationInboundChanges)
+      .where(
+        and(
+          eq(integrationInboundChanges.boardId, input.boardId),
+          eq(integrationInboundChanges.nodeId, input.nodeId),
+          eq(integrationInboundChanges.provider, input.provider),
+          eq(integrationInboundChanges.field, input.field),
+          eq(integrationInboundChanges.status, "pending"),
+        ),
+      );
+    if (pending.length > 0) {
+      const [row] = await this.db
+        .update(integrationInboundChanges)
+        .set({
+          externalValue: input.externalValue,
+          mappedValue: input.mappedValue ?? null,
+          detectedAt: now,
+          source,
+        })
+        .where(eq(integrationInboundChanges.id, pending[0]!.id))
+        .returning();
+      return rowToInbound(row!);
+    }
+    const [row] = await this.db
+      .insert(integrationInboundChanges)
+      .values({
+        id: newIntegrationId("inb_"),
+        orgId: input.orgId,
+        boardId: input.boardId,
+        provider: input.provider,
+        nodeId: input.nodeId,
+        externalId: input.externalId,
+        field: input.field,
+        externalValue: input.externalValue,
+        mappedValue: input.mappedValue ?? null,
+        status: "pending",
+        source,
+        detectedAt: now,
+      })
+      .returning();
+    return rowToInbound(row!);
+  }
+
+  async forBoard(boardId: string): Promise<InboundChangeRecord[]> {
+    const rows = await this.db
+      .select()
+      .from(integrationInboundChanges)
+      .where(eq(integrationInboundChanges.boardId, boardId))
+      .orderBy(
+        sql`${integrationInboundChanges.status} = 'pending' desc, ${integrationInboundChanges.detectedAt} desc`,
+      );
+    return rows.map(rowToInbound);
+  }
+
+  async change(boardId: string, id: string): Promise<InboundChangeRecord | undefined> {
+    const [row] = await this.db
+      .select()
+      .from(integrationInboundChanges)
+      .where(eq(integrationInboundChanges.id, id));
+    if (!row || row.boardId !== boardId) return undefined;
+    return rowToInbound(row);
+  }
+
+  async decide(
+    boardId: string,
+    id: string,
+    decision: "applied" | "dismissed",
+    decidedBy: string,
+    now: number,
+    extra?: { appliedSeq?: number; reason?: string },
+  ): Promise<InboundChangeRecord | undefined> {
+    // The decided-once guard, SQL-guarded: the UPDATE matches zero rows
+    // when another decider already wrote.
+    const updated = await this.db
+      .update(integrationInboundChanges)
+      .set({
+        status: decision,
+        decidedBy,
+        decidedAt: now,
+        ...(extra?.appliedSeq !== undefined ? { appliedSeq: extra.appliedSeq } : {}),
+        ...(extra?.reason !== undefined ? { reason: extra.reason } : {}),
+      })
+      .where(
+        and(
+          eq(integrationInboundChanges.id, id),
+          eq(integrationInboundChanges.boardId, boardId),
+          eq(integrationInboundChanges.status, "pending"),
+        ),
+      )
+      .returning();
+    if (updated.length > 0) return rowToInbound(updated[0]!);
+    const [existing] = await this.db
+      .select()
+      .from(integrationInboundChanges)
+      .where(eq(integrationInboundChanges.id, id));
+    return existing ? rowToInbound(existing) : undefined;
+  }
+
+  async supersedePending(
+    boardId: string,
+    nodeIds: readonly string[],
+    provider: string,
+    field: InboundField,
+    reason: string,
+    now: number,
+  ): Promise<number> {
+    if (nodeIds.length === 0) return 0;
+    const updated = await this.db
+      .update(integrationInboundChanges)
+      .set({ status: "superseded", reason, decidedAt: now })
+      .where(
+        and(
+          eq(integrationInboundChanges.boardId, boardId),
+          inArray(integrationInboundChanges.nodeId, [...nodeIds]),
+          eq(integrationInboundChanges.provider, provider),
+          eq(integrationInboundChanges.field, field),
+          eq(integrationInboundChanges.status, "pending"),
+        ),
+      )
+      .returning();
+    return updated.length;
   }
 }

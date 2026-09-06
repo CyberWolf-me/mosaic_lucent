@@ -44,11 +44,13 @@ import { InMemorySsoStore } from "./ssoStore.js";
 import { InMemoryIntegrationActionStore, InMemoryIntegrationStore } from "./integrations/integrations.js";
 import { InMemoryExecutionLedger } from "./integrations/ledger.js";
 import { InMemoryIntegrationWebhookEventStore } from "./integrations/webhook.js";
-import { InMemoryInboundChangeStore } from "./integrations/inbound.js";
+import { InMemoryInboundChangeStore, ingestInboundChange } from "./integrations/inbound.js";
 import {
   PostgresExecutionLedger,
   PostgresIntegrationActionStore,
   PostgresIntegrationStore,
+  PostgresIntegrationWebhookEventStore,
+  PostgresInboundChangeStore,
 } from "./store/pg-integrations.js";
 import { FakeProvider } from "./integrations/fake.js";
 import { linearConnectionFactory } from "./integrations/linear.js";
@@ -222,11 +224,10 @@ function makeStores(databaseUrl: string | undefined): {
       ]),
       actions: new PostgresIntegrationActionStore(target.db),
       ledger: new PostgresExecutionLedger(target.db),
-      // Stage D7 (Batch 1): the InMemory queue twins — the PG pairs land
-      // with migration 0021 in Batch 2. Delivery dedupe stays per-process
-      // until then, the same posture the D5 ledger had before D6.
-      webhookEvents: new InMemoryIntegrationWebhookEventStore(),
-      inbound: new InMemoryInboundChangeStore(),
+      // Stage D7: the webhook delivery ledger + the inbound queue (the PG
+      // pairs, migration 0021).
+      webhookEvents: new PostgresIntegrationWebhookEventStore(target.db),
+      inbound: new PostgresInboundChangeStore(target.db),
     },
     db: target,
   };
@@ -663,6 +664,63 @@ const integrationSweep = setInterval(() => {
     }
   })().catch((err: Error) => {
     logger.error("integrations.sweep.failed", { error: err.message });
+  });
+
+  // The D7 arm: pending webhook deliveries. The Stripe-refetch doctrine,
+  // adapted — Linear has no fetch-by-event-id API, so a stale delivery is
+  // recovered by REFETCHING the current truth: resolve the provider, getTask
+  // the external id, and ingest what it says NOW. A replayed stale event can
+  // never resurrect an old value this way; the current state supersedes it.
+  void (async () => {
+    const staleAt = Date.now() - 60_000;
+    const pending = await stores.integrations.webhookEvents!.pending(staleAt, Date.now(), 20);
+    for (const row of pending) {
+      const reclaimer = await stores.integrations.webhookEvents!.claim({
+        id: row.id,
+        provider: row.provider,
+        orgId: row.orgId,
+        externalId: row.externalId,
+        now: Date.now(),
+        staleAfterMs: 60_000,
+      });
+      if (reclaimer.outcome !== "claimed" || !row.externalId || !row.orgId) continue;
+      try {
+        const connection = await stores.integrations.store.connection(row.orgId, row.provider);
+        if (!connection || connection.status !== "active") continue;
+        const factory = stores.integrations.providers.get(row.provider);
+        if (!factory) continue;
+        const provider = factory(connection);
+        const task = await provider.getTask(row.externalId);
+        await ingestInboundChange(
+          {
+            linksForExternalId: (p, externalId) =>
+              stores.integrations.store.linksForExternalId(p, externalId),
+            boardNodeStatus: async (boardId, nodeId) => {
+              const board = await stores.boardStore.get(boardId);
+              if (!board) return null;
+              return board.workspace.nodes[nodeId]?.issue?.status ?? null;
+            },
+            store: stores.integrations.inbound!,
+            provider,
+          },
+          { provider: row.provider, externalId: row.externalId, status: task.status },
+          row.orgId,
+        );
+        await stores.integrations.webhookEvents!.markProcessed(row.id, row.orgId, Date.now());
+      } catch (err) {
+        await stores.integrations.webhookEvents!.markFailed(
+          row.id,
+          (err as Error).message.slice(0, 300),
+          Date.now(),
+        );
+        logger.error("integrations.sweep.webhook", {
+          error: (err as Error).message,
+          provider: row.provider,
+        });
+      }
+    }
+  })().catch((err: Error) => {
+    logger.error("integrations.sweep.webhooks.failed", { error: err.message });
   });
 }, 5 * 60_000);
 integrationSweep.unref?.();

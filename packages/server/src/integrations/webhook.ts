@@ -237,22 +237,30 @@ export class InMemoryIntegrationWebhookEventStore implements IntegrationWebhookE
     const existing = this.events.get(input.id);
     if (existing) {
       const stale = input.now - existing.claimedAt > input.staleAfterMs;
-      const receivable =
-        existing.status === "received" ||
-        (existing.status === "failed" && stale);
-      if (!receivable) {
-        return { outcome: "duplicate", event: { ...existing } };
+      // The claim ladder (the ledger's semantics): FAILED re-claims
+      // immediately (the work errored, nobody is mid-flight); RECEIVED
+      // inside the window is in_flight (a holder is presumed working);
+      // RECEIVED past the window re-claims (the holder crashed).
+      if (existing.status === "failed") {
+        const reclaimed: IntegrationWebhookEvent = {
+          ...existing,
+          claimedAt: input.now,
+          attempts: existing.attempts + 1,
+        };
+        this.events.set(input.id, reclaimed);
+        return { outcome: "claimed", event: { ...reclaimed } };
       }
-      if (existing.status === "received" && !stale) {
-        return { outcome: "in_flight", event: { ...existing } };
+      if (existing.status === "received") {
+        if (!stale) return { outcome: "in_flight", event: { ...existing } };
+        const reclaimed: IntegrationWebhookEvent = {
+          ...existing,
+          claimedAt: input.now,
+          attempts: existing.attempts + 1,
+        };
+        this.events.set(input.id, reclaimed);
+        return { outcome: "claimed", event: { ...reclaimed } };
       }
-      const reclaimed: IntegrationWebhookEvent = {
-        ...existing,
-        claimedAt: input.now,
-        attempts: existing.attempts + 1,
-      };
-      this.events.set(input.id, reclaimed);
-      return { outcome: "claimed", event: { ...reclaimed } };
+      return { outcome: "duplicate", event: { ...existing } };
     }
     const row: IntegrationWebhookEvent = {
       id: input.id,
