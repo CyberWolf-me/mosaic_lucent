@@ -58,10 +58,18 @@ export interface ErrorRecord {
 export interface MetricsSnapshot {
   startedAt: number;
   uptimeSeconds: number;
-  requests: { generate: number; image: number; ask: number };
+  requests: { generate: number; image: number; ask: number; aiPropose: number };
   errors: { total: number; byStatus: Record<string, number> };
   refusals: { rate: number; quota: number; plan: number };
-  latencyMs: { generateP50: number; generateP95: number; generateMax: number };
+  latencyMs: {
+    generateP50: number;
+    generateP95: number;
+    generateMax: number;
+    /** The selector's own lane (D10): "Ask Lucent to draft" → preview is
+     * the surface's latency budget, distinct from a full generation. */
+    aiProposeP50: number;
+    aiProposeP95: number;
+  };
   operationsEmitted: number;
   recentErrors: ErrorRecord[];
 }
@@ -92,6 +100,8 @@ export class Telemetry {
   private generateCount = 0;
   private imageCount = 0;
   private askCount = 0;
+  /** The D9 selector count (D10 wired it — it shipped emitted but uncounted). */
+  private aiProposeCount = 0;
   private operationsEmitted = 0;
   private errorTotal = 0;
   private readonly byStatus = new Map<number, number>();
@@ -99,6 +109,10 @@ export class Telemetry {
   private refusedQuota = 0;
   private refusedPlan = 0;
   private readonly latencies: number[] = [];
+  /** The selector's own samples: a selection round-trip is a different
+   * latency budget than a full generation, and folding it into the shared
+   * buffer would make both percentiles lie. */
+  private readonly aiProposeLatencies: number[] = [];
   private readonly recentErrors: ErrorRecord[] = [];
 
   /** Sinks attached after construction; see `subscribe`. */
@@ -142,6 +156,11 @@ export class Telemetry {
         this.latencies.push(event.ms);
         if (this.latencies.length > LATENCY_SAMPLES) this.latencies.shift();
         break;
+      case "ai-propose":
+        this.aiProposeCount += 1;
+        this.aiProposeLatencies.push(event.ms);
+        if (this.aiProposeLatencies.length > LATENCY_SAMPLES) this.aiProposeLatencies.shift();
+        break;
       case "error":
         this.errorTotal += 1;
         this.byStatus.set(event.status, (this.byStatus.get(event.status) ?? 0) + 1);
@@ -180,10 +199,11 @@ export class Telemetry {
 
   snapshot(): MetricsSnapshot {
     const sorted = [...this.latencies].sort((a, b) => a - b);
+    const aiSorted = [...this.aiProposeLatencies].sort((a, b) => a - b);
     return {
       startedAt: this.startedAt,
       uptimeSeconds: Math.round((Date.now() - this.startedAt) / 1000),
-      requests: { generate: this.generateCount, image: this.imageCount, ask: this.askCount },
+      requests: { generate: this.generateCount, image: this.imageCount, ask: this.askCount, aiPropose: this.aiProposeCount },
       errors: {
         total: this.errorTotal,
         byStatus: Object.fromEntries([...this.byStatus].map(([k, v]) => [String(k), v])),
@@ -193,6 +213,8 @@ export class Telemetry {
         generateP50: percentile(sorted, 50),
         generateP95: percentile(sorted, 95),
         generateMax: sorted.length ? Math.round(sorted[sorted.length - 1]!) : 0,
+        aiProposeP50: percentile(aiSorted, 50),
+        aiProposeP95: percentile(aiSorted, 95),
       },
       operationsEmitted: this.operationsEmitted,
       recentErrors: [...this.recentErrors].reverse(),

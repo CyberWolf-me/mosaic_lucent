@@ -1373,6 +1373,21 @@ export function createApp(deps: AppDeps): App {
     labelNames: ["kind", "provider"],
     buckets: AI_DURATION_BUCKETS,
   });
+  // The D9 selector's own lane (D10): "Ask Lucent to draft" → preview is
+  // its latency budget. DELIBERATELY LABEL-FREE (the D10 cardinality rule):
+  // no provider, no board, no org — per-provider split is the log's job, and
+  // any dynamic label here would give every board its own series.
+  const aiProposeDuration = metrics.histogram({
+    name: "lucent_ai_propose_duration_seconds",
+    help: "Seconds spent selecting actions for an AI-initiated external proposal.",
+    labelNames: [],
+    buckets: AI_DURATION_BUCKETS,
+  });
+  const aiProposeTotal = metrics.counter({
+    name: "lucent_ai_propose_total",
+    help: "AI-initiated external proposals drafted (the narrowing agent).",
+    labelNames: [],
+  });
 
   // Realtime connection lifetime (docs/reliability/slo.md, "Realtime
   // reachability"): the share of sockets still connected at the five-minute
@@ -1406,6 +1421,13 @@ export function createApp(deps: AppDeps): App {
       case "image":
       case "ask":
         aiDuration.observe(event.ms / 1000, { kind: event.kind, provider: event.provider });
+        break;
+      case "ai-propose":
+        // Label-free on purpose (the cardinality rule above). The count and
+        // the latency lane; the candidates→selected ratio stays in the log,
+        // where a high-cardinality field is free.
+        aiProposeTotal.inc();
+        aiProposeDuration.observe(event.ms / 1000);
         break;
       default:
         break;

@@ -145,7 +145,7 @@ describe("telemetry", () => {
     t.record({ kind: "generate", ms: 200, provider: "mock", operations: 2 });
     t.record({ kind: "image", ms: 50, provider: "mock-image" });
     const snap = t.snapshot();
-    expect(snap.requests).toEqual({ generate: 2, image: 1, ask: 0 });
+    expect(snap.requests).toEqual({ generate: 2, image: 1, ask: 0, aiPropose: 0 });
     expect(snap.operationsEmitted).toBe(5);
   });
 
@@ -229,7 +229,7 @@ describe("telemetry", () => {
 
   it("starts empty", () => {
     const snap = new Telemetry().snapshot();
-    expect(snap.requests).toEqual({ generate: 0, image: 0, ask: 0 });
+    expect(snap.requests).toEqual({ generate: 0, image: 0, ask: 0, aiPropose: 0 });
     expect(snap.errors.total).toBe(0);
     expect(snap.recentErrors).toEqual([]);
   });
