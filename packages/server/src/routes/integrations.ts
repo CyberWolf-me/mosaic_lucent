@@ -3,6 +3,7 @@ import { actionNodes } from "@lucent/core";
 import type { RegisterRoutes } from "./context.js";
 import { connectionView, extractProposalItems, MAX_CREDENTIAL_REF_CHARS } from "../integrations/integrations.js";
 import { webhookSchemes } from "../integrations/webhook.js";
+import { MAX_AI_SELECTED_ACTIONS } from "@lucent/ai";
 import type { IntegrationProviderName } from "../integrations/integrations.js";
 
 /**
@@ -59,7 +60,7 @@ function resolveProvider(
 }
 
 export const registerIntegrationRoutes: RegisterRoutes = (router, s) => {
-  const { integrations, send, readBody, requireUser, requireOrgRole, requireBoardRole, requireCsrf, meter, commitForBoard, broadcastProposal, auditRow } = s;
+  const { integrations, send, readBody, requireUser, requireOrgRole, requireBoardRole, requireCsrf, meter, commitForBoard, broadcastProposal, auditRow, provider: llmProvider, resolveAiContext, gateMonthly, meterUsage, telemetry, boardStore, usageStore } = s;
 
   // ---- The org admin surface (owner floor — credentials live here) --------
   router.get("/api/orgs/:id/integrations", async (ctx) => {
@@ -874,6 +875,232 @@ router.post("/api/boards/:id/integrations/inbound/:changeId/dismiss", async (ctx
   });
   void auditRow(req, user.id, guard.board.orgId, "integration.inbound.dismiss", changeId);
   send(res, 200, { change: decided });
+});
+
+// ---- The D9 AI-initiated proposal: the narrowing agent --------------------
+//
+//   POST /api/boards/:id/integrations/:provider/propose-ai
+//
+// The model is a SELECTOR, never an author (ADR 0035). The server builds
+// the FULL item set through the same shared builder the human route uses,
+// calls the provider's generateExternalPlan with a SEMANTIC-ONLY context,
+// then INTERSECTS the model's nodeIds with the real items. The record lands
+// as a normal pending proposal (origin "ai" + provenance + sourceSeq) that
+// ONLY the human approve route can decide — no route from here to the
+// executor exists. The ladder order is deliberate: connection and factory
+// checks FIRST, so a refused request costs no allowance (the review's
+// no-spend-on-refusal rule); the monthly gate runs just before the model
+// call, and the usage meters on success only.
+
+const proposeAiBodySchema = z.object({
+  request: z.string().min(1).max(600),
+});
+
+router.post("/api/boards/:id/integrations/:provider/propose-ai", async (ctx) => {
+  const { req, res } = ctx;
+  const route = "/api/boards/:id/integrations/:provider/propose-ai";
+  if (!requireCsrf(req, res, route)) return;
+  const user = await requireUser(req, res);
+  if (!user) return;
+  if (!meter(req, res, route)) return;
+  const boardId = ctx.param("id");
+  const guard = await requireBoardRole(req, res, boardId, "editor", route);
+  if (!guard.ok) return;
+  if (!integrations) return send(res, 503, { error: "integrations are not configured" });
+  const { actions } = integrations;
+  if (!actions) return send(res, 503, { error: "external actions are not configured" });
+
+  const providerName = ctx.param("provider");
+  // CONNECTION BEFORE MODEL: a 404/409 here costs no allowance — the
+  // review's no-spend-on-refusal rule, pinned by test.
+  const connection = await integrations.store.connection(guard.board.orgId, providerName);
+  if (!connection) {
+    send(res, 404, { error: `no ${providerName} connection is configured for this org` });
+    return;
+  }
+  if (connection.status !== "active") {
+    send(res, 409, { error: `the ${providerName} connection is ${connection.status}` });
+    return;
+  }
+  const resolved = resolveProvider(integrations, providerName, connection);
+  if (!resolved.ok) {
+    send(res, 400, { error: resolved.error });
+    return;
+  }
+  const provider = resolved.provider;
+
+  let body: z.infer<typeof proposeAiBodySchema>;
+  try {
+    const raw = await readBody(req);
+    body = proposeAiBodySchema.parse(raw ? JSON.parse(raw) : {});
+  } catch (err) {
+    send(res, 400, { error: "bad request", detail: (err as Error).message });
+    return;
+  }
+
+  // Billing: the board's org (the editor floor guarantees membership in
+  // it — the generate path's own rule). The monthly allowance runs just
+  // before the model call; a parse error or a connection refusal above
+  // never reaches it.
+  const allowance = await gateMonthly(res, guard.board.orgId, "ai.generationsPerMonth", route);
+  if (allowance === false) return;
+
+  // THE UPPER BOUND: the same shared builder the human route calls — the
+  // narrowing is structural, not conventional. The candidates the model
+  // sees are exactly the items the human route would propose.
+  const existingLinks = new Map(
+    (await integrations.store.linksForBoard(boardId))
+      .filter((l) => l.provider === providerName)
+      .map((l) => [l.nodeId, l] as const),
+  );
+  const items = extractProposalItems(
+    guard.board.workspace,
+    existingLinks,
+    provider.capabilityWarnings?.bind(provider),
+  );
+  if (items.length === 0) {
+    send(res, 422, { error: "no executable actions on this board" });
+    return;
+  }
+
+  // The SEMANTIC-ONLY context: node id, label, statement, issue fields.
+  // No credentials, no external ids, no connection internals (pinned in
+  // the ai package's suite; the boundary is the request type's shape).
+  const candidates = actionNodes(guard.board.workspace).map((node) => ({
+    nodeId: node.id,
+    label: node.label,
+    ...(node.statement ? { statementKind: node.statement.kind } : {}),
+    ...(node.statement?.topic ? { statementTopic: node.statement.topic } : {}),
+    ...(node.issue?.status ? { status: node.issue.status } : {}),
+    ...(node.issue?.assignee ? { assignee: node.issue.assignee } : {}),
+    ...(node.issue?.dueDate ? { dueDate: node.issue.dueDate } : {}),
+  }));
+
+  const started = Date.now();
+  const plan = await llmProvider.generateExternalPlan({
+    request: body.request,
+    boardName: guard.board.name,
+    // The provider's DISPLAY name — a label, never a connection detail.
+    providerName: provider.name,
+    candidates,
+    totalCandidates: candidates.length,
+  });
+
+  // DEDUP (first-occurrence order — deterministic, honest counts).
+  const seen = new Set<string>();
+  const deduped: string[] = [];
+  for (const id of plan.nodeIds) {
+    if (!seen.has(id)) {
+      seen.add(id);
+      deduped.push(id);
+    }
+  }
+
+  // INTERSECT: the only path from a model selection to a proposal item.
+  // Unknown ids drop with a visible warning (the citation discipline).
+  const byNodeId = new Map(items.map((item) => [item.nodeId, item] as const));
+  const warnings: string[] = [];
+  const selected = deduped.filter((id) => {
+    if (byNodeId.has(id)) return true;
+    warnings.push(`the model named "${id}", which is not an executable action on this board — dropped`);
+    return false;
+  });
+
+  // THE CAP: a selection larger than MAX_AI_SELECTED_ACTIONS is REFUSED
+  // with the honest error — never silently truncated, never silently
+  // reinterpreted (the review's rule, pinned).
+  if (selected.length > MAX_AI_SELECTED_ACTIONS) {
+    send(res, 422, {
+      error: `Lucent selected ${selected.length} actions, but external proposals are limited to ${MAX_AI_SELECTED_ACTIONS}`,
+      selectedCount: selected.length,
+      max: MAX_AI_SELECTED_ACTIONS,
+    });
+    return;
+  }
+
+  if (selected.length === 0) {
+    send(res, 422, {
+      error: "Lucent couldn't identify actions matching your request",
+      hint: 'Try: "Send the launch-related actions", "Send Sarah\'s actions", or use Propose to select everything.',
+    });
+    return;
+  }
+
+  const narrowed = selected.map((id) => byNodeId.get(id)!);
+  // The board revision the selection was computed against — audit, not a
+  // gate (approval applies the record's item snapshot either way).
+  const sourceSeq = await boardStore.latestSeq(boardId);
+
+  const { record, supersededId } = await actions.propose({
+    orgId: guard.board.orgId,
+    boardId,
+    provider: providerName as never,
+    connectionId: connection.id,
+    items: narrowed,
+    createdBy: user.id,
+    now: Date.now(),
+    origin: "ai",
+    provenance: { request: body.request, explanation: plan.explanation },
+    sourceSeq,
+  });
+
+  // Metered on success only (the ask/generate contract), the mode tag
+  // keeping the usage rows answerable by surface.
+  meterUsage(guard.board.orgId, "ai.generation", 1, {
+    boardId,
+    provider: llmProvider.name,
+    mode: "ai-propose",
+    ...(plan.model ? { model: plan.model } : {}),
+  });
+  telemetry.record({
+    kind: "ai-propose",
+    ms: Date.now() - started,
+    provider: llmProvider.name,
+    candidates: items.length,
+    selected: narrowed.length,
+  });
+
+  // THE PREVIEW: the same shape the human route answers, plus the AI
+  // origin's facts — the explanation is a RECOMMENDATION, rendered, never
+  // fed back as board truth.
+  const creates = narrowed.filter((i) => i.action === "create");
+  const updates = narrowed.filter((i) => i.action === "update");
+  send(res, 201, {
+    action: {
+      id: record.id,
+      provider: providerName,
+      status: record.status,
+      createdAt: record.createdAt,
+      origin: "ai",
+      provenance: record.provenance,
+      sourceSeq,
+      ...(supersededId ? { supersededId } : {}),
+    },
+    preview: {
+      creates: creates.map((i) => ({
+        nodeId: i.nodeId,
+        title: i.title,
+        ...(i.assignee ? { assignee: i.assignee } : {}),
+        ...(i.dueDate ? { dueDate: i.dueDate } : {}),
+        status: i.status,
+        ...(i.warnings ? { warnings: i.warnings } : {}),
+      })),
+      updates: updates.map((i) => ({
+        nodeId: i.nodeId,
+        externalId: i.externalId,
+        title: i.title,
+        status: i.status,
+        ...(i.warnings ? { warnings: i.warnings } : {}),
+      })),
+      statement:
+        `Lucent proposes sending ${creates.length + updates.length} of the board's ${items.length} executable actions to ${providerName}. Nothing will be deleted. Existing external tasks will only be modified in the fields explicitly shown in the update rows.`,
+      // The selection ratio — the narrowing made explicit.
+      selectedCount: narrowed.length,
+      totalCandidates: items.length,
+      explanation: plan.explanation,
+      ...(warnings.length > 0 ? { warnings } : {}),
+    },
+  });
 });
 
 };

@@ -107,6 +107,11 @@ function actionContract(name: string, make: () => IntegrationActionStore, prefix
           // round-trip — the approve gate reads them back from the store).
           warnings: [{ field: "dueDate", reason: "GitHub has no due-date field" }] }],
         createdBy: "u", now: 2,
+        // Stage D9: the AI origin's provenance + the revision snapshot (the
+        // columns migration 0022 adds — the round-trip both twins keep).
+        origin: "ai",
+        provenance: { request: "send the launch ones", explanation: "Launch-related." },
+        sourceSeq: 1042,
       });
       expect(b.supersededId).toBe(a.record.id);
       expect(b.record.connectionId).toBe("int_1");
@@ -115,6 +120,17 @@ function actionContract(name: string, make: () => IntegrationActionStore, prefix
       expect(b.record.items[0]!.warnings).toEqual([
         { field: "dueDate", reason: "GitHub has no due-date field" },
       ]);
+      // The D9 provenance round-trips: origin, the request/explanation
+      // pair, and the revision the selection was computed against. The
+      // FIRST record (no origin passed) reads as undefined — the callers'
+      // default is "user".
+      expect(b.record.origin).toBe("ai");
+      expect(b.record.provenance).toEqual({
+        request: "send the launch ones",
+        explanation: "Launch-related.",
+      });
+      expect(b.record.sourceSeq).toBe(1042);
+      expect(a.record.origin).toBeUndefined();
 
       const decided = await store.decide(board, b.record.id, "approved", "u", 3);
       expect(decided!.status).toBe("approved");

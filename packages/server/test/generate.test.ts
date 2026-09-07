@@ -19,6 +19,11 @@ function fixedProvider(operations: Operation[], explanation?: string) {
     async generateAnswer() {
       throw new Error("fixed provider cannot answer questions");
     },
+  // Stage D9 made generateExternalPlan part of the interface; the
+      // selector is not under test here.
+      async generateExternalPlan() {
+        throw new Error("this stub cannot select external actions");
+      },
   };
 }
 

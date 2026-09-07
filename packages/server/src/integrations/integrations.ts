@@ -451,6 +451,27 @@ export interface IntegrationActionRecord {
   items: IntegrationActionItem[];
   createdBy: string;
   createdAt: number;
+  /**
+   * Stage D9, ADR 0035: who initiated the proposal — the human route or
+   * the AI narrowing path. Existing records read as "user" (the default:
+   * every record before D9 was human-initiated). The DECIDER is always
+   * human on both paths; origin distinguishes who drafted.
+   */
+  origin?: "user" | "ai";
+  /**
+   * Stage D9: the AI path's provenance — the user's request and the
+   * model's rationale. The rationale is a RECOMMENDATION, never board
+   * truth (the C2/C5 doctrine: AI interpretation is not automatically
+   * semantic state); it is rendered, never fed back as evidence.
+   */
+  provenance?: { request: string; explanation: string };
+  /**
+   * Stage D9: the board's op-log head at proposal time — the revision the
+   * proposal was computed against. Audit + stale detection, not a gate:
+   * approval applies the ITEM SNAPSHOT the record stores, so a board that
+   * moved after the propose still gets exactly what the human reviewed.
+   */
+  sourceSeq?: number | null;
   decidedBy?: string;
   decidedAt?: number;
   appliedAt?: number;
@@ -470,6 +491,10 @@ export interface IntegrationActionStore {
     items: IntegrationActionItem[];
     createdBy: string;
     now: number;
+    /** Stage D9: the originator + provenance + the board revision (the human path passes origin "user" implicitly). */
+    origin?: "user" | "ai";
+    provenance?: { request: string; explanation: string };
+    sourceSeq?: number | null;
   }): Promise<{ record: IntegrationActionRecord; supersededId: string | null }>;
   /** Board-scoped read: a leaked id is not a read. */
   action(boardId: string, id: string): Promise<IntegrationActionRecord | undefined>;
@@ -503,6 +528,9 @@ export class InMemoryIntegrationActionStore implements IntegrationActionStore {
     items: IntegrationActionItem[];
     createdBy: string;
     now: number;
+    origin?: "user" | "ai";
+    provenance?: { request: string; explanation: string };
+    sourceSeq?: number | null;
   }): Promise<{ record: IntegrationActionRecord; supersededId: string | null }> {
     const pending = [...this.records.values()].find(
       (r) =>
@@ -525,6 +553,9 @@ export class InMemoryIntegrationActionStore implements IntegrationActionStore {
       items: input.items,
       createdBy: input.createdBy,
       createdAt: input.now,
+      ...(input.origin ? { origin: input.origin } : {}),
+      ...(input.provenance ? { provenance: input.provenance } : {}),
+      ...(input.sourceSeq !== undefined ? { sourceSeq: input.sourceSeq } : {}),
     };
     this.records.set(record.id, record);
     return { record: { ...record }, supersededId };

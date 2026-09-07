@@ -284,6 +284,11 @@ function rowToAction(row: DbActionRow): IntegrationActionRecord {
     ...(row.decidedAt !== null ? { decidedAt: row.decidedAt } : {}),
     ...(row.appliedAt !== null ? { appliedAt: row.appliedAt } : {}),
     ...(row.error !== null ? { error: row.error } : {}),
+    // Stage D9: origin/provenance/sourceSeq (null-safe — pre-D9 rows read
+    // as origin "user" by the callers' default).
+    ...(row.origin !== null ? { origin: row.origin as "user" | "ai" } : {}),
+    ...(row.provenance !== null ? { provenance: row.provenance as { request: string; explanation: string } } : {}),
+    ...(row.sourceSeq !== null ? { sourceSeq: row.sourceSeq } : {}),
   };
 }
 
@@ -298,6 +303,9 @@ export class PostgresIntegrationActionStore implements IntegrationActionStore {
     items: IntegrationActionRecord["items"];
     createdBy: string;
     now: number;
+    origin?: "user" | "ai";
+    provenance?: { request: string; explanation: string };
+    sourceSeq?: number | null;
   }): Promise<{ record: IntegrationActionRecord; supersededId: string | null }> {
     // Supersede any pending predecessor (the B3 create pattern).
     const pending = await this.db
@@ -330,6 +338,9 @@ export class PostgresIntegrationActionStore implements IntegrationActionStore {
         items: input.items,
         createdBy: input.createdBy,
         createdAt: input.now,
+        origin: input.origin ?? null,
+        provenance: input.provenance ?? null,
+        sourceSeq: input.sourceSeq ?? null,
       })
       .returning();
     return { record: rowToAction(row!), supersededId };

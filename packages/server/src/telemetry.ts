@@ -19,6 +19,19 @@ export type TelemetryEvent =
    * to watch, and folding them into generate would make both unreadable.
    */
   | { kind: "ask"; ms: number; provider: string; citations: number }
+  /**
+   * The AI-propose path (Stage D9): a narrowing selection that became a
+   * pending external proposal. Its own kind for the same reason as ask —
+   * selection latency and the candidates→selected ratio are this surface's
+   * signals, invisible inside a generate row.
+   */
+  | {
+      kind: "ai-propose";
+      ms: number;
+      provider: string;
+      candidates: number;
+      selected: number;
+    }
   | { kind: "error"; route: string; status: number; message: string }
   /**
    * A request we turned away, tagged with why. `plan:<entitlement key>` is a

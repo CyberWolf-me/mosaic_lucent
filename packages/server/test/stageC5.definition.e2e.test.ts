@@ -46,6 +46,9 @@ function agent(): LLMProvider & { requests: AnswerRequest[] } {
       requests.push(request);
       return { answer: "acknowledged", citations: [] };
     },
+    async generateExternalPlan(): Promise<never> {
+      throw new Error("the selector is not under test here");
+    },
   } as LLMProvider & { requests: AnswerRequest[] };
 }
 

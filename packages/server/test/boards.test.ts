@@ -104,6 +104,11 @@ describe("authoritative validation", () => {
       async generateAnswer() {
         throw new Error("fixed provider cannot answer questions");
       },
+      // Stage D9 made generateExternalPlan part of the interface; the
+      // selector is not under test here.
+      async generateExternalPlan() {
+        throw new Error("this stub cannot select external actions");
+      },
     };
     // The summary lies (says the board is empty), but the stored board wins.
     const result = await handleGenerate(
@@ -137,6 +142,11 @@ describe("authoritative validation", () => {
       // Stage C1: answering is not under test here; reaching it would be a bug.
       async generateAnswer() {
         throw new Error("fixed provider cannot answer questions");
+      },
+      // Stage D9 made generateExternalPlan part of the interface; the
+      // selector is not under test here.
+      async generateExternalPlan() {
+        throw new Error("this stub cannot select external actions");
       },
     };
     const result = await handleGenerate(
@@ -172,6 +182,11 @@ describe("authoritative validation", () => {
       async generateAnswer() {
         throw new Error("fixed provider cannot answer questions");
       },
+      // Stage D9 made generateExternalPlan part of the interface; the
+      // selector is not under test here.
+      async generateExternalPlan() {
+        throw new Error("this stub cannot select external actions");
+      },
     });
 
     await handleGenerate(
@@ -206,6 +221,11 @@ describe("authoritative validation", () => {
       async generateAnswer() {
         throw new Error("fixed provider cannot answer questions");
       },
+      // Stage D9 made generateExternalPlan part of the interface; the
+      // selector is not under test here.
+      async generateExternalPlan() {
+        throw new Error("this stub cannot select external actions");
+      },
     };
     const result = await handleGenerate(
       provider,
@@ -237,6 +257,11 @@ describe("authoritative validation", () => {
       // Stage C1: answering is not under test here; reaching it would be a bug.
       async generateAnswer() {
         throw new Error("fixed provider cannot answer questions");
+      },
+      // Stage D9 made generateExternalPlan part of the interface; the
+      // selector is not under test here.
+      async generateExternalPlan() {
+        throw new Error("this stub cannot select external actions");
       },
     };
     const summaryWithGhost = summarizeWorkspace(

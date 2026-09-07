@@ -1226,6 +1226,12 @@ export const integrationActions = pgTable(
     items: jsonb("items").notNull(),
     createdBy: text("created_by").notNull(),
     createdAt: bigint("created_at", { mode: "number" }).notNull(),
+    /** Stage D9: who drafted the proposal — "user" (default) or "ai". */
+    origin: text("origin"),
+    /** Stage D9: the AI path's {request, explanation} (a recommendation). */
+    provenance: jsonb("provenance"),
+    /** Stage D9: the board's op-log head at proposal time (audit). */
+    sourceSeq: bigint("source_seq", { mode: "number" }),
     decidedBy: text("decided_by"),
     decidedAt: bigint("decided_at", { mode: "number" }),
     appliedAt: bigint("applied_at", { mode: "number" }),

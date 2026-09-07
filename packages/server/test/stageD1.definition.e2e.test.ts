@@ -46,6 +46,9 @@ function agent(): LLMProvider {
     async generateAnswer() {
       throw new Error("not under test");
     },
+    async generateExternalPlan() {
+      throw new Error("not under test");
+    },
   } as LLMProvider;
 }
 

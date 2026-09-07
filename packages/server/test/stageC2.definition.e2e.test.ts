@@ -62,6 +62,9 @@ function historian(): LLMProvider & { requests: AnswerRequest[] } {
         citations: decision ? [{ kind: "node", id: decision.id }] : [],
       };
     },
+    async generateExternalPlan(): Promise<never> {
+      throw new Error("the selector is not under test here");
+    },
   } as LLMProvider & { requests: AnswerRequest[] };
 }
 

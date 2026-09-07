@@ -57,6 +57,9 @@ function historian(
       requests.push(request);
       return { answer: "ok", citations: [], ...respond(request) } as AnswerResult;
     },
+    async generateExternalPlan(): Promise<never> {
+      throw new Error("the selector is not under test here");
+    },
   } as LLMProvider & { requests: AnswerRequest[] };
 }
 

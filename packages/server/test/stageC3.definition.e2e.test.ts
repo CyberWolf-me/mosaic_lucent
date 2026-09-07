@@ -65,12 +65,15 @@ function historian(): LLMProvider & { requests: AnswerRequest[] } {
         answer: hasChain
           ? `Pricing changed between meetings: the ${older?.id} decision ($20, turn ${
               older?.turns[0]?.index ?? "?"
-            }) was superseded by ${newer?.id}'s correction ($15, turn ${
+            }) was superseded by ${newer?.id}'s correction (    5, turn ${
               newer?.turns[0]?.index ?? "?"
-            }). The board now carries the $15 decision.`
+            }). The board now carries the     5 decision.`
           : "I can see no pricing change in the visible window.",
         citations,
       };
+    },
+    async generateExternalPlan(): Promise<never> {
+      throw new Error("the selector is not under test here");
     },
   } as LLMProvider & { requests: AnswerRequest[] };
 }
