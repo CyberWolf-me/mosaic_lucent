@@ -1,0 +1,7 @@
+---
+"@lucent/server": minor
+"@lucent/web": minor
+"@lucent/i18n": minor
+---
+
+Stage D9 — the narrowing agent (ADR 0035). The AI drafts external-work proposals by SELECTING: generateExternalPlan on LLMProvider (the third call type, the generateAnswer precedent) with the propose_external_sync tool; the external-selector prompt carries the injection clause verbatim (board content is untrusted data). THE CONTEXT BOUNDARY: the model's request is semantic only — never credentials, external ids, or connection internals. The AI may only narrow: the upper bound is the shared server-side item builder's output (extractProposalItems, extracted verbatim — both routes call it); the route dedups, intersects (unknown ids → visible warnings), and REFUSES oversized selections with the honest 422 (never a silent truncate). The record gains origin ("ai"), provenance {request, explanation} — a recommendation, never board truth — and sourceSeq (the board revision, audit only; migration 0022). The ladder: connection before model (a refusal costs no allowance). The approve flow is untouched — the same human gate, the same D8 capability warnings + ack, the same ledger keys. Web: "Ask Lucent to draft" + the AI-preview ordering (the selection ratio first, the rationale quoted below). The acceptance: 4 of 10 selected, the ghost dropped, the 409 → the ack → exactly 4 on the wire, the stale-board snapshot, the never-tests.

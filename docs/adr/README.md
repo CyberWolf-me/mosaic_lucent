@@ -41,3 +41,4 @@ back to it.
 | [0032](0032-the-first-real-provider.md) | The first real provider: the effect contract corrected, Linear shipped (Stage D6) | Accepted |
 | [0033](0033-inbound-sync.md) | Inbound sync: the symmetric human gate, the receiver, the system actor (Stage D7) | Accepted |
 | [0034](0034-the-second-and-third-providers.md) | The second and third providers: the capability-honesty layer, the hardened recovery, the SSRF boundary (Stage D8) | Accepted |
+| [0035](0035-the-narrowing-agent.md) | The narrowing agent: AI-initiated external proposals through the same human gate (Stage D9) | Accepted |
