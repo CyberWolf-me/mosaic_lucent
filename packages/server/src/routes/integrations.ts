@@ -126,7 +126,14 @@ export const registerIntegrationRoutes: RegisterRoutes = (router, s) => {
         },
         Date.now(),
       );
-      send(res, 201, { integration: connectionView(connection) });
+      // supportsInbound echoes here too — the PUT's response and the list's
+      // must agree (the live pass caught the PUT omitting it).
+      send(res, 201, {
+        integration: {
+          ...connectionView(connection),
+          supportsInbound: webhookSchemes.has(connection.provider),
+        },
+      });
     } catch (err) {
       send(res, 400, { error: "invalid connection", detail: (err as Error).message });
     }

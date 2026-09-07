@@ -1573,3 +1573,43 @@ pass reads what the screen actually says, which is the point of it.
 
 Gate: typecheck 0; server 1029, web 646, i18n 14, mcp 28, ai 185,
 core 422.
+
+## The Stage D8 live browser pass (2026-09-06)
+
+Ran against the real stack: the rebuilt server on :4387 (all three
+adapters registered), the GitHub wire + webhook rig on :4390, Vite on
+:5174, the github connection carrying repo=acme/app, a stub baseUrl
+through config, and the webhook secret REF (the env-ref clause).
+
+What the pass verified, live in the browser:
+[x] THE PER-PROVIDER BUTTON: "Sync with GitHub" — generated from the
+    connection's supportsInbound (the D6-era hardcoded "Sync to
+    Linear" is gone).
+[x] THE HONESTY PREVIEW: the panel shows "Repo: acme/app" (the
+    per-provider config label); the brief row (blocked + a dueDate)
+    carries BOTH capability warnings verbatim — "GitHub has no
+    due-date field; 2026-09-20 will not be synced" and "'blocked' is
+    represented as open on GitHub"; the clean row carries none.
+[x] THE 409 GATE: Approve without the ack → the panel replaces
+    Approve with "Send anyway / Cancel" and renders "This provider
+    cannot represent some fields faithfully" with both warnings —
+    the informed consent the review demanded, zero wire mutations.
+[x] SEND ANYWAY → "Result 2 applied · 0 failed"; the ↗ chips render
+    the stub's issue urls (500, 501); GitHub received both open with
+    no dueDate — the consented loss, on the wire.
+[x] THE WEBHOOK LOOP: the stub's rig fired a signed
+    closed:not_planned for issue 500 at the real first-in-ladder
+    route; the External changes row rendered "github says
+    closed:not_planned — the board says blocked" with the badge (1);
+    ACCEPT IN THE BROWSER → nd_brief became cancelled on the real
+    board, and the history timeline shows the system-actor row —
+    "sync from github", actor {system, github, initiatedBy: D8
+    Owner} — the second system row in the product's history.
+
+Two fixes the pass forced (both coded, tested, committed here):
+1. The connection PUT's response omitted supportsInbound (only the
+   LIST added it) — the PUT echo now agrees with the list (pinned by
+   the live wire; the route suite stays green).
+2. The e2e lessons recorded in ADR 0034 (the executionTimeoutMs
+   injection; ordering the acceptance arms deliberately) both
+   bit during the batch and are folded into the ADR's consequences.
