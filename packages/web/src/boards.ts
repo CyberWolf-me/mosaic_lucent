@@ -487,9 +487,20 @@ export interface IntegrationConnectionView {
 }
 
 /** The frozen propose-preview shape (ADR 0031's contract; D8 adds the
- * per-item capability warnings — ADR 0034's honesty layer). */
+ * per-item capability warnings; D9 adds the AI-origin facts — the ratio,
+ * the explanation, and the drop warnings). */
 export interface IntegrationPreview {
-  action: { id: string; provider: string; status: string; createdAt: number; supersededId?: string };
+  action: {
+    id: string;
+    provider: string;
+    status: string;
+    createdAt: number;
+    supersededId?: string;
+    /** "ai" when the narrowing agent drafted this proposal. */
+    origin?: "user" | "ai";
+    provenance?: { request: string; explanation: string };
+    sourceSeq?: number | null;
+  };
   preview: {
     creates: Array<{
       nodeId: string;
@@ -508,6 +519,11 @@ export interface IntegrationPreview {
       warnings?: Array<{ field: string; reason: string }>;
     }>;
     statement: string;
+    /** The AI path's selection ratio + rationale + drop warnings. */
+    selectedCount?: number;
+    totalCandidates?: number;
+    explanation?: string;
+    warnings?: string[];
   };
 }
 
@@ -549,6 +565,32 @@ export async function proposeIntegration(
   });
   if (!res) return null;
   if (!res.ok) return { error: (await res.json().catch(() => ({ error: "propose failed" }))).error ?? "propose failed", status: res.status };
+  return (await res.json()) as IntegrationPreview;
+}
+
+/**
+ * Stage D9: the AI path — "Ask Lucent to draft". The request is the
+ * natural-language narrowing instruction; the server builds every item
+ * from real state, the model only selects, and the answer is the same
+ * preview shape with the AI-origin facts.
+ */
+export async function proposeIntegrationAI(
+  boardId: string,
+  provider: string,
+  request: string,
+): Promise<IntegrationPreview | { error: string; status: number; hint?: string } | null> {
+  const res = await authed(
+    `/api/boards/${encodeURIComponent(boardId)}/integrations/${encodeURIComponent(provider)}/propose-ai`,
+    { method: "POST", body: JSON.stringify({ request }) },
+  );
+  if (!res) return null;
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({ error: "propose failed" }))) as {
+      error?: string;
+      hint?: string;
+    };
+    return { error: body.error ?? "propose failed", status: res.status, ...(body.hint ? { hint: body.hint } : {}) };
+  }
   return (await res.json()) as IntegrationPreview;
 }
 

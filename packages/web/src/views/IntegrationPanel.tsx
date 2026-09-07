@@ -4,6 +4,7 @@ import type { WorkspaceState } from "../workspace.js";
 import {
   decideIntegrationAction,
   proposeIntegration,
+  proposeIntegrationAI,
   type IntegrationDecisionResult,
   type IntegrationLink,
   type IntegrationPreview,
@@ -47,6 +48,8 @@ export function IntegrationPanel({
   const [error, setError] = useState<string | null>(null);
   const [results, setResults] = useState<IntegrationDecisionResult | null>(null);
   const [links, setLinks] = useState<IntegrationLink[] | null>(null);
+  /** Stage D9: the Ask-Lucent input — the natural-language request. */
+  const [aiRequest, setAiRequest] = useState("");
   /** Stage D8: the ack the approve route requires when the provider cannot
    * represent some fields faithfully — set when the warnings render and
    * the human chooses to proceed. */
@@ -72,6 +75,26 @@ export function IntegrationPanel({
     setBusy(true);
     setError(null);
     const result = await proposeIntegration(boardId, provider);
+    setBusy(false);
+    if (result === null) {
+      setError(t("integrations.error.offline", locale));
+      return;
+    }
+    if ("error" in result) {
+      setError(result.error ?? "propose failed");
+      return;
+    }
+    setPreview(result);
+    setRefusedWarnings(null);
+  };
+
+  /** Stage D9: the AI path — "Ask Lucent to draft". The request rides the
+   * record's provenance; the model's selection + rationale render below. */
+  const proposeAi = async () => {
+    if (!boardId || !aiRequest.trim()) return;
+    setBusy(true);
+    setError(null);
+    const result = await proposeIntegrationAI(boardId, provider, aiRequest.trim());
     setBusy(false);
     if (result === null) {
       setError(t("integrations.error.offline", locale));
@@ -215,6 +238,24 @@ export function IntegrationPanel({
               <div style={{ padding: "6px 12px", fontSize: 12, color: "var(--ink-1)", lineHeight: 1.5 }}>
                 {preview.preview.statement}
               </div>
+              {/* Stage D9, the AI-origin preview: the CONCRETE SELECTION
+                  first — the ratio the narrowing is explicit — then the
+                  rows, and only below them the model's rationale, labeled
+                  as a RECOMMENDATION (never board truth, the C2/C5
+                  doctrine). */}
+              {preview.action.origin === "ai" &&
+                preview.preview.selectedCount !== undefined &&
+                preview.preview.totalCandidates !== undefined && (
+                  <div
+                    className="mono"
+                    style={{ padding: "2px 12px 6px", fontSize: 11, color: "var(--amber-2)" }}
+                  >
+                    {t("integrations.ai.ratio", locale, {
+                      selected: preview.preview.selectedCount,
+                      total: preview.preview.totalCandidates,
+                    })}
+                  </div>
+                )}
               {preview.preview.creates.length > 0 && header(
                 t("integrations.preview.creates", locale, { n: preview.preview.creates.length }),
               )}
@@ -254,6 +295,36 @@ export function IntegrationPanel({
                       </div>
                     ))}
                   </div>
+                </div>
+              ))}
+              {/* The model's rationale — AFTER the concrete selection, labeled
+                  as a recommendation (the review's ordering). The request the
+                  user typed rides beside it: the draft's provenance. */}
+              {preview.action.origin === "ai" && preview.preview.explanation && (
+                <div style={{ padding: "8px 12px 4px" }}>
+                  <div className="mono" style={{ fontSize: 10, color: "var(--ink-3)", marginBottom: 2 }}>
+                    {t("integrations.ai.rationale", locale)}
+                  </div>
+                  <div style={{ fontSize: 11.5, color: "var(--ink-2)", lineHeight: 1.5 }}>
+                    “{preview.preview.explanation}”
+                  </div>
+                  {preview.action.provenance?.request && (
+                    <div className="mono" style={{ fontSize: 10, color: "var(--ink-3)", marginTop: 4 }}>
+                      {t("integrations.ai.requested", locale, {
+                        request: preview.action.provenance.request,
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+              {/* The drop warnings: the model's unknown ids, made visible. */}
+              {preview.preview.warnings?.map((w, i) => (
+                <div
+                  key={i}
+                  className="mono"
+                  style={{ padding: "2px 12px", fontSize: 10, color: "var(--amber-2)", lineHeight: 1.5 }}
+                >
+                  ⚠ {w}
                 </div>
               ))}
             </>
@@ -327,9 +398,30 @@ export function IntegrationPanel({
         {connection && connection.status === "active" && (
           <div style={{ display: "flex", gap: 8, padding: "10px 14px", borderTop: "1px solid var(--stroke-1)" }}>
             {!preview && !results && (
-              <button className="btn amber" style={{ height: 28, fontSize: 12 }} disabled={busy} onClick={propose}>
-                {busy ? "…" : t("integrations.panel.propose", locale)}
-              </button>
+              <>
+                {/* Stage D9: Ask Lucent to draft — the narrowing agent. The
+                    request rides the record's provenance; the model's
+                    selection + rationale render in the preview. */}
+                <input
+                  value={aiRequest}
+                  onChange={(e) => setAiRequest(e.target.value)}
+                  placeholder={t("integrations.ai.placeholder", locale)}
+                  aria-label={t("integrations.ai.aria", locale)}
+                  maxLength={600}
+                  style={{ flex: 1, minWidth: 160, height: 28, fontSize: 12 }}
+                />
+                <button
+                  className="btn"
+                  style={{ height: 28, fontSize: 12 }}
+                  disabled={busy || !aiRequest.trim()}
+                  onClick={() => void proposeAi()}
+                >
+                  {busy ? "…" : t("integrations.ai.draft", locale)}
+                </button>
+                <button className="btn amber" style={{ height: 28, fontSize: 12 }} disabled={busy} onClick={propose}>
+                  {t("integrations.panel.propose", locale)}
+                </button>
+              </>
             )}
             {preview && !results && !refusedWarnings && (
               <>
