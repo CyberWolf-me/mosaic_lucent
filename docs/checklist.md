@@ -1677,3 +1677,40 @@ Two fixes the pass forced (both coded, tested, committed here):
 
 Gate: typecheck 0; server 1038 (+1 acceptance), ai 199 (+14), web 651
 (+5), i18n 14, mcp 28, core 422. Migration 0022 committed.
+
+## The Stage D9 live browser pass (2026-09-07)
+
+Ran against the real stack: the rebuilt server on :4387 (provider: MOCK —
+the REAL gorouter LLM was out of quota for the configured model
+("model_not_found / No available channel for claude-opus-5-thinking"),
+an external constraint; the MockProvider IS the deterministic narrowing
+agent, so the live pass proves the same engine offline), the GitHub
+stub on :4390, Vite on :5174, the 10-action board, and the github
+connection (repo=acme/app + the stub baseUrl through config).
+
+What the pass verified, live in the browser:
+[x] THE ASK-LUCENT FLOW: the panel's input ("Ask Lucent to draft —
+    e.g. the launch-critical ones") + the button; typing "send the
+    launch-related actions" and clicking produced the AI-origin
+    preview in the review's EXACT ordering: the statement ("Lucent
+    proposes sending 3 of the board's 10 executable actions to
+    github"), THE RATIO LINE ("3 of 10 actions selected"), the three
+    rows (the two with dueDates carrying the D8 warnings verbatim),
+    and BELOW them the quoted rationale labeled "a recommendation —
+    you decide" + the originating request ("asked: 'send the
+    launch-related actions'").
+[x] The mock's narrowing matched the request exactly: the 3
+    launch-titled actions out of 10.
+[x] THE GATE: Approve without the ack → the 409's faithful-
+    representation block (both dueDate warnings) + Send anyway/Cancel;
+    Send anyway → "Result", the ↗ chips (500/501/502), and THE WIRE
+    SAW EXACTLY 3 issue creates (plus one assignees fetch) — the
+    narrowing held end to end.
+[x] The action record on the server: approved, 3 items, one row in
+    the list.
+
+One environment note recorded: the real-LLM attempt surfaced the
+quota error honestly (a 500 with the provider's message in the log —
+the correct failure shape, not a silent fallback); the pass then used
+the mock. The real-model narrowing remains verified at the contract
+level by the scripted-selector suites.
