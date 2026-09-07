@@ -6,16 +6,25 @@ import {
   anthropicAnswerToolDefinition,
   answerArgumentsSchema,
 } from "../answer.js";
+import type { ExternalPlanRequest, ExternalPlanResult } from "../externalPlan.js";
+import {
+  EXTERNAL_PLAN_TOOL_NAME,
+  anthropicExternalPlanToolDefinition,
+} from "../externalPlan.js";
 import {
   ANSWER_SYSTEM_PROMPT,
+  EXTERNAL_PLAN_SYSTEM_PROMPT,
   SYSTEM_PROMPT,
   buildAnswerUserPrompt,
+  buildExternalPlanUserPrompt,
   buildUserPrompt,
 } from "../prompt.js";
 import {
   completionMeta,
   parseAnswerToolArguments,
   parseAnswerModelJson,
+  parseExternalPlanToolArguments,
+  parseExternalPlanModelJson,
   parseModelJson,
   parseToolArguments,
 } from "./toolCall.js";
@@ -266,6 +275,73 @@ export class AnthropicProvider implements LLMProvider {
       const text = data.content?.find((c) => c.type === "text")?.text ?? "";
       if (!text) throw new Error("Anthropic returned neither a tool call nor text");
       return parseAnswerModelJson(text, meta);
+    }
+    throw new Error(`Anthropic request failed (${lastStatus}): ${lastDetail}`);
+  }
+
+  /**
+   * The external-plan call type (Stage D9): the answer path's loop with the
+   * selector prompt, tool, and parsers. No repair — the server intersects
+   * and caps the selection regardless of what the model returned.
+   */
+  async generateExternalPlan(request: ExternalPlanRequest): Promise<ExternalPlanResult> {
+    let lastDetail = "";
+    let lastStatus = 0;
+    for (let attempt = 0; attempt < this.maxRetries; attempt++) {
+      let response: Response;
+      try {
+        response = await this.fetchImpl(this.baseUrl, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-api-key": this.apiKey,
+            "anthropic-version": "2023-06-01",
+          },
+          body: JSON.stringify({
+            model: this.model,
+            // A selection list plus one paragraph.
+            max_tokens: 2048,
+            system: EXTERNAL_PLAN_SYSTEM_PROMPT,
+            messages: [{ role: "user", content: buildExternalPlanUserPrompt(request) }],
+            tools: [anthropicExternalPlanToolDefinition()],
+            tool_choice: { type: "tool", name: EXTERNAL_PLAN_TOOL_NAME },
+          }),
+          signal: AbortSignal.timeout(this.timeoutMs),
+        });
+      } catch (err) {
+        lastDetail = (err as Error).message;
+        lastStatus = 0;
+        if (attempt < this.maxRetries - 1) {
+          await sleep(400 * 2 ** attempt);
+          continue;
+        }
+        throw new Error(`Anthropic request failed (network): ${lastDetail}`);
+      }
+
+      if (!response.ok) {
+        lastStatus = response.status;
+        lastDetail = await response.text().catch(() => "");
+        if (RETRYABLE_STATUS.has(response.status) && attempt < this.maxRetries - 1) {
+          await sleep(400 * 2 ** attempt + Math.random() * 250);
+          continue;
+        }
+        throw new Error(`Anthropic request failed (${lastStatus}): ${lastDetail}`);
+      }
+
+      const data = (await response.json()) as AnthropicResponse;
+      const meta = completionMeta(
+        data.model ?? this.model,
+        data.usage?.input_tokens,
+        data.usage?.output_tokens,
+      );
+
+      const toolUse = data.content?.find((c) => c.type === "tool_use");
+      if (toolUse?.input !== undefined) {
+        return parseExternalPlanToolArguments(toolUse.input as object, meta);
+      }
+      const text = data.content?.find((c) => c.type === "text")?.text ?? "";
+      if (!text) throw new Error("Anthropic returned neither a tool call nor text");
+      return parseExternalPlanModelJson(text, meta);
     }
     throw new Error(`Anthropic request failed (${lastStatus}): ${lastDetail}`);
   }

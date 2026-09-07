@@ -1,6 +1,11 @@
 import { safeParseOperations, type Operation } from "@lucent/core";
 import type { GenerateRequest, GenerateResult, LLMProvider, StreamCallbacks } from "../provider.js";
 import type { AnswerCitation, AnswerRequest, AnswerResult } from "../answer.js";
+import {
+  MAX_AI_SELECTED_ACTIONS,
+  type ExternalPlanRequest,
+  type ExternalPlanResult,
+} from "../externalPlan.js";
 
 /**
  * Offline provider so the full pipeline (generate -> validate -> reduce ->
@@ -866,6 +871,38 @@ export class MockProvider implements LLMProvider {
           } are visible in its history.`
         : `This board ("${request.boardName}") has no nodes yet.`,
       citations: node ? [{ kind: "node", id: node.id }] : [],
+    };
+  }
+
+  /**
+   * The external-plan path (Stage D9). Deterministic narrowing: the
+   * candidates whose label or statement topic shares a word with the
+   * request, capped at MAX_AI_SELECTED_ACTIONS; when nothing matches, ALL
+   * candidates (an honest broad default — the human reviews the whole set).
+   * The mock grounds its selection in the same candidate list the server
+   * computed, so the offline flow exercises the real intersection.
+   */
+  async generateExternalPlan(request: ExternalPlanRequest): Promise<ExternalPlanResult> {
+    const words = new Set(
+      request.request
+        .toLowerCase()
+        .split(/[^a-z0-9]+/)
+        .filter((w) => w.length > 3),
+    );
+    const matches = request.candidates.filter((c) => {
+      const haystack = `${c.label} ${c.statementTopic ?? ""}`.toLowerCase();
+      return [...words].some((w) => haystack.includes(w));
+    });
+    const selected = (matches.length > 0 ? matches : request.candidates).slice(
+      0,
+      MAX_AI_SELECTED_ACTIONS,
+    );
+    return {
+      nodeIds: selected.map((c) => c.nodeId),
+      explanation:
+        selected.length === request.candidates.length
+          ? `All ${selected.length} of the board's executable actions appear relevant to the request.`
+          : `These ${selected.length} of ${request.candidates.length} actions appear to match the request; the human reviews the selection.`,
     };
   }
 

@@ -1,7 +1,7 @@
 import * as z from "zod/v4";
 import { actionNodes } from "@lucent/core";
 import type { RegisterRoutes } from "./context.js";
-import { connectionView, MAX_CREDENTIAL_REF_CHARS } from "../integrations/integrations.js";
+import { connectionView, extractProposalItems, MAX_CREDENTIAL_REF_CHARS } from "../integrations/integrations.js";
 import { webhookSchemes } from "../integrations/webhook.js";
 import type { IntegrationProviderName } from "../integrations/integrations.js";
 
@@ -355,38 +355,19 @@ router.post("/api/boards/:id/integrations/:provider/propose", async (ctx) => {
 
   // Compute the per-node plan: creates for unlinked action nodes, updates
   // for linked ones (the same split the sync route applies), each carrying
-  // its exactly-once key.
+  // its exactly-once key. The shared builder (extracted in D9) — the AI
+  // propose route calls the same function, so the item computation can
+  // never diverge between the two origins.
   const existingLinks = new Map(
     (await integrations.store.linksForBoard(boardId))
       .filter((l) => l.provider === providerName)
-      .map((l) => [l.nodeId, l]),
+      .map((l) => [l.nodeId, l] as const),
   );
-  const items = actionNodes(guard.board.workspace).map((node) => {
-    const issue = node.issue!;
-    const link = existingLinks.get(node.id);
-    // Stage D8, ADR 0034's honesty layer: the provider declares what it
-    // CANNOT represent faithfully for this item BEFORE anything executes.
-    // The warnings ride the item into the record and the preview; approve
-    // refuses until the human acknowledges them.
-    const fields = {
-      title: node.label,
-      ...(issue.assignee ? { assignee: issue.assignee } : {}),
-      ...(issue.dueDate ? { dueDate: issue.dueDate } : {}),
-      ...(issue.status ? { status: issue.status } : {}),
-    };
-    const warnings = provider.capabilityWarnings?.(fields);
-    return {
-      nodeId: node.id,
-      action: link ? ("update" as const) : ("create" as const),
-      title: node.label,
-      ...(issue.assignee ? { assignee: issue.assignee } : {}),
-      ...(issue.dueDate ? { dueDate: issue.dueDate } : {}),
-      status: issue.status,
-      ...(link ? { externalId: link.externalId } : {}),
-      idempotencyKey: `ext_${node.id}`,
-      ...(warnings && warnings.length > 0 ? { warnings } : {}),
-    };
-  });
+  const items = extractProposalItems(
+    guard.board.workspace,
+    existingLinks,
+    provider.capabilityWarnings?.bind(provider),
+  );
 
   if (items.length === 0) {
     send(res, 422, { error: "no executable actions on this board" });

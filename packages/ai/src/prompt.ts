@@ -2,6 +2,7 @@ import { getPrompt } from "./registry.js";
 import { REQUEST_LIMITS } from "./provider.js";
 import type { GenerateRequest } from "./provider.js";
 import type { AnswerRequest } from "./answer.js";
+import type { ExternalPlanRequest } from "./externalPlan.js";
 
 /**
  * The prompt harness is the model-independent asset (docs/09 section 0). It
@@ -76,6 +77,21 @@ export const ANSWER_SYSTEM_PROMPT_VOCABULARY: readonly string[] =
   BOARD_HISTORIAN.vocabulary;
 export const ANSWER_SYSTEM_PROMPT_ID: string = BOARD_HISTORIAN.id;
 export const ANSWER_SYSTEM_PROMPT_VERSION: number = BOARD_HISTORIAN.version;
+
+/**
+ * The Stage D9 external-selector prompt, bound the same way: the narrowing
+ * selector for AI-initiated external proposals. Emits no operations (only
+ * a selection of node ids + a rationale); the injection clause and the
+ * recommendation-not-truth wording live in the prompt file.
+ */
+const EXTERNAL_SELECTOR = getPrompt("external-selector");
+
+/** The system prompt the external-plan path sends. */
+export const EXTERNAL_PLAN_SYSTEM_PROMPT: string = EXTERNAL_SELECTOR.systemPrompt;
+export const EXTERNAL_PLAN_SYSTEM_PROMPT_VOCABULARY: readonly string[] =
+  EXTERNAL_SELECTOR.vocabulary;
+export const EXTERNAL_PLAN_SYSTEM_PROMPT_ID: string = EXTERNAL_SELECTOR.id;
+export const EXTERNAL_PLAN_SYSTEM_PROMPT_VERSION: number = EXTERNAL_SELECTOR.version;
 
 /* -------------------------------------------------------------------------- */
 /* Untrusted content framing (M5)                                             */
@@ -752,6 +768,63 @@ export function buildAnswerUserPrompt(request: AnswerRequest): string {
   // The question: the one instruction, last, unenveloped, escaped, capped —
   // identical contract to buildUserPrompt's closing line.
   const asked = clamp(request.question, ANSWER_LIMITS.question);
+  sections.push(
+    `User request: ${escapeHarnessTags(asked.text)}${
+      asked.dropped ? ` [the harness dropped ${asked.dropped} characters over its limit]` : ""
+    }`,
+  );
+  return sections.join("\n\n");
+}
+
+/* -------------------------------------------------------------------------- */
+/* The external-plan user prompt (Stage D9)                                    */
+/* -------------------------------------------------------------------------- */
+
+/** Caps for the selector's prompt — the candidate list is bounded data. */
+const EXTERNAL_PLAN_LIMITS = {
+  requestChars: 600,
+  candidates: 50,
+  candidateLabelChars: 160,
+} as const;
+
+/**
+ * The user prompt for generateExternalPlan. The candidates are the
+ * server-computed narrowing upper bound; every text field is collaborator
+ * content, so each is tag-escaped — the selector's system prompt carries
+ * the injection clause, and the escape is the structural half. The user's
+ * request is the one instruction, last, unenveloped (the answer path's
+ * closing-line contract).
+ */
+export function buildExternalPlanUserPrompt(request: ExternalPlanRequest): string {
+  const sections: string[] = [];
+
+  sections.push(
+    `Board: ${escapeHarnessTags(clamp(request.boardName, 120).text)} — the user wants some of its executable actions proposed for external sync to ${escapeHarnessTags(clamp(request.providerName, 40).text)}.`,
+  );
+
+  const shown = request.candidates.slice(0, EXTERNAL_PLAN_LIMITS.candidates);
+  const candidateLines = shown.map((c) => {
+    const label = clamp(c.label, EXTERNAL_PLAN_LIMITS.candidateLabelChars);
+    const fields = [
+      c.statementKind ? `kind: ${c.statementKind}` : null,
+      c.statementTopic ? `topic: ${c.statementTopic}` : null,
+      c.status ? `status: ${c.status}` : null,
+      c.assignee ? `assignee: ${c.assignee}` : null,
+      c.dueDate ? `due: ${c.dueDate}` : null,
+    ].filter(Boolean);
+    return `  ${c.nodeId} · ${escapeHarnessTags(label.text)}${fields.length ? ` · ${fields.join(" · ")}` : ""}`;
+  });
+  const capStatement =
+    request.totalCandidates > shown.length
+      ? `\nThe board has ${request.totalCandidates} executable actions in total; you see the first ${shown.length}.`
+      : `\nThese are the board's ${shown.length} executable actions.`;
+  sections.push(
+    `Candidate actions (select a subset of these node ids — never invented ids, never duplicates):\n${
+      candidateLines.join("\n") || "  (none)"
+    }${capStatement}`,
+  );
+
+  const asked = clamp(request.request, EXTERNAL_PLAN_LIMITS.requestChars);
   sections.push(
     `User request: ${escapeHarnessTags(asked.text)}${
       asked.dropped ? ` [the harness dropped ${asked.dropped} characters over its limit]` : ""

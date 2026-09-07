@@ -2,6 +2,7 @@ export * from "./provider.js";
 export * from "./prompt.js";
 export * from "./registry.js";
 export * from "./answer.js";
+export * from "./externalPlan.js";
 export { MockProvider } from "./providers/mock.js";
 export { AnthropicProvider } from "./providers/anthropic.js";
 export { OpenAICompatibleProvider } from "./providers/openai-compat.js";

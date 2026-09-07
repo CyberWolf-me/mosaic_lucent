@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { actionNodes, type Workspace } from "@lucent/core";
 
 /**
  * The integration connection + task-link store (Stage D4, ADR 0030).
@@ -189,6 +190,44 @@ export function normalizeLink(input: LinkTaskInput): LinkTaskInput {
   }
   if (!input.externalId.trim()) throw new Error("externalId is required");
   return { ...input, provider, externalId: input.externalId.trim() };
+}
+
+/**
+ * The shared proposal-item builder (extracted from the propose route in
+ * Stage D9, verbatim): creates for unlinked action nodes, updates for
+ * linked ones, each with its exactly-once key and the D8 capability
+ * warnings. Both the human propose route and the AI propose route call
+ * THIS — the item computation can never diverge between them, which is
+ * what makes "the AI may only narrow" a structural fact rather than a
+ * convention: the AI route receives this list and intersects it.
+ */
+export function extractProposalItems(
+  workspace: Workspace,
+  linksForProvider: ReadonlyMap<string, { nodeId: string; externalId: string }>,
+  capabilityWarnings: ((fields: { title: string; assignee?: string; dueDate?: string; status?: string }) => Array<{ field: string; reason: string }>) | undefined,
+): IntegrationActionItem[] {
+  return actionNodes(workspace).map((node) => {
+    const issue = node.issue!;
+    const link = linksForProvider.get(node.id);
+    const fields = {
+      title: node.label,
+      ...(issue.assignee ? { assignee: issue.assignee } : {}),
+      ...(issue.dueDate ? { dueDate: issue.dueDate } : {}),
+      ...(issue.status ? { status: issue.status } : {}),
+    };
+    const warnings = capabilityWarnings?.(fields);
+    return {
+      nodeId: node.id,
+      action: link ? ("update" as const) : ("create" as const),
+      title: node.label,
+      ...(issue.assignee ? { assignee: issue.assignee } : {}),
+      ...(issue.dueDate ? { dueDate: issue.dueDate } : {}),
+      status: issue.status,
+      ...(link ? { externalId: link.externalId } : {}),
+      idempotencyKey: `ext_${node.id}`,
+      ...(warnings && warnings.length > 0 ? { warnings } : {}),
+    };
+  });
 }
 
 /** The admin's view of a connection: the reference as a FINGERPRINT, never in full. */

@@ -2,17 +2,26 @@ import { openAiToolDefinition, TOOL_NAME } from "@lucent/core";
 import type { GenerateRequest, GenerateResult, LLMProvider, StreamCallbacks } from "../provider.js";
 import type { AnswerRequest, AnswerResult } from "../answer.js";
 import { ANSWER_TOOL_NAME, openAiAnswerToolDefinition } from "../answer.js";
+import type { ExternalPlanRequest, ExternalPlanResult } from "../externalPlan.js";
+import {
+  EXTERNAL_PLAN_TOOL_NAME,
+  openAiExternalPlanToolDefinition,
+} from "../externalPlan.js";
 import { sseEvents } from "./sse.js";
 import {
   ANSWER_SYSTEM_PROMPT,
+  EXTERNAL_PLAN_SYSTEM_PROMPT,
   SYSTEM_PROMPT,
   buildAnswerUserPrompt,
+  buildExternalPlanUserPrompt,
   buildUserPrompt,
 } from "../prompt.js";
 import {
   completionMeta,
   parseAnswerModelJson,
   parseAnswerToolArguments,
+  parseExternalPlanModelJson,
+  parseExternalPlanToolArguments,
   parseModelJson,
   parseToolArguments,
 } from "./toolCall.js";
@@ -270,6 +279,83 @@ export class OpenAICompatibleProvider implements LLMProvider {
       const text = message?.content ?? "";
       if (!text) throw new Error("Provider returned neither a tool call nor content");
       return parseAnswerModelJson(text, meta);
+    }
+
+    throw new Error(`Provider request failed (${lastStatus}): ${lastDetail}`);
+  }
+
+  /**
+   * The external-plan call type (Stage D9): the answer path's loop with the
+   * selector prompt, the selector tool, and the selector parsers swapped
+   * in. Same no-repair/no-streaming posture — a dropped selection is a
+   * human-decided retry, not worth re-asking.
+   */
+  async generateExternalPlan(request: ExternalPlanRequest): Promise<ExternalPlanResult> {
+    const body = JSON.stringify({
+      model: this.model,
+      messages: [
+        { role: "system", content: EXTERNAL_PLAN_SYSTEM_PROMPT },
+        { role: "user", content: buildExternalPlanUserPrompt(request) },
+      ],
+      tools: [openAiExternalPlanToolDefinition()],
+      tool_choice: { type: "function", function: { name: EXTERNAL_PLAN_TOOL_NAME } },
+      // A selection list plus one paragraph, not a board.
+      max_tokens: 2048,
+      temperature: 0.2,
+    });
+
+    let lastDetail = "";
+    let lastStatus = 0;
+    for (let attempt = 0; attempt < this.maxRetries; attempt++) {
+      let response: Response;
+      try {
+        response = await this.fetchImpl(this.baseUrl, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            authorization: `Bearer ${this.apiKey}`,
+          },
+          body,
+          signal: AbortSignal.timeout(this.timeoutMs),
+        });
+      } catch (err) {
+        lastDetail = (err as Error).message;
+        lastStatus = 0;
+        if (attempt < this.maxRetries - 1) {
+          await sleep(400 * 2 ** attempt);
+          continue;
+        }
+        throw new Error(`Provider request failed (network): ${lastDetail}`);
+      }
+
+      if (!response.ok) {
+        lastStatus = response.status;
+        lastDetail = await response.text().catch(() => "");
+        if (RETRYABLE_STATUS.has(response.status) && attempt < this.maxRetries - 1) {
+          await sleep(400 * 2 ** attempt + Math.random() * 250);
+          continue;
+        }
+        throw new Error(`Provider request failed (${lastStatus}): ${lastDetail}`);
+      }
+
+      const data = (await response.json()) as ChatResponse;
+      const message = data.choices?.[0]?.message;
+      const meta = completionMeta(
+        data.model ?? this.model,
+        data.usage?.prompt_tokens,
+        data.usage?.completion_tokens,
+      );
+
+      const call =
+        message?.tool_calls?.find((c) => c.function?.name === EXTERNAL_PLAN_TOOL_NAME) ??
+        message?.tool_calls?.[0];
+      if (call?.function?.arguments) {
+        return parseExternalPlanToolArguments(call.function.arguments, meta);
+      }
+
+      const text = message?.content ?? "";
+      if (!text) throw new Error("Provider returned neither a tool call nor content");
+      return parseExternalPlanModelJson(text, meta);
     }
 
     throw new Error(`Provider request failed (${lastStatus}): ${lastDetail}`);

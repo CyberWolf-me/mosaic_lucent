@@ -1,6 +1,7 @@
 import type { DiagramKind, Operation, Workspace } from "@lucent/core";
 import { commentThreads, reactionTally, voteRanking } from "@lucent/core";
 import type { AnswerRequest, AnswerResult } from "./answer.js";
+import type { ExternalPlanRequest, ExternalPlanResult } from "./externalPlan.js";
 
 /**
  * Provider-agnostic AI boundary. The moat is the semantic canvas + harness, not
@@ -194,6 +195,15 @@ export interface LLMProvider {
    * and the citations only make sense as part of a whole.
    */
   generateAnswer(request: AnswerRequest): Promise<AnswerResult>;
+  /**
+   * The external-plan call type (Stage D9): the same board, narrowed
+   * instead of written or read. The model selects which of the server's
+   * candidate actions to propose for external sync, plus a rationale; the
+   * server builds every item from real state and the human approves.
+   * Required, so a provider cannot compile as a silent gap — the narrowing
+   * contract is a platform promise, not a per-provider courtesy.
+   */
+  generateExternalPlan(request: ExternalPlanRequest): Promise<ExternalPlanResult>;
   /**
    * Streaming variant. Optional: the single-shot contract stays the default,
    * and `streamViaGenerate` adapts any non-streaming provider so callers can

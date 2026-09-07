@@ -2,6 +2,8 @@ import { safeParseOperations } from "@lucent/core";
 import type { GenerateResult, TokenUsage } from "../provider.js";
 import type { AnswerResult } from "../answer.js";
 import { answerArgumentsSchema } from "../answer.js";
+import type { ExternalPlanResult } from "../externalPlan.js";
+import { externalPlanArgumentsSchema } from "../externalPlan.js";
 
 /**
  * Shared handling of a model's tool-call arguments.
@@ -160,4 +162,71 @@ export function parseAnswerModelJson(text: string, meta?: CompletionMeta): Answe
     throw new Error(`Model response was not valid JSON: ${(err as Error).message}`);
   }
   return toAnswerResult(parsed, "text fallback", meta);
+}
+
+/* -------------------------------------------------------------------------- */
+/* The external-plan path (Stage D9)                                          */
+/* -------------------------------------------------------------------------- */
+
+/** Tool-args shape the selector tool sends. */
+interface ExternalPlanArgs {
+  nodeIds?: unknown;
+  explanation?: unknown;
+}
+
+function toExternalPlanResult(
+  parsed: ExternalPlanArgs,
+  source: string,
+  meta?: CompletionMeta,
+): ExternalPlanResult {
+  const result = externalPlanArgumentsSchema.safeParse({
+    ...(parsed.nodeIds !== undefined ? { nodeIds: parsed.nodeIds } : {}),
+    ...(parsed.explanation !== undefined ? { explanation: parsed.explanation } : {}),
+  });
+  if (!result.success) {
+    throw new Error(`Model returned an invalid external plan (${source}): ${result.error.message}`);
+  }
+  return {
+    nodeIds: result.data.nodeIds,
+    explanation: result.data.explanation,
+    ...(meta?.model ? { model: meta.model } : {}),
+    ...(meta?.usage ? { usage: meta.usage } : {}),
+  };
+}
+
+/** Parse the selector tool's call arguments (a JSON string or an object). */
+export function parseExternalPlanToolArguments(
+  raw: string | object,
+  meta?: CompletionMeta,
+): ExternalPlanResult {
+  let parsed: ExternalPlanArgs;
+  if (typeof raw === "string") {
+    try {
+      parsed = JSON.parse(raw) as ExternalPlanArgs;
+    } catch (err) {
+      throw new Error(`Tool arguments were not valid JSON: ${(err as Error).message}`);
+    }
+  } else {
+    parsed = raw as ExternalPlanArgs;
+  }
+  return toExternalPlanResult(parsed, "tool call", meta);
+}
+
+/** Prose fallback — the same narrow brace extraction. */
+export function parseExternalPlanModelJson(
+  text: string,
+  meta?: CompletionMeta,
+): ExternalPlanResult {
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+  if (start === -1 || end === -1 || end < start) {
+    throw new Error("No JSON object found in model response");
+  }
+  let parsed: ExternalPlanArgs;
+  try {
+    parsed = JSON.parse(text.slice(start, end + 1)) as ExternalPlanArgs;
+  } catch (err) {
+    throw new Error(`Model response was not valid JSON: ${(err as Error).message}`);
+  }
+  return toExternalPlanResult(parsed, "text fallback", meta);
 }
