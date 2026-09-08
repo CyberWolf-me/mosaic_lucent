@@ -18,6 +18,14 @@ export interface Config {
   host: string;
   port: number;
   webOrigin: string;
+  /**
+   * Every origin the browser may call from (the CSRF Origin allow-list and any
+   * future multi-origin consumer). Vite's dev port auto-increments when the
+   * default is taken, so deployments pin several — a single-origin allow-list
+   * is how a stale 5174 entry silently 403'd every authenticated POST ("csrf
+   * rejected", reason "origin") once Vite drifted back to 5173.
+   */
+  webOrigins: string[];
   databaseUrl: string | undefined;
   requireAuth: boolean;
   /** True only when explicitly enabled; controls X-Forwarded-For trust. */
@@ -89,6 +97,8 @@ export interface ConfigEnv {
   LUCENT_HOST?: string;
   LUCENT_PORT?: string;
   LUCENT_WEB_ORIGIN?: string;
+  /** Comma-separated extension of LUCENT_WEB_ORIGIN; each entry joins the CSRF allow-list. */
+  LUCENT_WEB_ORIGINS?: string;
   LUCENT_DATABASE_URL?: string;
   LUCENT_REQUIRE_AUTH?: string;
   LUCENT_TRUST_PROXY?: string;
@@ -165,6 +175,14 @@ export function readConfig(env: ConfigEnv = process.env): Config {
     host: env.LUCENT_HOST ?? "127.0.0.1",
     port: num(env.LUCENT_PORT, 4387),
     webOrigin: env.LUCENT_WEB_ORIGIN ?? "http://localhost:5173",
+    webOrigins: (() => {
+      const primary = env.LUCENT_WEB_ORIGIN ?? "http://localhost:5173";
+      const extras = (env.LUCENT_WEB_ORIGINS ?? "")
+        .split(",")
+        .map((o) => o.trim())
+        .filter((o) => o.length > 0 && o !== primary);
+      return [primary, ...extras];
+    })(),
     databaseUrl: env.LUCENT_DATABASE_URL || undefined,
     requireAuth,
     trustProxy: env.LUCENT_TRUST_PROXY === "1",

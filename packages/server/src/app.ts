@@ -1073,7 +1073,10 @@ export function createApp(deps: AppDeps): App {
     const result = verifyCsrf(
       {
         secret,
-        allowedOrigins: [config.webOrigin, `http://${req.headers.host ?? ""}`].filter(Boolean),
+        allowedOrigins: [
+          ...config.webOrigins,
+          `http://${req.headers.host ?? ""}`,
+        ].filter(Boolean),
       },
       req.method ?? "GET",
       typeof req.headers.origin === "string" ? req.headers.origin : undefined,
