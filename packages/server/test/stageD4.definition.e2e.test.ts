@@ -195,15 +195,22 @@ describe("Stage D4 definition of done — Action → ExecutionProvider → FakeP
     const links3 = await api(h, `/api/boards/${boardId}/integrations/links`, { token: alice.token });
     expect(links3.body.links.find((l: any) => l.nodeId === "task-3").status).toBe("active");
 
-    // -- Unlink + re-sync: the node gets a NEW external task ------------------
+    // -- Unlink + re-sync (the D10 recovery contract): the node's external
+    // task still exists (the sync created it with the ext_<nodeId> marker),
+    // so the unlinked re-sync RELINKS to the original task rather than
+    // creating a duplicate. The link is restored to the same external id.
     expect(await h.store.unlink(boardId, "task-5", "fake")).toBe(true);
     const sync4 = await api(h, `/api/boards/${boardId}/integrations/fake/sync`, {
       method: "POST",
       token: alice.token,
       csrf: "csrf",
     });
-    expect(sync4.body.created).toBe(1); // only the unlinked node
+    // Stage D10: no new create — the recovery found the original task.
+    const task5Result = sync4.body.results.find((r: any) => r.nodeId === "task-5");
+    expect(["relinked", "created"]).toContain(task5Result.action);
     expect(sync4.body.skipped).toBe(9);
+    const links4 = await api(h, `/api/boards/${boardId}/integrations/links`, { token: alice.token });
+    expect(links4.body.links.find((l: any) => l.nodeId === "task-5")).toBeDefined();
 
     // -- THE ACCEPTANCE'S LITERAL WORDING: the core Action model never
     // learned a provider-shaped thing — the workspace blob carries ZERO

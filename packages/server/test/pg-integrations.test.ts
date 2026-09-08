@@ -83,6 +83,19 @@ function connectionContract(name: string, make: () => IntegrationStore, prefix: 
       expect(await store.linksForNode(board, "n1")).toHaveLength(2);
       // Another board sees nothing.
       expect(await store.linksForBoard(`${prefix}-other`)).toEqual([]);
+      // Stage D10: the org-scoped GC feed — newest-synced first, capped.
+      await store.linkTask(
+        { orgId: "o", boardId: `${prefix}-b2`, nodeId: "n1", provider: "fake", externalId: "E3", lastSyncedStatus: "todo" },
+        4_000,
+      );
+      const orgLinks = await store.linksForOrg("o", 10);
+      // The re-link above bumped n1's syncedAt to 4_000: the linear link (3k)
+      // and E3 (4k on another board) are in the feed; another org sees none.
+      expect(orgLinks.length).toBeGreaterThanOrEqual(2);
+      expect(orgLinks.every((l) => l.orgId === "o")).toBe(true);
+      expect((await store.linksForOrg(`${prefix}-other-org`, 10)).length).toBe(0);
+      // The cap is honored.
+      expect((await store.linksForOrg("o", 1)).length).toBe(1);
       // Unlink drops exactly one.
       expect(await store.unlink(board, "n1", "fake")).toBe(true);
       expect(await store.linksForNode(board, "n1")).toHaveLength(1);
@@ -240,6 +253,32 @@ function webhookEventContract(name: string, make: () => IntegrationWebhookEventS
       await store.markIgnored(id2, 5_110);
       expect((await store.pending(9_999, 9_999, 50)).some((e) => e.id === id2)).toBe(false);
     });
+
+    it("Stage D10 pruneTerminal: the terminal set only, the terminal timestamp, bounded", async () => {
+      const store = make();
+      const mk = async (id: string, status: "processed" | "ignored" | "failed" | "received", at: number) => {
+        await store.claim({ id, provider: "fake", orgId: "o", externalId: null, now: at - 1, staleAfterMs: 1 });
+        if (status === "failed") await store.markFailed(id, "boom", at);
+        else if (status === "processed") await store.markProcessed(id, "o", at);
+        else if (status === "ignored") await store.markIgnored(id, at);
+      };
+      await mk(`${prefix}-p1`, "processed", 1_000);
+      await mk(`${prefix}-p2`, "ignored", 1_100);
+      await mk(`${prefix}-p3`, "processed", Date.now()); // fresh terminal
+      await mk(`${prefix}-f1`, "failed", 1_200); // retryable — NEVER pruned
+      await mk(`${prefix}-r1`, "received", 1_300); // in-flight — NEVER pruned
+      const pruned = await store.pruneTerminal(Date.now() - 1000, 100);
+      expect(pruned).toBe(2); // the two OLD terminal rows only
+      // failed + received still feed the sweep; the fresh terminal row does
+      // not (not in the pending feed) and was not counted.
+      const feed = new Set((await store.pending(2_000, Date.now() + 1, 100)).map((e) => e.id));
+      expect(feed.has(`${prefix}-f1`)).toBe(true);
+      expect(feed.has(`${prefix}-r1`)).toBe(true);
+      // The cap: one row at a time.
+      await mk(`${prefix}-p4`, "processed", 2_000);
+      await mk(`${prefix}-p5`, "processed", 2_100);
+      expect(await store.pruneTerminal(Date.now() - 1000, 1)).toBe(1);
+    });
   });
 }
 
@@ -301,6 +340,21 @@ function inboundContract(name: string, make: () => InboundChangeStore, prefix: s
       const rows = await store.forBoard(board);
       expect(rows.find((r) => r.nodeId === "nB")).toMatchObject({ status: "superseded" });
       expect(rows.find((r) => r.nodeId === "nA")).toMatchObject({ status: "applied" });
+
+      // Stage D10 pruneTerminal: the terminal set (applied/dismissed/
+      // superseded) by decidedAt, never pending, bounded.
+      const pending = await store.put(
+        { ...base, nodeId: "nC", externalValue: "todo", mappedValue: "open" },
+        "webhook",
+        5_000,
+      );
+      expect(
+        await store.pruneTerminal(Date.now(), 100),
+      ).toBe(2); // nA (applied, decided 2_000) + nB (superseded, decided 4_000)
+      const after = await store.forBoard(board);
+      expect(after.find((r) => r.nodeId === "nC")).toMatchObject({ status: "pending" });
+      expect(after.find((r) => r.nodeId === "nA")).toBeUndefined();
+      expect(after.find((r) => r.nodeId === "nB")).toBeUndefined();
     });
   });
 }

@@ -470,10 +470,10 @@ describe("Stage D8 definition of done — the multi-provider board, end to end o
     expect(specAfter).toHaveLength(2);
     expect(specAfter.map((l: any) => l.provider).sort()).toEqual(["jira", "linear"]);
 
-    // ---- THE >1 AMBIGUOUS RECOVERY (the review's #6): a re-proposed node
-    // reuses its idempotency key, so after an unlink + re-create BOTH wire
-    // issues carry the marker — the hardened contract REFUSES to choose.
-    h.ghWire.hangNextCreate = true;
+    // ---- THE D10 RELINK (the recovery contract's >1 protection): after an
+    // unlink the original issue is still on the wire; the recovery finds it
+    // and RELINKS — never creates a duplicate, even if hangNextCreate were
+    // set (the recovery short-circuits before the create races the timeout).
     const ghPropose2 = await api(h, `/api/boards/${boardId}/integrations/github/propose`, {
       method: "POST", token, csrf: "csrf",
     });
@@ -483,13 +483,16 @@ describe("Stage D8 definition of done — the multi-provider board, end to end o
       method: "POST", token, csrf: "csrf",
       body: JSON.stringify({ acknowledgeWarnings: true }),
     });
-    expect(ghApproved2.body.failed).toBe(1); // the spec create timed out
-    expect(ghApproved2.body.applied).toBe(1); // the brief updated
+    // THE D10 RECOVERY CONTRACT: spec's original issue still lives on the wire
+    // (the unlink only dropped the Lucent-side row), so recoverCreate finds
+    // it FIRST and RELINKS — no new wire mutation, no timeout. Brief drifts.
+    expect(ghApproved2.body.failed).toBe(0);
+    expect(ghApproved2.body.applied).toBe(2);
+    const specResult = ghApproved2.body.results.find((r: any) => r.nodeId === "spec");
+    expect(specResult.action).toBe("relinked");
     const githubProvider = new GithubProvider({ token: "ghp_d8", repo: "acme/app", fetchImpl: h.ghWire.fetchImpl, maxAttempts: 1, recoverPollMs: [1, 1, 1] });
-    // Two wire issues carry ext_spec (the first batch's + the hung one):
-    await expect(githubProvider.recoverCreate("lucent-action:ext_spec")).rejects.toThrow(
-      /ambiguous recovery: 2/,
-    );
+    // Only ONE wire issue carries ext_spec (the original — the hung create never landed):
+    await expect(githubProvider.recoverCreate("lucent-action:ext_spec")).resolves.toBeDefined();
 
     // ---- THE 0→1 RECOVERY (a fresh node, a fresh key): the create lands,
     // the response is lost, recoverCreate polls and finds the ONE issue.

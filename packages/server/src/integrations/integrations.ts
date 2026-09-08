@@ -135,6 +135,13 @@ export interface IntegrationStore {
    * boards' which nodes that is).
    */
   linksForExternalId(provider: string, externalId: string): Promise<IntegrationTaskLink[]>;
+  /**
+   * Stage D10: the org's links, newest-synced first, capped — the link-GC
+   * arm's feed. Scanning the LINK table (not the boards) keeps the work
+   * proportional to actual integration state, and the cap keeps one sweep
+   * run bounded no matter how large the org grew.
+   */
+  linksForOrg(orgId: string, limit: number): Promise<IntegrationTaskLink[]>;
   /** Drop a link (unlink; deleting the node should cascade this). */
   unlink(boardId: string, nodeId: string, provider: string): Promise<boolean>;
 }
@@ -373,6 +380,14 @@ export class InMemoryIntegrationStore implements IntegrationStore {
   async linksForExternalId(provider: string, externalId: string): Promise<IntegrationTaskLink[]> {
     return [...this.links.values()]
       .filter((l) => l.provider === provider && l.externalId === externalId)
+      .map((l) => ({ ...l }));
+  }
+
+  async linksForOrg(orgId: string, limit: number): Promise<IntegrationTaskLink[]> {
+    return [...this.links.values()]
+      .filter((l) => l.orgId === orgId)
+      .sort((a, b) => b.syncedAt - a.syncedAt)
+      .slice(0, limit)
       .map((l) => ({ ...l }));
   }
 

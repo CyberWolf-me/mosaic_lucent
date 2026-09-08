@@ -244,11 +244,49 @@ export const registerIntegrationRoutes: RegisterRoutes = (router, s) => {
         ...(issue.assignee ? { assignee: issue.assignee } : {}),
         ...(issue.dueDate ? { dueDate: issue.dueDate } : {}),
         status: issue.status,
+        // THE D10 MARKER CONTRACT: the sync's create carries the same
+        // idempotency key the propose/approve path uses (ext_<nodeId>) —
+        // the recovery above searches for it, so a create and its later
+        // recovery resolve to the same stable identity on EVERY provider
+        // (key-native providers index it; search-based providers find the
+        // marker in the task's description).
+        idempotencyKey: `ext_${node.id}`,
       };
       const link = existingLinks.get(node.id);
       try {
         if (!link) {
-          // CREATE: the action has no external task yet.
+          // THE LINK-GC RECOVERY CONTRACT (D10, ADR 0036): an unlinked node
+          // may be a RE-CREATED action whose link was collected after the
+          // node was deleted — the external task still exists. Creating
+          // blindly would duplicate it. recoverCreate(marker) FIRST: the
+          // marker is the FULL ANCHORED comment (<!-- lucent-action:key -->)
+          // — the closing delimiter prevents prefix collisions (ext_task-1
+          // would otherwise match ext_task-10's marker). Found → RELINK.
+          // Not found → the task is truly gone → create.
+          const marker = `<!-- lucent-action:ext_${node.id} -->`;
+          // Same catch-fallthrough as the approve executor: a failed LOOKUP
+          // never fails the sync's item — not-found (or search-unavailable)
+          // → create.
+          const recovered = await (provider.recoverCreate
+            ? provider.recoverCreate(marker).catch(() => undefined)
+            : Promise.resolve(undefined));
+          if (recovered) {
+            const stored = await integrations.store.linkTask(
+              {
+                orgId: guard.board.orgId,
+                boardId,
+                nodeId: node.id,
+                provider: providerName as never,
+                externalId: recovered.externalId,
+                ...(recovered.url ? { url: recovered.url } : {}),
+                lastSyncedStatus: recovered.status,
+              },
+              Date.now(),
+            );
+            results.push({ nodeId: node.id, action: "relinked", externalId: stored.externalId, url: stored.url });
+            continue;
+          }
+          // CREATE: the action has no external task and none was recovered.
           const task = await provider.createTask(input);
           const stored = await integrations.store.linkTask(
             {
@@ -544,13 +582,55 @@ router.post("/api/boards/:id/integrations/actions/:actionId/approve", async (ctx
         status: item.status,
         idempotencyKey: item.idempotencyKey,
       };
-      const timeout = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error("provider timeout")), TIMEOUT_MS),
-      );
+      // THE LINK-GC RECOVERY CONTRACT (D10, ADR 0036): on a CREATE, recover
+      // before creating — the item's node may be a re-created action whose
+      // collected link left an existing external task. The marker is the
+      // FULL ANCHORED comment (the closing delimiter prevents the prefix
+      // collision ext_task-1 ⊃ ext_task-10); the D6 recovery seam is the
+      // same one the timeout retry rides. Recovered → relink, zero new
+      // wire mutations.
+      if (item.action === "create" && provider.recoverCreate) {
+        // The recovery is an OPTIMIZATION toward the no-duplicate invariant:
+        // when the search itself errors (a provider whose search surface is
+        // unavailable), fall through to the create — the D6 contract's own
+        // semantics (not-found → create), never a failed item because the
+        // LOOKUP failed.
+        const recovered = await provider
+          .recoverCreate(`<!-- lucent-action:${item.idempotencyKey} -->`)
+          .catch(() => undefined);
+        if (recovered) {
+          await integrations.store.linkTask(
+            {
+              orgId: guard.board.orgId,
+              boardId,
+              nodeId: item.nodeId,
+              provider: record.provider,
+              externalId: recovered.externalId,
+              ...(recovered.url ? { url: recovered.url } : {}),
+              lastSyncedStatus: recovered.status,
+            },
+            Date.now(),
+          );
+          await ledger.applied(boardId, record.provider, requestId, recovered.externalId, Date.now());
+          appliedCount += 1;
+          results.push({ nodeId: item.nodeId, action: "relinked", externalId: recovered.externalId, url: recovered.url });
+          continue;
+        }
+      }
       const task =
         item.action === "create"
-          ? await Promise.race([provider.createTask(input), timeout])
-          : await Promise.race([provider.updateTask(item.externalId!, input), timeout]);
+          ? await Promise.race([
+              provider.createTask(input),
+              new Promise<never>((_, reject) =>
+                setTimeout(() => reject(new Error("provider timeout")), TIMEOUT_MS),
+              ),
+            ])
+          : await Promise.race([
+              provider.updateTask(item.externalId!, input),
+              new Promise<never>((_, reject) =>
+                setTimeout(() => reject(new Error("provider timeout")), TIMEOUT_MS),
+              ),
+            ]);
       await integrations.store.linkTask(
         {
           orgId: guard.board.orgId,

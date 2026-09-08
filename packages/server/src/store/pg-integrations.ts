@@ -248,6 +248,17 @@ export class PostgresIntegrationStore implements IntegrationStore {
     return rows.map(rowToLink);
   }
 
+  async linksForOrg(orgId: string, limit: number): Promise<IntegrationTaskLink[]> {
+    // Newest-synced first, capped: the link-GC arm's bounded feed.
+    const rows = await this.db
+      .select()
+      .from(integrationTaskLinks)
+      .where(eq(integrationTaskLinks.orgId, orgId))
+      .orderBy(sql`${integrationTaskLinks.syncedAt} desc`)
+      .limit(limit);
+    return rows.map(rowToLink);
+  }
+
   async unlink(boardId: string, nodeId: string, provider: string): Promise<boolean> {
     const deleted = await this.db
       .delete(integrationTaskLinks)
@@ -725,6 +736,36 @@ export class PostgresIntegrationWebhookEventStore implements IntegrationWebhookE
       .set({ status: "failed", error: error.slice(0, 500), claimedAt: now })
       .where(eq(integrationWebhookEvents.id, id));
   }
+
+  async pruneTerminal(terminalBefore: number, limit: number): Promise<number> {
+    // The structural guard the review demanded: status IN the terminal set
+    // (failed excluded — retryable) AND claimedAt (the terminal timestamp,
+    // never receivedAt) below the cutoff. A pending/in-flight row cannot
+    // match even if the constant were mistyped. Bounded: select the capped
+    // ids first, then delete by id (drizzle's delete has no .limit).
+    const doomed = await this.db
+      .select({ id: integrationWebhookEvents.id })
+      .from(integrationWebhookEvents)
+      .where(
+        and(
+          inArray(integrationWebhookEvents.status, ["processed", "ignored", "exhausted"]),
+          lte(integrationWebhookEvents.claimedAt, terminalBefore),
+        ),
+      )
+      .orderBy(integrationWebhookEvents.claimedAt)
+      .limit(limit);
+    if (doomed.length === 0) return 0;
+    const deleted = await this.db
+      .delete(integrationWebhookEvents)
+      .where(
+        inArray(
+          integrationWebhookEvents.id,
+          doomed.map((row) => row.id),
+        ),
+      )
+      .returning({ id: integrationWebhookEvents.id });
+    return deleted.length;
+  }
 }
 
 /* -------------------------------------------------------------------------- */
@@ -890,5 +931,33 @@ export class PostgresInboundChangeStore implements InboundChangeStore {
       )
       .returning();
     return updated.length;
+  }
+
+  async pruneTerminal(decidedBefore: number, limit: number): Promise<number> {
+    // The same structural guard: terminal statuses + decidedAt (the
+    // decision's timestamp; pending rows have decidedAt NULL and cannot
+    // match lte). Bounded: the capped-id select, then delete by id.
+    const doomed = await this.db
+      .select({ id: integrationInboundChanges.id })
+      .from(integrationInboundChanges)
+      .where(
+        and(
+          inArray(integrationInboundChanges.status, ["applied", "dismissed", "superseded"]),
+          lte(integrationInboundChanges.decidedAt, decidedBefore),
+        ),
+      )
+      .orderBy(integrationInboundChanges.decidedAt)
+      .limit(limit);
+    if (doomed.length === 0) return 0;
+    const deleted = await this.db
+      .delete(integrationInboundChanges)
+      .where(
+        inArray(
+          integrationInboundChanges.id,
+          doomed.map((row) => row.id),
+        ),
+      )
+      .returning({ id: integrationInboundChanges.id });
+    return deleted.length;
   }
 }

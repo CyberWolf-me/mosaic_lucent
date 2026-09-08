@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import { afterEach, describe, expect, it } from "vitest";
 import type { AddressInfo } from "node:net";
 import { MockImageProvider, MockProvider } from "@lucent/ai";
@@ -354,7 +355,7 @@ describe("Stage D6 definition of done — the real provider, end to end on a stu
       method: "POST", token: alice.token, csrf: "csrf",
     });
     expect(approve.status).toBe(200);
-    expect(approve.body.failed).toBe(1); // the hung item
+    expect(approve.body.failed).toBe(1);
     expect(approve.body.applied).toBe(9);
     // The wire HOLDS 10 issues — the hung create landed!
     expect(wire.issues).toHaveLength(10);

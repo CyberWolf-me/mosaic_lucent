@@ -168,14 +168,20 @@ export class FakeProvider implements ExecutionProvider {
    * The D6 recovery seam, live in the fake: find a task whose title or
    * description carries the Lucent marker. The fake stores tasks whole, so
    * the scan is direct; Linear's real implementation queries
-   * description-contains.
+   * description-contains. The byKey map is the SECOND path (D10): the sync
+   * and approve routes recover with the FULL ANCHORED comment
+   * (<!-- lucent-action:key --> — the closing delimiter prevents prefix
+   * collisions) — the key inside is what the fake indexed the create
+   * under, so a re-created node's recovery resolves through it exactly
+   * the way a real provider's description search does.
    */
   async recoverCreate(marker: string): Promise<ExternalTask | undefined> {
     for (const task of this.tasks.values()) {
       if (task.title.includes(marker)) return task;
-      // The fake's createTask doesn't store descriptions; the byKey map is
-      // the marker-indexed path for keyed creates.
     }
+    const inner = marker.replace(/^<!--\s*lucent-action:/, "").replace(/\s*-->$/, "");
+    const keyed = this.byKey.get(inner);
+    if (keyed) return keyed;
     return undefined;
   }
 

@@ -365,6 +365,20 @@ export interface IntegrationWebhookEventStore {
   markProcessed(id: string, orgId: string | null, now: number): Promise<void>;
   markIgnored(id: string, now: number): Promise<void>;
   markFailed(id: string, error: string, now: number): Promise<void>;
+  /**
+   * Stage D10, ADR 0036: delete TERMINAL rows older than the horizon —
+   * processed | ignored | exhausted (the complete set; FAILED is retryable
+   * by the claim ladder's semantics and is NEVER pruned here). The cutoff
+   * reads the TERMINAL timestamp (claimedAt, where the terminal marks
+   * write), never receivedAt, so pending/in-flight rows are structurally
+   * safe even against a query bug. Capped per run (bounded sweeps).
+   *
+   * The prune-replay rule (ADR 0036): pruning a dedupe row can allow an old
+   * redelivery to look new — the second barrier is semantic, the ingest's
+   * resolution-level dedupe plus the sweeper's refetch-current-truth arm,
+   * which the ADR records and the tests pin.
+   */
+  pruneTerminal(terminalBefore: number, limit: number): Promise<number>;
 }
 
 export const DEFAULT_WEBHOOK_STALE_MS = 60_000;
@@ -450,6 +464,18 @@ export class InMemoryIntegrationWebhookEventStore implements IntegrationWebhookE
   async markFailed(id: string, error: string, now: number): Promise<void> {
     const found = this.events.get(id);
     if (found) this.events.set(id, { ...found, status: "failed", error, claimedAt: now });
+  }
+
+  async pruneTerminal(terminalBefore: number, limit: number): Promise<number> {
+    // The terminal set only (failed is retryable — never pruned); the
+    // cutoff reads claimedAt, where the terminal marks write.
+    const TERMINAL = new Set(["processed", "ignored", "exhausted"]);
+    const doomed = [...this.events.values()]
+      .filter((e) => TERMINAL.has(e.status) && e.claimedAt < terminalBefore)
+      .sort((a, b) => a.claimedAt - b.claimedAt)
+      .slice(0, limit);
+    for (const row of doomed) this.events.delete(row.id);
+    return doomed.length;
   }
 }
 

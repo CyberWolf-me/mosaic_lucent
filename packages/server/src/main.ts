@@ -581,6 +581,15 @@ if (billing) {
 // call (the race-safe path), re-runs the item through the provider with
 // the SAME idempotency key, and marks applied. The replay source is the
 // pending action record's stored items — the payload IS the record.
+//
+// D10, ADR 0036 — THE LEDGER RETENTION DECISION (the review's Option B):
+// execution-ledger rows are retained INDEFINITELY. They are the
+// authoritative idempotency/audit substrate — the duplicate-approval and
+// sweep-replay guarantees read them for the lifetime of the board, and
+// pruning them would weaken the exactly-once contract. The volume is
+// bounded by actions-per-board, not events. Revisit trigger (its own ADR
+// if it ever fires): a measured storage problem, with the applied rows'
+// externalId preserved as the link of record.
 const integrationSweep = setInterval(() => {
   void (async () => {
     const stale = Date.now() - 60_000;
@@ -727,6 +736,66 @@ const integrationSweep = setInterval(() => {
     }
   })().catch((err: Error) => {
     logger.error("integrations.sweep.webhooks.failed", { error: err.message });
+  });
+
+  // THE LINK-GC ARM (D10, ADR 0036 — the decision the sweep has "owned"
+  // since D5): a dead link is one whose BOARD is missing or whose NODE is
+  // gone from the board. Links are sync state, not audit (unlike
+  // connections, which are disable-not-delete): a re-created node re-links
+  // through the create-side recovery contract, so collecting the stale row
+  // never orphans an external task. Bounded: linksForOrg caps the feed;
+  // the org set comes from the connection store (only orgs WITH
+  // integrations can have links).
+  void (async () => {
+    for (const providerName of stores.integrations.providers.keys()) {
+      const connections = await stores.integrations.store.connectionsFor(providerName);
+      const orgIds = new Set(connections.map((c) => c.orgId));
+      for (const orgId of orgIds) {
+        const links = await stores.integrations.store.linksForOrg(orgId, 500);
+        for (const link of links) {
+          const board = await stores.boardStore.get(link.boardId);
+          // Board missing (deleted) → dead.
+          if (!board) {
+            await stores.integrations.store.unlink(link.boardId, link.nodeId, link.provider);
+            logger.info("integrations.gc.link", {
+              boardId: link.boardId,
+              nodeId: link.nodeId,
+              provider: link.provider,
+              reason: "board missing",
+            });
+            continue;
+          }
+          // Node missing (deleted) → dead.
+          if (!board.workspace.nodes[link.nodeId]) {
+            await stores.integrations.store.unlink(link.boardId, link.nodeId, link.provider);
+            logger.info("integrations.gc.link", {
+              boardId: link.boardId,
+              nodeId: link.nodeId,
+              provider: link.provider,
+              reason: "node missing",
+            });
+          }
+        }
+      }
+    }
+  })().catch((err: Error) => {
+    logger.error("integrations.sweep.gc.failed", { error: err.message });
+  });
+
+  // THE TERMINAL-ROW PRUNE (D10, ADR 0036): webhook events and inbound
+  // changes accumulate forever without it. Terminal rows older than 30
+  // days are deleted — the complete terminal sets (failed is retryable and
+  // NEVER pruned); the cutoff is the TERMINAL timestamp, so pending rows
+  // are structurally safe. Bounded per run.
+  void (async () => {
+    const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
+    const prunedEvents = await stores.integrations.webhookEvents!.pruneTerminal(cutoff, 1000);
+    const prunedChanges = await stores.integrations.inbound!.pruneTerminal(cutoff, 1000);
+    if (prunedEvents > 0 || prunedChanges > 0) {
+      logger.info("integrations.prune", { prunedEvents, prunedChanges });
+    }
+  })().catch((err: Error) => {
+    logger.error("integrations.sweep.prune.failed", { error: err.message });
   });
 }, 5 * 60_000);
 integrationSweep.unref?.();

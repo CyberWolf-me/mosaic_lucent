@@ -84,6 +84,14 @@ export interface InboundChangeStore {
    * (board, node, provider, field) becomes superseded — the board's
    * pushed value is the newer human decision. */
   supersedePending(boardId: string, nodeIds: readonly string[], provider: string, field: InboundField, reason: string, now: number): Promise<number>;
+  /**
+   * Stage D10, ADR 0036: delete TERMINAL records (applied | dismissed |
+   * superseded) whose decidedAt is older than the horizon. The cutoff
+   * reads decidedAt (the decision's timestamp), never detectedAt — a
+   * pending record has no decidedAt and is structurally unreachable
+   * here. Capped per run.
+   */
+  pruneTerminal(decidedBefore: number, limit: number): Promise<number>;
 }
 
 /** The InMemory pair (the integrations.ts convention). */
@@ -190,6 +198,16 @@ export class InMemoryInboundChangeStore implements InboundChangeStore {
       }
     }
     return count;
+  }
+
+  async pruneTerminal(decidedBefore: number, limit: number): Promise<number> {
+    const TERMINAL = new Set(["applied", "dismissed", "superseded"]);
+    const doomed = [...this.records.values()]
+      .filter((r) => TERMINAL.has(r.status) && (r.decidedAt ?? Infinity) < decidedBefore)
+      .sort((a, b) => (a.decidedAt ?? 0) - (b.decidedAt ?? 0))
+      .slice(0, limit);
+    for (const row of doomed) this.records.delete(row.id);
+    return doomed.length;
   }
 }
 
