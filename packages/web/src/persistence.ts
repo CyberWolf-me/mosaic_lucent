@@ -11,6 +11,121 @@ const PROJECT_PREFIX = "lucent.project.";
 /** Id of the project the user had open, so a reload returns to it. */
 const LAST_OPEN_KEY = "lucent.lastProject";
 
+/* --------------------------- account scoping ------------------------------ */
+
+/**
+ * Local persistence is scoped per signed-in account. Every key here used to be
+ * global to the browser profile, so creating a NEW account on the same browser
+ * inherited the previous account's whole project list — the dashboard showed
+ * someone else's boards as "Recents", and the boot restore dropped them into
+ * the last account's workspace. Keys are now namespaced by the session user's
+ * id (`lucent.u.<userId>.<key>`); `session.ts` sets the scope on every auth
+ * transition (signup, login, 2FA, logout, and the boot `/api/auth/me` check).
+ *
+ * The legacy global keys are adopted exactly once — by whichever account is
+ * signed in when the scoping code first runs — so the person who already has
+ * boards here keeps them. Every account authenticated after that claim starts
+ * with a clean slate, which is the bug this fixes.
+ */
+const SCOPE_MARKER_KEY = "lucent.scope";
+const LEGACY_CLAIM_KEY = "lucent.legacyClaimed";
+/** The namespace in effect for this tab; null = legacy global keys. */
+let scope: string | null = readCurrentScope();
+
+function readCurrentScope(): string | null {
+  try {
+    return localStorage.getItem(SCOPE_MARKER_KEY);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Switch the active namespace. `null` returns to the legacy global keys (the
+ * signed-out / local-only view). Passing the same user again is a no-op.
+ */
+export function setPersistenceScope(userId: string | null): void {
+  const next = userId ?? null;
+  if (next === scope) return;
+  scope = next;
+  try {
+    if (next === null) localStorage.removeItem(SCOPE_MARKER_KEY);
+    else localStorage.setItem(SCOPE_MARKER_KEY, next);
+  } catch {
+    /* storage unavailable: scoping stays in-memory for this tab */
+  }
+  if (next !== null) adoptLegacyKeysOnce(next);
+}
+
+/**
+ * One-time adoption: the pre-scoping data sitting under the global keys moves
+ * into the first account that authenticates on this browser, and the claim
+ * marker keeps every later account from inheriting it. Copy (not move) — the
+ * signed-out view still reads the legacy keys, and a botched migration must
+ * never destroy the only copy of someone's boards.
+ */
+function adoptLegacyKeysOnce(userId: string): void {
+  try {
+    if (localStorage.getItem(LEGACY_CLAIM_KEY) !== null) return;
+    // Snapshot the key list first: setItem below grows the storage, and the
+    // DOM enumeration contract makes live iteration over a growing list
+    // implementation-defined.
+    const keys: string[] = [];
+    for (let i = 0; i < localStorage.length; i += 1) {
+      const key = localStorage.key(i);
+      if (key !== null) keys.push(key);
+    }
+    for (const key of keys) {
+      const isProjectRecord = key.startsWith(PROJECT_PREFIX);
+      const isWorkspaceKey =
+        key === INDEX_KEY || key === LAST_OPEN_KEY || key === SHARED_BOARD_KEY;
+      if (!isProjectRecord && !isWorkspaceKey) continue;
+      const value = localStorage.getItem(key);
+      if (value === null) continue;
+      const scopedKey = scopedName(key);
+      if (localStorage.getItem(scopedKey) === null) {
+        localStorage.setItem(scopedKey, value);
+      }
+    }
+    localStorage.setItem(LEGACY_CLAIM_KEY, userId);
+  } catch {
+    /* best effort: worst case the user re-creates the boards */
+  }
+}
+
+/** Map a legacy key name to the active namespace (`lucent.x` → `lucent.u.<id>.x`). */
+function scopedName(key: string): string {
+  if (scope === null || !key.startsWith("lucent.")) return key;
+  return `lucent.u.${scope}.${key.slice("lucent.".length)}`;
+}
+
+/**
+ * The active namespace's name for `key` — for sibling modules (orgs.ts) that
+ * keep their own per-account key but should not re-implement the scoping rule.
+ */
+export function scopedStorageKey(key: string): string {
+  return scopedName(key);
+}
+
+/** Storage helpers every reader/writer goes through, so scoping is one seam. */
+function lsGet(key: string): string | null {
+  try {
+    return localStorage.getItem(scopedName(key));
+  } catch {
+    return null;
+  }
+}
+function lsSet(key: string, value: string): boolean {
+  return safeSetItem(scopedName(key), value);
+}
+function lsRemove(key: string): void {
+  try {
+    localStorage.removeItem(scopedName(key));
+  } catch {
+    /* ignore */
+  }
+}
+
 export interface ChatEntry {
   role: "user" | "ai" | "error";
   text: string;
@@ -196,8 +311,8 @@ export function archiveDecision(
 }
 
 function readIndex(): ProjectMeta[] {
+  const raw = lsGet(INDEX_KEY);
   try {
-    const raw = localStorage.getItem(INDEX_KEY);
     return raw ? (JSON.parse(raw) as ProjectMeta[]) : [];
   } catch {
     return [];
@@ -205,7 +320,7 @@ function readIndex(): ProjectMeta[] {
 }
 
 function writeIndex(index: ProjectMeta[]): void {
-  safeSetItem(INDEX_KEY, JSON.stringify(index));
+  lsSet(INDEX_KEY, JSON.stringify(index));
 }
 
 /**
@@ -248,7 +363,7 @@ export function listProjects(): ProjectMeta[] {
 
 export function loadProject(id: string): ProjectData | null {
   try {
-    const raw = localStorage.getItem(PROJECT_PREFIX + id);
+    const raw = lsGet(PROJECT_PREFIX + id);
     if (!raw) return null;
     const data = JSON.parse(raw) as Partial<ProjectData>;
     // A record without a workspace is a half-finished save (found by the live
@@ -286,7 +401,7 @@ export function loadProject(id: string): ProjectData | null {
 
 export function saveProject(data: Omit<ProjectData, "updatedAt">): ProjectData {
   const record: ProjectData = { ...data, updatedAt: Date.now() };
-  const ok = safeSetItem(PROJECT_PREFIX + record.id, JSON.stringify(record));
+  const ok = lsSet(PROJECT_PREFIX + record.id, JSON.stringify(record));
   if (!ok) return record;
   const index = readIndex().filter((p) => p.id !== record.id);
   index.push({ id: record.id, name: record.name, updatedAt: record.updatedAt });
@@ -295,7 +410,7 @@ export function saveProject(data: Omit<ProjectData, "updatedAt">): ProjectData {
 }
 
 export function deleteProject(id: string): void {
-  localStorage.removeItem(PROJECT_PREFIX + id);
+  lsRemove(PROJECT_PREFIX + id);
   writeIndex(readIndex().filter((p) => p.id !== id));
 }
 
@@ -350,18 +465,14 @@ export function boardIdOfMirror(id: string): string | null {
  * was on disk — the board had to be re-opened by hand from the dashboard.
  */
 export function setLastOpenProject(id: string | null): void {
-  try {
-    if (id) localStorage.setItem(LAST_OPEN_KEY, id);
-    else localStorage.removeItem(LAST_OPEN_KEY);
-  } catch {
-    /* storage unavailable (private mode / quota) — restore is best-effort */
-  }
+  if (id) lsSet(LAST_OPEN_KEY, id);
+  else lsRemove(LAST_OPEN_KEY);
 }
 
 /** The most recent project that still exists, or null on a first run. */
 export function loadLastOpenProject(): ProjectData | null {
   try {
-    const id = localStorage.getItem(LAST_OPEN_KEY);
+    const id = lsGet(LAST_OPEN_KEY);
     if (id) {
       const data = loadProject(id);
       if (data) return data;
@@ -382,18 +493,10 @@ export function loadLastOpenProject(): ProjectData | null {
 const SHARED_BOARD_KEY = "lucent.sharedBoard";
 
 export function setSharedBoardId(id: string | null): void {
-  try {
-    if (id) localStorage.setItem(SHARED_BOARD_KEY, id);
-    else localStorage.removeItem(SHARED_BOARD_KEY);
-  } catch {
-    /* storage unavailable — sharing just won't survive a reload */
-  }
+  if (id) lsSet(SHARED_BOARD_KEY, id);
+  else lsRemove(SHARED_BOARD_KEY);
 }
 
 export function getSharedBoardId(): string | null {
-  try {
-    return localStorage.getItem(SHARED_BOARD_KEY);
-  } catch {
-    return null;
-  }
+  return lsGet(SHARED_BOARD_KEY);
 }

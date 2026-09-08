@@ -1,4 +1,5 @@
 import { apiFetch, invalidateCsrfToken, primeCsrfToken } from "./http.js";
+import { setPersistenceScope } from "./persistence.js";
 
 /**
  * Client-side session (M1): where the browser's idea of "who am I" lives, plus
@@ -56,6 +57,10 @@ export function saveSession(token: string | null, user: SessionUser): void {
   } catch {
     /* storage unavailable - the session just won't outlive this page */
   }
+  // Every per-account localStorage namespace (projects, org selection, the
+  // shared-board pointer) hangs off the signed-in user. This is the one seam
+  // every auth success flows through.
+  setPersistenceScope(user.id);
 }
 
 export function getToken(): string | null {
@@ -96,6 +101,9 @@ function forgetLocalSession(): void {
   } catch {
     /* ignore */
   }
+  // Back to the legacy/global namespace: the signed-out view sees only what
+  // was never account-scoped, never another account's boards.
+  setPersistenceScope(null);
 }
 
 /**
@@ -327,6 +335,9 @@ function cacheSessionUser(user: SessionUser): void {
   } catch {
     /* ignore */
   }
+  // Cookie-only sessions never call saveSession on this page load — the boot
+  // /api/auth/me check is what re-aims the account namespace at the right user.
+  setPersistenceScope(user.id);
 }
 
 /**

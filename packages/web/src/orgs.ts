@@ -1,5 +1,6 @@
 import { apiFetch } from "./http.js";
 import { hasSession } from "./session.js";
+import { scopedStorageKey } from "./persistence.js";
 
 /**
  * Org REST client and active-org selection (M2.3).
@@ -158,9 +159,15 @@ export async function deleteOrg(id: string): Promise<OrgResult<null>> {
  * The org the user is currently looking at, as last chosen. Never trusted on
  * its own — `resolveCurrentOrg` checks it against live memberships first.
  */
+/**
+ * The org the user is currently looking at, as last chosen. Never trusted on
+ * its own — `resolveCurrentOrg` checks it against live memberships first.
+ * Scoped per account (the same namespace rule as the local projects): the
+ * selection is a fact about *this user's* memberships, not the browser's.
+ */
 export function getCurrentOrgId(): string | null {
   try {
-    const raw = localStorage.getItem(CURRENT_ORG_KEY);
+    const raw = localStorage.getItem(scopedStorageKey(CURRENT_ORG_KEY));
     return raw !== null && raw.length > 0 ? raw : null;
   } catch {
     return null;
@@ -169,7 +176,7 @@ export function getCurrentOrgId(): string | null {
 
 export function setCurrentOrgId(orgId: string): void {
   try {
-    localStorage.setItem(CURRENT_ORG_KEY, orgId);
+    localStorage.setItem(scopedStorageKey(CURRENT_ORG_KEY), orgId);
   } catch {
     /* storage unavailable - the choice just won't outlive this page */
   }
@@ -177,7 +184,7 @@ export function setCurrentOrgId(orgId: string): void {
 
 export function clearCurrentOrgId(): void {
   try {
-    localStorage.removeItem(CURRENT_ORG_KEY);
+    localStorage.removeItem(scopedStorageKey(CURRENT_ORG_KEY));
   } catch {
     /* ignore */
   }
