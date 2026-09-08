@@ -1027,3 +1027,55 @@ touching the inbound queue (the D7 symmetric gate holds); scheduled
 automation; MCP exposure of the AI propose; the visual-generation
 quality work the review flags as the higher product priority —
 recorded as the ordering concern, not D9 scope.
+
+## Amendment (2026-09-08): Stage D10 executed — the execution era's close
+
+ADR 0036's contract: D10 is consolidation, not extension — measurement
+completed, garbage collection made safe, the era's contracts locked in
+one regression, the record made true. The freeze rule governed: no new
+features, no UI.
+
+What Stage D10 shipped (commits; the acceptance in
+packages/server/test/integrations-d10-safety.test.ts and
+packages/server/test/stageD10.era.regression.test.ts):
+
+- **The telemetry completion** (b1087f7): the D9 ai-propose event was
+  emitted-but-uncounted. `aiPropose` joins the snapshot's request
+  counts + the P50/P95 latency lane; the Prometheus bridge mirrors it
+  (`lucent_ai_propose_total`, `lucent_ai_propose_duration_seconds`)
+  with ZERO dynamic labels — the cardinality rule pinned by test.
+- **The sweeper's decisions + the recovery contract** (1387aac): the
+  link GC (dead = board missing OR node missing, ≤500 links/org/run
+  via `linksForOrg`); the 30-day terminal prune (complete terminal
+  sets — failed is RETRYABLE, never pruned; ≤1000 rows/run for both
+  webhook events and inbound changes via `pruneTerminal`; the
+  WHERE is terminal-status + completion-timestamp, never createdAt);
+  the execution-ledger retention decision (Option B — indefinite,
+  recorded); THE LINK-GC RECOVERY INVARIANT: both the sync route and
+  the approve executor call `recoverCreate(marker)` BEFORE creating —
+  the FULL ANCHORED marker (the closing `-->` prevents the
+  ext_task-1 ⊂ ext_task-10 prefix collision); found → RELINK, not
+  found → create, a failed LOOKUP falls through to create. Pinned by
+  the review's exact scenario: delete node → GC → recreate → sync →
+  RELINKED, zero new wire creates. The approve executor's timeout
+  race now starts fresh per create (a real bug this surfaced: the
+  race was constructed before the recovery, so a slow recovery
+  rejected the create that followed).
+- **The era regression** (90d0fad): one process, eight isolated stage
+  harnesses — each stage's own createApp, its spine assertion,
+  teardown, then the next. D1 persist/undo/redo; D3 cycle-refused;
+  D4 10→10→10; D5 the retry names only the failed node; D6 Linear on
+  a stubbed wire; D7 the inbound route + queue; D8 one node, two
+  providers; D9 the narrowing 4-of-10, exactly 4 on the wire.
+- **The record** (this commit): ADR 0036; the AGENTS.md truth fixes
+  (the asset metadata store shipped in B6 — no longer "still
+  deferred"; the MCP tool list includes `list_external_links`;
+  assets upload to a configurable blob backend — memory/disk/S3);
+  the checklist's era ledger; the changeset.
+
+Explicitly NOT built, per ADR 0036 and the freeze rule: the execution
+dashboard / plan view; OAuth + multi-tenant credentials; Jira inbound
+webhooks; Figma/Slack adapters; scope enforcement (the refusal
+stands); inbound create/title/assignee sync; per-node propose; an
+actions-history view; a connection-admin UI. Each is named for its
+own future milestone — none inherits "D11".

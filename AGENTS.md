@@ -2,7 +2,7 @@
 
 > AI-Native Voice Visual Workspace. A conversational canvas where users describe ideas by voice or text and an AI agent constructs editable, structured visuals (flowcharts, architecture diagrams, user journeys, wireframes, mind maps).
 >
-> **Status: well past the V1 slice.** An npm-workspaces monorepo under `packages/` — six packages (`core`, `ai`, `server`, `web`, `mcp`, `i18n`) — implements the conversational canvas plus realtime multiplayer, auth, a full manual board, work tracking, agent access over MCP, SAML SSO, SCIM provisioning, and meeting transcripts. See `docs/checklist.md` for audited feature status and `docs/10-getting-started.md` to run it. **Persistence is Postgres-backed when `LUCENT_DATABASE_URL` is set (accounts, boards, and the realtime op log survive a restart); in-memory otherwise. Assets upload through `POST /api/assets` to a configurable blob backend (memory / disk / S3-compatible); still deferred: a Postgres-backed asset _metadata_ store.**
+> **Status: well past the V1 slice.** An npm-workspaces monorepo under `packages/` — six packages (`core`, `ai`, `server`, `web`, `mcp`, `i18n`) — implements the conversational canvas plus realtime multiplayer, auth, a full manual board, work tracking, agent access over MCP, SAML SSO, SCIM provisioning, meeting transcripts, and external execution (Linear/GitHub/Jira task sync, both directions, human-gated). See `docs/checklist.md` for audited feature status and `docs/10-getting-started.md` to run it. **Persistence is Postgres-backed when `LUCENT_DATABASE_URL` is set (accounts, boards, the realtime op log, and asset metadata survive a restart); in-memory otherwise. Assets upload through `POST /api/assets` to a configurable blob backend (memory / disk / S3-compatible), with asset metadata in Postgres when configured.**
 
 ## Build / test / run
 
@@ -26,7 +26,7 @@ a `postgres:16` service so they run there.
 - `@lucent/ai` — `LLMProvider` interface + prompt harness + `MockProvider` (offline), `AnthropicProvider`, and an OpenAI-compatible provider; plus an `ImageProvider`. The moat lives here as a model-independent harness, not a specific vendor.
 - `@lucent/server` — framework-free HTTP + WebSocket server: `/api/generate`, `/api/image`, auth, boards, realtime rooms, usage limits, `/metrics`. Owns the API key, schema-parses input, validates AI operations before returning them. Never move key handling to the client.
 - `@lucent/web` — React renders `core` through a **bespoke DOM + SVG canvas** (not tldraw or React Flow — neither is installed); `stt/` (three speech providers), `boardSync.ts` (realtime), `persistence.ts` (localStorage projects).
-- `@lucent/mcp` — MCP stdio server exposing `apply_canvas_operations`, `get_board`, `reset_board`, derived from the same core Zod union so an agent can never send an operation the validator would reject.
+- `@lucent/mcp` — MCP stdio server exposing `apply_canvas_operations`, `get_board`, `list_external_links`, `reset_board`, derived from the same core Zod union so an agent can never send an operation the validator would reject.
 
 ## Read before changing design or architecture
 
@@ -86,7 +86,7 @@ installed yet" and named libraries that were never adopted:
 - **Speech:** three STT providers (Web Speech, on-device Whisper, LiveKit).
   Toggle-to-talk, and there is **no intent-detection stage** — transcripts go
   straight to the model.
-- **Storage:** none; generated images are inlined as data URLs. S3 still planned.
+- **Storage:** assets upload through `POST /api/assets` to a configurable blob backend (memory for tests, disk for dev, S3/R2-compatible for prod); metadata is Postgres-backed when `LUCENT_DATABASE_URL` is set. Generated images from the AI image provider are still inlined as data URLs.
 
 Do not introduce Rust or other languages unless the user asks.
 

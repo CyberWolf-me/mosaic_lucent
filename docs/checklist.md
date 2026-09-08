@@ -1714,3 +1714,71 @@ quota error honestly (a 500 with the provider's message in the log —
 the correct failure shape, not a silent fallback); the pass then used
 the mock. The real-model narrowing remains verified at the contract
 level by the scripted-selector suites.
+
+## Stage D10 shipped: the execution era's close (2026-09, docs/17 amendment, ADR 0036)
+
+Consolidation, not extension — the freeze rule governed. Four batches:
+
+[x] **The telemetry completion** (b1087f7): the D9 ai-propose event,
+    counted at last — `aiPropose` in the snapshot's request counts +
+    the P50/P95 latency lane; the Prometheus bridge
+    (`lucent_ai_propose_total`, `lucent_ai_propose_duration_seconds`)
+    with ZERO dynamic labels — the cardinality rule pinned by test.
+[x] **The sweeper + the recovery contract** (1387aac): the link GC
+    (dead = board missing OR node missing; ≤500 links/org/run via
+    `linksForOrg`); the 30-day terminal prune on both stores
+    (`pruneTerminal` — the complete terminal sets: webhook
+    processed/ignored/exhausted, failed is RETRYABLE, never pruned;
+    inbound applied/dismissed/superseded; ≤1000 rows/run; the WHERE is
+    terminal-status + completion-timestamp, never createdAt); the
+    execution-ledger retention recorded (Option B — indefinite, the
+    authoritative idempotency/audit substrate); THE LINK-GC RECOVERY
+    INVARIANT — both the sync route and the approve executor call
+    `recoverCreate(marker)` before creating, the FULL ANCHORED marker
+    (`<!-- lucent-action:key -->` — the closing delimiter prevents the
+    ext_task-1 ⊂ ext_task-10 prefix collision); found → RELINK, not
+    found → create, a failed lookup falls through to create. Pinned by
+    the review's exact scenario (delete node → GC → recreate → sync →
+    RELINKED, zero new wire creates) + the board-deleted variant. The
+    approve executor's timeout race now starts fresh per create (the
+    race was previously constructed before the recovery, so a slow
+    recovery rejected the create that followed — a real bug the
+    batch's own testing surfaced).
+[x] **The era regression** (90d0fad): one process, eight isolated
+    stage harnesses (each stage's own createApp, its spine assertion,
+    teardown, then the next): D1 persist/undo/redo → D3
+    cycle-refused/edge-accepted → D4 10→10→10 → D5 the retry names
+    only the failed node → D6 Linear creates on a stubbed wire → D7
+    the inbound route + queue → D8 one node, links for two providers →
+    D9 the narrowing 4-of-10, exactly 4 on the wire. The spine, not a
+    tenth copy of every assertion.
+[x] **The record** (this commit): ADR 0036; the AGENTS.md truth fixes
+    (asset metadata is Postgres-backed since B6 — no longer "still
+    deferred"; the MCP tool list includes `list_external_links`;
+    "Storage: none" → the real blob-backends sentence); this era
+    ledger; the changeset.
+
+## The execution-era ledger (D1–D10, closed)
+
+Shipped and locked: the action node + its issue fields (D1); the
+acceptance-fixture workflow + the gated region (D2); the dependency
+graph with cycle rejection and blocker propagation (D3); the
+ExecutionProvider seam + the FakeProvider (D4); exactly-once external
+execution — the claim ladder, the ledger, the timeout→retry→recover
+path (D5); Linear, the first real provider, with the
+ambiguous-create recovery (D6); inbound sync — the signed webhook,
+the queue, the system actor, the human-gated accept/dismiss (D7);
+GitHub + Jira + the capability-honesty layer + cross-provider links
+(D8); the narrowing agent — AI-origin proposals through the same human
+gate (D9); the consolidation close — telemetry completed, GC made
+safe by the recovery contract, the era regression, the record made
+true (D10).
+
+Deferred, each named for its own future milestone (none inherits
+"D11"): the execution dashboard / plan view; OAuth + multi-tenant
+credentials; Jira inbound webhooks; Figma/Slack adapters; scope
+enforcement (the refusal stands); inbound create/title/assignee sync;
+per-node propose; an actions-history view; a connection-admin UI.
+
+Gate: typecheck 0; server 1055 (+8 D10 safety + regression tests),
+web 651, ai 203, i18n 14, mcp 28, core 422.
