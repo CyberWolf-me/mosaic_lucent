@@ -165,12 +165,18 @@ export function marqueeHits(
   return hit;
 }
 
-/** Bounding box over all nodes and shapes; null when the board is empty. */
+/** Bounding box over all nodes and shapes; null when the board is empty.
+ * Unplaced nodes use the same defaults the live renderer applies (`toScene`),
+ * so a server-adopted board exports instead of collapsing to "Empty board". */
 export function contentBounds(workspace: Workspace): Box | null {
   const boxes: Box[] = [];
   for (const n of Object.values(workspace.nodes)) {
-    if (n.position && n.size)
-      boxes.push({ x: n.position.x, y: n.position.y, width: n.size.width, height: n.size.height });
+    boxes.push({
+      x: n.position?.x ?? 0,
+      y: n.position?.y ?? 0,
+      width: n.size?.width ?? 160,
+      height: n.size?.height ?? 64,
+    });
   }
   for (const s of Object.values(workspace.shapes)) {
     boxes.push({ x: s.position.x, y: s.position.y, width: s.size.width, height: s.size.height });
@@ -301,11 +307,33 @@ export function buildBoardSvg(workspace: Workspace, pad = 40): string {
   }
   parts.push(regionBoxes.join(""));
 
+  // Connectors — the live canvas layers them under the cards, so the export
+  // does too. Center-to-center lines with an arrowhead marker; endpoints use
+  // the same position/size defaults as `toScene` so an unplaced endpoint still
+  // draws (the serializer used to skip unplaced nodes entirely and never drew
+  // edges at all — the exported file was cards-without-links or worse).
+  let connectorSvg = "";
+  for (const e of Object.values(workspace.edges)) {
+    const s = workspace.nodes[e.source];
+    const t = workspace.nodes[e.target];
+    if (!s || !t) continue;
+    const x1 = (s.position?.x ?? 0) + (s.size?.width ?? 160) / 2;
+    const y1 = (s.position?.y ?? 0) + (s.size?.height ?? 64) / 2;
+    const x2 = (t.position?.x ?? 0) + (t.size?.width ?? 160) / 2;
+    const y2 = (t.position?.y ?? 0) + (t.size?.height ?? 64) / 2;
+    connectorSvg +=
+      `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#8a8a90" stroke-width="1.5" marker-end="url(#export-arrow)"/>`;
+  }
+  parts.push(connectorSvg);
+
   for (const n of Object.values(workspace.nodes)) {
-    if (!n.position || !n.size) continue;
+    const x = n.position?.x ?? 0;
+    const y = n.position?.y ?? 0;
+    const width = n.size?.width ?? 160;
+    const height = n.size?.height ?? 64;
     parts.push(
-      `<rect x="${n.position.x}" y="${n.position.y}" width="${n.size.width}" height="${n.size.height}" rx="8" fill="#1b1b1e" stroke="#555"/>` +
-        `<text x="${n.position.x + n.size.width / 2}" y="${n.position.y + n.size.height / 2}" fill="#eee" font-family="sans-serif" font-size="13" text-anchor="middle" dominant-baseline="middle">${escapeXml(n.label)}</text>`,
+      `<rect x="${x}" y="${y}" width="${width}" height="${height}" rx="8" fill="#1b1b1e" stroke="#555"/>` +
+        `<text x="${x + width / 2}" y="${y + height / 2}" fill="#eee" font-family="sans-serif" font-size="13" text-anchor="middle" dominant-baseline="middle">${escapeXml(n.label)}</text>`,
     );
   }
   for (const s of Object.values(workspace.shapes)) {
@@ -384,7 +412,7 @@ export function buildBoardSvg(workspace: Workspace, pad = 40): string {
       );
     }
   }
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="${minX} ${minY} ${w} ${h}"><rect x="${minX}" y="${minY}" width="${w}" height="${h}" fill="#141416"/>${parts.join("")}</svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="${minX} ${minY} ${w} ${h}"><defs><marker id="export-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#8a8a90"/></marker></defs><rect x="${minX}" y="${minY}" width="${w}" height="${h}" fill="#141416"/>${parts.join("")}</svg>`;
 }
 
 /**

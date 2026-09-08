@@ -22,32 +22,38 @@ function mindMap() {
   ]);
 }
 
-const dist = (p: { x: number; y: number } | undefined, w = 160, h = 64) =>
-  p ? Math.hypot(p.x + w / 2, p.y + h / 2) : Number.NaN;
+// Center distance reads the ACTUAL laid-out size — hardcoding the base 64px
+// height broke when the layout began reserving the NodeCard's sub/chip rows
+// (the center then sat 7.5px off per node, angle-dependent).
+const dist = (box: { position: { x: number; y: number }; size: { width: number; height: number } } | undefined) =>
+  box ? Math.hypot(box.position.x + box.size.width / 2, box.position.y + box.size.height / 2) : Number.NaN;
 
 describe("radial layout for mind maps", () => {
   it("is selected automatically for a mindmap workspace", () => {
     const layout = computeLayout(mindMap());
     // The hub sits at the origin; a layered layout would place it at y=0 with
     // every child stacked directly below on one axis.
-    expect(dist(layout.core?.position)).toBeCloseTo(0, 5);
+    expect(dist(layout.core)).toBeCloseTo(0, 5);
   });
 
   it("puts the most-connected node at the centre", () => {
     const layout = computeLayout(mindMap());
-    const centre = dist(layout.core?.position);
+    const centre = dist(layout.core);
     for (const id of ["a", "b", "c", "a1"]) {
-      expect(dist(layout[id]?.position), id).toBeGreaterThan(centre);
+      expect(dist(layout[id]), id).toBeGreaterThan(centre);
     }
   });
 
   it("places first-ring branches on a common radius, spread apart", () => {
     const layout = computeLayout(mindMap());
-    const ra = dist(layout.a?.position);
-    const rb = dist(layout.b?.position);
-    const rc = dist(layout.c?.position);
-    expect(rb).toBeCloseTo(ra, 0);
-    expect(rc).toBeCloseTo(ra, 0);
+    const ra = dist(layout.a);
+    const rb = dist(layout.b);
+    const rc = dist(layout.c);
+    // "Common radius" modulo integer position rounding (half-pixel sizes make
+    // the rounded centers wobble by up to ~1px — 0.92 observed after the
+    // sub-row reservation added odd heights).
+    expect(Math.abs(rb - ra)).toBeLessThan(1.5);
+    expect(Math.abs(rc - ra)).toBeLessThan(1.5);
     // Distinct positions, not stacked on top of each other.
     const set = new Set([
       JSON.stringify(layout.a?.position),
@@ -59,7 +65,7 @@ describe("radial layout for mind maps", () => {
 
   it("puts a deeper node on an outer ring", () => {
     const layout = computeLayout(mindMap());
-    expect(dist(layout.a1?.position)).toBeGreaterThan(dist(layout.a?.position));
+    expect(dist(layout.a1)).toBeGreaterThan(dist(layout.a));
   });
 
   it("is deterministic", () => {
@@ -91,7 +97,7 @@ describe("radial layout for mind maps", () => {
       { op: "CREATE_NODE", id: "lonely", nodeType: "idea", label: "Lonely" },
     ]);
     const layout = computeLayout(ws);
-    expect(dist(layout.lonely?.position)).toBeGreaterThan(0);
+    expect(dist(layout.lonely)).toBeGreaterThan(0);
   });
 
   it("keeps a pinned node where the user dragged it", () => {

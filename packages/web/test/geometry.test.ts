@@ -83,6 +83,30 @@ describe("board geometry", () => {
     expect(svg).toContain("A &amp; &lt;b&gt;");
   });
 
+  it("exports connectors between nodes (the export used to drop every edge)", () => {
+    const ws = applyOperations(createWorkspace({ diagramKind: "flowchart" }), [
+      { op: "CREATE_NODE", id: "a", nodeType: "service", label: "A" },
+      { op: "CREATE_NODE", id: "b", nodeType: "service", label: "B" },
+      { op: "CONNECT_NODES", source: "a", target: "b", relationship: "calls" },
+    ]);
+    const svg = buildBoardSvg(ws);
+    expect(svg).toContain("<line");
+    expect(svg).toContain('marker-end="url(#export-arrow)"');
+  });
+
+  it("exports unplaced nodes at the live renderer's defaults instead of dropping them", () => {
+    const ws = applyOperations(createWorkspace({ diagramKind: "flowchart" }), [
+      // Deliberately no MOVE_NODE: server-adopted boards carry nodes without
+      // position/size (the schema keeps them optional); the live canvas draws
+      // them at (0,0) 160x64, and the export must match — not skip them.
+      { op: "CREATE_NODE", id: "a", nodeType: "service", label: "Unplaced" },
+    ]);
+    const svg = buildBoardSvg(ws);
+    expect(svg).not.toContain("Empty board");
+    expect(svg).toContain("Unplaced");
+    expect(svg).toContain('width="160"');
+  });
+
   it("finds shapes contained within a frame", () => {
     const frame = shape({
       id: "f",

@@ -4,6 +4,7 @@ import {
   createWorkspace,
   computeLayout,
   measureNode,
+  nodeCardExtraHeight,
   type Operation,
 } from "../src/index.js";
 
@@ -12,6 +13,10 @@ import {
  * label ("Payment Reconciliation Service") was clipped. Sizing lives in the
  * layout engine, not CSS, because connector anchors, the minimap, comment pins,
  * and SVG export all read node.size.
+ *
+ * Stage C2/D regression: the card also renders a nodeType sub row and a
+ * statement chip; without reserving height for them the fixed-height card
+ * clipped that content symmetrically (the "cut top and bottom" report).
  */
 describe("measureNode", () => {
   const base = { width: 160, height: 64 };
@@ -41,6 +46,29 @@ describe("measureNode", () => {
 
   it("handles an empty label without collapsing", () => {
     expect(measureNode("", base)).toEqual(base);
+  });
+
+  it("reserves the sub row + chip height for a statement node", () => {
+    const plain = measureNode("Cart", base, { extraHeight: nodeCardExtraHeight(undefined) });
+    const withSub = measureNode("Cart", base, { extraHeight: nodeCardExtraHeight({}) });
+    const withChip = measureNode("Cart", base, {
+      extraHeight: nodeCardExtraHeight({ statement: { kind: "goal", status: "open" } }),
+    });
+    expect(plain.height).toBe(base.height);
+    expect(withSub.height).toBe(base.height + 15);
+    expect(withChip.height).toBe(base.height + 15 + 23);
+  });
+
+  it("the layout reserves the extra rows for statement nodes", () => {
+    let ws = createWorkspace({ diagramKind: "flowchart" });
+    ws = applyOperations(ws, [
+      { op: "CREATE_NODE", id: "s1", nodeType: "goal", label: "Ship" },
+      { op: "SET_STATEMENT", id: "s1", statement: { kind: "goal", status: "open" } },
+      { op: "CREATE_NODE", id: "s2", nodeType: "service", label: "Ship" },
+    ] satisfies Operation[]);
+    const layout = computeLayout(ws, { direction: "vertical" });
+    expect(layout.s1!.size.height).toBe(base.height + 15 + 23);
+    expect(layout.s2!.size.height).toBe(base.height + 15);
   });
 });
 

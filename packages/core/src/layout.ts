@@ -1,4 +1,4 @@
-import type { DiagramKind, Position, Size, Workspace } from "./model.js";
+import type { DiagramKind, Node, Position, Size, Workspace } from "./model.js";
 
 /**
  * Deterministic layout. The AI never sets coordinates (docs/25); this pass turns
@@ -76,10 +76,26 @@ const REGION_STRIP_GAP = 240;
  * Deterministic by design: no DOM measurement, just an average-character-width
  * estimate that matches the rendered 12.5px label within a few pixels.
  */
+/**
+ * The vertical pixels NodeCard renders beyond the meta + single-title rows the
+ * 64px base box was calibrated against: the nodeType sub row always, and the
+ * stage-C2 statement chip when the node carries a statement. Sizing lives in
+ * the engine (not CSS) because connector anchors, minimap boxes, comment pins,
+ * and SVG export all read `node.size` — a CSS-only fix would leave them wrong.
+ * Calibrated against styles.css `.node-sub` (11px + 2px margin ≈ 15px) and the
+ * chip inline style (6px margin + ~11px line + 4px padding + 2px border ≈ 23px).
+ */
+export function nodeCardExtraHeight(node: Pick<Node, "statement"> | undefined): number {
+  if (!node) return 0;
+  const SUB_ROW = 15;
+  const CHIP_ROW = 23;
+  return SUB_ROW + (node.statement ? CHIP_ROW : 0);
+}
+
 export function measureNode(
   label: string,
   base: Size,
-  opts: { charWidth?: number; maxWidth?: number; lineHeight?: number } = {},
+  opts: { charWidth?: number; maxWidth?: number; lineHeight?: number; extraHeight?: number } = {},
 ): Size {
   const charWidth = opts.charWidth ?? 7.1; // 12.5px Geist, mixed case
   const maxWidth = opts.maxWidth ?? 280;
@@ -90,7 +106,13 @@ export function measureNode(
   // How many lines the label needs once wrapped to that width.
   const perLine = Math.max(1, Math.floor((width - padding) / charWidth));
   const lines = Math.max(1, Math.ceil(label.length / perLine));
-  const height = Math.max(base.height, base.height + (lines - 1) * lineHeight);
+  // extraHeight: the rows NodeCard renders below the title (sub caption,
+  // statement chip) — see nodeCardExtraHeight. Without it the card's fixed
+  // height clips that content symmetrically (overflow: hidden + centered).
+  const height = Math.max(
+    base.height,
+    base.height + (lines - 1) * lineHeight + (opts.extraHeight ?? 0),
+  );
   return { width, height };
 }
 
@@ -225,7 +247,7 @@ export function computeLayout(workspace: Workspace, options: LayoutOptions = {})
       const ids = layers.get(l)!;
       const extent = Math.max(
         ...ids.map((id) => {
-          const s = measureNode(workspace.nodes[id]?.label ?? "", nodeSize);
+          const s = measureNode(workspace.nodes[id]?.label ?? "", nodeSize, { extraHeight: nodeCardExtraHeight(workspace.nodes[id]) });
           return direction === "vertical" ? s.height : s.width;
         }),
         direction === "vertical" ? nodeSize.height : nodeSize.width,
@@ -255,7 +277,7 @@ export function computeLayout(workspace: Workspace, options: LayoutOptions = {})
       layers
         .get(l)!
         .reduce(
-          (sum, id) => sum + measureNode(workspace.nodes[id]?.label ?? "", nodeSize).width,
+          (sum, id) => sum + measureNode(workspace.nodes[id]?.label ?? "", nodeSize, { extraHeight: nodeCardExtraHeight(workspace.nodes[id]) }).width,
           0,
         ),
     ),
@@ -278,7 +300,7 @@ export function computeLayout(workspace: Workspace, options: LayoutOptions = {})
       for (const l of row) {
         const ids = layers.get(l)!;
         const sizes = new Map(
-          ids.map((id) => [id, measureNode(workspace.nodes[id]?.label ?? "", nodeSize)] as const),
+          ids.map((id) => [id, measureNode(workspace.nodes[id]?.label ?? "", nodeSize, { extraHeight: nodeCardExtraHeight(workspace.nodes[id]) })] as const),
         );
         const crossSpan =
           ids.reduce((sum, id) => sum + sizes.get(id)!.width, 0) + (ids.length - 1) * nodeGap;
@@ -306,7 +328,7 @@ export function computeLayout(workspace: Workspace, options: LayoutOptions = {})
     // Size each card to its label first, then lay the row out against the real
     // widths so wide cards don't overlap their neighbours.
     const sizes = new Map(
-      ids.map((id) => [id, measureNode(workspace.nodes[id]?.label ?? "", nodeSize)] as const),
+      ids.map((id) => [id, measureNode(workspace.nodes[id]?.label ?? "", nodeSize, { extraHeight: nodeCardExtraHeight(workspace.nodes[id]) })] as const),
     );
     const crossSpan =
       ids.reduce(
@@ -349,7 +371,7 @@ function radialLayout(
   // Without this, every node is the default size and labels clip on the outer
   // rings where two siblings sit close.
   const measured = new Map<string, Size>(
-    nodeIds.map((id) => [id, measureNode(workspace.nodes[id]?.label ?? "", nodeSize)] as const),
+    nodeIds.map((id) => [id, measureNode(workspace.nodes[id]?.label ?? "", nodeSize, { extraHeight: nodeCardExtraHeight(workspace.nodes[id]) })] as const),
   );
 
   // Undirected adjacency: a mind map branch reads the same in either direction.
@@ -451,7 +473,7 @@ function treeLayout(
   // each leaf, not the default (M0.5). Without this two leaves with long
   // labels overlap because the cursor advances by the default width only.
   const measured = new Map<string, Size>(
-    nodeIds.map((id) => [id, measureNode(workspace.nodes[id]?.label ?? "", nodeSize)] as const),
+    nodeIds.map((id) => [id, measureNode(workspace.nodes[id]?.label ?? "", nodeSize, { extraHeight: nodeCardExtraHeight(workspace.nodes[id]) })] as const),
   );
 
   const children = new Map<string, string[]>();
@@ -570,7 +592,7 @@ function swimlaneLayout(
   // column for the next node (M0.5). Without this every column is the default
   // width and the column-step carves lanes narrower than a long label needs.
   const measured = new Map<string, Size>(
-    nodeIds.map((id) => [id, measureNode(workspace.nodes[id]?.label ?? "", nodeSize)] as const),
+    nodeIds.map((id) => [id, measureNode(workspace.nodes[id]?.label ?? "", nodeSize, { extraHeight: nodeCardExtraHeight(workspace.nodes[id]) })] as const),
   );
 
   // Column = flow depth, so a step always sits right of its predecessor even

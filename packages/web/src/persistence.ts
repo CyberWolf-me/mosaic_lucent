@@ -304,6 +304,21 @@ export function newProjectId(): string {
 }
 
 /**
+ * A default project name that doesn't collide with any currently saved
+ * project. Derived from the actual set of persisted names (not a counter),
+ * so it survives reloads and is never fooled by deleted projects — every
+ * "New workspace" used to save the same hardcoded "Untitled workspace",
+ * which is why every session's cards carried identical names.
+ */
+export function uniqueProjectName(base = "Untitled workspace"): string {
+  const names = new Set(readIndex().map((p) => p.name));
+  if (!names.has(base)) return base;
+  let n = 2;
+  while (names.has(`${base} ${n}`)) n += 1;
+  return `${base} ${n}`;
+}
+
+/**
  * The local autosave slot for a server-side board.
  *
  * Autosave writes under whichever project id is current, so a board opened

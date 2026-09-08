@@ -52,6 +52,7 @@ import {
   loadProject,
   mirrorProjectId,
   newProjectId,
+  uniqueProjectName,
   newProposalId,
   onStorageError,
   openProposalIn,
@@ -457,7 +458,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   );
   const [view, setView] = useState<View>("canvas");
   const [projectId, setProjectId] = useState(restored?.id ?? newProjectId());
-  const [projectName, setProjectName] = useState(restored?.name ?? "Untitled workspace");
+  const [projectName, setProjectName] = useState(restored?.name ?? uniqueProjectName());
   // Called, not passed: `useState` treats a bare function as a lazy initializer
   // and would invoke `current` detached from the instance — `this.workspace`
   // on undefined. The arrow keeps it bound and runs exactly once.
@@ -1398,15 +1399,19 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
   const newProject = useCallback(() => {
     const id = newProjectId();
+    // A collision-free default name: every "New workspace" used to save the
+    // same hardcoded "Untitled workspace", so every card in the dashboard
+    // carried an identical name across sessions.
+    const name = uniqueProjectName();
     const fresh = new OperationHistory(createWorkspace(), "initial");
     // Write the record synchronously BEFORE the pointer moves: the autosave
     // races a reload, and the boot restore crashes on a pointer whose record
     // does not exist yet (`restored.workspace` of undefined) — the same
     // invariant startNewBoardFor already carries.
-    saveProject({ id, name: "Untitled workspace", workspace: fresh.current(), chat: [] });
+    saveProject({ id, name, workspace: fresh.current(), chat: [] });
     historyRef.current = fresh;
     setProjectId(id);
-    setProjectName("Untitled workspace");
+    setProjectName(name);
     setWorkspace(fresh.current());
     setChat([]);
     // The new project has no proposal record; leaving the old one in the
