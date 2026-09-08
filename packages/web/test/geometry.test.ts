@@ -107,6 +107,48 @@ describe("board geometry", () => {
     expect(svg).toContain('width="160"');
   });
 
+  it("exports the owner's live-generated launch-plan board completely (6 nodes, 5 edges, 1 region)", () => {
+    // The exact shape the live pass generated through the real AI route
+    // (glm-5.3-flash via api.b.ai): 3 goals + 2 blockers + 1 milestone, 5
+    // labeled relationships, one kinded group holding all six members. The
+    // pre-fix export dropped every edge and every unplaced node — this pins
+    // the whole picture at once.
+    const ws = applyOperations(createWorkspace({ diagramKind: "flowchart", name: "Launch plan" }), [
+      { op: "CREATE_GROUP", id: "g1", label: "Launch Plan", children: [] },
+      { op: "SET_GROUP_KIND", id: "g1", kind: "process" },
+      { op: "CREATE_NODE", id: "n1", nodeType: "issue", label: "Goal: 1k beta signups", groupId: "g1" },
+      { op: "CREATE_NODE", id: "n2", nodeType: "issue", label: "Goal: Marketing site live", groupId: "g1" },
+      { op: "CREATE_NODE", id: "n3", nodeType: "issue", label: "Goal: Onboarding shipped", groupId: "g1" },
+      { op: "CREATE_NODE", id: "n4", nodeType: "issue", label: "Blocker: API rate limits", groupId: "g1" },
+      { op: "CREATE_NODE", id: "n5", nodeType: "issue", label: "Blocker: Legal review", groupId: "g1" },
+      { op: "CREATE_NODE", id: "n6", nodeType: "milestone", label: "Product Launch", groupId: "g1" },
+      { op: "CONNECT_NODES", source: "n1", target: "n6", relationship: "delivers" },
+      { op: "CONNECT_NODES", source: "n2", target: "n6", relationship: "delivers" },
+      { op: "CONNECT_NODES", source: "n3", target: "n6", relationship: "delivers" },
+      { op: "CONNECT_NODES", source: "n4", target: "n6", relationship: "blocks" },
+      { op: "CONNECT_NODES", source: "n5", target: "n6", relationship: "blocks" },
+    ]);
+    const svg = buildBoardSvg(ws);
+    // Every node's label present.
+    for (const label of [
+      "Goal: 1k beta signups",
+      "Goal: Marketing site live",
+      "Goal: Onboarding shipped",
+      "Blocker: API rate limits",
+      "Blocker: Legal review",
+      "Product Launch",
+    ]) {
+      expect(svg).toContain(label);
+    }
+    // All 5 connectors, with arrowheads, and the region box + its label.
+    expect(svg).not.toContain("Empty board");
+    expect((svg.match(/<line /g) ?? []).length).toBe(5);
+    // "export-arrow" appears once per connector plus once in the marker
+    // definition — count the marker-end references, not the raw string.
+    expect((svg.match(/marker-end="url\(#export-arrow\)"/g) ?? []).length).toBe(5);
+    expect(svg).toContain("Launch Plan · Process map");
+  });
+
   it("finds shapes contained within a frame", () => {
     const frame = shape({
       id: "f",

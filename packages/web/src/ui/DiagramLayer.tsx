@@ -133,6 +133,34 @@ export function DiagramLayer({
   const drawEdges = visibleEdges(edges, byId, view, keep, dragOverride);
   const groups = visibleGroups(regions, view);
 
+  // Region label pills all anchor at their box's top-left (CSS: top -9px, left
+  // 12px). Overlapping region boxes — nested or duplicate groups out of one
+  // generation — used to stack every pill on the same point: the labels read
+  // as one jumbled line. Assign each label the first 20px row whose rect no
+  // earlier label occupies. Deterministic in region order.
+  const LABEL_ROW = 20;
+  const labelSlots = new Map<string, number>();
+  {
+    const placed: Array<{ x: number; y: number; w: number }> = [];
+    for (const g of groups) {
+      const text = [g.label.trim(), g.kind ? DIAGRAM_LABELS[g.kind] : ""]
+        .filter((s) => s.length > 0)
+        .join(" · ");
+      if (text.length === 0) continue;
+      const w = text.length * 7 + 24; // 9.5px mono + tracking + pill padding, padded
+      const x = g.x + 12;
+      const baseY = g.y - 9;
+      let slot = 0;
+      const hits = (y: number) =>
+        placed.some(
+          (p) => Math.abs(p.y - y) < LABEL_ROW - 2 && x < p.x + p.w && p.x < x + w,
+        );
+      while (hits(baseY + slot * LABEL_ROW)) slot += 1;
+      labelSlots.set(g.id, slot);
+      placed.push({ x, y: baseY + slot * LABEL_ROW, w });
+    }
+  }
+
   // Region collapse (P1): a collapsed group's members and their edges are
   // filtered from the draw lists — the model keeps everything, so expanding
   // restores the exact prior render. Edges fully inside a collapsed region
@@ -187,8 +215,16 @@ export function DiagramLayer({
           part of the operation schema and the model emits it (process maps depend
           on it for swimlanes), but the canvas never rendered groups — so "group
           these ideas" produced no visible result. */}
-      {finalGroups.map((g) =>
-        "collapsed" in g && g.collapsed ? (
+      {finalGroups.map((g) => {
+        // The label pill: "Name · Kind" when a kind exists, but a kindless
+        // group with an empty name renders nothing rather than a lone "·
+        // Kind" pill floating on the canvas (found live: unlabeled groups
+        // from AI output stacked bare-kind pills on unlabeled groups').
+        const labelBits = [g.label.trim(), g.kind ? DIAGRAM_LABELS[g.kind] : ""].filter(
+          (s) => s.length > 0,
+        );
+        const pill = labelBits.join(" · ");
+        return "collapsed" in g && g.collapsed ? (
           // A collapsed region renders as a summary card at the region's
           // original bounds (P1): label, node/edge counts, one expand button.
           // The members are untouched in the model — expanding filters
@@ -198,10 +234,7 @@ export function DiagramLayer({
             className="group-region collapsed"
             style={{ left: g.x, top: g.y, width: g.width, height: g.height }}
           >
-            <span className="group-region-label">
-              {g.label}
-              {g.kind ? ` · ${DIAGRAM_LABELS[g.kind]}` : ""}
-            </span>
+            {pill.length > 0 && <span className="group-region-label">{pill}</span>}
             <div className="mono" style={{ fontSize: 11.5, color: "var(--ink-3)", marginTop: 10 }}>
               {g.memberCount} node{g.memberCount === 1 ? "" : "s"} · {g.edgeCount} edge
               {g.edgeCount === 1 ? "" : "s"}
@@ -225,17 +258,23 @@ export function DiagramLayer({
                     e.stopPropagation();
                     onToggleCollapse(g.id);
                   },
-                  title: "Double-click to collapse this region",
+                  title: pill.length > 0 ? pill : "Double-click to collapse this region",
                 }
-              : {})}
+              : pill.length > 0
+                ? { title: pill }
+                : {})}
           >
-            <span className="group-region-label">
-              {g.label}
-              {g.kind ? ` · ${DIAGRAM_LABELS[g.kind]}` : ""}
-            </span>
+            {pill.length > 0 && (
+              <span
+                className="group-region-label"
+                style={{ top: (labelSlots.get(g.id) ?? 0) * LABEL_ROW - 9 }}
+              >
+                {pill}
+              </span>
+            )}
           </div>
-        ),
-      )}
+        );
+      })}
 
       <svg
         className="connectors"
@@ -363,7 +402,13 @@ export function DiagramLayer({
             opacity={focus ? focusOpacity(focus, n.id) : 1}
             title={n.label}
             meta={n.meta}
-            sub={n.nodeType}
+            // The sub caption repeats the nodeType; for the style-table types
+            // (and any unknown type, whose meta IS the uppercased nodeType)
+            // that renders the same word twice — "ISSUE" over "issue". Only
+            // show it when it actually adds a word the meta row doesn't have.
+            {...(n.nodeType.toLowerCase() === n.meta.toLowerCase()
+              ? {}
+              : { sub: n.nodeType })}
             dot={n.dot}
             mark={mark}
             state={lit ? "selected" : state}

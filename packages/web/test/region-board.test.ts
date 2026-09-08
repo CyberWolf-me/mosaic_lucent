@@ -66,9 +66,11 @@ describe("diagram regions on the board", () => {
 
   it("SVG export labels the region box with its kind", () => {
     const svg = buildBoardSvg(regionBoard);
-    expect(svg).toContain("Pricing · mindmap");
+    // The display vocabulary (DIAGRAM_LABELS), matching the canvas pill —
+    // not the raw kind string.
+    expect(svg).toContain("Pricing · Mind map");
     // The region rect sits behind the nodes (drawn first).
-    const regionIdx = svg.indexOf("Pricing · mindmap");
+    const regionIdx = svg.indexOf("Pricing · Mind map");
     const nodeIdx = svg.indexOf("Pricing</text>");
     expect(regionIdx).toBeGreaterThan(-1);
     expect(nodeIdx).toBeGreaterThan(regionIdx);

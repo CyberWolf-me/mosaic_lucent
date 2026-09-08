@@ -1,4 +1,6 @@
 import type { Shape, Workspace } from "@lucent/core";
+import { DIAGRAM_LABELS } from "../scene.js";
+import type { DiagramKind } from "@lucent/core";
 
 /**
  * Pure board geometry helpers, extracted from CanvasView so they can be unit
@@ -290,16 +292,24 @@ export function buildBoardSvg(workspace: Workspace, pad = 40): string {
     let members = 0;
     for (const id of g.children) {
       const n = workspace.nodes[id];
-      if (!n?.position || !n.size) continue;
+      if (!n) continue;
       members++;
-      if (n.position.x < minX2) minX2 = n.position.x;
-      if (n.position.y < minY2) minY2 = n.position.y;
-      if (n.position.x + n.size.width > maxX2) maxX2 = n.position.x + n.size.width;
-      if (n.position.y + n.size.height > maxY2) maxY2 = n.position.y + n.size.height;
+      // Same position/size defaults as the node loop and the live renderer —
+      // an unplaced member still bounds its region.
+      const nx = n.position?.x ?? 0;
+      const ny = n.position?.y ?? 0;
+      const nw = n.size?.width ?? 160;
+      const nh = n.size?.height ?? 64;
+      if (nx < minX2) minX2 = nx;
+      if (ny < minY2) minY2 = ny;
+      if (nx + nw > maxX2) maxX2 = nx + nw;
+      if (ny + nh > maxY2) maxY2 = ny + nh;
     }
     if (members === 0) continue;
     const gp = 22;
-    const label = g.kind ? `${g.label} · ${g.kind}` : g.label;
+    // The same display vocabulary the live canvas uses for the region pill
+    // (DIAGRAM_LABELS), not the raw kind string.
+    const label = g.kind ? `${g.label} · ${DIAGRAM_LABELS[g.kind as DiagramKind]}` : g.label;
     regionBoxes.push(
       `<rect x="${minX2 - gp}" y="${minY2 - gp}" width="${maxX2 - minX2 + gp * 2}" height="${maxY2 - minY2 + gp * 2}" rx="12" fill="#1a1a1d" stroke="#3a3a3e"/>` +
         `<text x="${minX2 - gp + 12}" y="${minY2 - gp + 16}" fill="#8a8a90" font-family="sans-serif" font-size="11">${escapeXml(label)}</text>`,
