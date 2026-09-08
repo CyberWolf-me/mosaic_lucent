@@ -1079,3 +1079,83 @@ webhooks; Figma/Slack adapters; scope enforcement (the refusal
 stands); inbound create/title/assignee sync; per-node propose; an
 actions-history view; a connection-admin UI. Each is named for its
 own future milestone — none inherits "D11".
+
+## Amendment (2026-09-09): the Stage D reconciliation — one authoritative roadmap
+
+The strategic Stage D document (the original execution vision, uploaded by the
+owner) and this file's engineering D1–D10 grew in parallel, so the same labels
+began to mean two things: the old roadmap's "D7" is decision→action linkage,
+while the engineering D7 is inbound sync. This section is the reconciliation —
+the authoritative mapping. From here on, **old-roadmap items are cited as
+"strategic D<n>", engineering stages as plain D<n>.**
+
+### The vision that stays canonical
+
+"Don't make Lucent the destination for execution. Make Lucent the connective
+tissue between intent and execution." — the strategic document's core sentence,
+unchanged by anything D1–D10 built. The loop it names still holds:
+
+TALK → LUCENT UNDERSTANDS → VISUALIZES → REMEMBERS → CREATES WORK →
+TRACKS WORK → LATTICE → ACTUAL CODE.
+
+D1–D10 built the *plumbing* under CREATES WORK and TRACKS WORK. The remaining
+strategic features are the *visible product capabilities* that plumbing now
+makes possible — which is why they were correctly sequenced second.
+
+### The strategic labels, reconciled
+
+**Absorbed into the engineering D1–D10 (done, with the mechanism):**
+
+| Strategic | Engineering home | The mechanism |
+| --- | --- | --- |
+| D1 actions as executable objects | D1 | the action nodeType + issue fields |
+| D2 action state | D1 + D7 | statements + inbound status sync |
+| D3 Linear | D6 | LinearProvider + ambiguous-create recovery |
+| D4 "don't become another PM tool" | D1–D9 principle | Lucent drafts; humans decide; execution stays external |
+| D5 external state sync | D7 | signed webhooks → queue → human-gated accept |
+| D6/D21 execution provenance | C3 + D7/D9 | provenance + sourceSeq + the actor record |
+| D8 dependency-aware execution | D3 | depends_on/blocks cycle rejection + propagation |
+| D9 integration framework | D4 | ExecutionProvider seam + capability warnings (D8) |
+| D11 GitHub | D8 | GithubProvider + the honesty layer |
+| D14 external action approval | D5 | the claim ladder + the approve gate + ack consent |
+| D15 idempotency | D5/D6/D10 | ledger + idempotency keys + the recovery contract |
+| D16 webhooks | D7/D8 | the scheme registry (linear/github/jira/fake) |
+| D19 Lattice connection | the final Lattice milestone (named, not built) | — |
+| D22 execution feedback | D7 | inbound is the feedback direction |
+| D24 permissioned external actions | D5/D6 | board-role guards + owner-only connections |
+| D25 full acceptance | D10 | the era regression walks all nine spines |
+
+**Genuinely remaining from the strategic roadmap — the future-milestone ledger:**
+
+| Strategic | Capability | Why it is not built yet / what it needs |
+| --- | --- | --- |
+| D7 | **Decision → Action linkage** | The ingredients exist (decisions, actions, provenance, statements) but decision→action causality is not a first-class execution relationship. Needs a link type + both query directions ("what actions came from this decision" / "what decisions caused this work"). Belongs with execution intelligence, not standalone. |
+| D13 | **Create the work** | semantic state → structured implementation plan → tasks. C2/C6/D1/D3/D5 give the pieces; the plan *generator* is the missing product capability. A top candidate for the next major feature. |
+| D17 | **Execution dashboard** | deliberately excluded from engineering D numbering; a major user-facing surface, its own milestone. |
+| D18 | **Decision impact analysis** | reasoning over the execution graph D3 now provides — natural later feature. |
+| D20 | **Decision → implementation plan** | requirement → current architecture → gap → implementation plan → tasks → code. The Lucent↔Lattice differentiator; final milestone territory. |
+| D10 | **Slack / Teams** | NOT an ExecutionProvider (the D8 discovery): a **CommunicationProvider** family — actions that *post*, not tasks that *track*. |
+| D12 | **Figma** | NOT an ExecutionProvider either: an **ArtifactProvider** family — design actions that produce files/frames. |
+| D23 | **Automation** | event → rule → action. Deliberately last: automate only after actions, dependencies, providers, approval, and sync are trustworthy — otherwise we'd be automating unreliable workflows. |
+
+### The provider-family rule (recorded as doctrine)
+
+The D8 interface review discovered the architecture's provider taxonomy, and
+it governs every remaining integration:
+
+- **Task systems** (Linear, GitHub, Jira) → ExecutionProvider (built).
+- **Design systems** (Figma) → ArtifactProvider (named, not built).
+- **Communication systems** (Slack, Teams) → CommunicationProvider (named, not built).
+- **Documents/sheets/calendars** (Notion, spreadsheets, calendar) → add only
+  when a concrete user workflow justifies them — never by default.
+
+### The one-paragraph answer to "are the D stages finished?"
+
+The **engineering** D1–D10 are finished (the era closed in ADR 0036). The
+**strategic** Stage D is not — and was never going to be — finished by them:
+its remaining eight capabilities (create-the-work, decision→action, the
+dashboard, decision impact, Slack/Teams, Figma, automation, and the
+Lucent↔Lattice handoff) are recorded above as the future-milestone ledger,
+each named for its own milestone, none inheriting the "D" engineering
+numbering. When a freeze gate reopens work, this ledger — not the old labels —
+is the menu.
