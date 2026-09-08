@@ -184,7 +184,12 @@ function makeStores(databaseUrl: string | undefined): {
       integrations: {
         store: new InMemoryIntegrationStore(),
         providers: new Map<string, import("./integrations/provider.js").ExecutionProviderFactory>([
-        ['fake', () => new FakeProvider()],
+        // ONE instance, like every other store in main: the fake's wire is
+        // its own memory, so a per-resolution instance would hand every
+        // request a fresh (amnesiac) external system — links would dangle
+        // and the recovery contract would be undemonstrable live (found
+        // by the D10 live pass).
+        ['fake', (() => { const fake = new FakeProvider(); return () => fake; })()],
         ['linear', linearConnectionFactory()],
         ['github', githubConnectionFactory()],
         ['jira', jiraConnectionFactory()],
@@ -223,7 +228,8 @@ function makeStores(databaseUrl: string | undefined): {
     integrations: {
       store: new PostgresIntegrationStore(target.db),
       providers: new Map<string, import("./integrations/provider.js").ExecutionProviderFactory>([
-        ['fake', () => new FakeProvider()],
+        // Same one-instance rule as the in-memory path (see the note there).
+        ['fake', (() => { const fake = new FakeProvider(); return () => fake; })()],
         ['linear', linearConnectionFactory()],
         ['github', githubConnectionFactory()],
         ['jira', jiraConnectionFactory()],

@@ -1782,3 +1782,45 @@ per-node propose; an actions-history view; a connection-admin UI.
 
 Gate: typecheck 0; server 1055 (+8 D10 safety + regression tests),
 web 651, ai 203, i18n 14, mcp 28, core 422.
+
+## The Stage D10 live smoke pass (2026-09-08)
+
+Ran against the real stack on :4387 (provider: MOCK — the gorouter LLM was
+out of quota for claude-opus-5-thinking again, the same external constraint
+as the D9 pass; the mock IS the deterministic narrowing agent), with the
+built web app served by the server's static handler.
+
+What the pass verified, live:
+
+[x] THE AI-PROPOSE SURFACE: propose-ai → origin ai + provenance + 2 of 2
+    selected → approve → both actions executed + linked (fake-1, fake-2).
+[x] THE PROMETHEUS SERIES: `/metrics/prometheus` shows
+    `lucent_ai_propose_total 1` + the duration histogram, every sample
+    line label-free — the cardinality rule verified on the real surface.
+[x] THE LINK-GC ARM LIVE: delete the node → the sweep tick logged
+    `integrations.gc.link {reason: "node missing"}` → the links list
+    dropped the dead row.
+[x] THE LINK-GC RECOVERY INVARIANT LIVE (the review's exact scenario):
+    recreate the node with the same id → sync →
+    `{"created":0, results:[{"action":"relinked","externalId":"fake-1"}]}`
+    — the existing external task RELINKED, zero new wire creates.
+
+TWO PRODUCTION BUGS THE PASS CAUGHT (both fixed + pinned by test):
+
+1. **The static handler answered `/metrics/prometheus` with the SPA** —
+   the exemption list had `/metrics` but not `/metrics/prometheus`, so a
+   GET fell through to index.html: wrong body, wrong content-type, and
+   the auth gate never ran (an unauthenticated probe got the SPA, not
+   the 401). Same class as the `/scim/` precedent already documented in
+   static.ts. Fix: one line in the exemption list + the
+   static.test.ts pin.
+2. **The fake provider was a per-resolution instance in main.ts** —
+   `() => new FakeProvider()` handed every request a fresh (amnesiac)
+   external wire, so links dangled ("fake task does not exist" on
+   drift-sync) and the recovery contract was undemonstrable live. Real
+   providers are stateless HTTP adapters so the bug was invisible until
+   the fake was the wire. Fix: ONE instance per process, like every
+   other store in main.ts (both the in-memory and PG registrations).
+
+Gate after the fixes: typecheck 0; all workspaces green (server 99
+files / 1055 tests).

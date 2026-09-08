@@ -16,8 +16,7 @@ import type { AddressInfo } from "node:net";
 import { createHmac } from "node:crypto";
 import { writeFileSync } from "node:fs";
 import { MockImageProvider, MockProvider } from "@lucent/ai";
-import type { LLMProvider } from "@lucent/ai/src/provider.js";
-import type { ExternalPlanRequest, ExternalPlanResult } from "@lucent/ai/src/externalPlan.js";
+import type { ExternalPlanRequest, ExternalPlanResult, LLMProvider } from "@lucent/ai";
 import { createWorkspace, type Operation } from "@lucent/core";
 import { createApp } from "../src/app.js";
 import { InMemoryUserStore } from "../src/accounts.js";
@@ -49,8 +48,8 @@ class SelectorLLM implements LLMProvider {
   readonly name = "selector";
   calls = 0;
   plan: ExternalPlanResult = { nodeIds: [], explanation: "" };
-  async generateOperations() { throw new Error("not under test"); }
-  async generateAnswer() { throw new Error("not under test"); }
+  generateOperations(): never { throw new Error("not under test"); }
+  generateAnswer(): never { throw new Error("not under test"); }
   async generateExternalPlan(_req: ExternalPlanRequest): Promise<ExternalPlanResult> {
     this.calls += 1;
     return { ...this.plan };
@@ -92,7 +91,7 @@ async function api(
   return { status: res.status, body };
 }
 
-function action(id: string, fields: { assignee?: string; dueDate?: string; status?: "open" | "completed" } = {}): Operation[] {
+function action(id: string, fields: { assignee?: string; dueDate?: string; status?: "open" | "resolved" } = {}): Operation[] {
   return [
     { op: "CREATE_NODE", id, nodeType: "action", label: id.replace(/-/g, " ") },
     { op: "SET_STATEMENT", id, statement: { kind: "action", status: fields.status ?? "open", topic: "era" } },

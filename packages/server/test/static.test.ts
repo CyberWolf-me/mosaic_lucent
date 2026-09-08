@@ -138,14 +138,14 @@ describe("createStaticHandler", () => {
     expect(r.status).toBe(400);
   });
 
-  it("falls through for /api/*, /ws, /health, /metrics", async () => {
+  it("falls through for /api/*, /ws, /health, /metrics (and /metrics/prometheus — the live D10 pass caught the SPA answering it)", async () => {
     const before = downstreamHits;
-    for (const p of ["/api/boards", "/ws", "/health", "/metrics"]) {
+    for (const p of ["/api/boards", "/ws", "/health", "/metrics", "/metrics/prometheus"]) {
       const r = await fetchAs(p);
       expect(r.status).toBe(418);
       expect(r.body).toBe("downstream");
     }
-    expect(downstreamHits - before).toBe(4);
+    expect(downstreamHits - before).toBe(5);
   });
 
   it("falls through for non-GET methods on an otherwise-static path", async () => {

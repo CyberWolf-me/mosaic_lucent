@@ -189,7 +189,8 @@ export function createStaticHandler(options: StaticOptions): StaticHandler {
         pathname.startsWith("/scim/") ||
         pathname === "/ws" ||
         pathname === "/health" ||
-        pathname === "/metrics"
+        pathname === "/metrics" ||
+        pathname === "/metrics/prometheus"
       ) {
         return false;
       }
