@@ -839,6 +839,158 @@ export function pointsByCategory(workspace: Workspace): Record<IssueStatusCatego
   return totals;
 }
 
+/* -------------------------------------------------------------------------- */
+/* The execution rollup (Stage E2, ADR 0037)                                  */
+/* -------------------------------------------------------------------------- */
+
+/** The one-line answer to "how is the work going?" — pure counts + percent. */
+export interface ExecutionRollup {
+  total: number;
+  completed: number;
+  inProgress: number;
+  blocked: number;
+  atRisk: number;
+  overdue: number;
+  /** round(100 · completed / total); 0 on an empty board. */
+  percent: number;
+}
+
+/**
+ * The execution rollup (Stage E2): counts over the board's EXECUTABLE
+ * actions (actionNodes, not every issue-carrying node — a plan region's
+ * derived work is executable; a bare card is not). Pure over
+ * (workspace, now), the same projection stance as the board columns:
+ * manual state is issue.status; derived state is `derivedExecution`;
+ * neither is stored (ADR 0027).
+ *
+ * The counts are deliberately overlapping, not a partition: `blocked` is
+ * the manual status OR any derived blocker; `atRisk` is any derived
+ * overdue-unfinished upstream — BLOCKED NOT EXCLUDED (ADR 0029's settled
+ * rule: trouble compounds); `overdue` is the action's own past-due date.
+ * A single action can be blocked AND at risk AND overdue, and the rollup
+ * says so three times, once per signal — the dashboard's job is to
+ * surface trouble, not to file it into one box.
+ */
+export function executionRollup(workspace: Workspace, now: number): ExecutionRollup {
+  const actions = actionNodes(workspace);
+  const derived = derivedExecution(workspace, now);
+  let completed = 0;
+  let inProgress = 0;
+  let blocked = 0;
+  let atRisk = 0;
+  let overdue = 0;
+  for (const node of actions) {
+    const issue = node.issue!;
+    const category = issue.statusCategory;
+    if (category === "done") {
+      completed += 1;
+      continue; // done work carries no trouble signals
+    }
+    const d = derived.get(node.id);
+    const isBlocked = issue.status === "blocked" || (d?.blockedBy.length ?? 0) > 0;
+    if (isBlocked) blocked += 1;
+    if ((d?.atRiskBy.length ?? 0) > 0) atRisk += 1;
+    if (isOverdueUnfinished(issue.dueDate, issue.status, now)) overdue += 1;
+    if (!isBlocked && category === "in_progress") inProgress += 1;
+  }
+  return {
+    total: actions.length,
+    completed,
+    inProgress,
+    blocked,
+    atRisk,
+    overdue,
+    percent: actions.length === 0 ? 0 : Math.round((100 * completed) / actions.length),
+  };
+}
+
+/** One blocked node's chain, ordered blocker-first (upstream → … → target). */
+export interface BlockingChain {
+  /** The derived-blocked node the chain explains. */
+  nodeId: string;
+  /** The walk from the status-blocked upstream down to the target. */
+  chain: Node[];
+}
+
+/**
+ * The blocking chains (Stage E2): for every derived-blocked action, the
+ * node-by-node path from a MANUALLY blocked upstream down to it — the
+ * "explain the chain" surface. One chain per blocked node, the shortest
+ * path found by BFS over the normalized dependency graph (deterministic:
+ * upstream order, first-hit wins), so the answer to "what's blocking us"
+ * is a story ("Design is blocked → Implementation waits on it") and not a
+ * bare id list.
+ */
+export function blockingChains(workspace: Workspace, now: number): BlockingChain[] {
+  const derived = derivedExecution(workspace, now);
+  const deps = dependsOnGraph(workspace);
+  const nodes = workspace.nodes;
+  // A root is any node whose MANUAL status is blocked — executable or
+  // not. `derivedExecution` counts a directly-depended non-executable
+  // blocker (a plain node the graph forwards nothing through) as a
+  // blockedBy entry, so the chain walk must be able to end on one.
+  const manuallyBlocked = new Set(
+    Object.values(nodes)
+      .filter((n) => n.issue?.status === "blocked")
+      .map((n) => n.id),
+  );
+  const out: BlockingChain[] = [];
+  for (const [id, d] of derived) {
+    if (d.blockedBy.length === 0) continue;
+    // BFS upstream from the blocked node over the FULL dependency graph —
+    // the walk is about explaining the chain, not propagating it, so it
+    // passes through nodes the execution graph would not forward through.
+    // First path to a manually blocked upstream wins; parents record the
+    // path for the walk back.
+    const parent = new Map<string, string>();
+    const queue = [...(deps.get(id) ?? [])];
+    const seen = new Set<string>([id, ...queue]);
+    let root: string | undefined;
+    for (let i = 0; i < queue.length && root === undefined; i += 1) {
+      const up = queue[i]!;
+      if (manuallyBlocked.has(up)) {
+        root = up;
+        break;
+      }
+      for (const next of deps.get(up) ?? []) {
+        if (!seen.has(next)) {
+          seen.add(next);
+          parent.set(next, up);
+          queue.push(next);
+        }
+      }
+    }
+    if (root === undefined) {
+      // No manually-blocked root reachable (the cause lies outside the
+      // dependency graph entirely): the chain is the direct blockers,
+      // still a story.
+      const direct: Node[] = [];
+      for (const bid of d.blockedBy) {
+        const n = nodes[bid];
+        if (n) direct.push(n);
+      }
+      out.push({ nodeId: id, chain: direct });
+      continue;
+    }
+    // Walk root → … → id by parents — already blocker-first order.
+    const path: Node[] = [];
+    let guard = 0;
+    for (let cur: string = root; guard < 10_000; guard += 1, cur = parent.get(cur)!) {
+      const n = nodes[cur];
+      if (n) path.push(n);
+      if (cur === id || !parent.has(cur)) {
+        if (cur !== id) {
+          const target = nodes[id];
+          if (target) path.push(target);
+        }
+        break;
+      }
+    }
+    out.push({ nodeId: id, chain: path });
+  }
+  return out;
+}
+
 /** Vote count per target id, for badges and the results tally. */
 export function voteTally(workspace: Workspace): Record<string, number> {
   const tally: Record<string, number> = {};

@@ -78,6 +78,7 @@ export type View =
   | "history"
   | "meeting"
   | "intelligence"
+  | "execution"
   | "wireframe"
   | "sequence"
   | "er"

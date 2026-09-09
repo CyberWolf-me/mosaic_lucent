@@ -251,6 +251,23 @@ export const Ico = {
       <path d="M9 6.5h6M9 17.5h6M6 9v6M18 9v6" />
     </svg>
   ),
+  Gauge: (p: P) => (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      {...p}
+    >
+      <path d="M4 14a8 8 0 1 1 16 0" />
+      <path d="M12 14l4-4" />
+      <path d="M3.5 18h17" />
+    </svg>
+  ),
   Journey: (p: P) => (
     <svg
       width="14"

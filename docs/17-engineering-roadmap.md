@@ -1198,3 +1198,39 @@ is HISTORICAL cause). The contract, in full:
 Zero schema change, zero migration, no new store, no new statement kind.
 Not built (still on the ledger): decision impact analysis, Slack/Teams,
 Figma, automation, the Lucent↔Lattice handoff.
+
+## Amendment (2026-09-09, later still): Stage E2 — the execution dashboard
+
+The ledger's second draw lands: one screen answering "how is the work
+going and what's blocking us" — pure client-side derivation, zero server
+state (ADR 0037's E2 extension records the doctrine).
+
+- **The core rollup** (`executionRollup` + `blockingChains` in core):
+  counts over EXECUTABLE actions (actionNodes, not every issue-carrying
+  node); blocked is manual-status OR derived blockers; at-risk is derived
+  overdue-unfinished upstream with BLOCKED NOT EXCLUDED (ADR 0029's settled
+  rule restated — trouble compounds); overdue is the action's own past-due
+  date; percent over completed only. The blocking chains tell the story:
+  per derived-blocked node, the shortest BFS path from a manually blocked
+  upstream down to it, blocker-first — the chain walk passes through
+  nodes the execution graph would not forward through (explaining is not
+  propagating), and a blocked non-executable root can end a chain exactly
+  as `derivedExecution` counts it.
+- **The view** (`ExecutionView`, the BoardView registration pattern):
+  rollup header (N% + thin progress bar + the five counts, at-risk
+  tooltip keeping the analytical-signal distinction), "What's blocking
+  us" (label chips, each a reveal jump through the existing onCitation
+  seam), "Decisions behind the work" (the E1 payoff made visible — for
+  every active action with drives edges, `action ← decision`), and an
+  empty state that teaches the loop ("Ask Lucent to create the work,
+  then track it here").
+- **The registration**: View union + App case + a RAIL entry (the new
+  Gauge icon) + the pure `execution.ts` projection module, node-tested
+  per the web suite's convention (the view renders what the projection
+  decides).
+
+Pinned by core `execution-rollup.test.ts` (11 tests — counts, percent,
+the overlap semantics, chain walks incl. the non-executable root and
+shortest-path cases) and web `execution.test.ts` (5 — the projection
+contract: empty flag, blocker-first chips, active-only decisions-behind,
+the E1+E2 together case).

@@ -1847,3 +1847,24 @@ case forbids any drives edge at all. Pinned by core `drives-graph.test.ts`
 (13 tests), the extended D2 acceptance e2e (five edges land on approval,
 all vanish on undo), and web projection tests. Zero schema change, zero
 migration, no new store, no new statement kind.
+
+## Stage E2 shipped: the execution dashboard (2026-09-09, docs/17 amendment, ADR 0037's E2 extension)
+
+One screen answering "how is the work going and what's blocking us," pure
+client-side over the existing derivation machinery — zero server state, zero
+new stores. `executionRollup` (core): counts over executable actions with
+deliberately overlapping signals (blocked = manual OR derived; at-risk =
+derived overdue-unfinished upstream, blocked NOT excluded per ADR 0029;
+overdue = the action's own past-due date; percent over completed).
+`blockingChains` (core): per derived-blocked node, the shortest
+blocker-first BFS path from a manually blocked upstream — the walk
+EXPLAINS the chain rather than propagating it, so it passes through nodes
+the execution graph would not forward through, and a blocked
+non-executable root can end a chain exactly as derivedExecution counts
+it. `ExecutionView` (web, registered in the View union / App router /
+left rail with the new Gauge icon): rollup header with progress bar and
+five counts; "What's blocking us" chains as clickable label chips (the
+onCitation reveal jump); "Decisions behind the work" — the E1 payoff made
+visible, `action ← decision` rows over active work; an empty state that
+teaches the create-the-work loop. Pinned by core execution-rollup.test.ts
+(11) and web execution.test.ts (5).
