@@ -137,11 +137,20 @@ export function DiagramLayer({
   // 12px). Overlapping region boxes — nested or duplicate groups out of one
   // generation — used to stack every pill on the same point: the labels read
   // as one jumbled line. Assign each label the first 20px row whose rect no
-  // earlier label occupies. Deterministic in region order.
+  // earlier label occupies. Deterministic in region order. The FRAME label
+  // ("Board · Kind", anchored at the frame's top-left + 8px) occupies the
+  // first row too — the outermost region hugs the frame's bounds, so its
+  // pill would otherwise land on the same line (found live: the stacked-
+  // nodes fix made the geometry real and the two labels collided).
   const LABEL_ROW = 20;
   const labelSlots = new Map<string, number>();
   {
     const placed: Array<{ x: number; y: number; w: number }> = [];
+    // The frame label's row, when the frame label will render (bounds exist
+    // — the same condition as the frame's render below).
+    if (bounds) {
+      placed.push({ x: bounds.x - pad + 14, y: bounds.y - pad + 8, w: label.length * 7 + 24 });
+    }
     for (const g of groups) {
       const text = [g.label.trim(), g.kind ? DIAGRAM_LABELS[g.kind] : ""]
         .filter((s) => s.length > 0)

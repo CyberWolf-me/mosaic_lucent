@@ -535,8 +535,17 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         // undo stack, otherwise undoing my own change would revert the peer's
         // edit and then a follow-up undo would put it back. The workspace
         // state catches up without history pollution (M0.4).
-        historyRef.current.syncFromRemote(ws);
-        setWorkspace(ws);
+        // WHOLESALE deliveries (the welcome catchup replay, a resync) rebuild
+        // the workspace from ops, which carry no coordinates — nodes land
+        // unpositioned and stack at (0,0) under the region labels. Incremental
+        // frames never drop positions (applyOperations preserves fields), so
+        // only a rebuild needs the guard the adopt/undo/redo paths carry:
+        // lay out ONLY when positions are missing, never rearrange a
+        // positioned board (M2).
+        const hasUnpositioned = Object.values(ws.nodes).some((n) => !n.position);
+        const positioned = hasUnpositioned ? laidOut(ws) : ws;
+        historyRef.current.syncFromRemote(positioned);
+        setWorkspace(positioned);
         setTick((t) => t + 1);
         applyingRemote.current = false;
       },
@@ -632,7 +641,17 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       // The server tells us our role on this board; trusting it here means the
       // read-only UI is correct before the socket's `welcome` arrives.
       setSyncRole(board.role);
-      const safe = withDefaults(board.workspace);
+      // A board stored without node positions (any write path that skips the
+      // client's layout pass — the ops API, MCP's apply_canvas_operations,
+      // external tooling) would render every node stacked at (0,0), piled
+      // under the region labels — the same failure the undo/redo paths fix
+      // with their own relayout. Lay out only when positions are actually
+      // missing: a fully-positioned board is never rearranged (M2's
+      // never-rearrange invariant), and the layout engine is deterministic,
+      // so the same stored board lays out identically on every load.
+      const safeRaw = withDefaults(board.workspace);
+      const hasUnpositioned = Object.values(safeRaw.nodes).some((n) => !n.position);
+      const safe = hasUnpositioned ? laidOut(safeRaw) : safeRaw;
       historyRef.current = new OperationHistory(safe, "loaded shared board");
       setWorkspace(safe);
       setTick((t) => t + 1);
