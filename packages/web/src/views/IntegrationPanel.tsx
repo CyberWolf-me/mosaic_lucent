@@ -26,6 +26,7 @@ import { resolveLocale, t } from "@lucent/i18n";
 export function IntegrationPanel({
   provider,
   connections,
+  nodeIds,
   onClose,
   onLinksChanged,
 }: {
@@ -38,6 +39,11 @@ export function IntegrationPanel({
      * — the UI's honesty layer (the label, the context copy). */
     supportsInbound?: boolean;
   }>;
+  /** Stage E3: the create-the-work bridge — the plan-derived action ids a
+   * human surface selected. When present, the panel's Propose runs the
+   * ids through the propose-ai route's narrowing (no selector model, the
+   * same intersect/cap/warn + approve + ack + ledger flow). */
+  nodeIds?: readonly string[];
   onClose: () => void;
   onLinksChanged: () => void;
 }) {
@@ -74,7 +80,12 @@ export function IntegrationPanel({
     if (!boardId) return;
     setBusy(true);
     setError(null);
-    const result = await proposeIntegration(boardId, provider);
+    // Stage E3: the bridge path — plan-derived ids a human surface named.
+    // The same propose-ai narrowing, minus the selector model; the whole-
+    // board route otherwise (the D5 semantics).
+    const result = nodeIds?.length
+      ? await proposeIntegrationAI(boardId, provider, "Send the plan's derived actions", nodeIds)
+      : await proposeIntegration(boardId, provider);
     setBusy(false);
     if (result === null) {
       setError(t("integrations.error.offline", locale));

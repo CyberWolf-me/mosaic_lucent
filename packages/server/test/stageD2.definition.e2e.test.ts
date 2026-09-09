@@ -271,6 +271,28 @@ describe("Stage D2 definition of done — the acceptance fixture", () => {
       expect(decisionsBehindAction(ws, id).length).toBeGreaterThan(0);
     }
 
+    // Stage E3: the task tree — the workstream sub-groups inside the plan
+    // region, every derived action in exactly one, each node's groupId on
+    // its workstream, and the region still holding everything.
+    const workstreamIds = Object.keys(ws.groups).filter((id) => id.startsWith("plan-ws-"));
+    expect(workstreamIds.length).toBe(4); // Research/Design/Engineering/QA
+    const assigned = new Set<string>();
+    for (const wsid of workstreamIds) {
+      const group = ws.groups[wsid]!;
+      expect(group.kind).toBeUndefined(); // kindless: container, not lens
+      expect(group.children.length).toBeGreaterThan(0);
+      for (const child of group.children) {
+        expect(child).toMatch(/-action$/);
+        expect(assigned.has(child), `${child} in exactly one workstream`).toBe(false);
+        assigned.add(child);
+        expect(ws.nodes[child]!.groupId).toBe(wsid);
+      }
+    }
+    expect(assigned.size).toBe(5); // all five derived actions
+    expect(ws.groups["plan-region"]!.children).toEqual(
+      expect.arrayContaining([...assigned, "dec-0", "dec-1", "dec-2", "dec-3"]),
+    );
+
     // -- The log records the approval as the AI actor chain ------------------
     const log = await h.boardStore.loadLog(boardId);
     const planEntry = log.find((e) => e.label === "proposal approved" || (e.actor?.actorType === "ai"));

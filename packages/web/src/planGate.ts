@@ -70,7 +70,7 @@ export function gatePlanOps(
  */
 export function planRequestText(statementCount: number): string {
   const tail =
-    "organize the decisions into a plan region, preserve existing actions with their owners and deadlines, derive new actions for requirements and risks, and link each derived action to the decision that drives it with a drives relationship. Proposals and questions are context — never create confirmed work from them.";
+    "organize the decisions into a plan region, preserve existing actions with their owners and deadlines, derive new actions for requirements and risks, link each derived action to the decision that drives it with a drives relationship, and organize the derived work into workstream groups (Research / Design / Engineering / QA). Proposals and questions are context — never create confirmed work from them.";
   return statementCount === 1
     ? `Create the work from this statement: ${tail}`
     : `Create the work from these ${statementCount} statements: ${tail}`;

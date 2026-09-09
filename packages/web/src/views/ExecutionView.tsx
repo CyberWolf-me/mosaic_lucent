@@ -1,10 +1,21 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { Workspace } from "@lucent/core";
 import { useWorkspace } from "../workspace.js";
 import type { WorkspaceState } from "../workspace.js";
 import { Ico } from "../ui/icons.js";
-import { executionProjection } from "../execution.js";
+import { executionProjection, planDerivedActionIds } from "../execution.js";
+import { IntegrationPanel } from "./IntegrationPanel.js";
+import { fetchOrgIntegrations } from "../boards.js";
+import { getCurrentOrgId } from "../orgs.js";
 import { resolveLocale, t } from "@lucent/i18n";
+
+/** The provider display names, the Intelligence header's own map. */
+const PROVIDER_DISPLAY_NAME: Record<string, string> = {
+  linear: "Linear",
+  github: "GitHub",
+  jira: "Jira",
+  fake: "Fake",
+};
 
 /**
  * The Execution view (Stage E2, ADR 0037): one screen answering "how is
@@ -39,6 +50,26 @@ export function ExecutionView(_: { onOpenSettings?: (section?: string) => void }
     [workspace],
   );
   const { rollup, chains, decisionsBehind, empty } = projection;
+  // Stage E3: the bridge — the plan-derived action ids a Send-to-provider
+  // button carries, and the org's active connections to offer.
+  const bridgeIds = useMemo(() => planDerivedActionIds(workspace), [workspace]);
+  const [connections, setConnections] = useState<
+    Array<{ provider: string; status: string; supportsInbound?: boolean }>
+  >([]);
+  const [panelProvider, setPanelProvider] = useState<string | null>(null);
+  const { boardId } = useWorkspace() as unknown as { boardId: string | null };
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const orgId = getCurrentOrgId();
+      const orgs = orgId ? await fetchOrgIntegrations(orgId) : [];
+      if (cancelled) return;
+      setConnections(orgs);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   if (empty) {
     return (
@@ -121,6 +152,29 @@ export function ExecutionView(_: { onOpenSettings?: (section?: string) => void }
             {rollup.total} action{rollup.total === 1 ? "" : "s"}
           </span>
           <span style={{ flex: 1 }} />
+          {/* Stage E3: the create-the-work bridge — one Send button per
+              ACTIVE connection, offered only when the board holds
+              plan-derived actions. The panel's Propose carries the ids
+              through the propose-ai narrowing; the approve gate, the
+              warnings ack, and the exactly-once ledger all apply as on
+              any external action. */}
+          {bridgeIds.length > 0 &&
+            connections
+              .filter((c) => c.status === "active")
+              .map((c) => {
+                const name = PROVIDER_DISPLAY_NAME[c.provider] ?? c.provider;
+                return (
+                  <button
+                    key={c.provider}
+                    className="btn"
+                    style={{ height: 24, fontSize: 11 }}
+                    title={`${t("integrations.send.to", locale, { provider: name })} — ${bridgeIds.length} plan-derived action${bridgeIds.length === 1 ? "" : "s"}`}
+                    onClick={() => setPanelProvider(c.provider)}
+                  >
+                    {t("integrations.send.to", locale, { provider: name })}
+                  </button>
+                );
+              })}
           <div style={{ fontSize: 22, fontVariationSettings: "'wght' 650" }}>
             {rollup.percent}%
           </div>
@@ -291,6 +345,18 @@ export function ExecutionView(_: { onOpenSettings?: (section?: string) => void }
           )}
         </div>
       </div>
+      {panelProvider && (
+        <IntegrationPanel
+          provider={panelProvider}
+          connections={connections}
+          nodeIds={bridgeIds}
+          onClose={() => setPanelProvider(null)}
+          onLinksChanged={() => {
+            // Links refetch is the Board surface's concern; the panel's
+            // own results view carries the outcome here.
+          }}
+        />
+      )}
     </div>
   );
 }

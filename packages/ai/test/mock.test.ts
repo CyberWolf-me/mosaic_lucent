@@ -150,3 +150,86 @@ describe("MockProvider statement semantics (Stage C2)", () => {
     });
   });
 });
+
+describe("MockProvider plan tree (Stages D2/E1/E3)", () => {
+  it("the plan grows the task tree: workstream groups, region nesting, drives edges — all valid", async () => {
+    const provider = new MockProvider();
+    // The D2 acceptance fixture's statement shape: a decision,
+    // requirements, risks (existing actions/proposals/questions omitted
+    // for focus — the plan preserves or ignores them).
+    const ws = applyOperations(
+      createWorkspace(),
+      [
+        { op: "CREATE_NODE", id: "dec-0", nodeType: "decision", label: "Phased rollout" },
+        { op: "SET_STATEMENT", id: "dec-0", statement: { kind: "decision", status: "resolved" } },
+        { op: "CREATE_NODE", id: "req-0", nodeType: "requirement", label: "Support SSO" },
+        { op: "SET_STATEMENT", id: "req-0", statement: { kind: "requirement", status: "open" } },
+        { op: "CREATE_NODE", id: "req-1", nodeType: "requirement", label: "Add audit log" },
+        { op: "SET_STATEMENT", id: "req-1", statement: { kind: "requirement", status: "open" } },
+        { op: "CREATE_NODE", id: "rsk-0", nodeType: "risk", label: "Migration data loss" },
+        { op: "SET_STATEMENT", id: "rsk-0", statement: { kind: "risk", status: "open" } },
+        { op: "CREATE_NODE", id: "rsk-1", nodeType: "risk", label: "Cost overrun" },
+        { op: "SET_STATEMENT", id: "rsk-1", statement: { kind: "risk", status: "open" } },
+      ] as never,
+    );
+    const { operations } = await provider.generateOperations({
+      message: "Create the work from these decisions.",
+      summary: summarizeWorkspace(ws),
+    });
+    // The batch validates against the seeded board — the tree is real
+    // state, not a draft.
+    expect(validateOperations(ws, operations)).toHaveLength(0);
+    const after = applyOperations(ws, operations);
+    // The workstream groups: kindless containers, one per stream, every
+    // derived action in exactly one.
+    const research = after.groups["plan-ws-research"];
+    const design = after.groups["plan-ws-design"];
+    const engineering = after.groups["plan-ws-engineering"];
+    const qa = after.groups["plan-ws-qa"];
+    expect(research).toMatchObject({ label: "Research" });
+    expect(design).toMatchObject({ label: "Design" });
+    expect(engineering).toMatchObject({ label: "Engineering" });
+    expect(qa).toMatchObject({ label: "QA" });
+    expect(research!.kind).toBeUndefined(); // kindless: a container, not a lens
+    const workstreamIds = [...research!.children, ...design!.children, ...engineering!.children, ...qa!.children];
+    expect(workstreamIds).toHaveLength(4);
+    expect(new Set(workstreamIds).size).toBe(4); // each action in exactly one stream
+    // The plan region keeps ALL derived nodes (plus the decisions), so the
+    // workstreams nest inside it (bounds over its own children list).
+    const region = after.groups["plan-region"]!;
+    expect(region.children).toEqual(expect.arrayContaining(workstreamIds));
+    expect(region.children).toContain("dec-0");
+    expect(region.kind).toBe("process");
+    // Each node's groupId lands on its workstream (the reducer's
+    // last-write-wins: the region is emitted before the workstreams).
+    for (const id of workstreamIds) {
+      expect(after.nodes[id]!.groupId).toMatch(/^plan-ws-/);
+    }
+    // The E1 drives edges ride along: one per derived action.
+    const drives = Object.values(after.edges).filter((e) => e.relationship === "drives");
+    expect(drives).toHaveLength(4);
+    for (const edge of drives) {
+      expect(edge.source).toBe("dec-0");
+      expect(edge.target).toMatch(/-action$/);
+    }
+  });
+
+  it("a board with no derived work grows no workstream groups", async () => {
+    const provider = new MockProvider();
+    const ws = applyOperations(
+      createWorkspace(),
+      [
+        { op: "CREATE_NODE", id: "dec-0", nodeType: "decision", label: "Phased rollout" },
+        { op: "SET_STATEMENT", id: "dec-0", statement: { kind: "decision", status: "resolved" } },
+      ] as never,
+    );
+    const { operations } = await provider.generateOperations({
+      message: "Create the work from these decisions.",
+      summary: summarizeWorkspace(ws),
+    });
+    expect(validateOperations(ws, operations)).toHaveLength(0);
+    const after = applyOperations(ws, operations);
+    expect(Object.keys(after.groups).filter((id) => id.startsWith("plan-ws-"))).toEqual([]);
+    expect(Object.values(after.edges).filter((e) => e.relationship === "drives")).toEqual([]);
+  });
+});

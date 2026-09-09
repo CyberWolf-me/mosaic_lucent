@@ -85,4 +85,10 @@ describe("planRequestText", () => {
       "link each derived action to the decision that drives it with a drives relationship",
     );
   });
+
+  it("teaches the workstream organization (Stage E3) — the task-tree shape", () => {
+    const text = planRequestText(9);
+    expect(text).toContain("organize the derived work into workstream groups");
+    expect(text).toContain("Research / Design / Engineering / QA");
+  });
 });

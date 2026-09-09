@@ -44,6 +44,18 @@ export interface ExecutionProjection {
 }
 
 /**
+ * Stage E3: the plan-derived actions a Send-to-provider bridge carries —
+ * the executable nodes whose createdFrom provenance names a plan
+ * derivation (ADR 0022's evidence, the bridge's selection). A board with
+ * no plan (or a plan whose work is all done and unlinked) answers [].
+ */
+export function planDerivedActionIds(workspace: Workspace): string[] {
+  return actionNodes(workspace)
+    .filter((n) => (n.provenance?.createdFrom?.length ?? 0) > 0)
+    .map((n) => n.id);
+}
+
+/**
  * The full projection. Chains walk the blocking story blocker-first;
  * decisions-behind rows cover the in-progress/blocked actions whose drives
  * edges name a decision — the E1 payoff made visible on the dashboard.

@@ -84,6 +84,22 @@ export function applyOperation(workspace: Workspace, op: Operation): Workspace {
             children: [...group.children, op.id],
           };
         }
+      } else {
+        // Membership is bidirectional (Stage E3): a node created into a
+        // group that ALREADY lists it as a child inherits that group — the
+        // mirror of the CREATE_GROUP stamp above. The repair pass reorders
+        // CREATE_GROUP (bucket 1) before CREATE_NODE (bucket 2), so a batch
+        // that emits "group with children" then the children themselves
+        // (the plan's workstream tree) must converge on the same membership
+        // as the unreordered batch. When SEVERAL groups already list the
+        // node (the plan region plus its workstreams), the LAST-created
+        // wins — the same last-write-wins the CREATE_GROUP stamp applies
+        // to existing nodes, so order never changes membership.
+        let gid: string | undefined;
+        for (const [id, group] of Object.entries(next.groups)) {
+          if (group.children.includes(op.id)) gid = id;
+        }
+        if (gid) next.nodes[op.id] = { ...next.nodes[op.id]!, groupId: gid };
       }
       break;
     }

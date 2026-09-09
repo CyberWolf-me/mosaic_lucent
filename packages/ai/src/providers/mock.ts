@@ -136,13 +136,45 @@ const scripts: Script[] = [
         target: id,
         relationship: "drives",
       })) as Operation[];
+      // Stage E3: workstream sub-groups — the task-tree shape the plan
+      // grows. Four canonical workstreams (the strategic example),
+      // derived actions assigned round-robin so the tree is
+      // deterministic. Kindless groups: a workstream is a container, not
+      // a diagram lens. The plan region keeps ALL derived nodes (plus
+      // the decisions) in its own children list, so region and
+      // workstreams overlap by design (bounds are measured per group
+      // over its children; the label-pill fix in 511903a keeps nested
+      // labels readable).
+      const WORKSTREAMS = ["Research", "Design", "Engineering", "QA"] as const;
+      const workstreamChildren = new Map<string, string[]>();
+      if (derivedIds.length > 0) {
+        derivedIds.forEach((id, i) => {
+          const name = WORKSTREAMS[i % WORKSTREAMS.length]!;
+          const list = workstreamChildren.get(name) ?? [];
+          list.push(id);
+          workstreamChildren.set(name, list);
+        });
+      }
+      const workstreams = [...workstreamChildren.entries()].map(([name, children]) => ({
+        op: "CREATE_GROUP",
+        id: `plan-ws-${name.toLowerCase()}`,
+        label: name,
+        children,
+      })) as Operation[];
       return {
         explanation: `Organized the board's semantic state into a plan: ${
           decisions.length
-        } decision(s) as the region, ${derivedIds.length} derived action(s) for requirements and risks, each linked to the decision that drives it. Existing actions preserved; proposals and questions untouched.`,
+        } decision(s) as the region, ${derivedIds.length} derived action(s) for requirements and risks organized into ${
+          workstreams.length
+        } workstream group(s), each action linked to the decision that drives it. Existing actions preserved; proposals and questions untouched.`,
         operations: [
           // Decisions create structure: the plan region holds the derived
-          // work (and the decision nodes it organizes around).
+          // work (and the decision nodes it organizes around), emitted
+          // FIRST — the reducer's CREATE_GROUP sets each existing child's
+          // node.groupId, last write wins, so the region's pass leaves the
+          // decision nodes on the region and the derived nodes untouched
+          // until the workstreams claim them. The region's bounds are
+          // measured over its own children list, so the nesting renders.
           ...(decisions.length
             ? [
                 {
@@ -155,6 +187,10 @@ const scripts: Script[] = [
               ]
             : []),
           ...derived,
+          // The workstreams come AFTER the derived nodes exist, so each
+          // CREATE_GROUP stamps its children's groupId onto real nodes —
+          // and being later than the region, the stamp wins.
+          ...workstreams,
           ...(decisions.length ? drives : []),
         ] as Operation[],
       };

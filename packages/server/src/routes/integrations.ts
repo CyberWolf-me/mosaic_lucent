@@ -974,6 +974,15 @@ router.post("/api/boards/:id/integrations/inbound/:changeId/dismiss", async (ctx
 
 const proposeAiBodySchema = z.object({
   request: z.string().min(1).max(600),
+  /**
+   * Stage E3 (ADR 0037): the create-the-work bridge — the client may name
+   * the node ids itself (a plan region's derived actions, selected by a
+   * human surface) instead of asking the model to narrow. When present,
+   * the selector LLM is SKIPPED entirely (no spend, no candidate draft);
+   * the ids flow through the SAME dedupe → intersect → cap → warn path a
+   * model selection takes, so the narrowing is structural either way.
+   */
+  nodeIds: z.array(z.string().min(1)).max(200).optional(),
 });
 
 router.post("/api/boards/:id/integrations/:provider/propose-ai", async (ctx) => {
@@ -1046,43 +1055,57 @@ router.post("/api/boards/:id/integrations/:provider/propose-ai", async (ctx) => 
   // The SEMANTIC-ONLY context: node id, label, statement, issue fields.
   // No credentials, no external ids, no connection internals (pinned in
   // the ai package's suite; the boundary is the request type's shape).
-  const candidates = actionNodes(guard.board.workspace).map((node) => ({
-    nodeId: node.id,
-    label: node.label,
-    ...(node.statement ? { statementKind: node.statement.kind } : {}),
-    ...(node.statement?.topic ? { statementTopic: node.statement.topic } : {}),
-    ...(node.issue?.status ? { status: node.issue.status } : {}),
-    ...(node.issue?.assignee ? { assignee: node.issue.assignee } : {}),
-    ...(node.issue?.dueDate ? { dueDate: node.issue.dueDate } : {}),
-  }));
-
+  // Stage E3: skipped entirely when the caller named the ids — the
+  // bridge path spends no model call.
   const started = Date.now();
-  const plan = await llmProvider.generateExternalPlan({
-    request: body.request,
-    boardName: guard.board.name,
-    // The provider's DISPLAY name — a label, never a connection detail.
-    providerName: provider.name,
-    candidates,
-    totalCandidates: candidates.length,
-  });
+  let selectedIds: string[];
+  let explanation: string;
+  if (body.nodeIds) {
+    selectedIds = body.nodeIds;
+    explanation = `Selected ${body.nodeIds.length} action(s) from the plan surface.`;
+  } else {
+    const candidates = actionNodes(guard.board.workspace).map((node) => ({
+      nodeId: node.id,
+      label: node.label,
+      ...(node.statement ? { statementKind: node.statement.kind } : {}),
+      ...(node.statement?.topic ? { statementTopic: node.statement.topic } : {}),
+      ...(node.issue?.status ? { status: node.issue.status } : {}),
+      ...(node.issue?.assignee ? { assignee: node.issue.assignee } : {}),
+      ...(node.issue?.dueDate ? { dueDate: node.issue.dueDate } : {}),
+    }));
+
+    const plan = await llmProvider.generateExternalPlan({
+      request: body.request,
+      boardName: guard.board.name,
+      // The provider's DISPLAY name — a label, never a connection detail.
+      providerName: provider.name,
+      candidates,
+      totalCandidates: candidates.length,
+    });
+    selectedIds = plan.nodeIds;
+    explanation = plan.explanation;
+  }
 
   // DEDUP (first-occurrence order — deterministic, honest counts).
   const seen = new Set<string>();
   const deduped: string[] = [];
-  for (const id of plan.nodeIds) {
+  for (const id of selectedIds) {
     if (!seen.has(id)) {
       seen.add(id);
       deduped.push(id);
     }
   }
 
-  // INTERSECT: the only path from a model selection to a proposal item.
-  // Unknown ids drop with a visible warning (the citation discipline).
+  // INTERSECT: the only path from a selection to a proposal item — model
+  // draft or human-named ids, the same gate. Unknown ids drop with a
+  // visible warning (the citation discipline).
   const byNodeId = new Map(items.map((item) => [item.nodeId, item] as const));
   const warnings: string[] = [];
   const selected = deduped.filter((id) => {
     if (byNodeId.has(id)) return true;
-    warnings.push(`the model named "${id}", which is not an executable action on this board — dropped`);
+    warnings.push(
+      `"${id}" is not an executable action on this board — dropped`,
+    );
     return false;
   });
 
@@ -1120,17 +1143,21 @@ router.post("/api/boards/:id/integrations/:provider/propose-ai", async (ctx) => 
     createdBy: user.id,
     now: Date.now(),
     origin: "ai",
-    provenance: { request: body.request, explanation: plan.explanation },
+    provenance: {
+      request: body.request,
+      explanation,
+      ...(body.nodeIds ? { nodeIds: body.nodeIds } : {}),
+    },
     sourceSeq,
   });
 
   // Metered on success only (the ask/generate contract), the mode tag
-  // keeping the usage rows answerable by surface.
+  // keeping the usage rows answerable by surface. The bridge path names
+  // no model — it spent none.
   meterUsage(guard.board.orgId, "ai.generation", 1, {
     boardId,
     provider: llmProvider.name,
-    mode: "ai-propose",
-    ...(plan.model ? { model: plan.model } : {}),
+    mode: body.nodeIds ? "plan-bridge" : "ai-propose",
   });
   telemetry.record({
     kind: "ai-propose",
@@ -1138,6 +1165,7 @@ router.post("/api/boards/:id/integrations/:provider/propose-ai", async (ctx) => 
     provider: llmProvider.name,
     candidates: items.length,
     selected: narrowed.length,
+    ...(body.nodeIds ? { mode: "plan-bridge" as const } : {}),
   });
 
   // THE PREVIEW: the same shape the human route answers, plus the AI
@@ -1177,7 +1205,7 @@ router.post("/api/boards/:id/integrations/:provider/propose-ai", async (ctx) => 
       // The selection ratio — the narrowing made explicit.
       selectedCount: narrowed.length,
       totalCandidates: items.length,
-      explanation: plan.explanation,
+      explanation,
       ...(warnings.length > 0 ? { warnings } : {}),
     },
   });

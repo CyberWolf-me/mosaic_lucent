@@ -1868,3 +1868,24 @@ onCitation reveal jump); "Decisions behind the work" — the E1 payoff made
 visible, `action ← decision` rows over active work; an empty state that
 teaches the create-the-work loop. Pinned by core execution-rollup.test.ts
 (11) and web execution.test.ts (5).
+
+## Stage E3 shipped: create the work — the task tree + the external bridge (2026-09-09, docs/17 amendment, ADR 0037's E3 extension)
+
+The plan flow grows the tree, and one click carries it to the external
+gate. The tree: kindless workstream sub-groups (Research / Design /
+Engineering / QA, round-robin over derived actions) inside the plan region
+— board content, one reversible batch. The reducer fix the tree surfaced:
+repairOperations reorders CREATE_GROUP before CREATE_NODE, which left
+children-created-after-groups with no groupId (the stamp only reached
+existing nodes); CREATE_NODE now inherits the LAST-created group that
+already lists it — last-write-wins both directions, order never changes
+membership. The bridge: propose-ai accepts optional `nodeIds` (a human
+surface's selection — zero selector spend, the same dedupe/intersect/cap/
+warn narrowing, `plan-bridge` metering, provenance carries the ids); the
+approve/warnings/ledger/recovery flows untouched. ExecutionView's header
+grows "Send to <Provider>" per active connection over the
+createdFrom-stamped executables; the IntegrationPanel's Propose runs the
+ids path. Pinned by stageE3.definition.e2e.test.ts (the bridge end to end,
+including the counting-selector-stays-at-0 no-spend pin), the mock tree
+tests, the D2 acceptance e2e's tree arm, and the plan-gate text pin. All
+workspaces green after the reducer change; the era regression re-run green.

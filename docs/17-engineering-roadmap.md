@@ -1234,3 +1234,48 @@ the overlap semantics, chain walks incl. the non-executable root and
 shortest-path cases) and web `execution.test.ts` (5 — the projection
 contract: empty flag, blocker-first chips, active-only decisions-behind,
 the E1+E2 together case).
+
+## Amendment (2026-09-09, final): Stage E3 — create the work, end to end
+
+The ledger's third draw closes Stage E's arc: "turn today's meeting into an
+implementation plan" produces a TASK TREE, and one click carries the plan's
+work into the existing external-propose gate. No new execution machinery —
+the D2 gate and the D5/D8/D9 approve flow are reused as-is (ADR 0037's E3
+extension records the doctrine).
+
+- **The tree (board content, ADR 0028 unchanged)**: the plan region gains
+  kindless workstream sub-groups (Research / Design / Engineering / QA,
+  derived actions assigned round-robin — deterministic) so the plan reads
+  as workstreams of work, one level of nesting. The reducer fix this
+  surfaced: the repair pass reorders CREATE_GROUP (bucket 1) before
+  CREATE_NODE (bucket 2), so a batch that emits groups-with-children then
+  the children themselves converged on NO membership (the CREATE_GROUP
+  stamp only reaches existing nodes). CREATE_NODE now inherits the
+  LAST-created group that already lists it as a child — the mirror of the
+  CREATE_GROUP stamp, last-write-wins both ways, so order never changes
+  membership.
+- **The bridge**: the propose-ai route gains an optional `nodeIds` array.
+  When present, the selector LLM is skipped entirely (zero spend, pinned by
+  a counting selector that must stay at 0); the ids flow through the SAME
+  dedupe → intersect → cap → warn narrowing a model selection takes; the
+  record carries `nodeIds` in its provenance; metering tags the
+  `plan-bridge` mode. The approve gate, the warnings 409/ack, the
+  exactly-once ledger, the D10 recovery contract: all untouched — the
+  bridge is a normal AI-origin proposal whose selection came from a human
+  surface instead of a model draft.
+- **The surfaces**: ExecutionView's header grows a "Send to <Provider>"
+  button per active connection (offered when the board holds
+  plan-derived actions — `createdFrom`-stamped executables, the ADR 0022
+  evidence as the bridge's selection); the IntegrationPanel's Propose
+  runs the ids path through the same panel the Intelligence surface uses.
+- **Undo/audit unchanged**: the plan stays one reversible batch (the D2
+  e2e's undo arm now also removes the workstreams); the bridge is a normal
+  propose with its own record.
+
+Pinned by: the E3 bridge e2e (stageE3.definition.e2e.test.ts — named ids →
+no selector call → the ghost-drop warning → approve → exactly the plan on
+the wire → duplicate guard → the empty-selection 422), the mock tree tests
+(workstream groups, region nesting, groupId-on-workstream, drives edges,
+the no-derived-work case), the D2 acceptance e2e's tree assertions, and
+the plan-gate request-text pin. The era regression re-run green after the
+reducer change.

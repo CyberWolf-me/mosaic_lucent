@@ -573,15 +573,27 @@ export async function proposeIntegration(
  * natural-language narrowing instruction; the server builds every item
  * from real state, the model only selects, and the answer is the same
  * preview shape with the AI-origin facts.
+ *
+ * Stage E3: `nodeIds` is the create-the-work bridge — a human surface
+ * (the plan's Send button) names the derived actions itself. When
+ * present, the server skips the selector model entirely and runs the ids
+ * through the same intersect/cap/warn narrowing.
  */
 export async function proposeIntegrationAI(
   boardId: string,
   provider: string,
   request: string,
+  nodeIds?: readonly string[],
 ): Promise<IntegrationPreview | { error: string; status: number; hint?: string } | null> {
   const res = await authed(
     `/api/boards/${encodeURIComponent(boardId)}/integrations/${encodeURIComponent(provider)}/propose-ai`,
-    { method: "POST", body: JSON.stringify({ request }) },
+    {
+      method: "POST",
+      body: JSON.stringify({
+        request,
+        ...(nodeIds && nodeIds.length > 0 ? { nodeIds: [...nodeIds] } : {}),
+      }),
+    },
   );
   if (!res) return null;
   if (!res.ok) {
