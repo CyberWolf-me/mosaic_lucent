@@ -1549,7 +1549,10 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
 
   const crumbs = [
     { label: "Personal" },
-    { label: nodeCount ? "E-commerce platform" : "Untitled workspace", current: true },
+    // The board's real name — a previous fix pinned the fallback to a
+    // placeholder ("E-commerce platform") for every named board, which is
+    // the same bug class the identical-project-names fix (02afaa5) covered.
+    { label: projectName || (nodeCount ? "Untitled workspace" : "Untitled workspace"), current: true },
   ];
 
   // Title-block stamp: kind on the left, scale + node count on the right. The
@@ -1649,7 +1652,7 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
               selectedNodes={selectedNodes}
               proposedIds={proposedIds}
               onSelect={onNodeSelect}
-              frameLabel={`E-commerce · ${DIAGRAM_LABELS[workspace.diagramKind]}`}
+              frameLabel={`${projectName || "Untitled"} · ${DIAGRAM_LABELS[workspace.diagramKind]}`}
               spotlightId={spotlightId}
               scale={zoom / 100}
               dragOverride={nodeDrag}
