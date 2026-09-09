@@ -279,6 +279,73 @@ export function dependencyReaches(
 }
 
 /**
+ * The decision→action causal relationship (Stage E1, ADR 0037). The same
+ * doctrine as DEPENDENCY_RELATIONSHIPS — convention + validator rules +
+ * teaching, never a zod enum — but causality is a different family from
+ * dependency: `decisions drive work` is HISTORICAL (the work exists because
+ * the decision caused it), so a drives edge never enters the dependency
+ * graph, never participates in cycle rejection, and never propagates
+ * blocking. Direction is pinned: the DECISION is the source, the ACTION is
+ * the target — "the decision drives these actions".
+ */
+export const DRIVES_RELATIONSHIP = "drives";
+
+/**
+ * The decision→action adjacency (Stage E1): decision id -> the action ids it
+ * drives. Walks `drives` edges only, and filters both endpoints defensively —
+ * a source without a decision-kind statement or a target that is not
+ * executable (action statement + issue) is ignored rather than trusted, the
+ * same read-side stance `derivedExecution` takes toward its graph.
+ */
+export function decisionDriveGraph(workspace: Workspace): Map<string, string[]> {
+  const out = new Map<string, string[]>();
+  for (const edge of Object.values(workspace.edges)) {
+    if (edge.relationship !== DRIVES_RELATIONSHIP) continue;
+    const source = workspace.nodes[edge.source];
+    const target = workspace.nodes[edge.target];
+    if (!source || !target) continue;
+    if (source.statement?.kind !== "decision") continue;
+    if (target.statement?.kind !== "action" || !target.issue) continue;
+    const list = out.get(edge.source) ?? [];
+    if (!list.includes(edge.target)) list.push(edge.target);
+    out.set(edge.source, list);
+  }
+  return out;
+}
+
+/**
+ * The actions a decision caused (Stage E1) — the query the surfaces ask:
+ * "what work came from this decision?" Returns executable action nodes in
+ * edge order, deduped.
+ */
+export function actionsFromDecision(workspace: Workspace, decisionId: string): Node[] {
+  const actions: Node[] = [];
+  for (const id of decisionDriveGraph(workspace).get(decisionId) ?? []) {
+    const node = workspace.nodes[id];
+    if (node) actions.push(node);
+  }
+  return actions;
+}
+
+/**
+ * The decisions behind an action (Stage E1) — the reverse query: "which
+ * decisions caused this work?" Walks the same `drives` edges from the other
+ * end, filtered to decision-kind sources, so a malformed edge pointing at
+ * a non-decision reads as no provenance rather than an error.
+ */
+export function decisionsBehindAction(workspace: Workspace, actionId: string): Node[] {
+  const decisions: Node[] = [];
+  for (const edge of Object.values(workspace.edges)) {
+    if (edge.relationship !== DRIVES_RELATIONSHIP) continue;
+    if (edge.target !== actionId) continue;
+    const source = workspace.nodes[edge.source];
+    if (!source || source.statement?.kind !== "decision") continue;
+    if (!decisions.some((d) => d.id === source.id)) decisions.push(source);
+  }
+  return decisions;
+}
+
+/**
  * Overdue-unfinished — the at-risk predicate (Stage D3, the review's
  * settled clarification): past its due date AND not completed/cancelled.
  * Blocked is deliberately NOT excluded: a blocked-but-overdue upstream

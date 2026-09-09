@@ -8,6 +8,7 @@ import {
   ASSISTANT_AUTHOR,
   canvasToolDefinition,
   boardColumns,
+  decisionDriveGraph,
   derivedExecution,
   type Operation,
   type Workspace,
@@ -102,6 +103,18 @@ export function summarizeBoard(ws: Workspace): Record<string, unknown> {
   // blockedBy/atRiskBy per executable node (computed truth, never stored).
   const derived = derivedExecution(ws, Date.now());
   const derivedFor = (id: string) => derived.get(id);
+  // Stage E1: the decision→action causality — a decision's summary row
+  // names the actions it drives, an action's names the decisions behind
+  // it. Computed per read, same stance as the derived map.
+  const driveGraph = decisionDriveGraph(ws);
+  const decisionsBehind = new Map<string, string[]>();
+  for (const [decisionId, actionIds] of driveGraph) {
+    for (const actionId of actionIds) {
+      const list = decisionsBehind.get(actionId) ?? [];
+      list.push(decisionId);
+      decisionsBehind.set(actionId, list);
+    }
+  }
   return {
     diagramKind: ws.diagramKind,
     nodeCount: Object.keys(ws.nodes).length,
@@ -154,6 +167,14 @@ export function summarizeBoard(ws: Workspace): Record<string, unknown> {
         : {}),
       ...(derivedFor(n.id)?.atRiskBy.length
         ? { derivedRisks: derivedFor(n.id)!.atRiskBy }
+        : {}),
+      // Stage E1: the drives causality — "what work came from this
+      // decision?" and the reverse, straight from the edges.
+      ...(n.statement?.kind === "decision" && driveGraph.get(n.id)?.length
+        ? { drivesActions: driveGraph.get(n.id)! }
+        : {}),
+      ...(decisionsBehind.get(n.id)?.length
+        ? { drivenByDecisions: decisionsBehind.get(n.id)! }
         : {}),
     })),
     edges: Object.values(ws.edges).map((e) => ({

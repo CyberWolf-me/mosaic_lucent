@@ -1824,3 +1824,26 @@ TWO PRODUCTION BUGS THE PASS CAUGHT (both fixed + pinned by test):
 
 Gate after the fixes: typecheck 0; all workspaces green (server 99
 files / 1055 tests).
+
+## Stage E1 shipped: the drives relation — decision→action causality (2026-09-09, docs/17 amendment, ADR 0037)
+
+The ledger's first draw. `drives` is a typed causal edge (Decision —drives→
+Action) on existing free-form relationships: validator-checked endpoints
+(decision-kind source; action statement + issue target, both readable from
+statements/issues minted earlier in the same batch via the new `issueOf`
+presence-set), bidirectionally queryable (`decisionDriveGraph` /
+`actionsFromDecision` / `decisionsBehindAction`), never a dependency
+(dependsOnGraph ignores it; no cycle rule; no blocking propagation —
+causality is historical, not future ordering). Rendered in the quiet
+`edge-dep` dash family; taught in visual-agent v9 with the
+direction-explicit example; carried by the plan flow (the mock derives one
+drives edge per derived action, round-robin over decisions; the D2 gate
+already admitted CONNECT_NODES; `planRequestText` teaches the linkage).
+Surfaces: the Board "◆ decisions" chip, the Intelligence "→ N actions"
+line, the Ask digest's `[drives: N]` / `[from decision: …]` brackets, and
+MCP's `drivesActions` / `drivenByDecisions`. Golden pins: the plan golden
+expects the drives edges and forbids the flipped direction; a question-only
+case forbids any drives edge at all. Pinned by core `drives-graph.test.ts`
+(13 tests), the extended D2 acceptance e2e (five edges land on approval,
+all vanish on undo), and web projection tests. Zero schema change, zero
+migration, no new store, no new statement kind.

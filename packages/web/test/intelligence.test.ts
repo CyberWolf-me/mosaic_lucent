@@ -335,6 +335,38 @@ describe("the D3 derived execution on the projection (Stage D3, ADR 0029)", () =
   });
 });
 
+describe("the E1 drives causality on the projection (Stage E1, ADR 0037)", () => {
+  function drivesBoard() {
+    return applyOperations(
+      boardOf([
+        ...statement("launch-decision", "decision", { status: "resolved", topic: "launch" }),
+        ...statement("old-decision", "decision", { status: "resolved", topic: "auth" }),
+        ...statement("pilot-action", "action", { assignee: "sarah" }),
+        ...statement("solo-action", "action", { assignee: "bo" }),
+      ]),
+      [{ op: "CONNECT_NODES", source: "launch-decision", target: "pilot-action", relationship: "drives" }],
+    );
+  }
+
+  it("decision rows carry the count of actions they drive", () => {
+    const sections = intelligenceSections(drivesBoard());
+    const decisions = sections.find((s) => s.kind === "decision")!.rows;
+    const launch = decisions.find((r) => r.id === "launch-decision")!;
+    expect(launch.drivesActions).toBe(1);
+    const old = decisions.find((r) => r.id === "old-decision")!;
+    expect(old.drivesActions).toBeUndefined(); // drove nothing, so no field
+  });
+
+  it("drives edges never produce blockedBy/atRiskBy — causality is not dependency", () => {
+    const sections = intelligenceSections(drivesBoard());
+    const actions = sections.find((s) => s.kind === "action")!.rows;
+    for (const row of actions) {
+      expect(row.blockedBy).toBeUndefined();
+      expect(row.atRiskBy).toBeUndefined();
+    }
+  });
+});
+
 describe("the D6 link join (the chip's data)", () => {
   it("linksByNode maps node id → the board's link", () => {
     // The same join IntelligenceView builds — pinned here as the contract.

@@ -497,6 +497,14 @@ export const GOLDEN_SET: readonly GoldenCase[] = [
         id: "req-0-action",
         statement: { kind: "action", status: "open", topic: "plan" },
       },
+      // Stage E1: each derived action traces to the decision that drives
+      // it — the causal edge, decision as source, action as target.
+      {
+        op: "CONNECT_NODES",
+        source: "dec-0",
+        target: "req-0-action",
+        relationship: "drives",
+      },
     ],
     // The mechanical acceptance rules: no lifecycle conversion, no
     // destruction, and no work minted from a proposal/question node id.
@@ -509,6 +517,8 @@ export const GOLDEN_SET: readonly GoldenCase[] = [
       { op: "SET_STATEMENT", id: "que-0", statement: { kind: "action" } },
       // Existing actions are preserved, never re-created or duplicated.
       { op: "CREATE_NODE", id: "act-0" },
+      // The drives direction is pinned: the action is never the source.
+      { op: "CONNECT_NODES", source: "req-0-action", target: "dec-0", relationship: "drives" },
     ],
   },
   {
@@ -546,6 +556,31 @@ export const GOLDEN_SET: readonly GoldenCase[] = [
         target: "design-approval",
         relationship: "blocks",
       },
+    ],
+  },
+  {
+    id: "drives-needs-a-decision",
+    // Stage E1: causality needs a cause. A board of questions and
+    // requirements carries no decision, so no drives edge may appear —
+    // the validator would refuse it (no decision-kind source), and the
+    // agent must not propose invalid ops even where a gate would drop
+    // them later.
+    message: "Create the work from these open questions.",
+    summary: summarizeWorkspace(
+      applyOperations(createWorkspace(), [
+        { op: "CREATE_NODE", id: "que-0", nodeType: "question", label: "Question 0" },
+        { op: "SET_STATEMENT", id: "que-0", statement: { kind: "question", status: "open" } },
+        { op: "CREATE_NODE", id: "req-0", nodeType: "requirement", label: "Requirement 0" },
+        { op: "SET_STATEMENT", id: "req-0", statement: { kind: "requirement", status: "open" } },
+      ] as never),
+    ),
+    // Questions never become work (the D2 rule stands); the drives
+    // vocabulary is not a loophole around it.
+    forbidOperations: [
+      { op: "SET_ISSUE", id: "que-0" },
+      { op: "SET_STATEMENT", id: "que-0", statement: { kind: "action" } },
+      // And no drives edge may exist at all — no decision to drive from.
+      { op: "CONNECT_NODES", relationship: "drives" },
     ],
   },
 ];

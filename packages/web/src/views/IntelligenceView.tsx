@@ -445,6 +445,9 @@ export function IntelligenceView(_: { onOpenSettings?: (section?: string) => voi
                                 : ""}
                               {row.dueDate ? ` · ${t("intel.row.due", locale, { date: row.dueDate })}` : ""}
                               {row.executionStatus ? ` · ${row.executionStatus}` : ""}
+                              {row.drivesActions
+                                ? ` · ${t("intel.row.drives", locale, { n: row.drivesActions })}`
+                                : ""}
                               {row.topic ? ` · ${row.topic}` : ""}
                             </div>
                             {/* Stage D3: the derived lines — computed project

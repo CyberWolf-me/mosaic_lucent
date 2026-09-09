@@ -1,5 +1,5 @@
 import type { Node, Operation, StatementKind, StatementStatus, Workspace } from "@lucent/core";
-import { derivedExecution, statementNodes } from "@lucent/core";
+import { actionsFromDecision, derivedExecution, statementNodes } from "@lucent/core";
 import {
   canonicalizeTopic,
   possibleDuplicateTopics,
@@ -77,6 +77,9 @@ export interface IntelligenceRow {
   /** Stage D3: upstream ids that are overdue-unfinished — an analytical
    * signal, never a status. */
   atRiskBy?: string[];
+  /** Stage E1: how many actions this decision drives — the causal count,
+   * from drives edges (0/undefined = the decision drove no work). */
+  drivesActions?: number;
   /** Creation evidence — the ✦ jump's source. */
   provenance?: { meetingId: string; turnRange?: [number, number] };
 }
@@ -136,6 +139,15 @@ export function intelligenceSections(workspace: Workspace): IntelligenceSection[
   // by every action row (the manual/derived split: manual state is
   // issue.status; blockedBy/atRiskBy are computed project truth).
   const derived = derivedExecution(workspace, Date.now());
+  // Stage E1: the decision→action adjacency — one graph walk per decision
+  // row's drives count.
+  const driveGraph = new Map<string, number>();
+  for (const n of statementNodes(workspace)) {
+    if (n.statement!.kind === "decision") {
+      const count = actionsFromDecision(workspace, n.id).length;
+      if (count > 0) driveGraph.set(n.id, count);
+    }
+  }
   return SECTION_ORDER.map((kind) => {
     const all = statementNodes(workspace)
       .filter((n) => n.statement!.kind === kind)
@@ -146,6 +158,7 @@ export function intelligenceSections(workspace: Workspace): IntelligenceSection[
           ...row,
           ...(d && d.blockedBy.length > 0 ? { blockedBy: d.blockedBy } : {}),
           ...(d && d.atRiskBy.length > 0 ? { atRiskBy: d.atRiskBy } : {}),
+          ...(driveGraph.has(n.id) ? { drivesActions: driveGraph.get(n.id) } : {}),
         };
       });
     const rows = [

@@ -69,7 +69,9 @@ export function gatePlanOps(
  * so the surface is node-tested.
  */
 export function planRequestText(statementCount: number): string {
+  const tail =
+    "organize the decisions into a plan region, preserve existing actions with their owners and deadlines, derive new actions for requirements and risks, and link each derived action to the decision that drives it with a drives relationship. Proposals and questions are context — never create confirmed work from them.";
   return statementCount === 1
-    ? "Create the work from this statement: organize the decisions into a plan region, preserve existing actions with their owners and deadlines, and derive new actions for requirements and risks. Proposals and questions are context — never create confirmed work from them."
-    : `Create the work from these ${statementCount} statements: organize the decisions into a plan region, preserve existing actions with their owners and deadlines, and derive new actions for requirements and risks. Proposals and questions are context — never create confirmed work from them.`;
+    ? `Create the work from this statement: ${tail}`
+    : `Create the work from these ${statementCount} statements: ${tail}`;
 }

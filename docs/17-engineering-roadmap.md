@@ -1159,3 +1159,42 @@ Lucent↔Lattice handoff) are recorded above as the future-milestone ledger,
 each named for its own milestone, none inheriting the "D" engineering
 numbering. When a freeze gate reopens work, this ledger — not the old labels —
 is the menu.
+
+## Amendment (2026-09-09, later): Stage E opens — E1, the drives relation
+
+The ledger's first draw: three items (decision→action linkage, the execution
+dashboard, create-the-work) become Stage E, one commit per stage. ADR 0037
+(Execution Intelligence) is the founding record; E2 and E3 extend it at
+their commits.
+
+E1 ships the `drives` relation — the fourth relation ADR 0029 anticipated
+and the first of the causality family (dependency is FUTURE ordering; drives
+is HISTORICAL cause). The contract, in full:
+
+- **Typed causal edge, direction pinned**: `Decision —drives→ Action` — the
+  decision is the source, the derived/executable action is the target. The
+  validator checks both endpoints (decision-kind statement as source; action
+  statement + issue as target), reading statements and issues minted earlier
+  in the same batch — the `statementOf` presence-simulation extended with an
+  `issueOf` set. DISCONNECT stays always-valid.
+- **Never a dependency**: drives never enters `dependsOnGraph`, never forms a
+  cycle, never propagates blocking. Causality is historical fact, not an
+  ordering — the work exists because the decision caused it.
+- **Bidirectional queries**: `decisionDriveGraph` + `actionsFromDecision` +
+  `decisionsBehindAction`, all read-side-filtered the `derivedExecution` way.
+- **The six places** (0029's doctrine): validator, semantics, teaching
+  (visual-agent v9, the direction-explicit Drives section), render (the
+  quiet `edge-dep` dash family), surfaces (the Board "◆ decisions" chip, the
+  Intelligence "→ N actions" line, the Ask digest's `[drives: N]` /
+  `[from decision: …]` brackets, MCP's `drivesActions`/`drivenByDecisions`),
+  golden pins (the plan golden's drives expectations + the question-only
+  case that forbids any drives edge at all).
+- **The plan flow carries causality now**: the mock's plan builder emits one
+  drives edge per derived action (decision round-robin, deterministic);
+  CONNECT_NODES was already in PLAN_SAFE_OPS, so the gate needed no change;
+  `planRequestText` teaches the linkage; the D2 acceptance e2e asserts the
+  five edges land on approval and vanish on undo.
+
+Zero schema change, zero migration, no new store, no new statement kind.
+Not built (still on the ledger): decision impact analysis, Slack/Teams,
+Figma, automation, the Lucent↔Lattice handoff.

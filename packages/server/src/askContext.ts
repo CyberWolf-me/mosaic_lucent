@@ -1,6 +1,6 @@
 import type { AnswerRequest, AnswerMeetingSummary, AnswerRetrievalHit } from "@lucent/ai";
 import type { Node, ProvenanceFields, Workspace } from "@lucent/core";
-import { canonicalizeTopic, derivedExecution, topicsAreVariants } from "@lucent/core";
+import { canonicalizeTopic, decisionDriveGraph, derivedExecution, topicsAreVariants } from "@lucent/core";
 import type { LoggedOpEntry } from "./boards.js";
 import type { MeetingTranscript } from "./meetings.js";
 import { buildSearchCorpus, retrieve, SEARCH_LIMITS } from "./retrieval.js";
@@ -148,6 +148,23 @@ export function renderBoardDigest(input: AskContextInput): string {
   // blockedBy/atRiskBy are computed truth).
   const derivedMap = derivedExecution(ws, Date.now());
   const derivedFor = (id: string) => derivedMap.get(id);
+  // Stage E1: the decision→action causality, both directions — a decision's
+  // digest line names how much work it drives, an action's names the
+  // decisions behind it. Computed per read like the derived map, never
+  // stored. Labels capped like blocked-by's slice.
+  const driveGraph = decisionDriveGraph(ws);
+  const decisionsBehind = new Map<string, string[]>();
+  for (const [decisionId, actionIds] of driveGraph) {
+    for (const actionId of actionIds) {
+      const list = decisionsBehind.get(actionId) ?? [];
+      list.push(decisionId);
+      decisionsBehind.set(actionId, list);
+    }
+  }
+  const labelOf = (id: string): string | null => {
+    const label = ws.nodes[id]?.label;
+    return label ? label.slice(0, ASK_DIGEST_LIMITS.nodeLabel) : null;
+  };
 
   const nodeIds = Object.keys(ws.nodes).slice(0, ASK_DIGEST_LIMITS.nodes);
   if (nodeIds.length) {
@@ -184,6 +201,18 @@ export function renderBoardDigest(input: AskContextInput): string {
             statement.topic ? ` · topic: ${statement.topic}` : ""
           }${statement.supersedes?.length ? ` · supersedes: ${statement.supersedes.join(", ")}` : ""}]`,
         );
+      }
+      // The drives causality (Stage E1): the decision's own line names the
+      // count; the action's names the decisions behind it. Both read from
+      // the drives graph computed above, capped like blocked-by.
+      if (statement?.kind === "decision") {
+        const driven = driveGraph.get(node.id);
+        if (driven?.length) parts.push(`[drives: ${driven.length}]`);
+      }
+      const behind = decisionsBehind.get(node.id);
+      if (behind?.length) {
+        const labels = behind.map(labelOf).filter((l): l is string => l !== null);
+        if (labels.length) parts.push(`[from decision: ${labels.slice(0, 6).join(", ")}]`);
       }
       // Provenance: the reason Ask exists. Quote plus the stable turn range,
       // which survives where the quote cannot (Stage A). The op-level field

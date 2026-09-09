@@ -1,6 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import type { IssueStatusCategory, Node, Operation } from "@lucent/core";
-import { BOARD_COLUMNS, boardColumns, derivedExecution, pointsByCategory } from "@lucent/core";
+import {
+  actionNodes,
+  BOARD_COLUMNS,
+  boardColumns,
+  decisionsBehindAction,
+  derivedExecution,
+  pointsByCategory,
+} from "@lucent/core";
 import { TopBar, LeftRail, StatusBadge } from "../ui/Chrome.js";
 import { AIPill } from "../ui/AIPill.js";
 import { fetchIntegrationLinks, type IntegrationLink } from "../boards.js";
@@ -34,6 +41,16 @@ export function BoardView({ onOpenSettings }: { onOpenSettings: (section?: strin
   // card badge reads it; column placement stays on the manual statusCategory
   // (derived informs, never silently refiles).
   const derived = useMemo(() => derivedExecution(workspace, Date.now()), [workspace]);
+  // Stage E1: the decision labels behind each action — one map lookup per
+  // card render, pure over the workspace's drives edges.
+  const decisionsByNode = useMemo(() => {
+    const out = new Map<string, string[]>();
+    for (const action of actionNodes(workspace)) {
+      const labels = decisionsBehindAction(workspace, action.id).map((d) => d.label);
+      if (labels.length > 0) out.set(action.id, labels);
+    }
+    return out;
+  }, [workspace]);
   // Stage D6: the external links (the ↗ chips on cards).
   const [links, setLinks] = useState<IntegrationLink[]>([]);
   useEffect(() => {
@@ -132,6 +149,7 @@ export function BoardView({ onOpenSettings }: { onOpenSettings: (section?: strin
                       key={n.id}
                       node={n}
                       derived={derived.get(n.id)}
+                      decisions={decisionsByNode.get(n.id)}
                       link={linksByNode.get(n.id)}
                       dragging={dragId === n.id}
                       onDragStart={() => setDragId(n.id)}
@@ -186,6 +204,7 @@ const PRIORITY_MARK: Record<string, string> = {
 function IssueCard({
   node,
   derived,
+  decisions,
   link,
   dragging,
   onDragStart,
@@ -195,6 +214,8 @@ function IssueCard({
   node: Node;
   /** Stage D3: computed project truth for this node (undefined = no derived state). */
   derived?: { blockedBy: string[]; atRiskBy: string[] };
+  /** Stage E1: the decision labels behind this action (empty = no drives edges). */
+  decisions?: string[];
   /** Stage D6: the board's external link for this card (the ↗ chip). */
   link?: { externalId: string; url?: string; syncedAt: number };
   dragging: boolean;
@@ -204,13 +225,15 @@ function IssueCard({
 }) {
   const issue = node.issue!;
   // A full sentence for AT: label, type, status, who it's assigned to,
-  // (Stage D1) the deadline, and (Stage D3) derived blockers/risks.
+  // (Stage D1) the deadline, and (Stage D3) derived blockers/risks, and
+  // (Stage E1) the decisions that caused the work.
   const cardLabel =
     `${node.label} — ${issue.type}, ${issue.status}` +
     (issue.assignee ? `, assigned to ${issue.assignee}` : "") +
     (issue.dueDate ? `, due ${issue.dueDate}` : "") +
     (derived && derived.blockedBy.length > 0 ? `, blocked by ${derived.blockedBy.join(", ")}` : "") +
     (derived && derived.atRiskBy.length > 0 ? `, at risk from ${derived.atRiskBy.join(", ")}` : "") +
+    (decisions && decisions.length > 0 ? `, driven by ${decisions.join(", ")}` : "") +
     (issue.storyPoints !== undefined ? `, ${issue.storyPoints} points` : "");
   // The due date is overdue when past today and the work isn't finished —
   // computed here at render, never persisted (ADR 0027).
@@ -281,6 +304,17 @@ function IssueCard({
           title={`At risk from: ${derived.atRiskBy.join(", ")}`}
         >
           ⌛ at risk {derived.atRiskBy.length}
+        </div>
+      )}
+      {/* Stage E1: the decisions chip — the causal story behind the card.
+          Quiet like the derived badges: informs, never refiling. */}
+      {decisions && decisions.length > 0 && (
+        <div
+          className="mono"
+          style={{ fontSize: 9.5, marginTop: 2, color: "var(--ink-3)" }}
+          title={`Decisions behind this work: ${decisions.join(", ")}`}
+        >
+          ◆ decision{decisions.length === 1 ? "" : "s"} {decisions.length}
         </div>
       )}
       {link && (

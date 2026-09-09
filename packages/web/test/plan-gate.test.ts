@@ -79,4 +79,10 @@ describe("planRequestText", () => {
     expect(many).toContain("preserve existing actions");
     expect(many).toContain("Proposals and questions are context");
   });
+
+  it("teaches the drives linkage (Stage E1) — each derived action traces to its decision", () => {
+    expect(planRequestText(3)).toContain(
+      "link each derived action to the decision that drives it with a drives relationship",
+    );
+  });
 });

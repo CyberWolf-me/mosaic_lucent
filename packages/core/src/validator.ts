@@ -65,6 +65,13 @@ export function validateOperations(workspace: Workspace, ops: Operation[]): Vali
   for (const [id, node] of Object.entries(workspace.nodes)) {
     if (node.statement) statementOf.set(id, node.statement);
   }
+  // Issue presence (Stage E1): a drives edge's target must be executable —
+  // an action statement AND an issue — and the batch may mint the issue in
+  // the same batch as the edge, so presence is simulated like `statementOf`.
+  const issueOf = new Set<string>();
+  for (const [id, node] of Object.entries(workspace.nodes)) {
+    if (node.issue) issueOf.add(id);
+  }
 
   /**
    * True when `from`'s supersession closure reaches `to` — i.e. following
@@ -148,6 +155,8 @@ export function validateOperations(workspace: Workspace, ops: Operation[]): Vali
         // A parent must be a real node, so epic→story links never dangle.
         if (op.issue?.parentId && !nodes.has(op.issue.parentId))
           err(`parent issue "${op.issue.parentId}" does not exist`);
+        if (op.issue) issueOf.add(op.id);
+        else issueOf.delete(op.id);
         break;
       case "UPDATE_ISSUE":
         if (!nodes.has(op.id)) err(`node "${op.id}" does not exist`);
@@ -224,6 +233,30 @@ export function validateOperations(workspace: Workspace, ops: Operation[]): Vali
             const list = dependsOnOf.get(dependent) ?? [];
             list.push(upstream);
             dependsOnOf.set(dependent, list);
+          }
+        }
+        // The drives endpoint rule (Stage E1, ADR 0037): causality has typed
+        // endpoints — the source must carry a DECISION statement, the target
+        // must be executable work (action statement + issue). Both are
+        // readable from statements/issues minted earlier in the same batch.
+        // No cycle rule: a decision driving an action is historical fact, not
+        // a dependency — it never blocks and never propagates.
+        if (op.relationship === "drives") {
+          const sourceStatement = statementOf.get(op.source);
+          const targetStatement = statementOf.get(op.target);
+          if (!sourceStatement || sourceStatement.kind !== "decision") {
+            err(
+              `drives edge from "${op.source}" to "${op.target}" refused: the source carries no decision statement`,
+            );
+          }
+          if (
+            !targetStatement ||
+            targetStatement.kind !== "action" ||
+            !issueOf.has(op.target)
+          ) {
+            err(
+              `drives edge from "${op.source}" to "${op.target}" refused: the target is not executable work (an action statement and an issue)`,
+            );
           }
         }
         edges.add(edgeId(op.source, op.target, op.relationship));

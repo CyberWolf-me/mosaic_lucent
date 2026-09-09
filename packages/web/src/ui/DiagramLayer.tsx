@@ -303,11 +303,15 @@ export function DiagramLayer({
           // Stage D3: dependency edges (depends_on/blocks) render subtly
           // distinct — a quiet dash, never high-salience (the review's
           // rendering restraint). related_to renders like any structural
-          // edge (it IS structural context, not execution).
-          const isDependency =
-            e.relationship === "depends_on" || e.relationship === "blocks";
+          // edge (it IS structural context, not execution). Stage E1:
+          // drives joins the quiet family — causality is metadata about
+          // why work exists, one dash family for all execution meaning.
+          const isQuiet =
+            e.relationship === "depends_on" ||
+            e.relationship === "blocks" ||
+            e.relationship === "drives";
           const cls = [
-            proposed ? "dashed emerging" : isDependency ? "edge-dep" : "",
+            proposed ? "dashed emerging" : isQuiet ? "edge-dep" : "",
             "appear",
           ]
             .filter(Boolean)

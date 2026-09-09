@@ -42,3 +42,5 @@ back to it.
 | [0033](0033-inbound-sync.md) | Inbound sync: the symmetric human gate, the receiver, the system actor (Stage D7) | Accepted |
 | [0034](0034-the-second-and-third-providers.md) | The second and third providers: the capability-honesty layer, the hardened recovery, the SSRF boundary (Stage D8) | Accepted |
 | [0035](0035-the-narrowing-agent.md) | The narrowing agent: AI-initiated external proposals through the same human gate (Stage D9) | Accepted |
+| [0036](0036-the-execution-eras-close.md) | The execution eras close: the freeze rule, the era regression, D-numbering's honest end (Stage D10) | Accepted |
+| [0037](0037-execution-intelligence.md) | Execution Intelligence: the drives relation, the rollup doctrine, the create-the-work bridge (Stage E) | Accepted |

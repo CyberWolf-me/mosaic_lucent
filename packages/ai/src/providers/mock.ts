@@ -126,10 +126,20 @@ const scripts: Script[] = [
           issue: { type: "task", status: "open" },
         });
       }
+      // Stage E1: each derived action traces to the decision that caused
+      // it — a drives edge per action, the decision chosen round-robin so
+      // the pairing is deterministic when there are more actions than
+      // decisions. A board with no decisions drives nothing.
+      const drives = derivedIds.map((id, i) => ({
+        op: "CONNECT_NODES",
+        source: decisions[i % Math.max(decisions.length, 1)]?.id ?? "",
+        target: id,
+        relationship: "drives",
+      })) as Operation[];
       return {
         explanation: `Organized the board's semantic state into a plan: ${
           decisions.length
-        } decision(s) as the region, ${derivedIds.length} derived action(s) for requirements and risks. Existing actions preserved; proposals and questions untouched.`,
+        } decision(s) as the region, ${derivedIds.length} derived action(s) for requirements and risks, each linked to the decision that drives it. Existing actions preserved; proposals and questions untouched.`,
         operations: [
           // Decisions create structure: the plan region holds the derived
           // work (and the decision nodes it organizes around).
@@ -145,6 +155,7 @@ const scripts: Script[] = [
               ]
             : []),
           ...derived,
+          ...(decisions.length ? drives : []),
         ] as Operation[],
       };
     },

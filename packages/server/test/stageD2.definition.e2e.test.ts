@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import type { AddressInfo } from "node:net";
 import { MockImageProvider, MockProvider } from "@lucent/ai";
-import { applyOperations, createWorkspace, inverseOperations, type Operation } from "@lucent/core";
+import { applyOperations, actionsFromDecision, createWorkspace, decisionDriveGraph, decisionsBehindAction, inverseOperations, type Operation } from "@lucent/core";
 import { createApp } from "../src/app.js";
 import { InMemoryUserStore } from "../src/accounts.js";
 import { InMemoryBoardStore } from "../src/boards.js";
@@ -169,14 +169,25 @@ describe("Stage D2 definition of done — the acceptance fixture", () => {
     expect(raw.some((o) => o.op === "CREATE_GROUP")).toBe(true);
     expect(raw.some((o) => o.op === "UPDATE_STATEMENT")).toBe(false);
     expect(raw.some((o) => o.op === "DELETE_NODE")).toBe(false);
-    // The gate keeps everything (the mock is plan-shaped) and stamps
-    // createdFrom on every created node.
+    // Stage E1: the causal edges — one drives CONNECT per derived action,
+    // decision as source. The batch carries five (one per derived action).
+    const driveOps = raw.filter(
+      (o) => o.op === "CONNECT_NODES" && (o as any).relationship === "drives",
+    );
+    expect(driveOps.length).toBe(5);
+    for (const op of driveOps) {
+      expect((op as any).source).toMatch(/^dec-\d$/);
+      expect((op as any).target).toMatch(/-action$/);
+    }
+    // The gate keeps everything (the mock is plan-shaped; CONNECT_NODES is
+    // in PLAN_SAFE_OPS) and stamps createdFrom on every created node.
     expect(gated.skipped).toEqual([]);
     for (const op of stamped) {
       if (op.op === "CREATE_NODE") {
         expect((op as any).provenance?.createdFrom).toBeDefined();
       }
     }
+    expect(stamped.filter((o) => (o as any).relationship === "drives").length).toBe(5);
 
     // -- The plan proposal through the real route (the client-convention ops) --
     const proposed = await api(h, `/api/boards/${boardId}/proposals`, {
@@ -239,6 +250,27 @@ describe("Stage D2 definition of done — the acceptance fixture", () => {
       expect(ws.nodes[`que-${i}`]?.statement?.kind).toBe("question");
     }
 
+    // Stage E1: the drives edges landed — five causal edges, each from a
+    // decision to the derived action it caused, readable in both
+    // directions through the graph helpers.
+    const driveGraph = decisionDriveGraph(ws);
+    const drivenActions = new Set(
+      [...driveGraph.values()].reduce<string[]>((acc, ids) => [...acc, ...ids], []),
+    );
+    for (const id of ["req-0-action", "req-1-action", "req-2-action", "rsk-0-action", "rsk-1-action"]) {
+      expect(drivenActions.has(id), `${id} is driven by a decision`).toBe(true);
+    }
+    const decisionIds = [...driveGraph.keys()];
+    expect(decisionIds.length).toBeGreaterThan(0);
+    expect(decisionIds.every((id) => /^dec-\d$/.test(id))).toBe(true);
+    for (const id of decisionIds) {
+      expect(actionsFromDecision(ws, id).length).toBeGreaterThan(0);
+    }
+    // And every derived action traces back to its decision(s).
+    for (const id of ["req-0-action", "rsk-1-action"]) {
+      expect(decisionsBehindAction(ws, id).length).toBeGreaterThan(0);
+    }
+
     // -- The log records the approval as the AI actor chain ------------------
     const log = await h.boardStore.loadLog(boardId);
     const planEntry = log.find((e) => e.label === "proposal approved" || (e.actor?.actorType === "ai"));
@@ -257,10 +289,13 @@ describe("Stage D2 definition of done — the acceptance fixture", () => {
     expect(undone.groups["plan-region"]).toBeUndefined();
     expect(undone.nodes["req-0-action"]).toBeUndefined();
     expect(undone.nodes["act-0"]?.issue?.assignee).toBe("Sarah"); // untouched throughout
+    // Stage E1: undo removes the causal edges with the rest of the batch —
+    // one reversible unit, structure and causality together.
+    expect(decisionDriveGraph(undone).size).toBe(0);
   });
 });
 
 function planRequestTextText(): string {
-  return "Create the work from these 9 statements: organize the decisions into a plan region, preserve existing actions with their owners and deadlines, and derive new actions for requirements and risks. Proposals and questions are context — never create confirmed work from them.";
+  return "Create the work from these 9 statements: organize the decisions into a plan region, preserve existing actions with their owners and deadlines, derive new actions for requirements and risks, and link each derived action to the decision that drives it with a drives relationship. Proposals and questions are context — never create confirmed work from them.";
 }
 
