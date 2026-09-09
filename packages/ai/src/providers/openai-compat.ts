@@ -73,13 +73,64 @@ interface ChatResponse {
  * appears). Retrying transient statuses with a short backoff turns most of them
  * into a successful call.
  */
-const RETRYABLE_STATUS = new Set([403, 408, 425, 429, 500, 502, 503, 504]);
+const RETRYABLE_STATUS = new Set([403, 408, 425, 429, 500, 502, 503, 504, 522, 524]);
 // Per-attempt ceiling. A full-board generation (~50 ops under a 16k output
 // budget) can legitimately take over 90s to write; the old 90s per-attempt
 // cap aborted exactly the large generations the budget was raised for (M1).
 // The client's stream timeout (120s, reset per frame) remains the user-side
 // guard. 180s keeps the provider comfortably above it.
 const DEFAULT_TIMEOUT_MS = 180_000;
+
+/**
+ * Some upstreams behind OpenAI-compatible gateways (e.g. muse-spark via
+ * kiosapi) only accept `tool_choice: "auto"` and 400 on the named-function
+ * form we send to force the tool. One probe is enough: the first such 400
+ * flips this per-instance flag, and every later request goes out with
+ * `"auto"` from the start. The tool definition stays in the request, and the
+ * prose fallback below already covers a model that declines to call it.
+ */
+function isToolChoiceUnsupported(status: number, detail: string): boolean {
+  return (
+    status === 400 &&
+    /tool_choice/i.test(detail) &&
+    /auto/i.test(detail)
+  );
+}
+
+function withAutoToolChoice(bodyText: string): string {
+  const body = JSON.parse(bodyText) as Record<string, unknown>;
+  body.tool_choice = "auto";
+  return JSON.stringify(body);
+}
+
+/**
+ * Salvage a chat-completion object from a response that arrived as an SSE body
+ * (kilo-auto via kiosapi answers `stream:false` requests with `data: {...}`
+ * framing). Returns the last parseable frame; surfaces the original JSON error
+ * when the body holds nothing usable, so the failure reads the same as before.
+ *
+ * A frame's payload may span MULTIPLE `data:` lines (the SSE spec's reason for
+ * the multi-line form) — the same reader rule `sseEvents` applies: all `data:`
+ * lines within one frame join into one payload. Parsing line-by-line would
+ * fail on exactly the bodies this exists to recover.
+ */
+function recoverSseBody(bodyText: string, originalError: Error): ChatResponse {
+  const frames = bodyText.split(/\r?\n\r?\n/);
+  for (const frame of frames.reverse()) {
+    const payload = frame
+      .split(/\r?\n/)
+      .filter((line) => line.trim().startsWith("data:"))
+      .map((line) => line.trim().slice(5).trim())
+      .join("");
+    if (!payload || payload === "[DONE]") continue;
+    try {
+      return JSON.parse(payload) as ChatResponse;
+    } catch {
+      // try an earlier frame
+    }
+  }
+  throw originalError;
+}
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -93,6 +144,8 @@ export class OpenAICompatibleProvider implements LLMProvider {
   private readonly fetchImpl: typeof fetch;
   private readonly maxRetries: number;
   private readonly timeoutMs: number;
+  /** Flips after the first "only auto is supported" 400 — see the helper. */
+  private forceAutoToolChoice = false;
 
   constructor(options: OpenAICompatOptions) {
     if (!options.apiKey) throw new Error("OpenAICompatibleProvider requires an apiKey");
@@ -121,7 +174,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
         ]
       : text;
 
-    const body = JSON.stringify({
+    let body = JSON.stringify({
       model: this.model,
       messages: [
         { role: "system", content: SYSTEM_PROMPT },
@@ -129,7 +182,11 @@ export class OpenAICompatibleProvider implements LLMProvider {
       ],
       tools: [openAiToolDefinition()],
       // Ask for the tool specifically; the schema then guarantees the shape.
-      tool_choice: { type: "function", function: { name: TOOL_NAME } },
+      // An upstream that only accepts "auto" downgrades this once — see
+      // isToolChoiceUnsupported.
+      tool_choice: this.forceAutoToolChoice
+        ? "auto"
+        : { type: "function", function: { name: TOOL_NAME } },
       // An explicit output budget. Without one, the gateway's default
       // applies — often far below what a full board of operations needs —
       // and the tool args truncate mid-JSON (unparseable) or the model
@@ -169,6 +226,14 @@ export class OpenAICompatibleProvider implements LLMProvider {
       if (!response.ok) {
         lastStatus = response.status;
         lastDetail = await response.text().catch(() => "");
+        // Named tool_choice unsupported upstream: downgrade to "auto" and
+        // retry immediately (not counted against the retry ladder).
+        if (isToolChoiceUnsupported(lastStatus, lastDetail) && !this.forceAutoToolChoice) {
+          this.forceAutoToolChoice = true;
+          body = withAutoToolChoice(body);
+          attempt--;
+          continue;
+        }
         if (RETRYABLE_STATUS.has(response.status) && attempt < this.maxRetries - 1) {
           // Exponential backoff with jitter: 400ms, 800ms, 1600ms (+ up to 250ms).
           await sleep(400 * 2 ** attempt + Math.random() * 250);
@@ -177,7 +242,17 @@ export class OpenAICompatibleProvider implements LLMProvider {
         throw new Error(`Provider request failed (${response.status}): ${lastDetail}`);
       }
 
-      const data = (await response.json()) as ChatResponse;
+      // A misbehaving route can ignore `stream:false` and answer with an SSE
+      // body ("data: {...}\n\n"). The raw text is read exactly once — after
+      // .json() consumes the body, .text() throws "Body has already been
+      // read" — then parsed as plain JSON, and on failure as an SSE frame.
+      let data: ChatResponse;
+      const raw = await response.text().catch(() => "");
+      try {
+        data = JSON.parse(raw) as ChatResponse;
+      } catch {
+        data = recoverSseBody(raw, new Error(`Provider returned non-JSON body: ${raw.slice(0, 120)}`));
+      }
       const message = data.choices?.[0]?.message;
 
       // A gateway may reroute, so the echoed model is preferred over the
@@ -214,14 +289,16 @@ export class OpenAICompatibleProvider implements LLMProvider {
    * re-asking the whole question).
    */
   async generateAnswer(request: AnswerRequest): Promise<AnswerResult> {
-    const body = JSON.stringify({
+    let body = JSON.stringify({
       model: this.model,
       messages: [
         { role: "system", content: ANSWER_SYSTEM_PROMPT },
         { role: "user", content: buildAnswerUserPrompt(request) },
       ],
       tools: [openAiAnswerToolDefinition()],
-      tool_choice: { type: "function", function: { name: ANSWER_TOOL_NAME } },
+      tool_choice: this.forceAutoToolChoice
+        ? "auto"
+        : { type: "function", function: { name: ANSWER_TOOL_NAME } },
       // A few sentences plus a citation list, not a board.
       max_tokens: 4096,
       temperature: 0.2,
@@ -254,6 +331,12 @@ export class OpenAICompatibleProvider implements LLMProvider {
       if (!response.ok) {
         lastStatus = response.status;
         lastDetail = await response.text().catch(() => "");
+        if (isToolChoiceUnsupported(lastStatus, lastDetail) && !this.forceAutoToolChoice) {
+          this.forceAutoToolChoice = true;
+          body = withAutoToolChoice(body);
+          attempt--;
+          continue;
+        }
         if (RETRYABLE_STATUS.has(response.status) && attempt < this.maxRetries - 1) {
           await sleep(400 * 2 ** attempt + Math.random() * 250);
           continue;
@@ -291,14 +374,16 @@ export class OpenAICompatibleProvider implements LLMProvider {
    * human-decided retry, not worth re-asking.
    */
   async generateExternalPlan(request: ExternalPlanRequest): Promise<ExternalPlanResult> {
-    const body = JSON.stringify({
+    let body = JSON.stringify({
       model: this.model,
       messages: [
         { role: "system", content: EXTERNAL_PLAN_SYSTEM_PROMPT },
         { role: "user", content: buildExternalPlanUserPrompt(request) },
       ],
       tools: [openAiExternalPlanToolDefinition()],
-      tool_choice: { type: "function", function: { name: EXTERNAL_PLAN_TOOL_NAME } },
+      tool_choice: this.forceAutoToolChoice
+        ? "auto"
+        : { type: "function", function: { name: EXTERNAL_PLAN_TOOL_NAME } },
       // A selection list plus one paragraph, not a board.
       max_tokens: 2048,
       temperature: 0.2,
@@ -331,6 +416,12 @@ export class OpenAICompatibleProvider implements LLMProvider {
       if (!response.ok) {
         lastStatus = response.status;
         lastDetail = await response.text().catch(() => "");
+        if (isToolChoiceUnsupported(lastStatus, lastDetail) && !this.forceAutoToolChoice) {
+          this.forceAutoToolChoice = true;
+          body = withAutoToolChoice(body);
+          attempt--;
+          continue;
+        }
         if (RETRYABLE_STATUS.has(response.status) && attempt < this.maxRetries - 1) {
           await sleep(400 * 2 ** attempt + Math.random() * 250);
           continue;
@@ -386,30 +477,61 @@ export class OpenAICompatibleProvider implements LLMProvider {
         ]
       : text;
 
-    const response = await this.fetchImpl(this.baseUrl, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${this.apiKey}`,
-        accept: "text/event-stream",
-      },
-      body: JSON.stringify({
+    const makeStreamBody = () =>
+      JSON.stringify({
         model: this.model,
         messages: [
           { role: "system", content: SYSTEM_PROMPT },
           { role: "user", content: userContent },
         ],
         tools: [openAiToolDefinition()],
-        tool_choice: { type: "function", function: { name: TOOL_NAME } },
+        tool_choice: this.forceAutoToolChoice
+          ? "auto"
+          : { type: "function", function: { name: TOOL_NAME } },
         // Same explicit budget as the non-streaming path — see the note there.
         max_tokens: 16384,
         temperature: 0.2,
         stream: true,
         // Not every gateway honours this; absence just means no usage chunk.
         stream_options: { include_usage: true },
-      }),
-      signal: AbortSignal.timeout(this.timeoutMs),
-    });
+      });
+
+    const openStream = () =>
+      this.fetchImpl(this.baseUrl, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${this.apiKey}`,
+          accept: "text/event-stream",
+        },
+        body: makeStreamBody(),
+        signal: AbortSignal.timeout(this.timeoutMs),
+      });
+
+    // A pre-stream failure carries no streamed data, so a transient gateway
+    // rejection (Cloudflare 522/524 from the routers we sit behind) is safe
+    // to retry here. Once bytes have flowed, a failure is terminal — the
+    // caller has already been shown the partial text.
+    let response = await openStream();
+    // Named tool_choice unsupported upstream: downgrade to "auto" and retry
+    // once before surfacing the failure (see isToolChoiceUnsupported).
+    if (
+      !response.ok &&
+      isToolChoiceUnsupported(
+        response.status,
+        await response.text().catch(() => ""),
+      ) &&
+      !this.forceAutoToolChoice
+    ) {
+      this.forceAutoToolChoice = true;
+      response = await openStream();
+    }
+    for (let attempt = 1; !response.ok && attempt < this.maxRetries; attempt++) {
+      if (!RETRYABLE_STATUS.has(response.status)) break;
+      await response.text().catch(() => "");
+      await sleep(400 * 2 ** (attempt - 1) + Math.random() * 250);
+      response = await openStream();
+    }
     if (!response.ok || !response.body) {
       const detail = await response.text().catch(() => "");
       throw new Error(`Provider stream failed (${response.status}): ${detail}`);
@@ -449,7 +571,11 @@ export class OpenAICompatibleProvider implements LLMProvider {
     );
     if (argumentsText !== "") return parseToolArguments(argumentsText, meta);
     if (proseText !== "") return parseModelJson(proseText, meta);
-    throw new Error("Provider stream ended without a tool call or content");
+    // Some routes (kilo-auto via kiosapi, 2026-09) close an SSE stream with
+    // zero content even though the same request answers over the non-streaming
+    // endpoint. Nothing was emitted to the caller, so re-asking without
+    // streaming is invisible to the user and saves the route.
+    return this.generateOperations(request);
   }
 }
 
