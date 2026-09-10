@@ -172,6 +172,15 @@ export interface ChatEntry {
    * entry without re-parsing the text.
    */
   historyTruncated?: boolean;
+  /**
+   * On a generation-failure `error` entry: the user's original prompt, so
+   * the entry renders a one-click "try again" affordance (found live,
+   * 2026-09-10: three provider 502s left an empty board behind a transient
+   * toast; the failure persisted in chat, but re-running meant retyping the
+   * whole request). Set only by the failure arm; older conversations parse
+   * unchanged.
+   */
+  retryPrompt?: string;
 }
 
 export interface ProjectMeta {

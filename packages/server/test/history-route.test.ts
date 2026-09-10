@@ -360,6 +360,24 @@ describe("historyWindow arithmetic (the shared seam)", () => {
     const empty = historyWindow(0, 25, 0);
     expect(empty).toMatchObject({ fromSeq: 1, hasMore: false, head: 0 });
   });
+
+  it("a snapshot at the head does not hide the whole log (live, 2026-09-10)", () => {
+    // Room eviction snapshots the current head on last-peer-leave while the
+    // in-memory store never prunes. The claimed floor then sits AHEAD of
+    // every entry; the old math computed fromSeq = baseSeq + 1 = head + 1,
+    // so loadLog(fromSeq - 1) returned nothing and History/Ask rendered an
+    // empty timeline over a full log. The window must degrade to the whole
+    // surviving log instead.
+    const atHead = historyWindow(7, 25, 7);
+    expect(atHead).toMatchObject({ fromSeq: 1, hasMore: false, head: 7 });
+    // Depth still caps the fallback, and hasMore stays exact (the excluded
+    // entries really exist — nothing was compacted in this branch).
+    const capped = historyWindow(60, 25, 60);
+    expect(capped).toMatchObject({ fromSeq: 36, hasMore: true });
+    // The tiny-board variant of the same shape.
+    const tiny = historyWindow(3, 25, 3);
+    expect(tiny).toMatchObject({ fromSeq: 1, hasMore: false });
+  });
 });
 
 describe("statementEvent derivation (Stage C3)", () => {

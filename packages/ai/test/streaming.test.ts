@@ -121,6 +121,113 @@ describe("OpenAI-compatible streaming", () => {
       provider.streamOperations({ message: "x", summary: EMPTY_SUMMARY }, collecting()),
     ).rejects.toThrow(/503/);
   });
+
+  it("retries a transient 522 before any bytes stream, then succeeds", async () => {
+    // kiosapi's Cloudflare front intermittently 522s while contacting the
+    // upstream. Nothing has streamed yet, so a retry is safe.
+    let calls = 0;
+    const frames = [
+      "data: " +
+        JSON.stringify({
+          model: "routed-model",
+          choices: [{ delta: { tool_calls: [{ function: { arguments: TOOL_ARGS } }] } }],
+        }) +
+        "\n\n",
+      "data: [DONE]\n\n",
+    ];
+    const provider = new OpenAICompatibleProvider({
+      apiKey: "k",
+      baseUrl: "https://gateway.test/v1/chat/completions",
+      model: "m",
+      fetchImpl: (async () => {
+        calls += 1;
+        if (calls === 1) return sseResponse([], 522);
+        return sseResponse(frames);
+      }) as typeof fetch,
+      maxRetries: 3,
+    });
+    const callbacks = collecting();
+    const result = await provider.streamOperations(
+      { message: "x", summary: EMPTY_SUMMARY },
+      callbacks,
+    );
+    expect(result.operations).toHaveLength(1);
+    expect(callbacks.text).toBe(TOOL_ARGS);
+    expect(calls).toBe(2);
+  });
+
+  it("does not retry a stream failure after bytes have flowed", async () => {
+    // The first response is OK and streams content, so once the read is under
+    // way any failure is terminal — the caller already received that text.
+    // The prose here deliberately isn't JSON: the final parse throws, and the
+    // point of the test is that exactly ONE upstream call was made (no retry
+    // ladder once bytes have flowed).
+    const frames = [
+      "data: " +
+        JSON.stringify({ choices: [{ delta: { content: "partial" } }] }) +
+        "\n\n",
+      "data: [DONE]\n\n",
+    ];
+    let calls = 0;
+    const provider = new OpenAICompatibleProvider({
+      apiKey: "k",
+      baseUrl: "https://gateway.test/v1/chat/completions",
+      model: "m",
+      fetchImpl: (async () => {
+        calls += 1;
+        return sseResponse(frames, 200);
+      }) as typeof fetch,
+      maxRetries: 3,
+    });
+    const callbacks = collecting();
+    await expect(
+      provider.streamOperations({ message: "x", summary: EMPTY_SUMMARY }, callbacks),
+    ).rejects.toThrow(/No JSON object/);
+    expect(callbacks.text).toBe("partial");
+    expect(calls).toBe(1);
+  });
+
+  it("downgrades tool_choice to auto on the stream 400 and retries", async () => {
+    // muse-spark rejects named tool_choice with a 400; the stream path must
+    // degrade the same way the non-streaming path does.
+    const toolChoice400 = () =>
+      sseResponse(
+        [
+          'event: error\ndata: {"error":{"message":"only \\"auto\\" is supported for `tool_choice`"}}\n\n',
+        ],
+        400,
+      );
+    let calls = 0;
+    const bodies: unknown[] = [];
+    const frames = [
+      "data: " +
+        JSON.stringify({
+          model: "routed-model",
+          choices: [{ delta: { tool_calls: [{ function: { arguments: TOOL_ARGS } }] } }],
+        }) +
+        "\n\n",
+      "data: [DONE]\n\n",
+    ];
+    const provider = new OpenAICompatibleProvider({
+      apiKey: "k",
+      baseUrl: "https://gateway.test/v1/chat/completions",
+      model: "m",
+      fetchImpl: (async (_url, init) => {
+        calls += 1;
+        bodies.push(JSON.parse((init?.body as string) ?? "{}"));
+        if (calls === 1) return toolChoice400();
+        return sseResponse(frames);
+      }) as typeof fetch,
+      maxRetries: 3,
+    });
+    const result = await provider.streamOperations(
+      { message: "x", summary: EMPTY_SUMMARY },
+      collecting(),
+    );
+    expect(result.operations).toHaveLength(1);
+    expect(calls).toBe(2);
+    expect(bodies[1]).toMatchObject({ tool_choice: "auto" });
+  });
 });
 
 describe("Anthropic streaming", () => {

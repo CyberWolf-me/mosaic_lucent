@@ -1,6 +1,11 @@
 import type { Server } from "node:http";
 import { WebSocketServer, WebSocket } from "ws";
-import { parseMentions, type Operation, type Workspace } from "@lucent/core";
+import {
+  parseMentions,
+  safeParseProgrammaticOperations,
+  type Operation,
+  type Workspace,
+} from "@lucent/core";
 import { Room } from "./room.js";
 import type { LoggedOp } from "./room.js";
 import type { FanoutMessage, Unsubscribe } from "./fanout.js";
@@ -189,12 +194,26 @@ export class RealtimeServer {
    * full-history replay on every all-participants-leave cycle. Idempotent on
    * (board, seq) by the store's contract; best-effort, because a failed
    * snapshot costs a full replay next time, never correctness.
+   *
+   * Guarded on the store head (found live: 2026-09-10): the room can trail
+   * the store when writes bypass it (pre-fix ops-API batches, multi-instance
+   * winners the room hasn't pulled). Snapshotting a trailing room's workspace
+   * freezes STALE state at the room's version — and the next cold start then
+   * anchors to it, hiding the newer store ops behind the snapshot floor.
+   * When the store's head is past the room's version, no snapshot is written
+   * (a full replay rebuilds correctly next time, which is the guarded cost),
+   * and the drifted snapshot never poisons a future join.
    */
   private evictRoom(boardId: string, room?: Room): void {
     const current = room ?? this.rooms.get(boardId);
     if (current) {
+      const roomVersion = current.version();
       void this.deps.boardStore
-        .putSnapshot(boardId, current.version(), current.current())
+        .latestSeq(boardId)
+        .then((storeHead) => {
+          if (storeHead > roomVersion) return;
+          return this.deps.boardStore.putSnapshot(boardId, roomVersion, current.current());
+        })
         .catch(() => {});
     }
     this.rooms.delete(boardId);
@@ -336,7 +355,29 @@ export class RealtimeServer {
         ? msg.requestId
         : undefined;
 
-    const result = await room.commit(conn.userId, (msg.ops ?? []) as never, msg.label ?? "", {
+    // The wire contract before any state touches the batch (found live:
+    // 2026-09-10). `Room.commit` validates presence and cycle rules, not op
+    // SHAPE — an op that passes the hand-rolled checks but not the schema
+    // (statement fields at the top level instead of nested, say) reached the
+    // reducer, which crashed the process. Parse with the STRICT schema
+    // (unknown top-level keys refused, not stripped) so the socket answer is
+    // a correlated refusal the client can fix, not a dead server or a
+    // silently acked no-op.
+    const parsed = safeParseProgrammaticOperations(msg.ops ?? []);
+    if (!parsed.success) {
+      const first = parsed.error.issues[0];
+      const at = first?.path?.length ? ` (at ${first.path.join(".")})` : "";
+      this.sendTo(conn, {
+        type: "op-rejected",
+        error: "schema",
+        detail: `operations failed schema validation: ${first?.message ?? "invalid op"}${at}`,
+        ...(requestId !== undefined ? { requestId } : {}),
+        ...(room ? { head: room.version() } : {}),
+      });
+      return;
+    }
+
+    const result = await room.commit(conn.userId, parsed.data, msg.label ?? "", {
       ...(requestId !== undefined ? { requestId } : {}),
     });
     if (!result.ok) {

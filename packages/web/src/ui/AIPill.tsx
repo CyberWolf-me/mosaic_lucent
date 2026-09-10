@@ -278,6 +278,9 @@ function ConvoTurn({
         {!isUser && entry.suggestNewBoard && entry.originPrompt && (
           <NewBoardAction prompt={entry.originPrompt} />
         )}
+        {/* The generation-retry affordance: only `error` entries whose
+            failure arm recorded the prompt carry it (see RetryAction). */}
+        {isError && entry.retryPrompt && <RetryAction prompt={entry.retryPrompt} />}
         {/* Partial-application report (M1): what the validator refused while
             applying the rest. Visible but quiet — a mono list under the
             answer, not a modal — so a skipped relationship reads as a known
@@ -408,6 +411,27 @@ function NewBoardAction({ prompt }: { prompt: string }) {
       onClick={() => startNewBoardFor(prompt)}
     >
       <Ico.Layers /> Build this on a new board
+    </button>
+  );
+}
+
+/**
+ * The one-click generation-retry affordance: re-sends the failed request's
+ * original prompt against the SAME board (found live, 2026-09-10: transient
+ * provider 502s left an empty board behind a transient toast; the failure
+ * persisted in chat, but re-running meant retyping the whole request). Only
+ * renders on entries whose `retryPrompt` the failure arm set — plan/quota/
+ * auth refusals carry no prompt because retrying would not help.
+ */
+function RetryAction({ prompt }: { prompt: string }) {
+  const { send } = useWorkspace() as unknown as { send: (message: string) => Promise<void> };
+  return (
+    <button
+      className="btn amber"
+      style={{ marginTop: 8, padding: "0 12px", height: 28, fontSize: 12 }}
+      onClick={() => void send(prompt)}
+    >
+      <Ico.Sparkle /> Try again
     </button>
   );
 }

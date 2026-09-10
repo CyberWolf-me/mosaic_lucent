@@ -5,6 +5,7 @@ import {
   foldStatementTopics,
   isHumanOnlyOperation,
   repairOperations,
+  safeParseProgrammaticOperations,
   stampAuthorship,
   validateOperations,
 } from "@lucent/core";
@@ -111,7 +112,25 @@ export const registerBoardOpsRoutes: RegisterRoutes = (router, s) => {
         "op" in op &&
         typeof (op as { op: unknown }).op === "string",
     );
-    const filtered = candidate.filter((op) => !isHumanOnlyOperation(op.op));
+    // The wire contract before the pipeline (found live: 2026-09-10). The
+    // hand-rolled validator checks presence and cycles, not op SHAPE; an op
+    // that passes those checks but not the schema reached the reducer and
+    // could crash the server process. The STRICT schema (unknown top-level
+    // keys refused, not stripped) also closes the silent-no-op class: a
+    // `patch`-wrapped UPDATE_ISSUE used to validate, commit, and change
+    // nothing. The room's ws path parses the same way (realtime.ts applyOp),
+    // so both agent entry points refuse malformed batches identically.
+    const parsed = safeParseProgrammaticOperations(candidate);
+    if (!parsed.success) {
+      const issues = parsed.error.issues.map((issue) => ({
+        index: 0,
+        op: "unknown",
+        message: `${issue.message}${issue.path.length ? ` (at ${issue.path.join(".")})` : ""}`,
+      }));
+      send(res, 422, { error: "operations failed validation", errors: issues });
+      return;
+    }
+    const filtered = parsed.data.filter((op) => !isHumanOnlyOperation(op.op));
     if (filtered.length === 0) {
       // Every op was human-only (MOVE_NODE and friends): nothing to apply,
       // and saying so beats an empty 200 that reads as success.
@@ -146,6 +165,48 @@ export const registerBoardOpsRoutes: RegisterRoutes = (router, s) => {
     // `catchUp` replays — the same ordering the room uses. The actor record
     // names the accountable human: an agent acts under its caller's token,
     // so `user/caller` is honest — it is their agent, not a fourth actor kind.
+    //
+    // Room-first (found live: 2026-09-10): a batch written only to the store
+    // bypassed every live socket — the room's in-memory state kept serving
+    // its stale truth, peers never saw the ops, and a later room eviction
+    // snapshotted the stale state, permanently emptying the board for future
+    // ws joiners. The room is now the primary writer (the B3 approve's own
+    // dual-path pattern); the store-only path is the fallback when no room
+    // is live or the caller has no role in it.
+    const roomResult = await s.commitForBoard(boardId, user.id, operations, label, {
+      // No expectedSeq: the room validates against its own head, which is
+      // fresher than anything the HTTP caller's earlier read can name. The
+      // caller's expectedSeq rides the store fallback below.
+      ...(requestId !== undefined ? { requestId } : {}),
+      actor: { actorType: "user", actorId: user.id, initiatedBy: user.id },
+    });
+    if (roomResult?.ok && roomResult.entry) {
+      // The broadcast + persistence the room's ordinary caller (realtime.ts)
+      // performs; this seam runs outside applyOp so the work is repeated
+      // here, per the approve dual-path precedent.
+      for (const absorbed of roomResult.absorbed ?? []) {
+        s.broadcastProposal(boardId, { type: "op", entry: absorbed });
+      }
+      s.broadcastProposal(boardId, { type: "op", entry: roomResult.entry });
+      const updated = applyOperations(guard.board.workspace, operations);
+      await boardStore.put({ ...guard.board, workspace: updated, updatedAt: Date.now() });
+      send(res, 200, {
+        seq: roomResult.entry.seq,
+        applied: operations.length,
+        updatedAt: Date.now(),
+        ...(roomResult.entry.operationId !== undefined
+          ? { operationId: roomResult.entry.operationId }
+          : {}),
+        ...(requestId !== undefined ? { requestId } : {}),
+      });
+      return;
+    }
+    if (roomResult && !roomResult.ok && roomResult.head !== undefined) {
+      // The live room refused (stale or role): the caller re-reads and
+      // re-validates, same as the store's 409 below.
+      send(res, 409, { error: "stale board", reason: roomResult.error, head: roomResult.head });
+      return;
+    }
     const append = await boardStore.appendOp({
       boardId,
       ops: operations,

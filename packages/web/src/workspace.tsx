@@ -29,7 +29,7 @@ import {
   type Operation,
   type Workspace,
 } from "@lucent/core";
-import { streamGenerate } from "./api.js";
+import { streamGenerate, PlanRefusalError } from "./api.js";
 import { classifyTurn } from "./meetings.js";
 import { BoardSync, type Peer } from "./boardSync.js";
 import {
@@ -1060,9 +1060,20 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           commitAndShare(next, foldedOps, explanation, conversation, projectName);
         }
       } catch (err) {
+        // Retriable-failure affordance (found live, 2026-09-10): a transient
+        // provider 502 left an empty board behind a transient toast; the
+        // error persisted in chat, but re-running meant retyping the whole
+        // request. A plan or quota refusal is NOT retriable by retrying — the
+        // message already says what to do instead — so only transport and
+        // provider failures carry the prompt.
+        const retriable = !(err instanceof PlanRefusalError) && !/quota|rate limit|plan|auth|access/i.test((err as Error).message ?? "");
         const conversation: ChatEntry[] = [
           ...withUser,
-          { role: "error", text: (err as Error).message },
+          {
+            role: "error",
+            text: (err as Error).message,
+            ...(retriable && text ? { retryPrompt: text } : {}),
+          },
         ];
         setChat(conversation);
         // A network failure mid-stream used to swallow the user's message

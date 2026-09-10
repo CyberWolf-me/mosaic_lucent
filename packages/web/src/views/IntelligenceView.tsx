@@ -682,6 +682,8 @@ export function IntelligenceView(_: { onOpenSettings?: (section?: string) => voi
                   {/* Evidence (rule 4): counts and meetings, never "looks similar". */}
                   <div className="mono" style={{ fontSize: 10.5, color: "var(--ink-3)" }}>
                     {t("intel.inbox.evidence", locale, {
+                      existing: item.existing,
+                      dup: item.dup,
                       a: item.existingStatements,
                       b: item.dupStatements,
                       m: item.meetings.length,

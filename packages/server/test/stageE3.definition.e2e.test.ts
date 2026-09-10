@@ -199,7 +199,10 @@ function planBoard(): Operation[] {
   ];
   for (const id of derivedIds) {
     ops.push({ op: "CREATE_NODE", id, nodeType: "action", label: `Address: ${id.replace("-action", "")}` });
-    ops.push({ op: "SET_STATEMENT", id, statement: { kind: "action", status: "open", topic: "plan" }, provenance: { createdFrom: ["dec-0"] } } as never);
+    // Provenance nests inside the statement (attachProvenance's rule), not
+    // at the op's top level — the strict programmatic parse refuses the
+    // latter, which is exactly what it is for.
+    ops.push({ op: "SET_STATEMENT", id, statement: { kind: "action", status: "open", topic: "plan", provenance: { createdFrom: ["dec-0"] } } });
     ops.push({ op: "SET_ISSUE", id, issue: { type: "task", status: "open" } });
   }
   ops.push({ op: "CREATE_GROUP", id: "plan-ws-research", label: "Research", children: ["req-0-action", "req-1-action"] });

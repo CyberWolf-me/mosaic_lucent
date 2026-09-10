@@ -298,3 +298,44 @@ describe("POST /api/boards/:id/ops (agent op-apply, R1)", () => {
     expect(topic).toBe("pricing");
   });
 });
+
+describe("the live-pass wire contract (2026-09-10 fixes)", () => {
+  let h: Harness;
+
+  afterEach(async () => {
+    if (h) await h.close();
+  });
+
+  it("refuses the reducer-crashing SET_STATEMENT shape with 422 (live defect 1)", async () => {
+    h = await harness();
+    const owner = await h.signup("crash@example.com");
+    const boardId = await seedBoard(h, owner);
+    // Top-level kind/status instead of the nested `statement` object: the
+    // hand-rolled validator passed this, and the reducer crashed the whole
+    // server process reading `op.statement.supersedes` of undefined.
+    const refused = await h.api(`/api/boards/${boardId}/ops`, {
+      method: "POST",
+      token: owner.token,
+      body: JSON.stringify({
+        ops: [{ op: "SET_STATEMENT", id: "a", kind: "decision", status: "open" }],
+      }),
+    });
+    expect(refused.status).toBe(422);
+    expect(refused.body.error).toBe("operations failed validation");
+  });
+
+  it("refuses the patch-wrapped UPDATE_ISSUE instead of acking a no-op (live defect 4)", async () => {
+    h = await harness();
+    const owner = await h.signup("patch@example.com");
+    const boardId = await seedBoard(h, owner);
+    const refused = await h.api(`/api/boards/${boardId}/ops`, {
+      method: "POST",
+      token: owner.token,
+      body: JSON.stringify({
+        ops: [{ op: "UPDATE_ISSUE", id: "a", patch: { status: "in_progress" } }],
+      }),
+    });
+    expect(refused.status).toBe(422);
+    expect(refused.body.errors[0].message).toContain('unknown key "patch"');
+  });
+});

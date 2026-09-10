@@ -49,14 +49,38 @@ export interface HistoryWindow {
  * log's floor; `head` is `latestSeq`.
  */
 export function historyWindow(head: number, depth: number | null, baseSeq: number): HistoryWindow {
+  const limit = depth !== null ? Math.min(depth, MAX_HISTORY_WINDOW) : MAX_HISTORY_WINDOW;
+  const newest = Math.max(0, head);
+  // A snapshot at (or past) the head means the claimed floor sits AHEAD of
+  // every entry that exists (found live: 2026-09-10). Room eviction
+  // snapshots the current head on last-peer-leave while the in-memory store
+  // never prunes — so baseSeq == head, `firstExisting` lands at head + 1,
+  // and a window computed from it starts past the head: loadLog(fromSeq - 1)
+  // returns NOTHING and History/Ask rendered an empty timeline over a
+  // 7-entry log. The density assumption below ("everything at/below the
+  // snapshot was pruned") is simply false here; the log still holds every
+  // revision. Fall back to the whole surviving log, capped by `limit`.
+  const floorPastHead = Math.max(0, baseSeq) >= newest && newest > 0;
+  if (floorPastHead) {
+    const fallbackFrom = Math.max(1, newest - limit + 1);
+    return {
+      head,
+      fromSeq: fallbackFrom,
+      depth,
+      limit,
+      // Dense from 1 to head in this branch, so `hasMore` is exact: entries
+      // before the fallback start exist and this window excludes them.
+      hasMore: fallbackFrom > 1,
+      baseSeq,
+    };
+  }
   // Oldest seq that still exists in the log: everything at/below the newest
   // snapshot was pruned away, so the first survivor is baseSeq + 1.
   const firstExisting = Math.max(0, baseSeq) + 1;
-  const limit = depth !== null ? Math.min(depth, MAX_HISTORY_WINDOW) : MAX_HISTORY_WINDOW;
   // The oldest seq the caller may see: no further back than the log goes,
   // and no further forward than `limit` revisions behind the head.
-  const fromSeq = Math.max(firstExisting, Math.max(0, head) - limit + 1);
-  // Exact because of density: everything in [fromSeq-1 … firstExisting) exists
+  const fromSeq = Math.max(firstExisting, newest - limit + 1);
+  // Exact because of density: everything in [fromSeq-1 ... firstExisting) exists
   // and is excluded. Entries at/below baseSeq are compacted, not hidden — they
   // are nobody's older history, so they never count toward hasMore.
   const hasMore = fromSeq > firstExisting;

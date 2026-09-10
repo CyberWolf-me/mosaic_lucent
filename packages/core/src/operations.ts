@@ -518,6 +518,15 @@ export const operationUnionSchema = operationSchema;
 
 export const operationsSchema = z.array(operationSchema);
 
+/**
+ * Per-op-name sets of the only top-level keys the contract knows. Built from
+ * the union's own shapes, so a new op or field is automatically known — this
+ * cannot drift from the schema it guards.
+ */
+const KNOWN_OP_KEYS: ReadonlyMap<string, ReadonlySet<string>> = new Map(
+  operationSchema.options.map((o) => [o.shape.op.value as string, new Set(Object.keys(o.shape))]),
+);
+
 /** Every operation name the reducer/validator accepts, in declaration order. */
 export const ALL_OPERATION_NAMES: readonly string[] = operationSchema.options.map(
   (o) => o.shape.op.value as string,
@@ -540,6 +549,46 @@ export function parseOperations(raw: unknown): Operation[] {
 
 /** Safe variant that returns a result instead of throwing. */
 export function safeParseOperations(raw: unknown) {
+  return operationsSchema.safeParse(raw);
+}
+
+/**
+ * The programmatic caller's parse (ws room, ops route, any future agent
+ * transport): unknown top-level keys are refused instead of stripped, so a
+ * malformed batch answers with a schema issue rather than committing a
+ * silently acked no-op — the class found live on 2026-09-10, where
+ * `{op:'UPDATE_ISSUE', id, patch:{...}}` validated (zod stripped `patch`),
+ * committed, acked, and changed nothing. Model output does NOT use this: it
+ * keeps the tolerant schema because providers emit harmless extras and the
+ * repair round owns real drift.
+ *
+ * The key check runs BEFORE `operationsSchema.safeParse` because a zod
+ * superRefine sees the already-stripped output — the extra keys are gone by
+ * the time a refinement could look at them. The result shape matches zod's,
+ * so callers read `.success` / `.data` / `.error.issues` unchanged.
+ */
+export function safeParseProgrammaticOperations(raw: unknown) {
+  if (Array.isArray(raw)) {
+    const issues: z.ZodIssue[] = [];
+    raw.forEach((entry, index) => {
+      if (typeof entry !== "object" || entry === null) return; // the union reports this
+      const opName = (entry as { op?: unknown }).op;
+      if (typeof opName !== "string") return; // the union reports this
+      const known = KNOWN_OP_KEYS.get(opName);
+      if (!known) return; // an unknown op name is the union's issue to report
+      for (const key of Object.keys(entry as object)) {
+        if (!known.has(key)) {
+          issues.push({
+            code: z.ZodIssueCode.custom,
+            path: [index, key],
+            message: `unknown key "${key}" on ${opName} — not part of the operation contract`,
+            input: entry,
+          });
+        }
+      }
+    });
+    if (issues.length > 0) return { success: false as const, error: new z.ZodError(issues) };
+  }
   return operationsSchema.safeParse(raw);
 }
 

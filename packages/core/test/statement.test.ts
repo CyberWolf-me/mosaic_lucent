@@ -7,6 +7,7 @@ import {
   statementNodes,
   attachProvenance,
   safeParseOperations,
+  safeParseProgrammaticOperations,
   type Operation,
   type Workspace,
 } from "../src/index.js";
@@ -390,5 +391,68 @@ describe("statement undo", () => {
       },
     ]);
     expectRoundTrip(before, [{ op: "DELETE_NODE", id: "a" }]);
+  });
+});
+
+/**
+ * The wire contract at the programmatic boundary (found live, 2026-09-10).
+ *
+ * The hand-rolled validator checks presence and cycles, not op SHAPE, so an
+ * op that mistyped the schema reached the reducer — where
+ * `op.statement.supersedes` on an undefined `statement` crashed the whole
+ * server process. `safeParseProgrammaticOperations` is what the ws room and
+ * the ops route now call first; these pin the two failure classes it closes:
+ * the crash shape and the silently-acked no-op (fields nested under a key the
+ * contract does not know — zod strips it, validation passes, nothing changes).
+ */
+describe("safeParseProgrammaticOperations", () => {
+  it("refuses the SET_STATEMENT shape that crashed the reducer", () => {
+    // Top-level kind/status instead of the nested `statement` object: the
+    // exact batch that killed the server and the exact non-null assertion
+    // the reducer makes.
+    const result = safeParseProgrammaticOperations([
+      { op: "SET_STATEMENT", id: "a", kind: "decision", status: "open" },
+    ]);
+    expect(result.success).toBe(false);
+  });
+
+  it("refuses the patch-wrapped UPDATE_ISSUE that used to ack as a no-op", () => {
+    const result = safeParseProgrammaticOperations([
+      { op: "UPDATE_ISSUE", id: "a", patch: { status: "in_progress" } },
+    ]);
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0]!.message).toContain("unknown key \"patch\"");
+    }
+    // The flat shape is the contract and still parses.
+    expect(
+      safeParseProgrammaticOperations([{ op: "UPDATE_ISSUE", id: "a", status: "in_progress" }])
+        .success,
+    ).toBe(true);
+  });
+
+  it("accepts every operation in the union with its own keys", () => {
+    // The guard is derived from the union's shapes, so the contract's own
+    // canonical batch must pass untouched — this is the drift alarm: a new
+    // op or field the guard disagrees with fails here, not in production.
+    const ops: Operation[] = [
+      { op: "CREATE_NODE", id: "a", nodeType: "process", label: "A" },
+      { op: "SET_STATEMENT", id: "a", statement: { kind: "decision", status: "open" } },
+      { op: "SET_STATEMENT", id: "a", statement: null },
+      { op: "UPDATE_STATEMENT", id: "a", status: "resolved", topic: "launch" },
+      { op: "SET_ISSUE", id: "a", issue: { type: "task", status: "open" } },
+      { op: "UPDATE_ISSUE", id: "a", status: "in_progress" },
+      { op: "CHANGE_TEXT", id: "a", text: "renamed" },
+      { op: "CONNECT_NODES", source: "a", target: "a", relationship: "depends_on" },
+      { op: "DISCONNECT_NODES", source: "a", target: "a", relationship: "depends_on" },
+    ];
+    expect(safeParseProgrammaticOperations(ops).success).toBe(true);
+  });
+
+  it("non-object entries fall through to the union's own issues", () => {
+    // The guard must never mask the schema's report for malformed shapes it
+    // does not own (a string where an op object belongs).
+    const result = safeParseProgrammaticOperations(["not-an-op"]);
+    expect(result.success).toBe(false);
   });
 });

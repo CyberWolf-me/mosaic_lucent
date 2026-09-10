@@ -126,3 +126,47 @@ describe("bundle integrity (the round-trip)", () => {
     }
   });
 });
+
+describe("the Intelligence inbox evidence contract (live, 2026-09-10)", () => {
+  // The merge-recommendation evidence rendered with literal "{existing}" /
+  // "{dup}" because the view passed only {a, b, m} while the string needs
+  // {existing, dup, a, b, m} — and `t()` leaves unknown tokens literal. The
+  // view now passes all five (IntelligenceView.tsx inbox section); this pins
+  // the contract at the string layer: the evidence and merge strings render
+  // with no surviving {token} for the param sets their call sites build.
+  const noSurvivingTokens = (rendered: string): void => {
+    expect(rendered).not.toMatch(/\{\w+\}/);
+  };
+  const inboxParams = {
+    existing: "pricing",
+    dup: "pricing-model",
+    a: 3,
+    b: 1,
+    m: 1,
+  };
+  it("the evidence sentence renders fully in English", () => {
+    noSurvivingTokens(t("intel.inbox.evidence", "en", inboxParams));
+    expect(t("intel.inbox.evidence", "en", inboxParams)).toContain("pricing-model");
+  });
+  it("the evidence sentence renders fully in Hungarian", () => {
+    noSurvivingTokens(t("intel.inbox.evidence", "hu", inboxParams));
+  });
+  it("every inbox string's tokens are satisfiable from the view's param set", () => {
+    // Cheap drift alarm: if a future edit adds a token to any inbox string
+    // without threading it through the call site, the literal leaks to the
+    // screen again — this fails at that edit.
+    const inboxKeys = [
+      "intel.inbox.dup",
+      "intel.inbox.evidence",
+      "intel.inbox.merge.preview",
+    ] as const;
+    for (const key of inboxKeys) {
+      for (const locale of LOCALES) {
+        const rendered = t(key, locale, { ...inboxParams, n: 1 });
+        expect(rendered, `${key} in ${locale} leaves an uninterpolated token`).not.toMatch(
+          /\{\w+\}/,
+        );
+      }
+    }
+  });
+});
