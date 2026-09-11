@@ -1,5 +1,5 @@
 import type { DiagramKind, Operation, Workspace } from "@lucent/core";
-import { commentThreads, reactionTally, voteRanking } from "@lucent/core";
+import { commentThreads, compositionLine, reactionTally, voteRanking } from "@lucent/core";
 import type { AnswerRequest, AnswerResult } from "./answer.js";
 import type { ExternalPlanRequest, ExternalPlanResult } from "./externalPlan.js";
 
@@ -94,6 +94,14 @@ export interface WorkspaceSummary {
   /** Ids the user currently has selected — lets the AI resolve "this/these"
    * (docs/15 Phase C reference resolution). Optional for back-compat. */
   selection?: string[];
+  /**
+   * V1 composition, derived in core: one line naming the board's main
+   * story (longest chain through the highest-degree node) and its regions.
+   * Empty string when the board has no edges. The model reads this BEFORE
+   * the node list, so "explain this architecture" leads with the story
+   * instead of rediscovering it from ids.
+   */
+  composition?: string;
   /**
    * Present when the board was too large to send in full. Counts are the true
    * totals before capping; the AI should ask for a focused slice instead of
@@ -441,6 +449,9 @@ export function summarizeWorkspace(workspace: Workspace, selection?: string[]): 
     ...(selection && selection.length
       ? { selection: selection.slice(0, DERIVED_LIMITS.selection) }
       : {}),
+    // V1: the derived composition line leads the summary when the board has
+    // a story to name.
+    ...(compositionLine(workspace) ? { composition: compositionLine(workspace) } : {}),
     // Surfaces truncation so the model can ask for a slice rather than
     // reasoning about a partial graph it doesn't know is partial.
     ...(nodesTruncated || edgesTruncated
