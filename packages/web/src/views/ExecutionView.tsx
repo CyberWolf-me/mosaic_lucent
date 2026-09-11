@@ -49,7 +49,7 @@ export function ExecutionView(_: { onOpenSettings?: (section?: string) => void }
     () => executionProjection(workspace, Date.now()),
     [workspace],
   );
-  const { rollup, chains, decisionsBehind, empty } = projection;
+  const { rollup, chains, decisionsBehind, empty, attention } = projection;
   // Stage E3: the bridge — the plan-derived action ids a Send-to-provider
   // button carries, and the org's active connections to offer.
   const bridgeIds = useMemo(() => planDerivedActionIds(workspace), [workspace]);
@@ -223,6 +223,43 @@ export function ExecutionView(_: { onOpenSettings?: (section?: string) => void }
           ))}
         </div>
       </div>
+
+      {/* — What needs my attention (Phase 3): the four signals, each item a
+          reveal jump to its node — the review's "needs attention" surface.
+          Renders only when something actually needs it. — */}
+      {attention.items.length > 0 && (
+        <div
+          style={{
+            background: "oklch(from var(--canvas-2) l c h / 0.75)",
+            border: "1px solid var(--stroke-1)",
+            borderRadius: 14,
+            padding: "16px 20px",
+            marginBottom: 18,
+          }}
+        >
+          <div
+            className="mono"
+            style={{ fontSize: 10, color: "var(--ink-3)", letterSpacing: "0.08em" }}
+          >
+            {t("exec.attention.title", locale)}
+          </div>
+          <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+            {attention.items.map((item) => (
+              <button
+                key={`${item.kind}-${item.nodeId}`}
+                className="btn ghost"
+                style={{ fontSize: 11, height: 26, padding: "0 10px" }}
+                title={item.reason}
+                onClick={() => onCitation({ kind: "node", id: item.nodeId })}
+              >
+                {item.kind === "blocked" ? "⚠" : item.kind === "overdue" ? "⏰" : item.kind === "openDecision" ? "?" : "✦"}{" "}
+                {item.label}
+                <span style={{ color: "var(--ink-3)" }}> — {item.reason}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18, flex: 1, minHeight: 0 }}>
         {/* — What's blocking us: the chains, blocker-first, every chip a jump — */}

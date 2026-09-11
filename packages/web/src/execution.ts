@@ -5,6 +5,7 @@ import {
   decisionsBehindAction,
   derivedExecution,
   executionRollup,
+  needsAttention,
 } from "@lucent/core";
 
 /**
@@ -41,6 +42,12 @@ export interface ExecutionProjection {
   decisionsBehind: DecisionBehindRow[];
   /** The empty-state flag: a board with no executable work. */
   empty: boolean;
+  /**
+   * The attention layer (Phase 3): "What needs my attention?" — blocked,
+   * overdue, open decisions, and new meeting statements, each with the node
+   * pointer the reveal jump needs. Pure over the workspace, per ADR 0027.
+   */
+  attention: ReturnType<typeof needsAttention>;
 }
 
 /**
@@ -83,5 +90,5 @@ export function executionProjection(workspace: Workspace, now: number): Executio
       });
     }
   }
-  return { rollup, chains, decisionsBehind, empty: rollup.total === 0 };
+  return { rollup, chains, decisionsBehind, empty: rollup.total === 0, attention: needsAttention(workspace, now) };
 }

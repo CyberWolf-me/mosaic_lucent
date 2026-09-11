@@ -85,6 +85,7 @@ export const en: Messages = {
   "exec.decisions.empty": "No decisions are linked to in-progress work yet.",
   "exec.empty.title": "No executable work yet",
   "exec.empty.hint": "Ask Lucent to create the work, then track it here.",
+  "exec.attention.title": "NEEDS ATTENTION",
   "intel.subtitle":
     "A projection of the current semantic workspace — what is true now, every row traceable to its source.",
   "intel.section.decision": "Decisions",
@@ -218,6 +219,7 @@ export const hu: Messages = {
   "exec.decisions.empty": "Még nincs döntés kapcsolva folyamatban lévő munkához.",
   "exec.empty.title": "Még nincs végrehajtható munka",
   "exec.empty.hint": "Kérd Lucentet, hogy létrehozza a munkát, aztán itt kövesd nyomon.",
+  "exec.attention.title": "FIGYELMET IGÉNYEL",
   "intel.subtitle":
     "A jelenlegi szemantikai munkaterület vetülete — mi igaz most, minden sor visszavezethető a forrására.",
   "intel.section.decision": "Döntések",
