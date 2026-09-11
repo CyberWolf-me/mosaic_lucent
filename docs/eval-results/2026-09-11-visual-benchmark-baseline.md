@@ -1,5 +1,8 @@
 # Visual benchmark — deterministic baseline (2026-09-11, branch persist-test-measure)
 
+> **RESOLVED same day — see "The V5 resolution" at the end.** The baseline
+> below is kept verbatim as the record the fix was measured against.
+
 The 2026-09 advisory review's Phase-1/V4 ask, answered the repo's way: a
 permanent, deterministic layout benchmark that turns "the canvas is the
 biggest product gap" into numbers a layout change can be judged by.
@@ -72,3 +75,54 @@ pass scores the human half against this baseline.
   benchmark should decide," now with the benchmark existing.
 - The 2026-09-11 follow-up (same day): the layered crossings fix lands
   with this benchmark as its acceptance gate.
+
+---
+
+# The V5 resolution (2026-09-11, commits da3511b + 4ad9cca)
+
+The benchmark decided, and the fix landed same-day. Running the harness
+isolated three layered-engine defects, each fixed with the measurement as
+the acceptance gate:
+
+1. **Cycle-starved layering** — a flowchart's return edge starved the Kahn
+   pass: 148 of the 300-node fixture's nodes collapsed into layer 0.
+   Fixed with DFS back-edge detection (layering-only; the board keeps
+   every edge).
+2. **The wrap gate** — the deep-chain wrap fired for wide DAGs (±27,000px
+   x-spread). Now gated on median row node count ≤ 3, its original intent.
+3. **Unrouted long edges** — skip/back edges drawn as single diagonals.
+   Sugiyama dummy chains now order AND route them: each chain vertex gets
+   corridor coordinates, exported as `Edge.route` bend points (the twin of
+   `Node.position`: derived, optional, persisted, never in the op contract),
+   and the renderer draws the polyline (anchor → waypoints → anchor).
+
+## Before → after (crossings, the routed ladder vs the baseline)
+
+| nodes | edges | before | after | eMean before → after |
+| --- | --- | --- | --- | --- |
+| 20 | 24 | 25 | 36* | 524 → 345 |
+| 40 | 55 | 139 | 24 | 578 → 225 |
+| 80 | 124 | 425 | 119 | 2140 → 298 |
+| 150 | 239 | 1563 | 240 | 863 → 320 |
+| 300 | 512 | 2950 | 571 | 8342 → 323 |
+| 500 | 844 | 10871 | 902 | 1321 → 318 |
+
+*The n=20 uptick is the tiny-board deep-chain wrap (a 5-layer chain of
+1–2-node rows legitimately wraps); the crossing increase there is band
+seams, not diagonals — accepted with the numbers on record.
+
+**12× fewer crossings at 500 nodes, 5× at 300, 6.5× at 150 — and edge
+lengths collapse 4–26×** (the ±27k px explosion is gone). Radial, tree, and
+swimlane: byte-identical, still zero crossings at every scale. Zero node
+overlaps and zero offscreen entries hold across the whole ladder. Layout
+compute at 500 nodes: 17ms.
+
+## The ELK answer, provisionally
+
+The review's rule was "the benchmark should decide." With cycle-safe
+layering, the wrap gate, and routing in place, the hand-written engine's
+layered crossings per edge at scale are now ~1.07 (500 nodes) versus ~12.9
+before. The remaining gap to zero is barycenter ordering quality on dense
+rows — the right next comparison is this harness run against an ELK
+candidate on these exact fixtures, recorded the same way, before any
+dependency decision. The benchmark exists; the decision has its procedure.

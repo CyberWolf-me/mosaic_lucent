@@ -1889,3 +1889,42 @@ ids path. Pinned by stageE3.definition.e2e.test.ts (the bridge end to end,
 including the counting-selector-stays-at-0 no-spend pin), the mock tree
 tests, the D2 acceptance e2e's tree arm, and the plan-gate text pin. All
 workspaces green after the reducer change; the era regression re-run green.
+
+## Visual Intelligence V4+V5 shipped: the layout benchmark + the routed layered engine (2026-09-11, advisory-review Phase 1)
+
+The 2026-09 advisory review's ask, answered the repo's way: measure first,
+then fix what the measurement names. V4 built the permanent harness —
+`visualBenchmark.ts` (pure-geometry metrics: crossings, overlaps, edge
+length mean/p95/per-node, offscreen, layout ms) over deterministic
+synthetic boards (`benchmarkBoards.ts`: layered DAG with skip/return edges,
+radial mind map, ternary tree, swimlanes with handoffs) at the
+20/40/80/150/300/500 ladder, pinned by 33 invariant tests and printed by
+`scripts/visual-benchmark.ts`. The baseline it recorded: the layered
+engine (flowchart/architecture) was the only strategy crossing edges —
+25 at 20 nodes exploding to 10,871 at 500 — while radial/tree/swimlane
+held zero at every scale.
+
+- [x] V5 core — three engine defects the harness isolated, all fixed:
+      cycle-starved layering (a return edge starved Kahn; 148/300 nodes
+      collapsed into layer 0 — DFS back-edge detection now excludes cycle
+      edges from layering only), the wrap gate (the deep-chain wrap fired
+      for wide DAGs, ±27,000px x-spread — now median-row-count gated), and
+      unrouted long edges (Sugiyama dummy chains order AND route them;
+      corridor coordinates exported as `Edge.route`, the twin of
+      `Node.position`: derived, optional, persisted, never in the op
+      contract). Pinned by edge-routes.test.ts (7).
+- [x] V5 web — the renderer draws the corridors: PlacedEdge carries
+      routes, makePath emits polylines (route-less = byte-identical
+      bezier), labels ride the drawn path's true midpoint, cull spans
+      cover waypoints, SVG/PNG exports draw the same polyline, and
+      laidOut/laidOutScoped/applyPreview stamp routes through
+      computeLayoutWithRoutes + applyRoutes. Pinned by
+      edge-route-render.test.ts (6).
+- [x] The measured result (before → after, crossings): 40: 139→24,
+      80: 425→119, 150: 1563→240, 300: 2950→571, 500: 10871→902
+      (12×); edge means collapse 4–26×; overlaps/offscreen stay 0
+      everywhere; radial/tree/swimlane unchanged. Full record:
+      docs/eval-results/2026-09-11-visual-benchmark-baseline.md.
+- [x] Gate: 2,484 tests green across six workspaces, typecheck 0.
+      Not built (deliberately): semantic zoom, edge-tier density — the
+      V2/V3 layer, next against the same harness.
