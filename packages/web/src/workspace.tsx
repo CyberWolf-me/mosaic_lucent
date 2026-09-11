@@ -13,16 +13,19 @@ import {
   OperationHistory,
   applyLayout,
   applyOperations,
+  applyRoutes,
   applyValidOperations,
   attachPlanProvenance,
   attachProvenance,
   computeLayout,
+  computeLayoutWithRoutes,
   createWorkspace,
   existingTopics,
   foldStatementTopics,
   parseWorkspace,
   parseWorkspaceOrDefault,
   relayoutRegion,
+  relayoutRegionWithRoutes,
   separateRegions,
   validateOperations,
   type DiagramKind,
@@ -293,7 +296,10 @@ const PROPOSAL_THRESHOLD = 5;
 function laidOut(ws: Workspace): Workspace {
   // No strategy is passed: computeLayout picks radial for mind maps and layered
   // otherwise, so switching representation actually changes the arrangement.
-  return applyLayout(ws, computeLayout(ws, { direction: "vertical" }));
+  // Routes ride along (V5): the same pass derives the long edges' bend
+  // points, stamped exactly like the node positions it computes.
+  const { layout, routes } = computeLayoutWithRoutes(ws, { direction: "vertical" });
+  return applyRoutes(applyLayout(ws, layout), routes);
 }
 
 /**
@@ -319,9 +325,9 @@ function laidOutScoped(ws: Workspace, touched: ReadonlySet<string>): Workspace {
   if (groupIds.size !== 1) return laidOut(ws); // crosses regions: global pass
   const groupId = [...groupIds][0];
   if (!groupId) return laidOut(ws);
-  const regionResult = relayoutRegion(ws, groupId);
+  const regionResult = relayoutRegionWithRoutes(ws, groupId);
   if (!regionResult) return laidOut(ws);
-  let next = applyLayout(ws, regionResult);
+  let next = applyRoutes(applyLayout(ws, regionResult.layout), regionResult.routes);
   // Growth can extend the region into a right-hand neighbour; push only the
   // neighbours actually overlapped (never a global shuffle).
   const shifts = separateRegions(next, groupId);
@@ -330,6 +336,22 @@ function laidOutScoped(ws: Workspace, touched: ReadonlySet<string>): Workspace {
       const node = next.nodes[id];
       if (node) next = { ...next, nodes: { ...next.nodes, [id]: { ...node, ...placed } } };
     }
+    // Shifted regions' edge routes move with them — the corridor stays
+    // glued to its nodes. Every shift in one `separateRegions` pass is the
+    // SAME horizontal push (dx) for its whole region, so routes inside a
+    // shifted region shift by their nodes' dx, computed per edge from its
+    // own endpoints (not the loop's mutating `next`).
+    const shiftedRoutes: Record<string, Array<{ x: number; y: number }>> = {};
+    for (const [edgeId, edge] of Object.entries(ws.edges)) {
+      if (!edge.route) continue;
+      const srcShift = shifts[edge.source];
+      const tgtShift = shifts[edge.target];
+      if (!srcShift && !tgtShift) continue;
+      const dx = (srcShift ?? tgtShift)!.position.x - (ws.nodes[edge.source]?.position?.x ?? 0);
+      const dy = (srcShift ?? tgtShift)!.position.y - (ws.nodes[edge.source]?.position?.y ?? 0);
+      shiftedRoutes[edgeId] = edge.route.map((p) => ({ x: p.x + dx, y: p.y + dy }));
+    }
+    next = applyRoutes(next, shiftedRoutes);
   }
   return next;
 }

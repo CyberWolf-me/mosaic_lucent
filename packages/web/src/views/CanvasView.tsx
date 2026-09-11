@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { applyLayout, computeLayout } from "@lucent/core";
+import { applyLayout, applyRoutes, computeLayoutWithRoutes } from "@lucent/core";
 import { Ico } from "../ui/icons.js";
 import { AIPill } from "../ui/AIPill.js";
 import { TopBar, LeftRail, ZoomBadge, StatusBadge } from "../ui/Chrome.js";
@@ -2103,8 +2103,10 @@ function applyPreview(
   // Run the layout engine over the preview. Proposed nodes carry no position, so
   // without this every one of them rendered at the origin, stacked on top of each
   // other and on top of the existing board — the preview looked broken and then
-  // "fixed itself" on Apply.
-  return applyLayout(merged, computeLayout(merged, { direction: "vertical" }));
+  // "fixed itself" on Apply. Routes ride along (V5): the preview draws the same
+  // corridors the applied board will.
+  const { layout, routes } = computeLayoutWithRoutes(merged, { direction: "vertical" });
+  return applyRoutes(applyLayout(merged, layout), routes);
 }
 
 function SelectionHud({

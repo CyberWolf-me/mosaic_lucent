@@ -268,8 +268,22 @@ export interface Point {
  * Cubic-bezier path between two anchor points. `dir` 'h' = horizontal-first.
  * `spread` fans parallel edges apart: 0 is the centre line, ±n bows the curve
  * so two relationships between the same pair are both readable.
+ *
+ * With `route` bend points (the layout's corridor for a long edge), the path
+ * is the routed polyline instead: anchor → each waypoint → anchor, with
+ * small rounded joins so the bends read as drawn corners rather than a
+ * sawtooth. `pathLength` normalisation downstream still applies (dash
+ * animations measure the whole polyline).
  */
-export function makePath(a: Point, b: Point, dir: "h" | "v" = "h", spread = 0): string {
+export function makePath(a: Point, b: Point, dir: "h" | "v" = "h", spread = 0, route: Point[] = []): string {
+  if (route.length > 0) {
+    const pts = [a, ...route, b];
+    let d = `M ${pts[0]!.x} ${pts[0]!.y}`;
+    for (let i = 1; i < pts.length; i++) {
+      d += ` L ${pts[i]!.x} ${pts[i]!.y}`;
+    }
+    return d;
+  }
   const dx = b.x - a.x;
   const dy = b.y - a.y;
   if (dir === "h") {

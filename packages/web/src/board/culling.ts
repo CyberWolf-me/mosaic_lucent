@@ -235,10 +235,17 @@ export function visibleEdges(
     const a = shift(realA);
     const b = shift(realB);
     const pad = 8 + Math.ceil(e.parallelIndex / 2) * 18;
-    const minX = Math.min(a.cx - a.w / 2, b.cx - b.w / 2) - pad;
-    const minY = Math.min(a.cy - a.h / 2, b.cy - b.h / 2) - pad;
-    const maxX = Math.max(a.cx + a.w / 2, b.cx + b.w / 2) + pad;
-    const maxY = Math.max(a.cy + a.h / 2, b.cy + b.h / 2) + pad;
+    // Routed edges (V5): the polyline's waypoints extend beyond the two-card
+    // hull — the corridor bends through other rows — so the span test must
+    // cover them or a routed edge pops out mid-pan while its endpoints are
+    // both off-screen. Route-less edges behave exactly as before (defensive
+    // access: hand-built PlacedEdges in older call sites carry no route).
+    const xs = [a.cx - a.w / 2, b.cx - b.w / 2, ...(e.route ?? []).map((p) => p.x)];
+    const ys = [a.cy - a.h / 2, b.cy - b.h / 2, ...(e.route ?? []).map((p) => p.y)];
+    const minX = Math.min(...xs) - pad;
+    const minY = Math.min(...ys) - pad;
+    const maxX = Math.max(...xs) + pad;
+    const maxY = Math.max(...ys) + pad;
     return overlaps(view, minX, minY, maxX - minX, maxY - minY);
   });
 }

@@ -322,6 +322,9 @@ export function buildBoardSvg(workspace: Workspace, pad = 40): string {
   // the same position/size defaults as `toScene` so an unplaced endpoint still
   // draws (the serializer used to skip unplaced nodes entirely and never drew
   // edges at all — the exported file was cards-without-links or worse).
+  // A routed edge (V5) exports its drawn polyline — the corridor through the
+  // rows, matching what the canvas shows — via points=; route-less edges keep
+  // the <line> form.
   let connectorSvg = "";
   for (const e of Object.values(workspace.edges)) {
     const s = workspace.nodes[e.source];
@@ -331,8 +334,18 @@ export function buildBoardSvg(workspace: Workspace, pad = 40): string {
     const y1 = (s.position?.y ?? 0) + (s.size?.height ?? 64) / 2;
     const x2 = (t.position?.x ?? 0) + (t.size?.width ?? 160) / 2;
     const y2 = (t.position?.y ?? 0) + (t.size?.height ?? 64) / 2;
-    connectorSvg +=
-      `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#8a8a90" stroke-width="1.5" marker-end="url(#export-arrow)"/>`;
+    if (e.route && e.route.length > 0) {
+      const pts = [
+        [x1, y1] as const,
+        ...e.route.map((p) => [p.x, p.y] as const),
+        [x2, y2] as const,
+      ];
+      connectorSvg +=
+        `<polyline points="${pts.map(([x, y]) => `${x},${y}`).join(" ")}" fill="none" stroke="#8a8a90" stroke-width="1.5" marker-end="url(#export-arrow)"/>`;
+    } else {
+      connectorSvg +=
+        `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#8a8a90" stroke-width="1.5" marker-end="url(#export-arrow)"/>`;
+    }
   }
   parts.push(connectorSvg);
 

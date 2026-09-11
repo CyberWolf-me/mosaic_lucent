@@ -64,6 +64,11 @@ export interface PlacedEdge {
   toSide: Side;
   /** Fan-out index among edges sharing this node pair (0 = centre line). */
   parallelIndex: number;
+  /**
+   * Derived bend points (Edge.route), canvas coordinates, source→target
+   * order. Empty for route-less edges — the renderer's straight/bezier path.
+   */
+  route: Array<{ x: number; y: number }>;
 }
 
 export type Side = "l" | "r" | "t" | "b";
@@ -126,6 +131,7 @@ export function toScene(workspace: Workspace): {
       fromSide: faces.fromSide,
       toSide: faces.toSide,
       parallelIndex,
+      route: e.route ?? [],
     };
   });
 

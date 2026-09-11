@@ -332,7 +332,7 @@ export function DiagramLayer({
           return (
             <path
               key={e.id}
-              d={makePath(a, b, e.dir, spread)}
+              d={makePath(a, b, e.dir, spread, e.route)}
               className={cls}
               // Normalize the path's own length to 100 units so the draw-in
               // animation is geometry-independent. The old animation lived on
@@ -376,10 +376,36 @@ export function DiagramLayer({
           const b = anchor(to, e.toSide);
           const step = Math.ceil(e.parallelIndex / 2) * 18;
           const spread = e.parallelIndex === 0 ? 0 : e.parallelIndex % 2 === 1 ? step : -step;
-          // Midpoint of the bezier, which for our control points is close enough
-          // to the average of the endpoints plus the fan offset.
-          const mx = (a.x + b.x) / 2 + (e.dir === "v" ? spread : 0);
-          const my = (a.y + b.y) / 2 + (e.dir === "h" ? spread : 0);
+          // Label position: for a routed edge, the polyline's true midpoint
+          // (the vertex/segment centre at half the path's length) so the label
+          // rides the drawn corridor; otherwise the bezier midpoint as before.
+          let mx: number;
+          let my: number;
+          if (e.route.length > 0) {
+            const pts = [a, ...e.route, b];
+            const segs = pts.slice(1).map((p, i) => ({
+              len: Math.hypot(p.x - pts[i]!.x, p.y - pts[i]!.y),
+              from: pts[i]!,
+              to: p,
+            }));
+            let half = segs.reduce((s, seg) => s + seg.len, 0) / 2;
+            let midSeg = segs[0]!;
+            for (const seg of segs) {
+              if (half <= seg.len) {
+                midSeg = seg;
+                break;
+              }
+              half -= seg.len;
+            }
+            const t = midSeg.len > 0 ? half / midSeg.len : 0;
+            mx = midSeg.from.x + (midSeg.to.x - midSeg.from.x) * t;
+            my = midSeg.from.y + (midSeg.to.y - midSeg.from.y) * t;
+          } else {
+            // Midpoint of the bezier, which for our control points is close enough
+            // to the average of the endpoints plus the fan offset.
+            mx = (a.x + b.x) / 2 + (e.dir === "v" ? spread : 0);
+            my = (a.y + b.y) / 2 + (e.dir === "h" ? spread : 0);
+          }
           return (
             <div key={`lbl-${e.id}`} className="edge-label" style={{ left: mx, top: my }}>
               {e.relationship}
