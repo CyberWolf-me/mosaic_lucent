@@ -106,8 +106,8 @@ continues to work as model operations that persist, undo, and are AI-readable.
 - [x] Resolve comments — resolve and reopen; resolved threads drop out of counts
 - [x] Reactions — emoji reactions work today; single-user until presence exists
 - [x] Basic notifications — a mentions feed listing open threads that name someone
-- [~] Share board — real auth-gated boards exist (owner creates, others join by id); the share dialog copies the board URL, but there is no API to promote a joiner from viewer to editor yet
-- [~] Board permissions — roles are enforced server-side (owner/editor/viewer; non-owners join as viewer and viewer commits are rejected), but there is no share/role-grant endpoint to change a user's role
+- [x] Share board — real auth-gated boards exist (owner creates, others join by id); the share dialog copies the board URL, and `PATCH /api/boards/:id/members/:userId` (M2.6) changes a member's role with a notification to the affected user (corrected 2026-09-11: the "no promote API" note below predated M2.6)
+- [x] Board permissions — roles are enforced server-side (owner/editor/viewer; non-owners join as viewer and viewer commits are rejected); the M2.6 share/role-grant endpoint (`PATCH .../members/:userId`, owner-only, 409 on the owner row) is the role-change path — pinned by crossTenant.test.ts (corrected 2026-09-11: the earlier "[~] no endpoint" note was stale)
 
 ---
 
@@ -378,9 +378,9 @@ than regenerating it, and can now emit sticky notes and shapes as well as nodes.
   log survive a restart, so a rejoining client's catchup is rebuilt from
   `op_log` rather than an empty in-process array. The web client now undoes
   via the inverse-operation `OperationHistory` rather than the snapshot
-  `History`. Still missing: a share/role-grant endpoint (invitees are
-  hard-coded `viewer`) and sticky sessions for multi-process deploys
-  (presence and the hot `Room` are per-process)
+  `History`. Still missing: sticky sessions for multi-process deploys
+  (presence and the hot `Room` are per-process). The share/role-grant
+  endpoint shipped in M2.6 (`PATCH /api/boards/:id/members/:userId`)
 - [x] AI reliability is high — transient gateway failures are retried
 - [~] AI latency feels acceptable — 20–35s on the current model
 - [ ] Large boards perform well — **corrected 2026-08.** No virtualization or
@@ -1928,3 +1928,34 @@ held zero at every scale.
 - [x] Gate: 2,484 tests green across six workspaces, typecheck 0.
       Not built (deliberately): semantic zoom, edge-tier density — the
       V2/V3 layer, next against the same harness.
+
+## Stage D live validation pass: defects found and the repair pass (2026-09-10 → 09-11)
+
+The 40-section Stage D live protocol ran against the real server + browser
+(record: docs/eval-results/2026-09-10-live-validation-pass.md — scorecard,
+taxonomy, A–D buckets). The pass's real output was 11 defects; five were
+fixed the next day, each pinned by a regression test:
+
+- [x] E1 server-crash + S5 silent no-op — `safeParseProgrammaticOperations`
+      rejects known-op/unknown-key shapes (top-level SET_STATEMENT fields;
+      `patch` on UPDATE_ISSUE) before zod strips them; wired into both the
+      ws op path and the ops HTTP route (422). Tests: statement.test.ts (+4),
+      board-ops-route.test.ts (+2).
+- [x] M1/M2 ops-route/room split — the route commits room-first
+      (`commitForBoard` + `broadcastProposal`, the B3 dual-path pattern) and
+      `evictRoom` refuses to snapshot when the store is ahead of the room,
+      so an agent-seeded board can never be overwritten by a stale room nor
+      serve a permanently empty resync. Test: opProtocol.e2e.test.ts
+      "an ops-route batch reaches the live room".
+- [x] P1 history window — `historyWindow` floors the window when
+      baseSeq >= newest (snapshot at head, no prune), so History/Ask stop
+      seeing an empty timeline; head 7 / base 7 → fromSeq 1 (was 8).
+      Test: history-route.test.ts.
+- [x] P2 Intelligence placeholders — the evidence sentence now receives
+      existing/dup; i18n contract tests assert no surviving `{token}` in
+      en+hu (i18n.test.ts +3).
+- [x] Provider-failure affordance — error entries gain `retryPrompt` and a
+      Try again action in AIPill (retriable = not plan refusal/quota/auth).
+- [ ] Not fixed, deliberately (C-bucket build-next): V2 layout wrap at
+      depth, S1 failed-generation workspace bleed, V5 ≥80-node readability,
+      M3 supersede-proposal surprise, server-level provider retry.
