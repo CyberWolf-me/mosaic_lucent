@@ -17,6 +17,7 @@
  */
 
 import { BOARD_FACTORIES } from "../packages/core/src/benchmarkBoards.js";
+import { applyLayout, applyRoutes, computeLayoutWithRoutes } from "../packages/core/src/layout.js";
 import { measureVisualMetrics } from "../packages/core/src/visualBenchmark.js";
 
 const SCALES = [20, 40, 80, 150, 300, 500];
@@ -44,8 +45,15 @@ const rows: Row[] = [];
 for (const factory of BOARD_FACTORIES) {
   for (const n of SCALES) {
     // Three deterministic builds, median-of-3 on timing-sensitive numbers,
-    // same fixture every time (generators are pure).
-    const runs = [0, 1, 2].map(() => measureVisualMetrics(factory.build(n)));
+    // same fixture every time (generators are pure). Each build is routed
+    // and stamped exactly as the app does (applyLayout + applyRoutes), so
+    // the crossings count the polylines the renderer will actually draw.
+    const runs = [0, 1, 2].map(() => {
+      const built = factory.build(n);
+      const { layout, routes } = computeLayoutWithRoutes(built);
+      const routed = applyRoutes(applyLayout(built, layout), routes);
+      return measureVisualMetrics(routed);
+    });
     const median = (pick: (m: (typeof runs)[number]) => number) =>
       runs.map(pick).sort((a, b) => a - b)[1];
     const m = runs[0];

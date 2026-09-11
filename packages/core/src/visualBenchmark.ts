@@ -143,7 +143,11 @@ export function measureVisualMetrics(
     }
   }
 
-  // Edge segments between node centres, then pairwise crossings.
+  // Edge segments: the DRAWN truth. An edge carrying a route draws as a
+  // polyline (anchor → waypoints → anchor — each consecutive pair is a
+  // segment); a route-less edge is the one straight centre-to-centre line
+  // as before. The benchmark must measure what the renderer draws, or a
+  // routing change reads as no change.
   const centres = new Map<string, { x: number; y: number }>();
   for (const [id, box] of boxes) centres.set(id, { x: box.x + box.w / 2, y: box.y + box.h / 2 });
 
@@ -156,8 +160,13 @@ export function measureVisualMetrics(
       offscreenEntries++;
       continue;
     }
-    segments.push({ x1: s.x, y1: s.y, x2: t.x, y2: t.y });
-    lengths.push(Math.hypot(t.x - s.x, t.y - s.y));
+    const path: Array<{ x: number; y: number }> = [s, ...(edge.route ?? []), t];
+    for (let i = 0; i + 1 < path.length; i++) {
+      const a = path[i]!;
+      const b = path[i + 1]!;
+      segments.push({ x1: a.x, y1: a.y, x2: b.x, y2: b.y });
+      lengths.push(Math.hypot(b.x - a.x, b.y - a.y));
+    }
   }
   let crossings = 0;
   for (let i = 0; i < segments.length; i++) {

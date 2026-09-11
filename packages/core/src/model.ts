@@ -514,6 +514,17 @@ export interface Edge {
   target: string;
   /** Semantic relationship, e.g. "calls", "initiates", "receives". */
   relationship: string;
+  /**
+   * Derived bend points for a long edge, in source→target order — the drawn
+   * polyline the layered engine routes through the rows between the
+   * endpoints (2026-09-11, the visual benchmark's crossings finding). The
+   * route-aware twin of `Node.position`: stamped by the layout pass
+   * (applyRoutes), optional on the model, persisted with the board, and
+   * NEVER part of the operation contract — the AI still connects nodes; the
+   * engine owns how the line is drawn. Absent/empty: render as before, one
+   * line between the endpoints.
+   */
+  route?: Position[];
   metadata?: Record<string, unknown>;
 }
 

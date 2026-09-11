@@ -161,6 +161,9 @@ const edgeSchema = z.object({
   target: z.string().min(1),
   relationship: z.string().min(1),
   label: z.string().optional(),
+  // Derived routing waypoints (layout-stamped, like Node.position); optional
+  // so every pre-route board parses unchanged.
+  route: z.array(z.object({ x: z.number(), y: z.number() })).optional(),
 });
 
 const groupSchema = z.object({

@@ -117,28 +117,61 @@ export function measureNode(
 }
 
 export function computeLayout(workspace: Workspace, options: LayoutOptions = {}): LayoutResult {
+  return dispatchLayoutWithRoutes(workspace, options).layout;
+}
+
+/**
+ * The layout plus the edge ROUTES it derives. `layout` is the exact
+ * node-only `LayoutResult` every existing consumer sees; `routes` maps each
+ * multi-layer edge id to its ordered bend points (Sugiyama phase 4, the
+ * coordinate-assignment half the 2026-09-11 benchmark demanded: the chain
+ * corridor the ordering phase already threads must become actual drawn
+ * geometry, or a long edge stays a diagonal cutting every row between).
+ */
+export function computeLayoutWithRoutes(
+  workspace: Workspace,
+  options: LayoutOptions = {},
+): { layout: LayoutResult; routes: EdgeRoutes } {
+  return dispatchLayoutWithRoutes(workspace, options);
+}
+
+/** Ordered bend points for each routed edge, in source→target order. */
+export type EdgeRoutes = Record<string, Position[]>;
+
+/**
+ * Strategy dispatch returning layout + routes (the routes-aware twin of the
+ * old computeLayout body). Layered is the only strategy that routes today —
+ * radial/tree/swimlane edges are short by construction (their benchmark
+ * ladders hold zero crossings), so they return `routes: {}`.
+ */
+function dispatchLayoutWithRoutes(
+  workspace: Workspace,
+  options: LayoutOptions = {},
+): { layout: LayoutResult; routes: EdgeRoutes } {
+  // Empty board short-circuit (the old computeLayout's contract): no nodes
+  // means {}, before any strategy runs.
+  if (Object.keys(workspace.nodes).length === 0) return { layout: {}, routes: {} };
+  // Region partitioning first, exactly as the old computeLayout body did:
+  // each region lays out under its own strategy, board flow separately.
+  if (!options.strategy) {
+    const partition = splitByRegions(workspace);
+    if (partition) return layoutWithRegionsRoutes(workspace, partition, { ...DEFAULTS, ...options });
+  }
+  const strategy = options.strategy ?? STRATEGY_FOR_KIND[workspace.diagramKind] ?? "layered";
+  if (strategy === "radial") return { layout: radialLayout(workspace, { ...DEFAULTS, ...options }), routes: {} };
+  if (strategy === "tree") return { layout: treeLayout(workspace, { ...DEFAULTS, ...options }), routes: {} };
+  if (strategy === "swimlane") return { layout: swimlaneLayout(workspace, { ...DEFAULTS, ...options }), routes: {} };
+  return layeredLayoutWithRoutes(workspace, options);
+}
+
+function layeredLayoutWithRoutes(
+  workspace: Workspace,
+  options: LayoutOptions = {},
+): { layout: LayoutResult; routes: EdgeRoutes } {
   const opts = { ...DEFAULTS, ...options };
   const nodeIds = Object.keys(workspace.nodes);
   const result: LayoutResult = {};
-  if (nodeIds.length === 0) return result;
-
-  // Diagram regions (per-group `kind`): a board may carry several diagrams — a
-  // flowchart for the checkout AND a mind map for pricing ideas. Partitioning
-  // happens before strategy dispatch so no caller has to know regions exist.
-  // Only the region's own nodes/edges/groups enter its sub-workspace: a sub
-  // layout reads membership, so the same nodes it places are the ones its
-  // geometry talks about. An explicit `strategy` option is a caller override
-  // (a user asking "lay the whole board out as a tree") and suspends the split.
-  if (!options.strategy) {
-    const partition = splitByRegions(workspace);
-    if (partition) return layoutWithRegions(workspace, partition, opts);
-  }
-
-  // An explicit strategy always wins so callers can override the default.
-  const strategy = options.strategy ?? STRATEGY_FOR_KIND[workspace.diagramKind] ?? "layered";
-  if (strategy === "radial") return radialLayout(workspace, opts);
-  if (strategy === "tree") return treeLayout(workspace, opts);
-  if (strategy === "swimlane") return swimlaneLayout(workspace, opts);
+  if (nodeIds.length === 0) return { layout: result, routes: {} };
 
   // Build adjacency from edges (only between existing nodes).
   const outgoing = new Map<string, string[]>();
@@ -153,12 +186,68 @@ export function computeLayout(workspace: Workspace, options: LayoutOptions = {})
     indegree.set(edge.target, (indegree.get(edge.target) ?? 0) + 1);
   }
 
-  // Assign layers via Kahn-style longest-path. Cycles are broken by processing
-  // remaining nodes at their current best layer, so layout never hangs.
+  // CYCLE REMOVAL (Sugiyama phase 1, found by the 2026-09-11 benchmark): a
+  // flowchart's return edge makes the graph cyclic, and the old Kahn pass
+  // left every cycle-reachable node stuck at layer 0 — the benchmark's
+  // n=300 board measured 148 of 300 nodes collapsed into one row (the
+  // engine's worst defect the harness has caught yet). The standard remedy:
+  // DFS identifies back edges; layering ignores them (the board keeps every
+  // edge — only the LAYER PASS looks away), so longest-path assignment sees
+  // every node's true depth. The ignored back edge then spans many layers
+  // and is routed as a chain like any long edge.
+  const backEdges = new Set<string>();
+  {
+    // Iterative DFS over the graph in insertion order (deterministic):
+    // an edge to a node already on the current stack is a back edge.
+    const state = new Map<string, 0 | 1 | 2>(); // 0 unvisited, 1 on stack, 2 done
+    for (const id of nodeIds) state.set(id, 0);
+    for (const start of nodeIds) {
+      if (state.get(start) !== 0) continue;
+      const stack: Array<{ id: string; nextIdx: number }> = [{ id: start, nextIdx: 0 }];
+      state.set(start, 1);
+      while (stack.length > 0) {
+        const top = stack[stack.length - 1]!;
+        const succ = outgoing.get(top.id) ?? [];
+        // Advance through successors; one still on the stack is a back
+        // edge — record it and skip (do not descend).
+        if (top.nextIdx < succ.length) {
+          const t = succ[top.nextIdx]!;
+          top.nextIdx++;
+          const st = state.get(t);
+          if (st === 1) {
+            backEdges.add(`${top.id}->${t}`);
+          } else if (st === 0) {
+            state.set(t, 1);
+            stack.push({ id: t, nextIdx: 0 });
+          }
+        } else {
+          state.set(top.id, 2);
+          stack.pop();
+        }
+      }
+    }
+  }
+
+  // Assign layers via Kahn-style longest-path over the ACYCLIC view (back
+  // edges excluded from adjacency for layering only). Any node still
+  // unvisited keeps its current best layer, so layout never hangs.
+  const layeringOut = new Map<string, string[]>();
+  const layeringIn = new Map<string, number>();
+  for (const id of nodeIds) {
+    layeringOut.set(id, []);
+    layeringIn.set(id, 0);
+  }
+  for (const edge of Object.values(workspace.edges)) {
+    if (backEdges.has(`${edge.source}->${edge.target}`)) continue;
+    if (!layeringOut.has(edge.source) || !layeringIn.has(edge.target)) continue;
+    layeringOut.get(edge.source)!.push(edge.target);
+    layeringIn.set(edge.target, layeringIn.get(edge.target)! + 1);
+  }
+
   const layer = new Map<string, number>();
   for (const id of nodeIds) layer.set(id, 0);
 
-  const remainingIndegree = new Map(indegree);
+  const remainingIndegree = new Map(layeringIn);
   const queue = nodeIds.filter((id) => (remainingIndegree.get(id) ?? 0) === 0);
   const visited = new Set<string>();
 
@@ -167,14 +256,13 @@ export function computeLayout(workspace: Workspace, options: LayoutOptions = {})
     if (visited.has(id)) continue;
     visited.add(id);
     const currentLayer = layer.get(id) ?? 0;
-    for (const target of outgoing.get(id) ?? []) {
+    for (const target of layeringOut.get(id) ?? []) {
       layer.set(target, Math.max(layer.get(target) ?? 0, currentLayer + 1));
       const deg = (remainingIndegree.get(target) ?? 0) - 1;
       remainingIndegree.set(target, deg);
       if (deg <= 0) queue.push(target);
     }
   }
-  // Any nodes left unvisited (cycles) keep layer 0; still get placed.
 
   // Group nodes by layer, ordered deterministically by insertion order.
   const layers = new Map<number, string[]>();
@@ -184,20 +272,77 @@ export function computeLayout(workspace: Workspace, options: LayoutOptions = {})
     layers.get(l)!.push(id);
   }
 
+  // LONG-EDGE ROUTING (Sugiyama phase 1b, found by the visual benchmark
+  // 2026-09-11): an edge spanning several layers — a "bypasses" skip, a
+  // flowchart's return edge — is one long diagonal the ordering phase cannot
+  // see. The benchmark isolated it exactly: skip/back edges alone cross
+  // nothing; they cross everything else, 25→10,871 times over the 20→500
+  // ladder. The standard remedy is a chain of dummy nodes, one per
+  // intermediate layer, so the barycenter sweeps treat the edge as ordinary
+  // adjacent-layer hops and route it through the row. Dummies exist ONLY for
+  // ordering — they never reach LayoutResult; the renderer still draws the
+  // user's edge, now visually following the routed chain instead of cutting
+  // a diagonal across the board.
+  const DUMMY_PREFIX = "__route_";
+  /** edge id → dummy chain, in layer order between source and target. */
+  const dummyOfEdge = new Map<string, string[]>();
+  for (const edge of Object.values(workspace.edges)) {
+    const sLayer = layer.get(edge.source);
+    const tLayer = layer.get(edge.target);
+    if (sLayer === undefined || tLayer === undefined) continue;
+    if (Math.abs(tLayer - sLayer) <= 1) continue; // adjacent: nothing to route
+    const from = Math.min(sLayer, tLayer);
+    const to = Math.max(sLayer, tLayer);
+    const chain: string[] = [];
+    for (let l = from + 1; l < to; l++) {
+      const dummyId = `${DUMMY_PREFIX}${dummyOfEdge.size}`;
+      chain.push(dummyId);
+      layers.set(l, [...(layers.get(l) ?? []), dummyId]);
+    }
+    dummyOfEdge.set(edge.id, chain);
+  }
+
   const { nodeSize, layerGap, nodeGap, direction } = opts;
   const sortedLayers = [...layers.keys()].sort((a, b) => a - b);
 
-  // Reduce edge crossings before assigning coordinates. Raw insertion order is
-  // what makes generated diagrams look tangled: a node's parents can sit at the
-  // far end of the previous layer, so its edge cuts across every sibling. This
-  // is the standard Sugiyama ordering phase — sort each layer by the mean index
-  // of its neighbours in the already-ordered previous layer, sweeping forward
-  // then backward. Stable and deterministic: ties keep their earlier order.
+  // Ordering adjacency, now over ROUTED hops: each multi-layer edge is
+  // source→d1→…→target, so incoming/outgoing describe the chain the sweeps
+  // order. A dummy's barycenter is the mean of its chain neighbours — the
+  // routing signal that pulls the chain between the rows' real nodes.
   const incoming = new Map<string, string[]>();
-  for (const id of nodeIds) incoming.set(id, []);
+  const outgoingRouted = new Map<string, string[]>();
+  const ensureIn = (id: string) => {
+    if (!incoming.has(id)) incoming.set(id, []);
+  };
+  const ensureOut = (id: string) => {
+    if (!outgoingRouted.has(id)) outgoingRouted.set(id, []);
+  };
+  for (const id of nodeIds) {
+    ensureIn(id);
+    ensureOut(id);
+  }
+  for (const [edgeId, chain] of dummyOfEdge) {
+    const edge = workspace.edges[edgeId]!;
+    const path = [edge.source, ...chain, edge.target];
+    for (let i = 0; i + 1 < path.length; i++) {
+      const a = path[i]!;
+      const b = path[i + 1]!;
+      ensureIn(b);
+      ensureOut(a);
+      incoming.get(b)!.push(a);
+      outgoingRouted.get(a)!.push(b);
+    }
+  }
+  // Unrouted (adjacent-layer) edges keep their direct hops in both maps —
+  // built fresh here so a node with only direct edges still appears.
   for (const edge of Object.values(workspace.edges)) {
-    if (!incoming.has(edge.target) || !outgoing.has(edge.source)) continue;
+    if (dummyOfEdge.has(edge.id)) continue;
+    // Both endpoints must be in this layout (the old guard, on `layer`).
+    if (!layer.has(edge.source) || !layer.has(edge.target)) continue;
+    ensureIn(edge.target);
+    ensureOut(edge.source);
     incoming.get(edge.target)!.push(edge.source);
+    outgoingRouted.get(edge.source)!.push(edge.target);
   }
 
   const orderIn = (ids: string[]) => new Map(ids.map((id, i) => [id, i]));
@@ -233,13 +378,28 @@ export function computeLayout(workspace: Workspace, options: LayoutOptions = {})
     for (let i = sortedLayers.length - 2; i >= 0; i--) {
       const next = layers.get(sortedLayers[i + 1]!)!;
       const cur = sortedLayers[i]!;
-      layers.set(cur, byBarycenter(layers.get(cur)!, next, outgoing));
+      layers.set(cur, byBarycenter(layers.get(cur)!, next, outgoingRouted));
+    }
+  }
+
+  // Snapshot the dummy-inclusive row order BEFORE stripping: route
+  // interpolation needs each dummy's slot among its placed neighbours.
+  const rowOrderWithDummies = new Map<number, string[]>();
+  for (const [l, ids] of layers) rowOrderWithDummies.set(l, [...ids]);
+
+  // Strip the dummies: rows keep only real nodes from here on, so every
+  // downstream pass (extents, placement, bounds) is node-only and
+  // LayoutResult keeps its exact contract.
+  for (const ids of layers.values()) {
+    for (let i = ids.length - 1; i >= 0; i--) {
+      if (ids[i]!.startsWith(DUMMY_PREFIX)) ids.splice(i, 1);
     }
   }
 
   // Walk the layers once to find where each row starts along the flow axis,
   // accounting for rows made taller by wrapped labels.
   const layerOffsets = new Map<number, number>();
+  const layerExtents = new Map<number, number>();
   {
     let along = 0;
     for (const l of sortedLayers) {
@@ -252,6 +412,7 @@ export function computeLayout(workspace: Workspace, options: LayoutOptions = {})
         }),
         direction === "vertical" ? nodeSize.height : nodeSize.width,
       );
+      layerExtents.set(l, extent);
       along += extent + layerGap;
     }
   }
@@ -284,12 +445,31 @@ export function computeLayout(workspace: Workspace, options: LayoutOptions = {})
     nodeSize.width,
   );
   const flowSpan = [...layerOffsets.values()].at(-1) ?? 0;
+  // DEEP-CHAIN ONLY (found by the 2026-09-11 visual benchmark): the wrap
+  // exists for chains — every layer holding one or two nodes, so the flow
+  // axis stacks into a pole. It was never meant for wide DAGs, but
+  // `flowSpan > widestRow * 1.6` also fired for those (a board of many-node
+  // rows, tall enough, wrapped into horizontal bands of huge rows — the
+  // n=80/300 benchmark boards measured ±27,000px of x-spread). Gate on the
+  // median row's node count: chains have few nodes per row; a DAG with
+  // crowded rows is a normal layered board and stays vertical.
+  const medianRowNodes = (() => {
+    const counts = sortedLayers
+      .map((l) => layers.get(l)!.length)
+      .sort((a, b) => a - b);
+    return counts[Math.floor(counts.length / 2)] ?? 0;
+  })();
   const shouldWrap =
-    sortedLayers.length > WRAP_ROW_LAYERS && pinnedCount === 0 && flowSpan > widestRow * 1.6;
+    sortedLayers.length > WRAP_ROW_LAYERS &&
+    pinnedCount === 0 &&
+    flowSpan > widestRow * 1.6 &&
+    medianRowNodes <= 3;
 
+  // Wrap output (bands of WRAP_ROW_LAYERS layers stacked across the canvas):
+  // declared before the branch so the shared route-derivation exit below can
+  // read whichever placement ran.
+  const wrapped: LayoutResult = {};
   if (shouldWrap) {
-    const wrapped = {} as LayoutResult;
-    // Rows stack along the CROSS axis: row 0 starts at x=0, row 1 begins to
     // its right, and so on. Each row is laid out left-to-right from its own
     // base, so consecutive layers read in flow order and rows read in bands.
     let rowBase = 0;
@@ -319,9 +499,8 @@ export function computeLayout(workspace: Workspace, options: LayoutOptions = {})
       }
       rowBase += rowWidth + layerGap * 2;
     }
-    return wrapped;
-  }
-
+    // Fall through: the shared exit derives routes against `wrapped`.
+  } else {
   for (const l of sortedLayers) {
     const ids = layers.get(l)!;
     const isVertical = direction === "vertical";
@@ -351,8 +530,88 @@ export function computeLayout(workspace: Workspace, options: LayoutOptions = {})
       result[id] = { position, size };
     });
   }
+  }
 
-  return result;
+  // ROUTE COORDINATES (Sugiyama phase 4, the 2026-09-11 benchmark's ask):
+  // the ordering phase threaded each multi-layer edge's dummy chain between
+  // real nodes; now that real nodes have coordinates, every chain vertex
+  // gets its corridor position by INTERPOLATING between its row neighbours'
+  // placed centers — the vertex sits fractionally between them exactly where
+  // the ordering put it. Interpolation is against the dummy-inclusive row
+  // order (kept before the strip), so a corridor through a crowded row lands
+  // in its gap, not on a node.
+  const layoutOut = shouldWrap ? wrapped : result;
+  const dummyCross = new Map<string, number>();
+  for (const l of sortedLayers) {
+    const ids = rowOrderWithDummies.get(l) ?? [];
+    // The row's placed real nodes, in row order, with their CENTER cross
+    // coordinates (same space as the placement loops above).
+    const placedCenters = ids
+      .filter((id) => !id.startsWith(DUMMY_PREFIX))
+      .map((id) => {
+        const placed = layoutOut[id];
+        if (!placed) return null;
+        return {
+          slot: ids.indexOf(id),
+          cross:
+            direction === "vertical"
+              ? placed.position.x + placed.size.width / 2
+              : placed.position.y + placed.size.height / 2,
+        };
+      })
+      .filter((c): c is { slot: number; cross: number } => c !== null);
+    if (placedCenters.length === 0) continue;
+    ids.forEach((id, i) => {
+      if (!id.startsWith(DUMMY_PREFIX)) return;
+      const below = placedCenters.filter((c) => c.slot < i).at(-1);
+      const above = placedCenters.find((c) => c.slot > i);
+      if (below && above) {
+        const total = above.slot - below.slot;
+        const frac = total > 0 ? (i - below.slot) / total : 0.5;
+        dummyCross.set(id, below.cross + (above.cross - below.cross) * frac);
+      } else if (below) {
+        dummyCross.set(id, below.cross + nodeGap);
+      } else if (above) {
+        dummyCross.set(id, above.cross - nodeGap);
+      } else {
+        dummyCross.set(id, placedCenters[0]!.cross);
+      }
+    });
+  }
+
+  // The routes themselves: source anchor → chain vertices → target anchor.
+  // Each dummy's along coordinate sits at its row's CENTRE (band-local under
+  // wrap exactly as the placement loops did for real nodes).
+  const routes: EdgeRoutes = {};
+  for (const [edgeId, chain] of dummyOfEdge) {
+    const edge = workspace.edges[edgeId]!;
+    const srcLayer = layer.get(edge.source) ?? 0;
+    const tgtLayer = layer.get(edge.target) ?? 0;
+    const from = Math.min(srcLayer, tgtLayer);
+    const points: Position[] = [];
+    chain.forEach((dummyId, idx) => {
+      const cross = dummyCross.get(dummyId);
+      if (cross === undefined) return;
+      const l = from + 1 + idx;
+      let along = layerOffsets.get(l) ?? 0;
+      if (shouldWrap) {
+        // Band-local: subtract the band's first-layer offset, exactly as
+        // the wrap placement did. Bands are rows of WRAP_ROW_LAYERS
+        // consecutive layers starting at layer 0.
+        const bandFirst = Math.floor(l / WRAP_ROW_LAYERS) * WRAP_ROW_LAYERS;
+        along -= layerOffsets.get(bandFirst) ?? 0;
+      }
+      const alongCentered = along + (layerExtents.get(l) ?? 0) / 2;
+      points.push(
+        direction === "vertical"
+          ? { x: cross, y: alongCentered }
+          : { x: alongCentered, y: cross },
+      );
+    });
+    if (points.length > 0) routes[edgeId] = points;
+  }
+
+  return { layout: layoutOut, routes };
 }
 
 /**
@@ -801,6 +1060,85 @@ function layoutWithRegions(
 }
 
 /**
+ * The routes-aware twin of layoutWithRegions: identical packing, plus each
+ * region's edge routes translated by the same origin shift its nodes take,
+ * so a routed chain stays glued to its region. Cross-region edges are not
+ * in any sub-workspace, so they carry no route and render as before.
+ */
+function layoutWithRegionsRoutes(
+  workspace: Workspace,
+  partition: RegionPartition,
+  opts: Required<Omit<LayoutOptions, "strategy">>,
+): { layout: LayoutResult; routes: EdgeRoutes } {
+  const result: LayoutResult = {};
+  const routes: EdgeRoutes = {};
+  const pins = Object.values(workspace.nodes).filter((n) => n.pinned);
+
+  // --- Board flow first: the board's own diagram, excluding region members.
+  let boardTop = 0;
+  if (partition.board.length > 0) {
+    const boardWs = subWorkspaceFor(workspace, partition.board, workspace.diagramKind);
+    const boardOut = layoutSingleRoutes(boardWs, workspace.diagramKind, opts);
+    Object.assign(result, boardOut.layout);
+    for (const [edgeId, pts] of Object.entries(boardOut.routes)) routes[edgeId] = [...pts];
+    if (Object.keys(boardOut.layout).length > 0) boardTop = boundsOf(boardOut.layout).h;
+  }
+
+  // --- Regions: each under its own strategy.
+  const regionLayouts: Array<{
+    groupId: string;
+    kind: DiagramKind;
+    out: { layout: LayoutResult; routes: EdgeRoutes };
+  }> = [];
+  for (const region of partition.regions) {
+    const regionWs = subWorkspaceFor(workspace, region.ids, region.kind);
+    regionLayouts.push({
+      groupId: region.groupId,
+      kind: region.kind,
+      out: layoutSingleRoutes(regionWs, region.kind, opts),
+    });
+  }
+
+  // --- Pack regions along a row, cross-flow, with gutter separation — the
+  // same translation layoutWithRegions applies, extended to routes.
+  const gap = REGION_GAP;
+  let cursorX = 0;
+  for (const rl of regionLayouts) {
+    const b = boundsOf(rl.out.layout);
+    const dx = cursorX - b.x;
+    const dy = REGION_STRIP_GAP + boardTop - b.y;
+    for (const [id, placed] of Object.entries(rl.out.layout)) {
+      result[id] = {
+        position: { x: placed.position.x + dx, y: placed.position.y + dy },
+        size: placed.size,
+      };
+    }
+    for (const [edgeId, pts] of Object.entries(rl.out.routes)) {
+      routes[edgeId] = pts.map((p) => ({ x: p.x + dx, y: p.y + dy }));
+    }
+    cursorX += b.w + gap;
+  }
+
+  for (const p of pins) {
+    void p; // absent from the result by design (see layoutWithRegions)
+  }
+  return { layout: result, routes };
+}
+
+/** Dispatch one (sub-)workspace, returning layout and routes together. */
+function layoutSingleRoutes(
+  ws: Workspace,
+  kind: DiagramKind,
+  opts: Required<Omit<LayoutOptions, "strategy">>,
+): { layout: LayoutResult; routes: EdgeRoutes } {
+  const strategy = STRATEGY_FOR_KIND[kind] ?? "layered";
+  if (strategy === "radial") return { layout: radialLayout(ws, opts), routes: {} };
+  if (strategy === "tree") return { layout: treeLayout(ws, opts), routes: {} };
+  if (strategy === "swimlane") return { layout: swimlaneLayout(ws, opts), routes: {} };
+  return layeredLayoutWithRoutes(ws, opts);
+}
+
+/**
  * Build the sub-workspace one region (or the board flow) is laid out in: its
  * member nodes, the edges between them, and its own groups (swimlane regions
  * need lane groups inside the region). The diagramKind is the partition's
@@ -929,6 +1267,78 @@ export function applyLayout(workspace: Workspace, layout: LayoutResult): Workspa
     nodes[id] = placed ? { ...node, position: placed.position, size: placed.size } : node;
   }
   return { ...workspace, nodes };
+}
+
+/**
+ * Stamp derived edge routes onto a workspace's edges (the route-aware twin of
+ * applyLayout writing node positions). A pure clone-and-stamp: edges named in
+ * `routes` get their bend points, every other edge keeps whatever it had —
+ * including its old route (a region relayout touches only the region's
+ * edges; the rest of the board's routes stay put, exactly like their nodes).
+ */
+export function applyRoutes(workspace: Workspace, routes: EdgeRoutes): Workspace {
+  if (Object.keys(routes).length === 0) return workspace;
+  const edges: Workspace["edges"] = {};
+  for (const [id, edge] of Object.entries(workspace.edges)) {
+    const route = routes[id];
+    edges[id] = route ? { ...edge, route } : edge;
+  }
+  return { ...workspace, edges };
+}
+
+/**
+ * The routes-aware relayoutRegion: the group's members re-layout AND the
+ * group's internal edge routes re-derive, shifted to the group's current
+ * origin like the nodes. Returns null (no routes) when there is nothing to
+ * do, matching relayoutRegion's contract. The caller applies layout first,
+ * then routes, so untouched nodes' edges keep their existing routes.
+ */
+export function relayoutRegionWithRoutes(
+  workspace: Workspace,
+  groupId: string,
+  options: LayoutOptions = {},
+): { layout: LayoutResult; routes: EdgeRoutes } | null {
+  const group = workspace.groups[groupId];
+  if (!group) return null;
+  const memberIds = Object.values(workspace.nodes)
+    .filter((n) => n.groupId === groupId)
+    .map((n) => n.id);
+  if (memberIds.length === 0) return null;
+
+  const opts = { ...DEFAULTS, ...options };
+  const kind = group.kind ?? workspace.diagramKind;
+  const sub = subWorkspaceFor(workspace, memberIds, kind);
+  const subOut = layoutSingleRoutes(sub, kind, opts);
+  if (Object.keys(subOut.layout).length === 0) return null;
+
+  const placed = memberIds
+    .map((id) => workspace.nodes[id])
+    .filter((n): n is NonNullable<typeof n> => Boolean(n?.position));
+  if (placed.length === 0) return null;
+  const originX = Math.min(...placed.map((n) => n.position!.x));
+  const originY = Math.min(...placed.map((n) => n.position!.y));
+  const b = boundsOf(subOut.layout);
+  const dx = originX - b.x;
+  const dy = originY - b.y;
+
+  const result: LayoutResult = {};
+  for (const [id, node] of Object.entries(workspace.nodes)) {
+    if (node.groupId === groupId) continue;
+    if (node.position && node.size) {
+      result[id] = { position: node.position, size: node.size };
+    }
+  }
+  for (const [id, fresh] of Object.entries(subOut.layout)) {
+    result[id] = {
+      position: { x: fresh.position.x + dx, y: fresh.position.y + dy },
+      size: fresh.size,
+    };
+  }
+  const routes: EdgeRoutes = {};
+  for (const [edgeId, pts] of Object.entries(subOut.routes)) {
+    routes[edgeId] = pts.map((p) => ({ x: p.x + dx, y: p.y + dy }));
+  }
+  return { layout: result, routes };
 }
 
 /**

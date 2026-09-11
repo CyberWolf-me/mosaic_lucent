@@ -42,40 +42,51 @@ function addEdge(ws: Workspace, source: string, target: string, relationship: st
 
 /**
  * Layered DAG (flowchart/architecture): k = ~sqrt(n) layers sized so total
- * nodes ≈ n; each node links to 1–2 nodes in the next layer (stride-chosen,
- * deterministic), plus a skip edge two layers ahead (the "Stripe calls the
- * DB directly" shape) and one back edge at the end (the return path).
+ * nodes ≈ n; every node links to 1–2 nodes STRICTLY one layer back (index
+ * arithmetic keeps the parent inside the previous band), plus a skip edge
+ * two layers back (the "Stripe calls the DB directly" shape) and one back
+ * edge at the end (the return path). Layer indices are explicit — no
+ * derived arithmetic — so the Kahn pass sees exactly the intended bands
+ * (verified: the layered ladder's median row holds ~sqrt(n) nodes).
  */
 export function layeredBoard(n: number, seed = 1): Workspace {
   const ws = createWorkspace({ id: "bench-layered", name: `Layered ${n}`, diagramKind: "flowchart" });
   const layers = Math.max(2, Math.round(Math.sqrt(n)));
   const perLayer = Math.max(2, Math.ceil(n / layers));
+  // rows[l] = the node ids placed in layer l.
+  const rows: string[][] = [];
   let count = 0;
-  for (let layer = 0; layer < layers && count < n; layer++) {
+  for (let l = 0; l < layers && count < n; l++) {
+    rows.push([]);
     for (let j = 0; j < perLayer && count < n; j++, count++) {
-      const node = addNode(ws, count, layer === 0 ? "entry" : "service");
-      node.metadata = { layer };
-      if (layer > 0) {
-        // Deterministic parent: previous layer, stride-offset by seed.
-        const parentIdx = count - perLayer - ((j + seed) % perLayer) + perLayer;
-        const parentId = id("n", Math.max(0, parentIdx - perLayer));
-        const parent = ws.nodes[parentId];
-        if (parent) addEdge(ws, parent.id, node.id, "calls");
-        // A second link for density: the next neighbour in the previous layer.
-        const altId = id("n", Math.max(0, parentIdx - perLayer) + 1);
-        if (ws.nodes[altId] && (j + seed) % 2 === 0) addEdge(ws, altId, node.id, "calls");
-        // The skip edge: two layers back, first node of that layer.
-        if (layer > 1) {
-          const skipId = id("n", Math.max(0, (layer - 2) * perLayer));
-          if (ws.nodes[skipId] && (j + seed) % 3 === 0) addEdge(ws, skipId, node.id, "bypasses");
-        }
-      }
+      const node = addNode(ws, count, l === 0 ? "entry" : "service");
+      node.metadata = { layer: l };
+      rows[l]!.push(node.id);
     }
   }
+  for (let l = 1; l < rows.length; l++) {
+    const prev = rows[l - 1]!;
+    rows[l]!.forEach((id, j) => {
+      // Parent: the previous layer, stride-offset so consecutive children
+      // spread across parents instead of stacking on the first.
+      const parent = prev[(j + seed) % prev.length]!;
+      addEdge(ws, parent, id, "calls");
+      // Second parent for density: the previous layer's next node.
+      const alt = prev[(j + seed + 1) % prev.length]!;
+      if ((j + seed) % 2 === 0 && alt !== parent) addEdge(ws, alt, id, "calls");
+      // The skip edge: two layers back, stride-selected.
+      if (l > 1) {
+        const skips = rows[l - 2]!;
+        const skip = skips[(j + seed) % skips.length]!;
+        if ((j + seed) % 3 === 0) addEdge(ws, skip, id, "bypasses");
+      }
+    });
+  }
   // The back edge: last node → first, the flowchart return path.
-  const ids = Object.keys(ws.nodes).sort();
-  const last = ids[ids.length - 1];
-  if (ids.length >= 2 && last) addEdge(ws, last, ids[0] ?? ids[1]!, "returns to");
+  const first = rows[0]?.[0];
+  const lastRow = rows[rows.length - 1] ?? [];
+  const last = lastRow[lastRow.length - 1];
+  if (first && last && first !== last) addEdge(ws, last, first, "returns to");
   return ws;
 }
 
