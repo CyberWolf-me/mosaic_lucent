@@ -1,4 +1,4 @@
-import type { DiagramKind, Node, Workspace } from "@lucent/core";
+import { edgeTiers, type DiagramKind, type Node, type Workspace } from "@lucent/core";
 
 /**
  * Presentation mapping from the semantic model to the reference visual language.
@@ -69,6 +69,12 @@ export interface PlacedEdge {
    * order. Empty for route-less edges — the renderer's straight/bezier path.
    */
   route: Array<{ x: number; y: number }>;
+  /**
+   * Visual weight (V3): primary = structural flow, secondary = long/
+   * cross-region context, quiet = execution metadata. The zoom-density
+   * policy (edgeDensity) consumes it.
+   */
+  tier: "primary" | "secondary" | "quiet";
 }
 
 export type Side = "l" | "r" | "t" | "b";
@@ -100,6 +106,7 @@ export function toScene(workspace: Workspace): {
   nodes: PlacedNode[];
   edges: PlacedEdge[];
 } {
+  const tiers = edgeTiers(workspace);
   const nodes: PlacedNode[] = Object.values(workspace.nodes).map((n) => {
     const style = styleForType(n.nodeType);
     const w = n.size?.width ?? 160;
@@ -132,6 +139,7 @@ export function toScene(workspace: Workspace): {
       toSide: faces.toSide,
       parallelIndex,
       route: e.route ?? [],
+      tier: tiers[e.id] ?? "primary",
     };
   });
 

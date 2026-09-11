@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import type { Workspace } from "@lucent/core";
+import { edgeDensity, type Workspace } from "@lucent/core";
 import { anchor, ConnectorDefs, makePath, NodeCard, type NodeState } from "./atoms.js";
 import { techMarkFor } from "./techMarks.js";
 import { KIND_TINT } from "../statementUi.js";
@@ -319,6 +319,13 @@ export function DiagramLayer({
             e.relationship === "depends_on" ||
             e.relationship === "blocks" ||
             e.relationship === "drives";
+          // Zoom-density policy (V2/V3): at deep zoom-out only PRIMARY
+          // relationships draw — secondary (long/cross-region context) and
+          // quiet (execution metadata) recede, so the overview reads as the
+          // board's flow, not a wall of connectors. Mid zoom: secondary dims
+          // to 0.45. Zoomed in: everything at full weight.
+          const density = edgeDensity(e.tier, scale);
+          if (density.hidden) return null;
           const cls = [
             proposed ? "dashed emerging" : isQuiet ? "edge-dep" : "",
             "appear",
@@ -343,8 +350,8 @@ export function DiagramLayer({
               // relative to the whole path whatever its real pixel length.
               pathLength={100}
               markerEnd={proposed ? "url(#arr-amber)" : "url(#arr)"}
-              opacity={edgeFocus}
-              style={edgeFocus !== 1 ? { transition: "opacity 160ms ease" } : undefined}
+              opacity={edgeFocus * density.opacity}
+              style={edgeFocus !== 1 || density.opacity !== 1 ? { transition: "opacity 160ms ease" } : undefined}
             />
           );
         })}
@@ -372,6 +379,10 @@ export function DiagramLayer({
           const from = nodeAt(e.source);
           const to = nodeAt(e.target);
           if (!from || !to || !e.relationship) return null;
+          // Labels follow their edge's density: a secondary edge receded at
+          // mid zoom loses its label, and a hidden edge hides it entirely.
+          const labelDensity = edgeDensity(e.tier, scale);
+          if (labelDensity.hidden) return null;
           const a = anchor(from, e.fromSide);
           const b = anchor(to, e.toSide);
           const step = Math.ceil(e.parallelIndex / 2) * 18;
@@ -407,7 +418,11 @@ export function DiagramLayer({
             my = (a.y + b.y) / 2 + (e.dir === "h" ? spread : 0);
           }
           return (
-            <div key={`lbl-${e.id}`} className="edge-label" style={{ left: mx, top: my }}>
+            <div
+              key={`lbl-${e.id}`}
+              className="edge-label"
+              style={{ left: mx, top: my, opacity: labelDensity.opacity }}
+            >
               {e.relationship}
             </div>
           );
