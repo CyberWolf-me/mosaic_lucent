@@ -421,6 +421,14 @@ export interface HandleResult {
   status: number;
   body: unknown;
   /**
+   * Why the generation ended (see GenerateOutcome) — recorded by the routes
+   * so the telemetry counts provider vs validation vs other failures
+   * separately instead of inferring them from status codes.
+   */
+  outcome: GenerateOutcome;
+  /** Whether the bounded repair round ran, success or not. */
+  repaired: boolean;
+  /**
    * What the provider reported about the completion: which model answered and
    * what it cost. Deliberately a sibling of `body` rather than a field in it —
    * the meter needs it to reconcile revenue against `usage_events` (M4), the
@@ -526,10 +534,17 @@ export async function handleGenerate(
 ): Promise<HandleResult> {
   const outcome = await runGeneratePipeline(provider, rawBody, userId, authoritative);
   if (!outcome.ok) {
-    return { status: outcome.status, body: outcome.body };
+    return {
+      status: outcome.status,
+      body: outcome.body,
+      outcome: outcome.outcome,
+      repaired: outcome.repaired,
+    };
   }
   return {
     status: 200,
+    outcome: outcome.outcome,
+    repaired: outcome.repaired,
     body: {
       operations: outcome.operations,
       explanation: outcome.explanation,
@@ -557,6 +572,10 @@ export type PipelineOutcome =
       /** 0 when no authoritative board backed the request (field omitted downstream). */
       boardVersion: number;
       completion: NonNullable<HandleResult["completion"]>;
+      /** Why the generation ended (see GenerateOutcome). */
+      outcome: GenerateOutcome;
+      /** Whether the bounded repair round ran, success or not. */
+      repaired: boolean;
       /**
        * Operations that failed validation and were skipped rather than applied
        * (partial application, M1). Empty on a clean batch. Each carries the
@@ -565,7 +584,30 @@ export type PipelineOutcome =
        */
       warnings?: Array<{ op: string; reason: string }>;
     }
-  | { ok: false; status: number; body: unknown };
+  | {
+      ok: false;
+      status: number;
+      body: unknown;
+      /** Why the generation ended (see GenerateOutcome). */
+      outcome: GenerateOutcome;
+      /** False on every refusal: the repair round only runs post-provider. */
+      repaired: boolean;
+    };
+
+/**
+ * WHY a generation ended the way it did (the 2026-09 review's §7: "Is
+ * Lucent unreliable, or is the upstream provider unreliable?"). Assigned at
+ * each pipeline arm where the knowledge lives, so the telemetry counts the
+ * distinction instead of inferring it from status codes:
+ *   success    — validated operations reached the client (partial
+ *                application counts: the user got a board).
+ *   provider   — the provider call itself failed (throw / transport).
+ *   validation — the model answered but the batch failed validation even
+ *                after the bounded repair round.
+ *   other      — refused before spend (bad request shape, quota): neither
+ *                Lucent's generation quality nor the provider's.
+ */
+export type GenerateOutcome = "success" | "provider" | "validation" | "other";
 
 /**
  * The one post-provider pipeline: filter human-only ops, stamp authorship,
@@ -588,6 +630,8 @@ async function runGeneratePipeline(
       ok: false,
       status: 400,
       body: { error: "invalid request", detail: parsed.error.format() },
+      outcome: "other",
+      repaired: false,
     };
   }
 
@@ -603,6 +647,8 @@ async function runGeneratePipeline(
       ok: false,
       status: 502,
       body: { error: "provider failed", detail: (err as Error).message },
+      outcome: "provider",
+      repaired: false,
     };
   }
 
@@ -685,6 +731,8 @@ async function runGeneratePipeline(
       ok: false,
       status: 422,
       body: { error: "operations failed validation", errors, repaired },
+      outcome: "validation",
+      repaired,
     };
   }
   const warnings = partial
@@ -712,6 +760,8 @@ async function runGeneratePipeline(
       boardVersion: Date.now(),
       completion,
       warnings,
+      outcome: "success",
+      repaired,
     };
   }
 
@@ -724,6 +774,8 @@ async function runGeneratePipeline(
     boardVersion: 0,
     completion,
     warnings,
+    outcome: "success",
+    repaired,
   };
 }
 
@@ -747,6 +799,8 @@ export async function handleGenerateStream(
   provider: string;
   operations: number;
   completion: NonNullable<HandleResult["completion"]> | null;
+  outcome: GenerateOutcome;
+  repaired: boolean;
 }> {
   const emit = send ?? (() => {});
   emit("start", { provider: provider.name, streaming: true });
@@ -755,7 +809,14 @@ export async function handleGenerateStream(
   });
   if (!outcome.ok) {
     emit("error", outcome.body);
-    return { status: outcome.status, provider: provider.name, operations: 0, completion: null };
+    return {
+      status: outcome.status,
+      provider: provider.name,
+      operations: 0,
+      completion: null,
+      outcome: outcome.outcome,
+      repaired: outcome.repaired,
+    };
   }
   emit("done", {
     operations: outcome.operations,
@@ -771,5 +832,7 @@ export async function handleGenerateStream(
     provider: outcome.provider,
     operations: outcome.operations.length,
     completion: outcome.completion,
+    outcome: outcome.outcome,
+    repaired: outcome.repaired,
   };
 }

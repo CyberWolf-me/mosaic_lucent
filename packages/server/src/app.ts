@@ -1392,6 +1392,38 @@ export function createApp(deps: AppDeps): App {
     labelNames: [],
   });
 
+  // The generation outcome ledger (2026-09 review §7): "Is Lucent unreliable,
+  // or is the upstream provider?" answered by counters, not status-code
+  // archaeology. Every attempt lands in exactly one bucket; DELIBERATELY
+  // LABEL-FREE (the D10 cardinality rule) — the per-provider split is the
+  // log's job, and a provider label here would give every gateway its own
+  // series family for a question the totals already answer.
+  const generationAttempts = metrics.counter({
+    name: "lucent_generation_attempts_total",
+    help: "Every /api/generate (and stream) attempt, by how it ended.",
+    labelNames: [],
+  });
+  const generationSuccess = metrics.counter({
+    name: "lucent_generation_success_total",
+    help: "Generations that returned validated operations (partial application counts).",
+    labelNames: [],
+  });
+  const generationProviderFailures = metrics.counter({
+    name: "lucent_generation_provider_failures_total",
+    help: "The provider call itself failed (transport/timeout/5xx).",
+    labelNames: [],
+  });
+  const generationValidationFailures = metrics.counter({
+    name: "lucent_generation_validation_failures_total",
+    help: "The model answered but the batch failed validation even after repair.",
+    labelNames: [],
+  });
+  const generationRepairs = metrics.counter({
+    name: "lucent_generation_repairs_total",
+    help: "Bounded repair rounds run (co-occurs with success or validation).",
+    labelNames: [],
+  });
+
   // Realtime connection lifetime (docs/reliability/slo.md, "Realtime
   // reachability"): the share of sockets still connected at the five-minute
   // mark is the SLO, and it is only answerable from a duration histogram.
@@ -1421,6 +1453,14 @@ export function createApp(deps: AppDeps): App {
         refusals.inc({ route: event.route, reason: refusalClass(event.reason) });
         break;
       case "generate":
+        // The outcome ledger series — one attempt, exactly one bucket.
+        generationAttempts.inc();
+        if (event.outcome === "success") generationSuccess.inc();
+        else if (event.outcome === "provider") generationProviderFailures.inc();
+        else if (event.outcome === "validation") generationValidationFailures.inc();
+        if (event.repaired) generationRepairs.inc();
+        aiDuration.observe(event.ms / 1000, { kind: event.kind, provider: event.provider });
+        break;
       case "image":
       case "ask":
         aiDuration.observe(event.ms / 1000, { kind: event.kind, provider: event.provider });
@@ -3454,6 +3494,18 @@ export function createApp(deps: AppDeps): App {
           ? (result.body as { operations: unknown[] }).operations.length
           : 0;
         let body = result.body;
+        // EVERY attempt is recorded with its outcome (the 2026-09 review §7):
+        // the counters must answer "is Lucent unreliable, or is the provider?"
+        // from the totals, so failures join the generate lane instead of
+        // hiding in the generic error channel.
+        telemetry.record({
+          kind: "generate",
+          ms: Date.now() - started,
+          provider: provider.name,
+          operations: ops,
+          outcome: result.outcome,
+          repaired: result.repaired,
+        });
         if (result.status >= 400) {
           telemetry.record({
             kind: "error",
@@ -3462,12 +3514,7 @@ export function createApp(deps: AppDeps): App {
             message: JSON.stringify((result.body as { error?: string })?.error ?? result.body),
           });
         } else {
-          telemetry.record({
-            kind: "generate",
-            ms: Date.now() - started,
-            provider: provider.name,
-            operations: ops,
-          });
+          // (The success generate event was recorded above with every attempt.)
           // Metered on success only. A provider timeout is our failure, and
           // billing for it is a refund request with extra steps.
           if (aiCtx.orgId) {
@@ -3585,6 +3632,16 @@ export function createApp(deps: AppDeps): App {
         closed = true;
         res.end();
 
+        // EVERY attempt is recorded with its outcome — same ledger as the
+        // JSON route, so the two transports reconcile into one answer.
+        telemetry.record({
+          kind: "generate",
+          ms: Date.now() - started,
+          provider: outcome.provider,
+          operations: outcome.operations,
+          outcome: outcome.outcome,
+          repaired: outcome.repaired,
+        });
         if (outcome.status >= 400) {
           telemetry.record({
             kind: "error",
@@ -3594,12 +3651,6 @@ export function createApp(deps: AppDeps): App {
           });
           return;
         }
-        telemetry.record({
-          kind: "generate",
-          ms: Date.now() - started,
-          provider: outcome.provider,
-          operations: outcome.operations,
-        });
         if (aiCtx.orgId) {
           meterUsage(aiCtx.orgId, "ai.generation", 1, {
             boardId: storedBoard?.id ?? null,

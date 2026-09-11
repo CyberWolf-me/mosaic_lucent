@@ -10,7 +10,23 @@
  */
 
 export type TelemetryEvent =
-  | { kind: "generate"; ms: number; provider: string; operations: number }
+  | {
+      kind: "generate";
+      ms: number;
+      provider: string;
+      operations: number;
+      /**
+       * WHY the generation ended (the 2026-09 review's §7): every attempt is
+       * recorded — not only successes — so `/metrics` answers "is Lucent
+       * unreliable, or is the upstream provider?" from counters instead of
+       * status-code archaeology. Latency percentiles keep sampling the same
+       * way; a failed attempt's ms rides along but the P50/P95 lanes read
+       * best on successes, so failed attempts join the shared buffer too
+       * (a 502's latency is real signal for the ops dashboards).
+       */
+      outcome: "success" | "provider" | "validation" | "other";
+      repaired: boolean;
+    }
   | { kind: "image"; ms: number; provider: string }
   /**
    * The answer path (Stage C1): a question about the board, answered with
@@ -72,6 +88,20 @@ export interface MetricsSnapshot {
   };
   operationsEmitted: number;
   recentErrors: ErrorRecord[];
+  /**
+   * The generation outcome ledger (2026-09 review §7): every attempt counted
+   * by why it ended. attempts = success + provider + validation + other,
+   * exactly; repairs can co-occur with success (a repaired batch that
+   * validated) or with validation (a repair that didn't save it).
+   */
+  generation: {
+    attempts: number;
+    success: number;
+    providerFailures: number;
+    validationFailures: number;
+    otherFailures: number;
+    repairs: number;
+  };
 }
 
 /** Keep the last N errors so /metrics can show what is actually failing. */
@@ -104,6 +134,11 @@ export class Telemetry {
   private aiProposeCount = 0;
   private operationsEmitted = 0;
   private errorTotal = 0;
+  /** The outcome ledger: every generate attempt lands in exactly one bucket. */
+  private generateProvider = 0;
+  private generateValidation = 0;
+  private generateOther = 0;
+  private generateRepairs = 0;
   private readonly byStatus = new Map<number, number>();
   private refusedRate = 0;
   private refusedQuota = 0;
@@ -144,6 +179,11 @@ export class Telemetry {
         this.operationsEmitted += event.operations;
         this.latencies.push(event.ms);
         if (this.latencies.length > LATENCY_SAMPLES) this.latencies.shift();
+        // The outcome ledger: exactly one bucket per attempt.
+        if (event.outcome === "provider") this.generateProvider += 1;
+        else if (event.outcome === "validation") this.generateValidation += 1;
+        else if (event.outcome === "other") this.generateOther += 1;
+        if (event.repaired) this.generateRepairs += 1;
         break;
       case "image":
         this.imageCount += 1;
@@ -218,6 +258,15 @@ export class Telemetry {
       },
       operationsEmitted: this.operationsEmitted,
       recentErrors: [...this.recentErrors].reverse(),
+      generation: {
+        attempts: this.generateCount,
+        success:
+          this.generateCount - this.generateProvider - this.generateValidation - this.generateOther,
+        providerFailures: this.generateProvider,
+        validationFailures: this.generateValidation,
+        otherFailures: this.generateOther,
+        repairs: this.generateRepairs,
+      },
     };
   }
 }

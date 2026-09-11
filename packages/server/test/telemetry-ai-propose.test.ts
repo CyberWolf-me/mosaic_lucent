@@ -17,7 +17,14 @@ describe("Telemetry — the ai-propose kind counted", () => {
     t.record({ kind: "ai-propose", ms: 100, provider: "mock", candidates: 10, selected: 4 });
     t.record({ kind: "ai-propose", ms: 300, provider: "mock", candidates: 10, selected: 2 });
     // A generate event must NOT pollute the selector's lane.
-    t.record({ kind: "generate", ms: 9_999, provider: "mock", operations: 5 });
+    t.record({
+      kind: "generate",
+      ms: 9_999,
+      provider: "mock",
+      operations: 5,
+      outcome: "success",
+      repaired: false,
+    });
     const snap = t.snapshot();
     expect(snap.requests.aiPropose).toBe(2);
     expect(snap.requests.generate).toBe(1);
