@@ -36,6 +36,42 @@ export type IntegrationStatus = (typeof INTEGRATION_STATUSES)[number];
 export const MAX_CREDENTIAL_REF_CHARS = 200;
 export const MAX_SCOPES = 10;
 
+/**
+ * Operator-secret guard: a credentialRef names an environment variable whose
+ * value the server will send to an external host. An org owner must not be
+ * able to name operator-held secrets (session keys, SCIM/Stripe credentials,
+ * database URLs) and exfiltrate them through a connection's baseUrl override.
+ * The match is a case-insensitive substring so `lucent_session_secret`,
+ * `LUCENT_SESSION_SECRET` and `my-session-backup` all refuse with the same
+ * honest 400. Integration keys (LINEAR/GITHUB/JIRA test refs) contain none
+ * of these substrings and pass unchanged.
+ */
+export const FORBIDDEN_CREDENTIAL_REF_SUBSTRINGS = [
+  "SESSION",
+  "SCIM",
+  "STRIPE",
+  "DATABASE",
+  "SECRET",
+  "PRIVATE",
+  "PASSWORD",
+  "LIVEKIT",
+  "OAUTH",
+  "SMTP",
+  "TOTP",
+  "TICKET",
+] as const;
+
+export function assertSafeCredentialRef(ref: string): void {
+  const upper = ref.toUpperCase();
+  for (const needle of FORBIDDEN_CREDENTIAL_REF_SUBSTRINGS) {
+    if (upper.includes(needle)) {
+      throw new Error(
+        `credentialRef must not reference operator secrets (contains "${needle}")`,
+      );
+    }
+  }
+}
+
 /** One org's connection to one external system. */
 export interface IntegrationConnection {
   id: string;
@@ -166,6 +202,7 @@ export function normalizeConnection(
   if (!ref || ref.length > MAX_CREDENTIAL_REF_CHARS) {
     throw new Error(`credentialRef must be 1..${MAX_CREDENTIAL_REF_CHARS} characters`);
   }
+  assertSafeCredentialRef(ref);
   const scopes = (input.scopes ?? []).map((s) => s.trim()).filter(Boolean).slice(0, MAX_SCOPES);
   // Stage D6: provider config — shallow-validated (≤10 entries, short
   // strings); provider-specific validation is the factory's business at

@@ -34,7 +34,15 @@ export function boardToMarkdown(ws: Workspace): string {
   return lines.join("\n") + "\n";
 }
 
-const csvCell = (v: string) => (/[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
+/**
+ * One CSV cell: RFC 4180 quoting plus formula-injection defense (a board
+ * label of `=1+1` must export as text, never as a live spreadsheet formula).
+ */
+export const csvCell = (v: string): string => {
+  let s = v;
+  if (/^[ \t]*[=+\-@|%]/.test(s)) s = `'${s}`;
+  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+};
 
 /** Export the board's nodes as CSV rows (id,type,label + outgoing edges). */
 export function boardToCsv(ws: Workspace): string {

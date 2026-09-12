@@ -12,9 +12,13 @@ import { formatAssetRef } from "@lucent/core";
  * Auth, tenant and CSRF rules (all enforced at the call site, not inside the
  * service, so an internal caller can reuse it without re-implementing them):
  *
- * - `POST /api/assets` — `requireUser` + `requireCsrf` + at-least-viewer on the
- *   body-declared `orgId`. The bytes arrive as the request body — JSON would
- *   double-encode them through base64.
+ * - `POST /api/assets` — `requireUser` + `requireCsrf` + at-least-editor on the
+ *   body-declared `orgId`. Uploads consume the org's storage quota, so viewers
+ *   (read-only) must not be able to burn it — the DELETE floor already
+ *   requires editor, and upload matches it. An optional `X-Lucent-Board-Id`
+ *   header, when present, must name a board in the same org (checked via
+ *   `boardOrgFor` when wired); otherwise the upload is refused with a 404 so
+ *   board ids are not enumerable across tenants.
  * - `GET /api/assets/:id` and `/thumb` — `requireUser`, then the service's
  *   own org check (it refuses to return another org's bytes). No CSRF, because
  *   a GET is idempotent and CSRF is a state-mutating concern.
@@ -58,6 +62,21 @@ export interface AssetRoutesContext {
   send(res: ServerResponse, status: number, body: unknown): void;
   /** Bytes-as-body reader; separate from the UTF-8 reader because images are binary. */
   readRawBody(req: IncomingMessage, maxBytes?: number): Promise<Buffer>;
+  /**
+   * Optional board→org lookup for the `X-Lucent-Board-Id` header check. When
+   * wired (production app), a declared board id that is unknown or belongs to
+   * another org refuses the upload with a 404. When absent (isolated route
+   * tests), the header is accepted as opaque metadata, preserving the old
+   * behaviour for callers that do not go through the board check.
+   */
+  boardOrgFor?: (boardId: string) => Promise<string | undefined>;
+  /**
+   * Optional abuse-prevention meter (the global sliding-window limiter).
+   * Wired in production; absent in isolated route tests. Uploads and deletes
+   * are quota-burning writes and always meter; reads meter too (byte serving
+   * is the bandwidth-abuse surface).
+   */
+  meter?: (req: IncomingMessage, res: ServerResponse, route: string) => boolean;
   /** Standard logger for the rare non-fatal path. */
   logger?: { error: (event: string, fields?: Record<string, unknown>) => void };
   /**
@@ -86,12 +105,13 @@ export function registerAssetRoutes(
       if (!deps.requireCsrf(req, res, "/api/assets")) return true;
       const user = (await deps.requireUser(req, res)) as { id: string } | null;
       if (!user) return true;
+      if (deps.meter && !deps.meter(req, res, "/api/assets")) return true;
       const orgId = await resolveOrgId(deps, req, user.id);
       if (!orgId.ok) {
         deps.send(res, orgId.status, { error: orgId.error });
         return true;
       }
-      const guard = await deps.requireOrgRole(req, res, orgId.value, "viewer", "/api/assets");
+      const guard = await deps.requireOrgRole(req, res, orgId.value, "editor", "/api/assets");
       if (!guard.ok) return true;
 
       const declaredMime =
@@ -107,6 +127,13 @@ export function registerAssetRoutes(
         req.headers["x-lucent-board-id"].length > 0
           ? req.headers["x-lucent-board-id"]
           : null;
+      if (declaredBoardId !== null && deps.boardOrgFor) {
+        const boardOrg = await deps.boardOrgFor(declaredBoardId);
+        if (!boardOrg || boardOrg !== orgId.value) {
+          deps.send(res, 404, { error: "board not found" });
+          return true;
+        }
+      }
 
       let bytes: Buffer;
       try {
@@ -151,6 +178,7 @@ export function registerAssetRoutes(
     if (req.method === "GET" && getMatch !== null && !getMatch[2]) {
       const user = (await deps.requireUser(req, res)) as { id: string } | null;
       if (!user) return true;
+      if (deps.meter && !deps.meter(req, res, "/api/assets/:id")) return true;
       const orgId = await resolveOrgId(deps, req, user.id);
       if (!orgId.ok) {
         deps.send(res, orgId.status, { error: orgId.error });
@@ -173,6 +201,7 @@ export function registerAssetRoutes(
     if (req.method === "GET" && getMatch !== null && getMatch[2] === "/thumb") {
       const user = (await deps.requireUser(req, res)) as { id: string } | null;
       if (!user) return true;
+      if (deps.meter && !deps.meter(req, res, "/api/assets/:id/thumb")) return true;
       const orgId = await resolveOrgId(deps, req, user.id);
       if (!orgId.ok) {
         deps.send(res, orgId.status, { error: orgId.error });
@@ -197,6 +226,7 @@ export function registerAssetRoutes(
     if (req.method === "DELETE" && /^\/api\/assets\/([A-Za-z0-9_-]{3,64})$/.test(url)) {
       const user = (await deps.requireUser(req, res)) as { id: string } | null;
       if (!user) return true;
+      if (deps.meter && !deps.meter(req, res, "/api/assets/:id")) return true;
       const orgId = await resolveOrgId(deps, req, user.id);
       if (!orgId.ok) {
         deps.send(res, orgId.status, { error: orgId.error });

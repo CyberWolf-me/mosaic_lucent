@@ -10,6 +10,13 @@ import { randomUUID } from "node:crypto";
  * JSON to a collector needs is a level check, a serialiser and a redactor --
  * roughly this file -- not a transport, a worker thread and a plugin API.
  *
+ * CONSOLE VS LOGGER (the rule): request-path code must use Logger (redacted,
+ * sampled, request-id attached). `console.*` is reserved for ops-only output
+ * with no request PII — boot/migration/shutdown lines, the dev mailer, and
+ * storage-backend warnings that carry only ids/mime types, never board
+ * content, prompts, emails, or secrets. A `console` line that interpolates
+ * user content is a bug; move it to Logger.
+ *
  * Three properties are load-bearing, and the tests pin each one:
  *
  *  - `child(fields)` returns a logger that merges those fields into every

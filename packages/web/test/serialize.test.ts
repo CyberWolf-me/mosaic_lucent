@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { createWorkspace, applyOperations } from "@lucent/core";
 import type { Operation } from "@lucent/core";
-import { boardToMarkdown, boardToCsv, parseCsv, csvToStickyOps } from "../src/board/serialize.js";
+import { boardToMarkdown, boardToCsv, parseCsv, csvToStickyOps, csvCell } from "../src/board/serialize.js";
 
 function ecommerce() {
   const ops: Operation[] = [
@@ -55,5 +55,16 @@ describe("board serialize (Phase B)", () => {
     const ops = csvToStickyOps("A,B\nC,D");
     const ws = applyOperations(createWorkspace(), ops);
     expect(Object.keys(ws.shapes)).toHaveLength(4);
+  });
+
+  it("prefixes formula triggers so spreadsheet apps treat them as text", () => {
+    expect(csvCell("=1+1")).toBe("'=1+1");
+    expect(csvCell("+cmd")).toBe("'+cmd");
+    expect(csvCell("-2+3")).toBe("'-2+3");
+    expect(csvCell("@mention")).toBe("'@mention");
+    expect(csvCell("  =evil")).toBe("'  =evil");
+    // Normal cells are untouched.
+    expect(csvCell("Customer")).toBe("Customer");
+    expect(csvCell("a,b")).toBe('"a,b"');
   });
 });

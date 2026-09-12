@@ -8,12 +8,20 @@ export function EmptyState({
   onSubmit,
   onSpeak,
   onBlankBoard,
+  failedAttempt,
 }: {
   value: string;
   onChange: (v: string) => void;
   onSubmit: () => void;
   onSpeak: () => void;
   onBlankBoard?: () => void;
+  /**
+   * The last failed first-generation attempt (P1-RF-001): without this, a
+   * failed Begin returned to a pristine hero and the error + retry lived only
+   * in the collapsed conversation — the user's request looked like it
+   * vanished. Present → the failure and its retry share the hero.
+   */
+  failedAttempt?: { text: string; retryPrompt?: string } | null;
 }) {
   const { notify } = useToast();
   const suggestions = [
@@ -99,6 +107,48 @@ export function EmptyState({
         Describe an idea, a system, a flow. Lucent turns your words into a visual workspace you can
         shape as you talk.
       </p>
+
+      {failedAttempt && (
+        <div
+          role="alert"
+          style={{
+            width: 620,
+            maxWidth: "100%",
+            display: "flex",
+            alignItems: "center",
+            gap: 12,
+            padding: "12px 16px",
+            border: "1px solid var(--sig-red)",
+            borderRadius: "var(--r-lg)",
+            background: "oklch(from var(--canvas-2) l c h / 0.85)",
+          }}
+        >
+          <span style={{ color: "var(--sig-red)", fontSize: 15 }}>⚠</span>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 12.5, color: "var(--ink-0)", lineHeight: 1.45 }}>
+              That didn't work — the board is still empty, your request wasn't lost.
+            </div>
+            <div
+              className="mono"
+              style={{ fontSize: 11, color: "var(--ink-3)", marginTop: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "pre-wrap" }}
+            >
+              {failedAttempt.text}
+            </div>
+          </div>
+          {failedAttempt.retryPrompt && (
+            <button
+              className="btn amber"
+              style={{ flex: "none", height: 30, padding: "0 14px", fontSize: 12 }}
+              onClick={() => {
+                if (failedAttempt.retryPrompt) onChange(failedAttempt.retryPrompt);
+              }}
+              title="Put the request back in the box, ready to send again"
+            >
+              Try again
+            </button>
+          )}
+        </div>
+      )}
 
       <div
         style={{

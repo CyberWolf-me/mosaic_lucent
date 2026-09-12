@@ -4,6 +4,7 @@ import { resolveLocale, t } from "@lucent/i18n";
 import { useWorkspace } from "../workspace.js";
 import type { WorkspaceState } from "../workspace.js";
 import { Ico } from "../ui/icons.js";
+import { TopBar, LeftRail } from "../ui/Chrome.js";
 import {
   KIND_GLYPH,
   intelligenceSections,
@@ -55,13 +56,15 @@ const PROVIDER_DISPLAY_NAME: Record<string, string> = {
  * new truth, mutate state without approval, or replace History as the
  * source for temporal analysis.
  */
-export function IntelligenceView(_: { onOpenSettings?: (section?: string) => void }) {
-  const { workspace, onCitation, applyManual, send, boardId } = useWorkspace() as unknown as {
+export function IntelligenceView({ onOpenSettings }: { onOpenSettings: (section?: string) => void }) {
+  const { workspace, onCitation, applyManual, send, boardId, projectName, setView } = useWorkspace() as unknown as {
     workspace: Workspace;
     onCitation: WorkspaceState["onCitation"];
     applyManual: WorkspaceState["applyManual"];
     send: WorkspaceState["send"];
     boardId: string | null;
+    projectName: string;
+    setView: WorkspaceState["setView"];
   };
   const locale = useMemo(() => resolveLocale(navigator.language), []);
 
@@ -165,16 +168,25 @@ export function IntelligenceView(_: { onOpenSettings?: (section?: string) => voi
 
   /**
    * Stage D2: "Plan from selection" — the kind-aware input surface. The
-   * checked statement ids flow through the ordinary send with the plan
-   * attachment: the model's ops get gated (PLAN_SAFE_OPS) and stamped
-   * (createdFrom) in the send path, then the >5-op batch opens the proposal
-   * panel like any large change — the B3 gate is the plan's approval.
+   * checked statement ids flow through the ordinary send in BOTH channels the
+   * request supports (P1-EX-001): the plan attachment (client-side gating +
+   * createdFrom stamping) AND the selection argument, so the model actually
+   * sees "plan from these statements" instead of the whole board plus a
+   * post-hoc local stamp. They used to travel only in the attachment, which
+   * the wire never carried.
+   *
+   * The handoff navigates to the canvas (P1-IA-001): generation phases and
+   * the proposal panel live there, so sending from a view that never shows
+   * them made the plan feel like it vanished. Small additive batches apply
+   * on the board — which is where the user should be looking to see them.
    */
   const planFromSelection = () => {
     const ids = [...checked];
     if (ids.length === 0) return;
-    void send(planRequestText(ids.length), undefined, { plan: { statementIds: ids } });
+    const request = planRequestText(ids.length);
+    void send(request, ids, { plan: { statementIds: ids } });
     setChecked(new Set());
+    setView("canvas");
   };
 
   const keepSeparate = (item: InboxItem) => {
@@ -214,18 +226,35 @@ export function IntelligenceView(_: { onOpenSettings?: (section?: string) => voi
     }${row.topic ? ` · ${row.topic}` : ""} · ${sectionHeader(kind)}`;
 
   return (
-    <div
-      style={{
-        position: "absolute",
-        top: 76,
-        bottom: 30,
-        left: 76,
-        right: 30,
-        display: "grid",
-        gridTemplateColumns: "minmax(420px, 520px) 1fr",
-        gap: 18,
-      }}
-    >
+    <div style={{ position: "absolute", inset: 0 }}>
+      <div style={{ position: "absolute", inset: 0 }}>
+        <div className="canvas-grid" />
+        <div className="canvas-vignette" />
+      </div>
+      {/* The shared shell, like every other full surface (the audit's P1-IA-001:
+          this view used to render bare, a navigation dead end — no rail, no
+          way back to the board). */}
+      <TopBar
+        crumbs={[
+          { label: "Personal" },
+          { label: projectName, view: "canvas" },
+          { label: "Intelligence", current: true },
+        ]}
+        onOpenSettings={onOpenSettings}
+      />
+      <LeftRail onOpenSettings={onOpenSettings} />
+      <div
+        style={{
+          position: "absolute",
+          top: 76,
+          bottom: 30,
+          left: 76,
+          right: 30,
+          display: "grid",
+          gridTemplateColumns: "minmax(420px, 520px) 1fr",
+          gap: 18,
+        }}
+      >
       {/* — The sections: the six kinds, open first, settled dimmed — */}
       <div
         style={{
@@ -757,6 +786,7 @@ export function IntelligenceView(_: { onOpenSettings?: (section?: string) => voi
           }}
         />
       )}
+      </div>
     </div>
   );
 }

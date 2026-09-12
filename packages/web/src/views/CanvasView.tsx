@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { resolveLocale, t } from "@lucent/i18n";
 import { applyLayout, applyRoutes, computeLayoutWithRoutes } from "@lucent/core";
 import { Ico } from "../ui/icons.js";
 import { AIPill } from "../ui/AIPill.js";
@@ -134,12 +135,12 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
     readOnly,
     setView,
     lens,
-    setLens,
     syncStatus,
     boardId,
   } = useWorkspace();
   const [settings] = useSettings();
   const { notify } = useToast();
+  const locale = useMemo(() => resolveLocale(navigator.language), []);
 
   const [message, setMessage] = useState("");
   const [selected, setSelected] = useState<string | null>(null);
@@ -564,7 +565,15 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
       },
       onFinal: (t) => {
         setListening(false);
-        void send(t);
+        // P1-AI-001: voice honors the same Build/Ask contract as the
+        // keyboard. Ask mode routes the utterance to the read-only ask()
+        // pipeline — it used to call send() unconditionally, so a spoken
+        // question could mutate the board while the pill said "Ask".
+        if (pillMode === "ask") {
+          void ask(t);
+        } else {
+          void send(t);
+        }
       },
       onError: (msg) => {
         setListening(false);
@@ -583,6 +592,8 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
   }, [
     listening,
     send,
+    ask,
+    pillMode,
     setListening,
     notify,
     voiceSupported,
@@ -1614,6 +1625,24 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
   const genProgress =
     canvasPhase === "generating" && streamChars > 0 ? `${streamChars} characters received` : null;
 
+  // P1-RF-001: a failed first generation returns to this hero, and the error
+  // + retry used to live only in the collapsed conversation — invisible, the
+  // request looked lost. When the hero is up and the conversation's last
+  // entry is that failure, surface it here; Try again puts the prompt back
+  // in the box (retrying is one deliberate send, not an auto-fire, so the
+  // user can fix the request first).
+  const heroFailure =
+    canvasPhase === "empty" && chat.length > 0
+      ? (() => {
+          const last = chat[chat.length - 1]!;
+          if (last.role !== "error") return null;
+          // Only the immediately-preceding failed attempt: the user entry for
+          // it sits right before the error.
+          const userText = chat[chat.length - 2]?.role === "user" ? chat[chat.length - 2]!.text : undefined;
+          return { text: last.text, retryPrompt: last.retryPrompt ?? userText };
+        })()
+      : null;
+
   // UX-3: one attention count across proposal/skipped/blocked/at-risk/sync.
   // Inbound + sync errors arrive via props where known; here proposal +
   // skipped ops from chat + offline state. Blocked/at-risk derive inside.
@@ -1677,6 +1706,7 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
             onSubmit={submit}
             onSpeak={toggleVoice}
             onBlankBoard={() => addShape(createShapeOp("sticky", 340, 260))}
+            failedAttempt={heroFailure}
           />
           {/* The tour overlays the hero: it is the first-minute surface, and
               it unmounts itself once seen (or dismissed) — no flag threading
@@ -1835,18 +1865,23 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
             )}
             {/* UX-2: one-tap provenance. The HUD answers "why is this here?"
                 with the meeting quote + source jump + undo, not a tooltip. */}
-            {whyNode && workspace.nodes[whyNode]?.position && (
-              <div
-                style={{
-                  position: "absolute",
-                  left: workspace.nodes[whyNode]!.position!.x,
-                  top: (workspace.nodes[whyNode]!.position!.y ?? 0) + 60,
-                  zIndex: 45,
-                }}
-              >
-                <WhyThis nodeId={whyNode} onClose={() => setWhyNode(null)} />
-              </div>
-            )}
+            {(() => {
+              if (whyNode === null) return null;
+              const pos = workspace.nodes[whyNode]?.position;
+              if (!pos) return null;
+              return (
+                <div
+                  style={{
+                    position: "absolute",
+                    left: pos.x,
+                    top: (pos.y ?? 0) + 60,
+                    zIndex: 45,
+                  }}
+                >
+                  <WhyThis nodeId={whyNode} onClose={() => setWhyNode(null)} />
+                </div>
+              );
+            })()}
             {/* Live collaborators' cursors and selections track content space. */}
             {peers.length > 0 && <PresenceCursors peers={peers} />}
           </CanvasViewport>
@@ -1886,6 +1921,25 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
               not a permanent button competing with the canvas. */}
 
           <TopBar crumbs={crumbs} meta={meta} onOpenSettings={onOpenSettings} />
+          {/* Screen-reader mirror of board structure: counts plus selection,
+              announced politely on change. Visual focus-dimming (focusSet) has
+              no DOM-focus meaning, so without this structural edits are silent
+              for assistive tech. */}
+          <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+            {t("canvas.status.summary", locale, {
+              name: workspace.name || "untitled",
+              nodes: Object.keys(workspace.nodes).length,
+              shapes: Object.keys(workspace.shapes).length,
+            })}{" "}
+            {selected !== null || selectedShapes.size > 0 || selectedNodes.size > 0
+              ? t("canvas.status.selected", locale, {
+                  n:
+                    selectedNodes.size +
+                    selectedShapes.size +
+                    (selected !== null && !selectedNodes.has(selected) ? 1 : 0),
+                })
+              : t("canvas.status.nothing", locale)}
+          </div>
           {readOnly && (
             <div className="readonly-banner" role="status" aria-live="polite">
               <Ico.Eye />

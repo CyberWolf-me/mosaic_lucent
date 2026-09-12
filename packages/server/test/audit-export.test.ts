@@ -145,6 +145,14 @@ describe("GET /api/orgs/:id/audit — pagination + CSV (F1)", () => {
       ip: "203.0.113.7",
       at: 2_000,
     });
+    // One formula-injection row: must export as text, never as a live formula.
+    await h.orgStore.audit({
+      orgId: owner.orgId,
+      actorId: "usr_x",
+      action: "=1+1",
+      ip: null,
+      at: 3_000,
+    });
 
     const res = await h.api(`/api/orgs/${owner.orgId}/audit?format=csv`, { token: owner.token });
     expect(res.status).toBe(200);
@@ -155,6 +163,8 @@ describe("GET /api/orgs/:id/audit — pagination + CSV (F1)", () => {
     // A plain row lands unquoted, with the empty target columns as
     // consecutive commas: action,target_type,target_id,ip.
     expect(csv).toMatch(/plain\.action,,,203\.0\.113\.7/);
+    // The formula cell is single-quote prefixed.
+    expect(csv).toContain("'=1+1");
     // CRLF line endings, per RFC 4180.
     expect(csv).toContain("\r\n");
   });

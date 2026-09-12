@@ -1,3 +1,4 @@
+import { assertSafeOutboundUrl } from "./outboundUrl.js";
 import type {
   CreateTaskInput,
   ExternalTask,
@@ -445,7 +446,23 @@ export function githubConnectionFactory(): (
     return new GithubProvider({
       token,
       repo,
-      ...(connection.config?.baseUrl ? { baseUrl: connection.config.baseUrl } : {}),
+      ...(connection.config?.baseUrl ? { baseUrl: resolveGithubBaseUrl(connection.config.baseUrl) } : {}),
     });
   };
+}
+
+/**
+ * Custom-URL gate (same policy as Linear): SSRF-safe always, disabled in
+ * production unless the operator opts in for GitHub Enterprise proxies.
+ */
+export function resolveGithubBaseUrl(candidate: string): string {
+  const checked = assertSafeOutboundUrl(candidate, "github config.baseUrl");
+  if (process.env["NODE_ENV"] === "production" && process.env["LUCENT_ALLOW_CUSTOM_INTEGRATION_URL"] !== "1") {
+    throw new GithubError(
+      "github config.baseUrl is disabled in production (set LUCENT_ALLOW_CUSTOM_INTEGRATION_URL=1 to allow self-hosted proxies)",
+      0,
+      false,
+    );
+  }
+  return checked.toString().replace(/\/$/, "");
 }

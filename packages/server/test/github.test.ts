@@ -267,6 +267,9 @@ describe("the error, retry, and factory arms", () => {
     expect(() => factory({ credentialRef: "GH_TEST_TOKEN" })).toThrow(/missing config\.repo/);
     expect(() => factory({ credentialRef: "GH_TEST_TOKEN", config: { repo: "../../etc" } })).toThrow(/owner\/repo/);
     expect(() => factory({ credentialRef: "GH_TEST_TOKEN", config: { repo: "acme" } })).toThrow(/owner\/repo/);
+    expect(() =>
+      factory({ credentialRef: "GH_TEST_TOKEN", config: { repo: "acme/app", baseUrl: "http://evil.example/api" } }),
+    ).toThrow(/only https/);
     delete process.env.GH_TEST_TOKEN;
   });
 

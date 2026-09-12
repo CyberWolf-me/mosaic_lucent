@@ -176,6 +176,19 @@ describe("InMemoryIntegrationStore", () => {
     expect(() =>
       normalizeConnection({ orgId: "o", provider: "fake", credentialRef: "   ", createdBy: "u" }),
     ).toThrow(/credentialRef/);
+    // Operator secrets are never valid references — an org owner must not be
+    // able to name the session key / SCIM / Stripe / database env vars.
+    for (const ref of [
+      "LUCENT_SESSION_SECRET",
+      "lucent-scim-token",
+      "LUCENT_STRIPE_SECRET_KEY",
+      "LUCENT_DATABASE_URL",
+      "my-private-key",
+    ]) {
+      expect(() =>
+        normalizeConnection({ orgId: "o", provider: "fake", credentialRef: ref, createdBy: "u" }),
+      ).toThrow(/operator secrets/);
+    }
     // The known set is the D4/D8 vocabulary.
     expect(INTEGRATION_PROVIDERS).toContain("fake");
     expect(INTEGRATION_PROVIDERS).toContain("linear");
@@ -184,12 +197,12 @@ describe("InMemoryIntegrationStore", () => {
   it("the admin view fingerprints the reference, never echoes it in full", async () => {
     const store = new InMemoryIntegrationStore();
     const c = await store.putConnection(
-      { orgId: "org1", provider: "fake", credentialRef: "LUCENT_VERY_LONG_SECRET_REFERENCE_NAME", createdBy: "u1" },
+      { orgId: "org1", provider: "fake", credentialRef: "LUCENT_VERY_LONG_REFERENCE_NAME_FOR_ADMIN", createdBy: "u1" },
       NOW,
     );
     const view = connectionView(c);
-    expect(view.credentialRef).toBe("LUCE…(38 chars)");
-    expect(JSON.stringify(view)).not.toContain("LUCENT_VERY_LONG_SECRET_REFERENCE_NAME");
+    expect(view.credentialRef).toBe("LUCE…(41 chars)");
+    expect(JSON.stringify(view)).not.toContain("LUCENT_VERY_LONG_REFERENCE_NAME_FOR_ADMIN");
     expect(view.status).toBe("active");
   });
 });

@@ -39,7 +39,7 @@ import type { RegisterRoutes } from "./context.js";
  * same permission across surfaces.
  */
 export const registerBoardOpsRoutes: RegisterRoutes = (router, s) => {
-  const { boardStore, readBody, requireUser, requireBoardRole, send, requestOrigin, orgStore } = s;
+  const { boardStore, readBody, requireUser, requireBoardRole, send, requestOrigin, orgStore, meter } = s;
 
   router.post("/api/boards/:id/ops", async (ctx) => {
     const { req, res } = ctx;
@@ -48,6 +48,7 @@ export const registerBoardOpsRoutes: RegisterRoutes = (router, s) => {
     // comment in createApp's `requireCsrf` explicitly anticipates.
     const user = await requireUser(req, res);
     if (!user) return;
+    if (!meter(req, res, "/api/boards/:id/ops")) return;
     const boardId = ctx.param("id");
     const guard = await requireBoardRole(req, res, boardId, "editor", "/api/boards/:id/ops", user);
     if (!guard.ok) return;

@@ -279,4 +279,41 @@ describe("asset gateway routes", () => {
     const res = await fetch(`${h.base}/api/assets`);
     expect(res.status).toBe(401);
   });
+
+  it("refuses an upload naming an unknown or foreign board", async () => {
+    const owner = await h.signup("carol@example.com");
+    const bad = await h.request(owner.cookies, {
+      method: "POST",
+      path: "/api/assets",
+      body: PNG_1x1,
+      csrf: owner.csrf.headerValue,
+      extraHeaders: { "x-lucent-board-id": "board_does_not_exist" },
+    });
+    // Unknown board ids are not enumerable: the same 404 as a missing asset.
+    expect(bad.status).toBe(404);
+    expect(bad.body.error).toBe("board not found");
+  });
+
+  it("requires editor (not viewer) for uploads — quota-burning writes", async () => {
+    const { registerAssetRoutes } = await import("../src/routes/assets.js");
+    const seenRoles: string[] = [];
+    const handle = registerAssetRoutes({
+      assetService: {} as never,
+      requireUser: async () => ({ id: "u1" }),
+      membershipsFor: async () => [{ orgId: "org1", role: "viewer" }],
+      requireOrgRole: async (_req, res, _orgId, required, _route) => {
+        seenRoles.push(String(required));
+        return { ok: false };
+      },
+      requireCsrf: () => true,
+      send: () => {},
+      readRawBody: async () => Buffer.alloc(0),
+    });
+    const req = { method: "POST", url: "/api/assets", headers: {} } as never;
+    const res = {} as never;
+    await handle(req, res);
+    // The upload floor must be editor, matching DELETE — a viewer must not
+    // be able to burn the org's storage quota.
+    expect(seenRoles).toEqual(["editor"]);
+  });
 });

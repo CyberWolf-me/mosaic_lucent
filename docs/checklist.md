@@ -14,7 +14,10 @@
 - [x] Pan
 - [x] Zoom in/out
 - [x] Zoom-to-fit
-- [x] Smooth canvas performance
+- [~] Smooth canvas performance — smooth on typical boards; viewport culling
+  kicks in at ≥300 objects (`web/src/board/culling.ts`), but there is no
+  virtualization budget test or large-board fixture, so large-board
+  smoothness is unclaimed (see "Large boards remain usable" below)
 - [x] Minimap — labelled "Overview", dismissible; no viewport rect / click-to-pan yet
 - [x] Grid/dot background — dots / lines / off, all applied
 - [x] Multi-select

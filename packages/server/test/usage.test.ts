@@ -141,8 +141,8 @@ describe("limitsFromEnv", () => {
 describe("telemetry", () => {
   it("counts requests and totals operations emitted", () => {
     const t = new Telemetry();
-    t.record({ kind: "generate", ms: 100, provider: "mock", operations: 3 });
-    t.record({ kind: "generate", ms: 200, provider: "mock", operations: 2 });
+    t.record({ kind: "generate", ms: 100, provider: "mock", operations: 3, outcome: "success", repaired: false });
+    t.record({ kind: "generate", ms: 200, provider: "mock", operations: 2, outcome: "success", repaired: false });
     t.record({ kind: "image", ms: 50, provider: "mock-image" });
     const snap = t.snapshot();
     expect(snap.requests).toEqual({ generate: 2, image: 1, ask: 0, aiPropose: 0 });
@@ -152,7 +152,7 @@ describe("telemetry", () => {
   it("reports latency percentiles", () => {
     const t = new Telemetry();
     for (const ms of [10, 20, 30, 40, 100]) {
-      t.record({ kind: "generate", ms, provider: "mock", operations: 1 });
+      t.record({ kind: "generate", ms, provider: "mock", operations: 1, outcome: "success", repaired: false });
     }
     const snap = t.snapshot();
     expect(snap.latencyMs.generateMax).toBe(100);
@@ -222,7 +222,7 @@ describe("telemetry", () => {
   it("forwards events to an optional external sink", () => {
     const seen: string[] = [];
     const t = new Telemetry((e) => seen.push(e.kind));
-    t.record({ kind: "generate", ms: 1, provider: "mock", operations: 0 });
+    t.record({ kind: "generate", ms: 1, provider: "mock", operations: 0, outcome: "success", repaired: false });
     t.record({ kind: "refused", route: "/x", reason: "rate" });
     expect(seen).toEqual(["generate", "refused"]);
   });

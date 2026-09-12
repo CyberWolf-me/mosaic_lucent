@@ -200,15 +200,16 @@ export function verifySamlResponse(
 // ---------- canonicalization (exc-c14n, the subset SAML uses) ----------
 
 /**
- * Canonical XML (exclusive) as `xmldom` renders it. @xmldom/xmldom's
- * XMLSerializer already emits the properties exc-c14n requires for SAML
- * payloads — no comments, attribute order stable by insertion, namespace
- * declarations on the owning element, empty elements as start/end pairs.
- * The one property it does not guarantee is whitespace inside the start tag,
- * and SAML's `parseFromString` path keeps it deterministic.
- *
- * This function is the seam ADR 0013 names: swapping in a dedicated c14n
- * library means changing this one function, nothing else.
+ * Canonical XML approximation for the SAML subset this SP verifies.
+ * LIMITATION (disclosed, not hidden): this is `xmldom`'s XMLSerializer, not
+ * full exclusive c14n — attribute sorting and namespace-inheritance edge
+ * cases are not normalized. In practice IdPs tested against this SP emit
+ * already-canonical payloads (no comments, stable attribute order,
+ * namespaces on the owning element), so verification converges; a strict
+ * IdP emitting non-canonical attribute order may fail closed with a digest
+ * mismatch rather than verify incorrectly. Fail-closed is the safe
+ * direction. Swapping in a dedicated c14n library means changing this one
+ * function (the seam ADR 0013 names), nothing else.
  */
 export function canonicalize(node: DomElement): string {
   // Clone so the serializer never mutates the parsed document's relationships.
@@ -341,20 +342,24 @@ function hash(xml: string, algorithm: string): Buffer {
   return createHash("sha256").update(xml, "utf8").digest();
 }
 
-function verifyWithAlgorithm(
+export function verifyWithAlgorithm(
   algorithm: string,
   xml: string,
   signatureB64: string,
   certPem: string,
 ): boolean {
   const lower = algorithm.toLowerCase();
-  const rsaAlgo = lower.includes("sha256")
-    ? "RSA-SHA256"
+  // Strict allowlist: an unknown SignatureMethod refuses rather than falling
+  // back to RSA-SHA256 — a fallback would let an attacker downgrade the
+  // algorithm field and still verify under a weaker assumption.
+  const rsaAlgo = lower.includes("sha512")
+    ? "RSA-SHA512"
     : lower.includes("sha384")
       ? "RSA-SHA384"
-      : lower.includes("sha512")
-        ? "RSA-SHA512"
-        : "RSA-SHA256";
+      : lower.includes("sha256")
+        ? "RSA-SHA256"
+        : null;
+  if (rsaAlgo === null) return false;
   try {
     return createVerify(rsaAlgo).update(xml, "utf8").verify(certPem, signatureB64, "base64");
   } catch {

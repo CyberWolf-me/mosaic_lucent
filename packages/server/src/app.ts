@@ -381,15 +381,18 @@ function formatDay(today: Date, deltaDays: number): string {
 }
 
 /**
- * One CSV cell, escaped per RFC 4180: quote when the value carries a comma,
- * a quote or any newline, doubling embedded quotes. Unquoted cells are the
- * readable default — every field the audit emits is either a plain id, an
- * epoch number or an email, and a CSV of nothing-but-quotes is a CSV nobody
- * reads. The escaping covers the hostile case (an action string with a
- * comma) rather than assuming it cannot happen.
+ * One CSV cell, escaped per RFC 4180 plus OWASP formula-injection defense:
+ * quote when the value carries a comma, a quote or any newline (doubling
+ * embedded quotes), and prefix a single quote when the value starts with a
+ * formula trigger (`= + - @ | %`, after leading spaces/tabs) so Excel/Sheets
+ * treat `=1+1` board content as text, never as a live formula. Unquoted cells
+ * stay the readable default — every field the audit emits is either a plain
+ * id, an epoch number or an email, and a CSV of nothing-but-quotes is a CSV
+ * nobody reads.
  */
-function csvCell(value: string | number): string {
-  const s = String(value);
+export function csvCell(value: string | number): string {
+  let s = String(value);
+  if (/^[ \t]*[=+\-@|%]/.test(s)) s = `'${s}`;
   if (/[",\r\n]/.test(s)) return `"${s.replaceAll('"', '""')}"`;
   return s;
 }
@@ -1708,6 +1711,8 @@ export function createApp(deps: AppDeps): App {
         requireCsrf,
         send,
         readRawBody,
+        boardOrgFor: async (boardId: string) => (await boardStore.get(boardId))?.orgId,
+        meter,
         ...(logger ? { logger } : {}),
         warnMemoryStorage: deps.assetService.describe().blobs.startsWith("memory"),
       })

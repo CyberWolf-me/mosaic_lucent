@@ -1,4 +1,5 @@
 import type { ExecutionStatus } from "@lucent/core";
+import { assertSafeOutboundUrl } from "./outboundUrl.js";
 import type {
   CreateTaskInput,
   ExternalTask,
@@ -421,8 +422,30 @@ export function linearConnectionFactory(): (
       apiKey,
       teamId,
       // A connection-scoped wire override for testing and self-hosted
-      // proxies; unset means the public api.linear.app endpoint.
-      ...(connection.config?.baseUrl ? { baseUrl: connection.config.baseUrl } : {}),
+      // proxies; unset means the public api.linear.app endpoint. Validated
+      // SSRF-safe at connect time and refused in production unless the
+      // operator explicitly opts in — otherwise any org owner could point
+      // the server (carrying the credential) at an attacker host.
+      ...(connection.config?.baseUrl
+        ? { baseUrl: resolveCustomBaseUrl(connection.config.baseUrl, "linear") }
+        : {}),
     });
   };
+}
+
+/**
+ * Shared custom-URL gate: SSRF-safe always, production-opt-in only.
+ * Tests construct providers directly with any baseUrl; only the
+ * connection-config path (owner-controlled) passes through here.
+ */
+export function resolveCustomBaseUrl(candidate: string, what: string): string {
+  const checked = assertSafeOutboundUrl(candidate, `${what} config.baseUrl`);
+  if (process.env["NODE_ENV"] === "production" && process.env["LUCENT_ALLOW_CUSTOM_INTEGRATION_URL"] !== "1") {
+    throw new LinearError(
+      `${what} config.baseUrl is disabled in production (set LUCENT_ALLOW_CUSTOM_INTEGRATION_URL=1 to allow self-hosted proxies)`,
+      0,
+      false,
+    );
+  }
+  return checked.toString().replace(/\/$/, "");
 }

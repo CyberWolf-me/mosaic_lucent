@@ -23,7 +23,7 @@ import type {
   OrgSummary,
 } from "../billing.js";
 import { buildSupportReport, formatSupportReport } from "../support.js";
-import { useWorkspace } from "../workspace.js";
+import { useWorkspaceOptional } from "../workspace.js";
 
 /** Profile menu, preferences modal, and shape toolbar. Ported from settings.jsx. */
 
@@ -960,21 +960,25 @@ export function SettingsModal({
  */
 function SupportPane() {
   // The workspace read is inside the pane, not the modal: the modal mounts
-  // before the provider exists on some entry paths, and a pane that reads
-  // context it might not have is a crash, not a settings page.
-  const ws = useWorkspace();
+  // outside WorkspaceProvider on some entry paths (the auth screen's ⌘,,
+  // an org page), and a pane that reads context it might not have is a
+  // crash, not a settings page. useWorkspaceOptional returns null there —
+  // a diagnostics report without the board section is still copyable
+  // support material, which beats a blank settings page. Inside the
+  // provider (the normal path) the board section reports as always.
+  const ws = useWorkspaceOptional();
   const [copied, setCopied] = useState(false);
 
   const report = buildSupportReport({
-    nodes: Object.keys(ws.workspace.nodes).length,
-    edges: Object.keys(ws.workspace.edges).length,
-    shapes: Object.keys(ws.workspace.shapes).length,
-    comments: Object.keys(ws.workspace.comments).length,
-    boardId: ws.boardId,
-    syncStatus: ws.syncStatus,
-    syncRole: ws.syncRole,
-    busy: ws.busy,
-    streamChars: ws.streamChars,
+    nodes: Object.keys(ws?.workspace.nodes ?? {}).length,
+    edges: Object.keys(ws?.workspace.edges ?? {}).length,
+    shapes: Object.keys(ws?.workspace.shapes ?? {}).length,
+    comments: Object.keys(ws?.workspace.comments ?? {}).length,
+    boardId: ws?.boardId ?? null,
+    syncStatus: ws?.syncStatus ?? "offline",
+    syncRole: ws?.syncRole ?? null,
+    busy: ws?.busy ?? false,
+    streamChars: ws?.streamChars ?? 0,
     provider: "configured-at-runtime",
   });
   const text = formatSupportReport(report);

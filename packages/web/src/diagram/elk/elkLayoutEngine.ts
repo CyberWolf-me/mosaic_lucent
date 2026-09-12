@@ -279,6 +279,11 @@ const ELK_ELIGIBLE_KINDS: ReadonlySet<DiagramKind> = new Set<DiagramKind>([
   "flowchart",
   "architecture",
   "journey",
+  // The service's ELK_KINDS includes bpmn (a bpmn board is ELK-eligible,
+  // pinned by the bpmn lens tests); the region seam must agree or a bpmn
+  // region would silently fall to the built-in engine inside an otherwise
+  // ELK board.
+  "bpmn",
 ]);
 
 /** The Phase 2 candidate (ADR 0039: production for the flat graph families). */

@@ -269,6 +269,24 @@ describe("the error, retry, and timeout arms", () => {
       expect(() => factory({ credentialRef: "LUCENT_LINEAR_TEST_KEY" })).toThrow(/config.teamId/);
     }
   });
+
+  it("the factory refuses unsafe or private custom baseUrls", async () => {
+    const { linearConnectionFactory } = await import("../src/integrations/linear.js");
+    const factory = linearConnectionFactory();
+    const saved = process.env.LUCENT_LINEAR_TEST_KEY;
+    process.env.LUCENT_LINEAR_TEST_KEY = "lin_test_key";
+    try {
+      expect(() =>
+        factory({ credentialRef: "LUCENT_LINEAR_TEST_KEY", config: { teamId: "t", baseUrl: "http://evil.example/webhook" } }),
+      ).toThrow(/only https/);
+      expect(() =>
+        factory({ credentialRef: "LUCENT_LINEAR_TEST_KEY", config: { teamId: "t", baseUrl: "https://192.168.0.9/hook" } }),
+      ).toThrow(/private\/loopback/);
+    } finally {
+      if (saved === undefined) delete process.env.LUCENT_LINEAR_TEST_KEY;
+      else process.env.LUCENT_LINEAR_TEST_KEY = saved;
+    }
+  });
 });
 
 describe("updateTask / getTask", () => {

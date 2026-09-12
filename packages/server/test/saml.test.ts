@@ -13,7 +13,7 @@ import { Limiter } from "../src/limiter.js";
 import { InMemoryTicketStore } from "../src/realtimeTicket.js";
 import { readConfig } from "../src/config.js";
 import { InMemorySsoStore, domainOfEmail, normalizeDomain } from "../src/ssoStore.js";
-import { canonicalize, verifySamlResponse } from "../src/saml.js";
+import { canonicalize, verifySamlResponse, verifyWithAlgorithm } from "../src/saml.js";
 
 /**
  * The SAML vertical (F1 / ADR 0013) proven against a mock IdP the test itself
@@ -299,6 +299,21 @@ describe("verifySamlResponse against the mock IdP", () => {
     // way, no identity is returned.
     if (!result.ok) expect(result.error).toMatch(/email/);
     else if (result.ok) expect(result.identity.nameId.includes("@")).toBe(true);
+  });
+
+  it("refuses an unknown SignatureMethod instead of falling back to RSA-SHA256", () => {
+    // Sign canonical bytes with the real key, then ask verification under an
+    // unknown algorithm URI. The old fallback would have verified under
+    // SHA256 anyway (algorithm downgrade); the strict allowlist refuses.
+    const xml = "<SignedInfo>test</SignedInfo>";
+    const signer = createSign("RSA-SHA256");
+    signer.update(xml, "utf8");
+    const sig = signer.sign(privateKey, "base64");
+    expect(
+      verifyWithAlgorithm("http://www.w3.org/2001/04/xmldsig-more#rsa-sha256", xml, sig, CERT_PEM),
+    ).toBe(true);
+    expect(verifyWithAlgorithm("http://example.test/unknown-algo", xml, sig, CERT_PEM)).toBe(false);
+    expect(verifyWithAlgorithm("", xml, sig, CERT_PEM)).toBe(false);
   });
 });
 

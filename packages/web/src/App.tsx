@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { resolveLocale, t } from "@lucent/i18n";
 import { ThemeRoot } from "./settings.js";
 import { WorkspaceProvider, useWorkspace, type CanvasLens, type View } from "./workspace.js";
 import { ToastProvider } from "./ui/Toast.js";
@@ -173,6 +174,7 @@ export function App() {
   const [settingsSection, setSettingsSection] = useState("appearance");
   /** Bumped after a sign-in / sign-up so the session check runs again. */
   const [authTick, setAuthTick] = useState(0);
+  const locale = useMemo(() => resolveLocale(navigator.language), []);
 
   const route = useRoute();
   const auth = useAuthStatus(authTick);
@@ -270,9 +272,14 @@ export function App() {
       return (
         <>
           <ThemeRoot />
+          <a href="#main-content" className="skip-link">
+            {t("a11y.skip.link", locale)}
+          </a>
           <ToastProvider>
             <WorkspaceProvider>
-              <Router onOpenSettings={openSettings} />
+              <main id="main-content">
+                <Router onOpenSettings={openSettings} />
+              </main>
             </WorkspaceProvider>
           </ToastProvider>
           {settingsOpen && (

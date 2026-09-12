@@ -82,6 +82,14 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
   const [recording, setRecording] = useState(false);
   const [startedAt, setStartedAt] = useState<number | null>(null);
   const [turns, setTurns] = useState<MeetingTurn[]>([]);
+  // Mirror of `turns` for the STT callbacks and the checkpoint helper: both
+  // are armed once and must read the live list, not the list of the render
+  // that created them.
+  const turnsRef = useRef<MeetingTurn[]>([]);
+  const appendTurn = (t: MeetingTurn): void => {
+    turnsRef.current = [...turnsRef.current, t];
+    setTurns(turnsRef.current);
+  };
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState<MeetingTranscript[]>([]);
   const [selectedMeeting, setSelectedMeeting] = useState<MeetingTranscript | null>(null);
@@ -104,6 +112,44 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
   const setLiveMeetingTurnCount = (n: number): void => {
     liveMeetingTurnCountRef.current = n;
   };
+  // P1-MT-001: capture durability independent of extraction. Turns appended to
+  // the server transcript the moment they are captured (not only when an
+  // extraction checkpoint rides along), and stopRecording flushes what a
+  // still-in-flight append hadn't reached BEFORE the end route makes the
+  // transcript immutable. `persistedCount` counts the local turns the server
+  // definitely holds; an append in flight (or that failed) leaves the gap that
+  // the flush closes.
+  const persistedCountRef = useRef(0);
+  const appendInFlightRef = useRef<Promise<MeetingTranscript | null> | null>(null);
+  const checkpointTurns = async (): Promise<void> => {
+    const board = boardId;
+    const meetingId = liveMeetingId;
+    if (!board || !meetingId) return;
+    // Serialize appends: a checkpoint behind an in-flight one would double-send
+    // the same span when both read the same persistedCount.
+    const previous = appendInFlightRef.current;
+    if (previous) await previous.catch(() => {});
+    if (persistedCountRef.current >= turnsRef.current.length) return;
+    const batch = turnsRef.current.slice(persistedCountRef.current);
+    const from = persistedCountRef.current;
+    appendInFlightRef.current = appendMeetingTurns(board, meetingId, batch)
+      .then((stored) => {
+        if (stored) {
+          // The server holds the full list; trust its length over our slice
+          // arithmetic so a dedup/normalization on the server still converges.
+          persistedCountRef.current = Math.max(from + batch.length, stored.turns.length);
+          liveMeetingTurnCountRef.current = stored.turns.length;
+        }
+        return stored;
+      })
+      .finally(() => {
+        appendInFlightRef.current = null;
+      });
+    await appendInFlightRef.current;
+  };
+  // The live transcript id lives in state (renders) and in a ref (the capture
+  // callbacks below read it without re-arming the STT provider).
+  const liveMeetingIdRef = useRef<string | null>(null);
   // Topic breaks (UX-5): separator indices into the displayed transcript.
   // Render-local — the saved transcript is never rewritten — and spliced
   // into extraction prompts as "── topic break ──" lines.
@@ -186,21 +232,22 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
         const t = text.trim();
         if (!t) return;
         lastFinalAtRef.current = Date.now();
-        setTurns((prev) => [
-          ...prev,
-          {
-            // The provider tells us who spoke when it can (LiveKit segments
-            // carry the room identity; the browser provider has no concept
-            // and "You" is the honest fallback rather than a fake guess).
-            speaker: meta?.speaker ?? (provider.id === "livekit" ? "Speaker" : "You"),
-            at: Date.now(),
-            text: t,
-            kind: classifyTurn(t),
-          },
-        ]);
+        appendTurn({
+          // The provider tells us who spoke when it can (LiveKit segments
+          // carry the room identity; the browser provider has no concept
+          // and "You" is the honest fallback rather than a fake guess).
+          speaker: meta?.speaker ?? (provider.id === "livekit" ? "Speaker" : "You"),
+          at: Date.now(),
+          text: t,
+          kind: classifyTurn(t),
+        });
         // Queue the turn for the live extraction loop — the trigger effect
         // decides when the batch is worth a model call.
         setExtractQueued((q) => q + 1);
+        // P1-MT-001: checkpoint the CAPTURED turn immediately — durability of
+        // what was said must not depend on the extraction loop deciding a
+        // batch is worth a model call, or on an extraction succeeding at all.
+        void checkpointTurns();
       },
       onStatus: (s) => {
         if (s === "transcribing") notify("Transcribing on device…");
@@ -216,23 +263,28 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
       setStartedAt(Date.now());
       // A fresh capture starts a fresh transcript; the saved list keeps the
       // prior meetings.
+      turnsRef.current = [];
       setTurns([]);
+      persistedCountRef.current = 0;
       setExtractQueued(0);
       setLastExtractStatus(null);
       lastFinalAtRef.current = null;
       lastExtractAtRef.current = null;
       setRecording(true);
-      // Open the server-side transcript NOW with an empty turn list: the
-      // extraction loop appends checkpoints to it, so everything said during
-      // the meeting is durable even before it ends. No board / no store →
-      // capture still works locally; checkpoints are just skipped.
+      // Open the server-side transcript NOW with an empty turn list: every
+      // captured final checkpoints into it the moment it lands, so everything
+      // said during the meeting is durable even before it ends. No board / no
+      // store → capture still works locally; checkpoints are just skipped.
       if (boardId) {
         void (async () => {
           const stored = await saveMeeting(boardId, {
             turns: [],
             startedAt: Date.now(),
           });
-          if (stored) setLiveMeetingId(stored.id);
+          if (stored) {
+            liveMeetingIdRef.current = stored.id;
+            setLiveMeetingId(stored.id);
+          }
         })();
       }
     }
@@ -242,43 +294,51 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
     voiceRef.current?.stop();
     voiceRef.current = null;
     setRecording(false);
-    // End the running transcript (Stage C3): the extraction checkpoints
-    // already hold everything said; the end route closes the record for
-    // real — before C3 the stop just abandoned the id and the store said
-    // "in progress" forever. Ending also blocks further appends (minutes
-    // are immutable once a meeting ends); idempotent, so a retry is a read.
-    if (liveMeetingId && boardId) {
-      const ending = liveMeetingId;
+    // End the running transcript (Stage C3 + P1-MT-001): flush every captured
+    // turn the checkpoint pipeline hasn't confirmed BEFORE the end route makes
+    // the record immutable — the end used to race the last in-flight append,
+    // and an ended transcript refuses appends, so the meeting's final words
+    // could vanish. Idempotent, so a retry is a read.
+    const ending = liveMeetingIdRef.current;
+    const captured = turnsRef.current;
+    const unflushed = captured.length - persistedCountRef.current;
+    if (ending && boardId) {
       void (async () => {
+        await checkpointTurns().catch(() => {});
         const ended = await endMeeting(boardId, ending);
         if (ended) {
           // The saved list updates in place: the record it already holds
           // gained its boundary.
           setSaved((prev) => prev.map((m) => (m.id === ended.id ? ended : m)));
         }
+        persistedCountRef.current = 0;
+        liveMeetingIdRef.current = null;
       })();
-    }
-    setLiveMeetingId(null);
-    setLiveMeetingTurnCount(0);
-    // Fallback save when capture ran without the server transcript (local
-    // board, or the open call failed): persist what was said in one piece.
-    if (turns.length > 0 && boardId && !liveMeetingId) {
+    } else if (captured.length > 0 && boardId) {
+      // Fallback save when capture ran without the server transcript (local
+      // board, or the open call failed): persist what was said in one piece.
       void (async () => {
         const stored = await saveMeeting(boardId, {
-          turns,
+          turns: captured,
           startedAt: startedAt ?? Date.now(),
           endedAt: Date.now(),
         });
         if (stored) {
           setSaved((prev) => [stored, ...prev]);
-          setTurns([]);
-          setStartedAt(null);
           notify("Meeting saved.");
         } else {
           notify("Couldn't save the meeting — use Save meeting to retry.");
         }
       })();
     }
+    if (unflushed > 0) {
+      // The flush above runs async; if it fails (offline, server down) the
+      // turns are still on screen and Save meeting can retry. Say so rather
+      // than claiming an all-clear the transcript may not have.
+      notify(`Flushing ${unflushed} captured turn${unflushed === 1 ? "" : "s"} to the transcript…`);
+    }
+    setLiveMeetingId(null);
+    setLiveMeetingTurnCount(0);
   };
 
   // ---- The live extraction loop (M2) ----------------------------------------
@@ -303,21 +363,23 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
     extractInFlight.current = true;
     const batch = pendingTurns;
     const prompt = differentialPrompt(batch);
+    const batchStart = Math.max(0, turns.length - extractQueued);
     setExtractQueued((q) => Math.max(0, q - batch.length));
     lastExtractAtRef.current = Date.now();
     try {
-      // send() runs the full pipeline. For an additive batch the ops apply
-      // (silently, in the canvas, per the meeting gate); for anything else
-      // the canvas opens the review panel — either way the user sees the
-      // outcome on the board, and the view never blocks on it. The
-      // provenance attachment stamps whatever this extract creates with
+      // send() runs the full pipeline and now reports its terminal state
+      // (P1-MT-002): applied / proposed / answered / rejected / failed /
+      // busy / refused / cancelled. The heartbeat below names what actually
+      // happened instead of asserting "Extracted" for every outcome — and a
+      // busy/failed batch is RE-QUEUED so its turns reach the board on the
+      // next trigger rather than vanishing behind a success message.
+      // The provenance attachment stamps whatever this extract creates with
       // the meeting id, the turns' own words, AND the stable index range
       // + per-turn kinds — the range survives transcript normalization and
       // is what a future board→transcript→object link keys on.
-      const batchStart = Math.max(0, turns.length - extractQueued);
-      await send(prompt, undefined, {
+      const result = await send(prompt, undefined, {
         provenance: {
-          meetingId: liveMeetingId ?? "live-session",
+          meetingId: liveMeetingIdRef.current ?? "live-session",
           turns: batch.map((t) => t.text),
           turnRange: [batchStart, batchStart + batch.length - 1],
           turnKinds: batch
@@ -325,18 +387,47 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
             .filter((k): k is NonNullable<MeetingTurn["kind"]> => Boolean(k)),
         },
       });
-      setLastExtractStatus(
-        batch.length === 1 ? `Extracted 1 new turn` : `Extracted ${batch.length} new turns`,
-      );
-      // Checkpoint: append the extracted turns to the running transcript so
-      // the server holds everything said so far even before the meeting ends.
-      if (boardId && liveMeetingId) {
-        void appendMeetingTurns(boardId, liveMeetingId, batch).then((stored) => {
-          if (stored) setLiveMeetingTurnCount(stored.turns.length);
-        });
+      const n = batch.length;
+      switch (result.outcome) {
+        case "applied":
+          setLastExtractStatus(
+            `Applied ${n === 1 ? "1 new turn" : `${n} new turns`} to the board`,
+          );
+          break;
+        case "proposed":
+          setLastExtractStatus(
+            `Extracted ${n === 1 ? "1 turn" : `${n} turns`} — review the ${result.ops} proposed changes on the canvas`,
+          );
+          break;
+        case "answered":
+          setLastExtractStatus(`Extracted ${n === 1 ? "1 turn" : `${n} turns`} — no board changes were needed`);
+          break;
+        case "rejected":
+          setLastExtractStatus(`Extraction refused — ${n} turn${n === 1 ? "" : "s"} left in the transcript, nothing was changed`);
+          break;
+        case "busy":
+          // Another generation holds the pipeline; the turns stay queued.
+          setExtractQueued((q) => q + n);
+          setLastExtractStatus(`Extraction waiting — another request is running`);
+          break;
+        case "refused":
+          setLastExtractStatus(`Extraction refused — this board is read-only for you`);
+          break;
+        case "failed":
+          // Transport/provider failure: retry on the next trigger arm rather
+          // than losing the batch behind a "handled" status.
+          setExtractQueued((q) => q + n);
+          setLastExtractStatus(`Extraction failed: ${result.error} — will retry`);
+          break;
+        case "cancelled":
+          setLastExtractStatus(`Extraction cancelled — nothing was applied`);
+          break;
       }
     } catch (err) {
-      setLastExtractStatus(`Extraction failed: ${(err as Error).message}`);
+      // send() itself catches and reports into chat; this arm guards a
+      // failure in OUR plumbing around it. Re-queue, same as a failed send.
+      setExtractQueued((q) => q + batch.length);
+      setLastExtractStatus(`Extraction failed: ${(err as Error).message} — will retry`);
     } finally {
       extractInFlight.current = false;
     }

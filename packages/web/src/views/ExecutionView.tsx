@@ -3,6 +3,7 @@ import type { Workspace } from "@lucent/core";
 import { useWorkspace } from "../workspace.js";
 import type { WorkspaceState } from "../workspace.js";
 import { Ico } from "../ui/icons.js";
+import { TopBar, LeftRail } from "../ui/Chrome.js";
 import { executionProjection, planDerivedActionIds } from "../execution.js";
 import { IntegrationPanel } from "./IntegrationPanel.js";
 import { fetchIntegrationLinks, fetchOrgIntegrations, type IntegrationLink } from "../boards.js";
@@ -59,10 +60,11 @@ function writeSyncLedger(links: IntegrationLink[]): void {
  * projection decides, and the empty state teaches the loop ("Ask Lucent
  * to create the work, then track it here").
  */
-export function ExecutionView(_: { onOpenSettings?: (section?: string) => void }) {
-  const { workspace, onCitation } = useWorkspace() as unknown as {
+export function ExecutionView({ onOpenSettings }: { onOpenSettings: (section?: string) => void }) {
+  const { workspace, onCitation, projectName } = useWorkspace() as unknown as {
     workspace: Workspace;
     onCitation: WorkspaceState["onCitation"];
+    projectName: string;
   };
   const locale = useMemo(() => resolveLocale(navigator.language), []);
   // The whole dashboard is one pure projection of the workspace — derived
@@ -111,34 +113,52 @@ export function ExecutionView(_: { onOpenSettings?: (section?: string) => void }
 
   if (empty) {
     return (
-      <div
-        style={{
-          position: "absolute",
-          top: 76,
-          bottom: 30,
-          left: 76,
-          right: 30,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-        }}
-      >
+      <div style={{ position: "absolute", inset: 0 }}>
+        <div style={{ position: "absolute", inset: 0 }}>
+          <div className="canvas-grid" />
+          <div className="canvas-vignette" />
+        </div>
+        {/* The shared shell on the empty state too (P1-IA-001): the hint says
+            "ask Lucent to create the work", and the way back to the composer
+            must be one click, not a dead end. */}
+        <TopBar
+          crumbs={[
+            { label: "Personal" },
+            { label: projectName, view: "canvas" },
+            { label: "Execution", current: true },
+          ]}
+          onOpenSettings={onOpenSettings}
+        />
+        <LeftRail onOpenSettings={onOpenSettings} />
         <div
           style={{
-            background: "oklch(from var(--canvas-2) l c h / 0.75)",
-            border: "1px solid var(--stroke-1)",
-            borderRadius: 16,
-            padding: "36px 44px",
-            textAlign: "center",
-            maxWidth: 420,
+            position: "absolute",
+            top: 76,
+            bottom: 30,
+            left: 76,
+            right: 30,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
           }}
         >
-          <Ico.Gauge style={{ color: "var(--ink-3)" }} />
-          <div style={{ fontSize: 14, fontVariationSettings: "'wght' 550", marginTop: 12 }}>
-            {t("exec.empty.title", locale)}
-          </div>
-          <div className="mono" style={{ fontSize: 11, color: "var(--ink-3)", marginTop: 6 }}>
-            {t("exec.empty.hint", locale)}
+          <div
+            style={{
+              background: "oklch(from var(--canvas-2) l c h / 0.75)",
+              border: "1px solid var(--stroke-1)",
+              borderRadius: 16,
+              padding: "36px 44px",
+              textAlign: "center",
+              maxWidth: 420,
+            }}
+          >
+            <Ico.Gauge style={{ color: "var(--ink-3)" }} />
+            <div style={{ fontSize: 14, fontVariationSettings: "'wght' 550", marginTop: 12 }}>
+              {t("exec.empty.title", locale)}
+            </div>
+            <div className="mono" style={{ fontSize: 11, color: "var(--ink-3)", marginTop: 6 }}>
+              {t("exec.empty.hint", locale)}
+            </div>
           </div>
         </div>
       </div>
@@ -159,19 +179,34 @@ export function ExecutionView(_: { onOpenSettings?: (section?: string) => void }
   ];
 
   return (
-    <div
-      style={{
-        position: "absolute",
-        top: 76,
-        bottom: 30,
-        left: 76,
-        right: 30,
-        display: "flex",
-        flexDirection: "column",
-        gap: 18,
-        overflow: "auto",
-      }}
-    >
+    <div style={{ position: "absolute", inset: 0 }}>
+      <div style={{ position: "absolute", inset: 0 }}>
+        <div className="canvas-grid" />
+        <div className="canvas-vignette" />
+      </div>
+      {/* The shared shell, like every other full surface (P1-IA-001). */}
+      <TopBar
+        crumbs={[
+          { label: "Personal" },
+          { label: projectName, view: "canvas" },
+          { label: "Execution", current: true },
+        ]}
+        onOpenSettings={onOpenSettings}
+      />
+      <LeftRail onOpenSettings={onOpenSettings} />
+      <div
+        style={{
+          position: "absolute",
+          top: 76,
+          bottom: 30,
+          left: 76,
+          right: 30,
+          display: "flex",
+          flexDirection: "column",
+          gap: 18,
+          overflow: "auto",
+        }}
+      >
       {/* — The rollup header: percent + the progress bar + the counts — */}
       <div
         style={{
@@ -481,6 +516,7 @@ export function ExecutionView(_: { onOpenSettings?: (section?: string) => void }
           }}
         />
       )}
+      </div>
     </div>
   );
 }

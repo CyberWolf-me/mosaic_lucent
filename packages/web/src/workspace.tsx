@@ -33,6 +33,9 @@ import {
   type Workspace,
 } from "@lucent/core";
 import { streamGenerate, PlanRefusalError } from "./api.js";
+import { layoutBoard, relayoutRegionScoped } from "./diagram/layoutService.js";
+import { WORKER_ELK_ENGINE } from "./diagram/elk/index.js";
+import { pushRegionNeighbors } from "./diagram/regionGrowth.js";
 import { classifyTurn } from "./meetings.js";
 import { BoardSync, type Peer } from "./boardSync.js";
 import {
@@ -172,6 +175,23 @@ export interface SendAttachments {
 /** UX-2: user-facing generation phases (stream chars are display-only detail). */
 export type GenPhase = "understanding" | "constructing" | "validating" | "applying";
 
+/**
+ * What a `send` actually did (P1-MT-002) — the honest terminal states the
+ * pipeline can reach. `applied`/`proposed` carry the op count so callers can
+ * say precisely what landed or awaits review; `failed` carries the message
+ * already shown in chat, for callers that report status elsewhere (the
+ * meeting view's extraction heartbeat).
+ */
+export type SendOutcome =
+  | { outcome: "applied"; ops: number }
+  | { outcome: "proposed"; ops: number }
+  | { outcome: "answered" }
+  | { outcome: "rejected" }
+  | { outcome: "failed"; error: string }
+  | { outcome: "busy" }
+  | { outcome: "refused" }
+  | { outcome: "cancelled" };
+
 export interface WorkspaceState {
   view: View;
   setView: (v: View) => void;
@@ -237,7 +257,18 @@ export interface WorkspaceState {
    */
   openBoard: (id: string) => Promise<boolean>;
 
-  send: (message: string, selection?: string[], attachments?: SendAttachments) => Promise<void>;
+  /**
+   * The outcome of a `send` — the contract callers need to report honestly
+   * (P1-MT-002): "Extracted N turns" used to print even when generation
+   * failed, was refused, or was skipped because another request was busy,
+   * because `send` returned void and swallowed its own failures. Every
+   * terminal state the pipeline can reach is named here.
+   */
+  send: (
+    message: string,
+    selection?: string[],
+    attachments?: SendAttachments,
+  ) => Promise<SendOutcome>;
   /**
    * Ask Lucent (Stage C1): the read direction of the AI pill's Build/Ask
    * split. The question goes to POST /api/boards/:id/ask over the shared
@@ -320,6 +351,13 @@ function laidOut(ws: Workspace): Workspace {
   return applyRoutes(applyLayout(ws, layout), routes);
 }
 
+/** What the synchronous pass decided — the async refinement's instruction. */
+interface LayoutScope {
+  kind: "region" | "board";
+  /** The region that re-flowed (kind: "region"). */
+  groupId?: string;
+}
+
 /**
  * The spatial-additivity commit path (M2): if every node this batch TOUCHES
  * (creates or edits) sits inside one group, re-layout just that group at its
@@ -331,47 +369,32 @@ function laidOut(ws: Workspace): Workspace {
  *
  * `touched` is the set of node ids the batch creates or modifies, derived by
  * the caller from the ops themselves.
+ *
+ * Doc 18 Phase 4: this is now PHASE 1 of the two-phase commit. The return
+ * carries the scope so the caller can run the async ELK refinement (phase 2)
+ * over exactly the same region — the refinement re-lays out only what this
+ * pass already decided to re-flow, so the spatial-additivity invariant holds
+ * for both engines.
  */
-function laidOutScoped(ws: Workspace, touched: ReadonlySet<string>): Workspace {
-  if (touched.size === 0) return laidOut(ws);
+function laidOutScoped(ws: Workspace, touched: ReadonlySet<string>): { ws: Workspace; scope: LayoutScope } {
+  const full = (): { ws: Workspace; scope: LayoutScope } => ({ ws: laidOut(ws), scope: { kind: "board" } });
+  if (touched.size === 0) return full();
   const groupIds = new Set<string>();
   for (const id of touched) {
     const g = ws.nodes[id]?.groupId ?? ws.groups[id]?.id;
-    if (!g) return laidOut(ws); // unscoped: a batch touching loose nodes relayouts all
+    if (!g) return full(); // unscoped: a batch touching loose nodes relayouts all
     groupIds.add(g);
   }
-  if (groupIds.size !== 1) return laidOut(ws); // crosses regions: global pass
+  if (groupIds.size !== 1) return full(); // crosses regions: global pass
   const groupId = [...groupIds][0];
-  if (!groupId) return laidOut(ws);
+  if (!groupId) return full();
   const regionResult = relayoutRegionWithRoutes(ws, groupId);
-  if (!regionResult) return laidOut(ws);
+  if (!regionResult) return full();
   let next = applyRoutes(applyLayout(ws, regionResult.layout), regionResult.routes);
   // Growth can extend the region into a right-hand neighbour; push only the
   // neighbours actually overlapped (never a global shuffle).
-  const shifts = separateRegions(next, groupId);
-  if (shifts) {
-    for (const [id, placed] of Object.entries(shifts)) {
-      const node = next.nodes[id];
-      if (node) next = { ...next, nodes: { ...next.nodes, [id]: { ...node, ...placed } } };
-    }
-    // Shifted regions' edge routes move with them — the corridor stays
-    // glued to its nodes. Every shift in one `separateRegions` pass is the
-    // SAME horizontal push (dx) for its whole region, so routes inside a
-    // shifted region shift by their nodes' dx, computed per edge from its
-    // own endpoints (not the loop's mutating `next`).
-    const shiftedRoutes: Record<string, Array<{ x: number; y: number }>> = {};
-    for (const [edgeId, edge] of Object.entries(ws.edges)) {
-      if (!edge.route) continue;
-      const srcShift = shifts[edge.source];
-      const tgtShift = shifts[edge.target];
-      if (!srcShift && !tgtShift) continue;
-      const dx = (srcShift ?? tgtShift)!.position.x - (ws.nodes[edge.source]?.position?.x ?? 0);
-      const dy = (srcShift ?? tgtShift)!.position.y - (ws.nodes[edge.source]?.position?.y ?? 0);
-      shiftedRoutes[edgeId] = edge.route.map((p) => ({ x: p.x + dx, y: p.y + dy }));
-    }
-    next = applyRoutes(next, shiftedRoutes);
-  }
-  return next;
+  next = pushRegionNeighbors(next, groupId);
+  return { ws: next, scope: { kind: "region", groupId } };
 }
 
 /** Node/group ids a batch creates or modifies — the "what did we touch" set. */
@@ -475,6 +498,13 @@ function stripInviteFromUrl(): void {
   const url = new URL(window.location.href);
   if (!url.searchParams.has("invite")) return;
   url.searchParams.delete("invite");
+  window.history.replaceState({}, "", url.toString());
+}
+
+function stripBoardFromUrl(): void {
+  const url = new URL(window.location.href);
+  if (!url.searchParams.has("board")) return;
+  url.searchParams.delete("board");
   window.history.replaceState({}, "", url.toString());
 }
 
@@ -586,6 +616,39 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
    */
   const serverProposalRef = useRef<{ boardId: string; id: string } | null>(null);
   const [tick, setTick] = useState(0); // force re-read of history undo/redo flags
+  /**
+   * Doc 18 Phase 4 — the two-phase layout, status half. Phase 1 is the
+   * synchronous built-in pass every commit already runs (instant, scoped,
+   * contract-identical to pre-Phase-4 behaviour). Phase 2 is the async ELK
+   * refinement (ADR 0039's hybrid selection) that follows a legitimate layout
+   * pass and re-lays out the same scope through the worker: better geometry
+   * on the flat graph families, off the main thread. `refining` while in
+   * flight; `degraded` when ELK and every fallback failed — phase 1's
+   * geometry is already on screen and valid, so this is a quality notice
+   * ("Layout couldn't be updated — retry?"), never a blank canvas (doc 18
+   * Phase 4 item 3).
+   */
+  const [layoutStatus, setLayoutStatus] = useState<
+    { phase: "idle" } | { phase: "refining" } | { phase: "degraded" }
+  >({ phase: "idle" });
+  /**
+   * The refinement's epoch: bumped whenever the board's semantic state moves
+   * under an in-flight refinement (a second send, an undo, a remote frame).
+   * The guard at swap-in time makes every landing check "was this result
+   * computed for the board that is still current?" — a stale result is
+   * dropped on the floor. Same pattern the streaming pill uses (genAbortRef)
+   * for the same reason: async work must never clobber newer sync state.
+   */
+  const layoutEpochRef = useRef(0);
+  /**
+   * What a refinement re-lays out: the whole board, or one region's members.
+   * The refinement NEVER runs its own scope decision — it executes the scope
+   * phase 1 already decided, so the spatial-additivity invariant (region out
+   * = 0) holds for both engines alike.
+   */
+  const layoutScopeRef = useRef<LayoutScope>({ kind: "board" });
+  /** The retry affordance: re-run the refinement over the current board. */
+  const [layoutRetry, setLayoutRetry] = useState<(() => void) | null>(null);
   // Live collaborators. Populated only when a server-side board is open and the
   // realtime socket is connected; empty in the offline/solo localStorage flow.
   const [peers, setPeers] = useState<Peer[]>([]);
@@ -755,6 +818,27 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  /**
+   * Leave the shared-board session — the full teardown, not just the pointer
+   * clear. Every deliberate move to a LOCAL board (New workspace, open a
+   * project, import) ends the shared session atomically: the socket drops so
+   * `commitAndShare` can never carry a local edit to the old room, the role
+   * and status reset so the UI stops advertising a live board, and ?board=
+   * leaves the address bar so a reload cannot rejoin either. The save pointer
+   * (`setSharedBoardId(null)`) is the caller's move — this helper owns only
+   * the transport/role/URL half so the audit's P0 fix composes with the
+   * existing per-path pointer clears instead of duplicating them.
+   */
+  const leaveSharedBoard = useCallback(() => {
+    syncRef.current?.disconnect();
+    syncRef.current = null;
+    setSyncRole(null);
+    setSyncStatus("offline");
+    setPeers([]);
+    setBoardId(null);
+    stripBoardFromUrl();
+  }, []);
+
   // Surface a localStorage failure as a chat error (M0.5). Without this the
   // user kept editing a board that wouldn't survive a reload because the
   // autosave silently threw.
@@ -796,7 +880,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
    */
   const commit = useCallback(
     (next: Workspace, ops: Operation[], label: string, conversation: ChatEntry[], name: string) => {
-      const positioned = laidOutScoped(next, touchedIdsOf(ops));
+      const positioned = laidOutScoped(next, touchedIdsOf(ops)).ws;
       historyRef.current.commit(ops, label);
       setWorkspace(positioned);
       setTick((t) => t + 1);
@@ -894,9 +978,17 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   }, [adoptBoard]);
 
   const send = useCallback(
-    async (message: string, selection?: string[], attachments?: SendAttachments) => {
+    async (
+      message: string,
+      selection?: string[],
+      attachments?: SendAttachments,
+    ): Promise<SendOutcome> => {
       const text = message.trim();
-      if (!text || busy) return;
+      // Busy is a no-op the caller must know about (P1-MT-002): the meeting
+      // loop used to print "Extracted N turns" even when this arm swallowed
+      // the batch because another generation was in flight.
+      if (!text) return { outcome: "busy" };
+      if (busy) return { outcome: "busy" };
       setListening(false);
       if (readOnly) {
         setChat((c) => [
@@ -907,7 +999,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
             text: "You're viewing this board. Ask the owner for edit access to change it.",
           },
         ]);
-        return;
+        return { outcome: "refused" };
       }
       const withUser: ChatEntry[] = [...chat, { role: "user", text }];
       setChat(withUser);
@@ -964,7 +1056,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           // the user's message and the answer simply disappeared (found live:
           // a "move the monitoring stack" answer was gone after a reload).
           persist(workspace, conversation, projectName);
-          return;
+          return { outcome: "answered" };
         }
         const errors = validateOperations(workspace, result.operations);
         if (errors.length > 0) {
@@ -979,7 +1071,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           // Same reasoning as the zero-op path: the rejected attempt is part
           // of the board's story, not ephemeral UI state.
           persist(workspace, conversation, projectName);
-          return;
+          return { outcome: "rejected" };
         }
         const explanation = result.explanation ?? `Applied ${result.operations.length} operations.`;
 
@@ -1149,6 +1241,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           // The ops themselves apply only on approval, but the request and
           // the review-gate reply are durable from this moment on.
           persist(workspace, conversation, projectName);
+          return { outcome: "proposed", ops: result.operations.length };
         } else {
           const next = applyStamped();
           const conversation: ChatEntry[] = [
@@ -1160,6 +1253,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           // folded topic ride into history and the room with them (Stage C2
           // + C5).
           commitAndShare(next, foldedOps, explanation, conversation, projectName);
+          return { outcome: "applied", ops: foldedOps.length };
         }
       } catch (err) {
         // Retriable-failure affordance (found live, 2026-09-10): a transient
@@ -1188,6 +1282,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         // entirely — on reload the board looked like the request never
         // happened. Keep the failed attempt visible.
         persist(workspace, conversation, projectName);
+        return cancelled
+          ? { outcome: "cancelled" }
+          : { outcome: "failed", error: (err as Error).message };
       } finally {
         setBusy(false);
         setGenPhase(null);
@@ -1565,14 +1662,16 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     setView("canvas");
     setTick((t) => t + 1);
     setLastOpenProject(id);
-    // A deliberate move to a local board ends the shared-board session.
+    // A deliberate move to a local board ends the shared-board session —
+    // transport included, not just the pointer: without the disconnect, a
+    // local edit could still reach the previous room through commitAndShare.
     // Without this clear, the boot rejoin effect kept adopting the LAST
     // shared board on every reload — the user's "New workspace" was undone
     // by the next refresh (found live: a K8s board was silently replaced by
     // a shared board from an earlier session).
     setSharedBoardId(null);
-    setBoardId(null);
-  }, []);
+    leaveSharedBoard();
+  }, [leaveSharedBoard]);
 
   /**
    * Parallel diagrams: open a FRESH board and immediately send `prompt` to it,
@@ -1614,7 +1713,11 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     setLastOpenProject(id);
     pendingNewBoardPrompt.current = prompt;
     setTick((t) => t + 1);
-  }, []);
+    // Same isolation as newProject: the generated board is local, so the
+    // previous shared session (socket, role, ?board=) must not survive into it.
+    setSharedBoardId(null);
+    leaveSharedBoard();
+  }, [leaveSharedBoard]);
 
   useEffect(() => {
     const prompt = pendingNewBoardPrompt.current;
@@ -1662,7 +1765,11 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     setTick((t) => t + 1);
     saveProject({ id, name, workspace: safe, chat: [] });
     setLastOpenProject(id);
-  }, []);
+    // An import creates a fresh LOCAL project; the shared session of whatever
+    // board was open before must not survive into it.
+    setSharedBoardId(null);
+    leaveSharedBoard();
+  }, [leaveSharedBoard]);
 
   const openProject = useCallback((id: string) => {
     const data = loadProject(id);
@@ -1694,8 +1801,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     // Same as newProject: opening a local project leaves the shared-board
     // session, or the next reload swaps the user back into the shared board.
     setSharedBoardId(null);
-    setBoardId(null);
-  }, []);
+    leaveSharedBoard();
+  }, [leaveSharedBoard]);
 
   /**
    * Open a board that lives on the server, given its id. The dashboard's
@@ -1813,4 +1920,16 @@ export function useWorkspace(): WorkspaceState {
   const ctx = useContext(Ctx);
   if (!ctx) throw new Error("useWorkspace must be used within WorkspaceProvider");
   return ctx;
+}
+
+/**
+ * The null-safe read for surfaces that can mount OUTSIDE the provider — the
+ * settings modal (⌘, on the auth screen), org pages, anything reachable
+ * before or after a workspace lifetime. Returns null instead of throwing so
+ * those surfaces can degrade (a diagnostics report without the board
+ * section) rather than crash; components inside the provider keep the
+ * throwing `useWorkspace` so a wiring mistake still fails loudly.
+ */
+export function useWorkspaceOptional(): WorkspaceState | null {
+  return useContext(Ctx);
 }

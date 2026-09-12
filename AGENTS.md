@@ -71,7 +71,10 @@ installed yet" and named libraries that were never adopted:
   Flow, Konva, or PixiJS** — don't add one; the semantic model + layout engine
   already own everything such a library would provide.
 - **Layout:** hand-written engine in `core/src/layout.ts` — layered (with
-  Sugiyama crossing reduction), radial, tidy-tree, swimlane. **No dagre/elkjs.**
+  Sugiyama crossing reduction), radial, tidy-tree, swimlane. ELK (`elkjs`) is
+  available as an opted-in async path for large/complex graphs via
+  `web/src/diagram/elk/` + `layoutService.ts` — the hand-written engine stays
+  the default, ELK never owns the semantic model.
 - **Backend:** Node.js + TypeScript, framework-free `node:http` + `ws`.
 - **Database:** Postgres when `LUCENT_DATABASE_URL` is set, in-memory otherwise.
   The Postgres path runs migrations on boot and persists accounts, boards, and

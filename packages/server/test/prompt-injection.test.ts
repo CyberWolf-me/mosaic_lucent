@@ -246,7 +246,7 @@ describe("prompt-injection fixture — the gate under attack", () => {
 
     // THE GATE HELD: the proposal is PENDING and the wire is SILENT — no
     // matter what the label said, nothing reached the repository.
-    const actionId = proposed.body.action?.id as string;
+    const actionId = (proposed.body as { action: { id: string } }).action.id;
     const record = await h.actions.action(boardId, actionId);
     expect(record?.status).toBe("pending");
     expect(record?.origin).toBe("ai");

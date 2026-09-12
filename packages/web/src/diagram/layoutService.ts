@@ -64,6 +64,18 @@ export function elkEligible(workspace: Workspace): boolean {
   return true;
 }
 
+/**
+ * ADR 0039 routing, region form: a region re-flows through ELK exactly when
+ * its effective kind (the group's, falling back to the board's) is one of
+ * the families ELK won. The async refinement uses this to decline BEFORE
+ * running a wasted built-in region pass inside the service.
+ */
+export function elkRegionEligible(workspace: Workspace, groupId: string): boolean {
+  const group = workspace.groups[groupId];
+  if (!group) return false;
+  return ELK_KINDS.has(group.kind ?? workspace.diagramKind);
+}
+
 function stamp(
   ws: Workspace,
   out: { layout: Record<string, { position: { x: number; y: number }; size: { width: number; height: number } }>; routes: Record<string, Array<{ x: number; y: number }>> },

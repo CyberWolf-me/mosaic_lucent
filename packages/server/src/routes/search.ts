@@ -17,19 +17,20 @@ import { buildSearchCorpus, retrieve, SEARCH_LIMITS } from "../retrieval.js";
  * not the results: content outside the entitlement is not filtered out of
  * hits, it was never in the corpus to match.
  *
- * Viewer floor, no CSRF (a GET), no meter (pure computation over reads the
- * caller is already entitled to — search spends no allowance, the same
- * reasoning as the history route). The response discloses its window the
- * same way the history route does: windowTruncated says older content
- * exists beyond the entitlement and was NOT searched, so "no results" can
- * be read honestly instead of as "nothing else exists".
+ * Viewer floor, no CSRF (a GET). Metered for abuse prevention (a tight
+ * loop over a large corpus is still server work), but not billed — search
+ * spends no allowance, the same reasoning as the history route. The response
+ * discloses its window the same way the history route does: windowTruncated
+ * says older content exists beyond the entitlement and was NOT searched, so
+ * "no results" can be read honestly instead of as "nothing else exists".
  */
 export const registerSearchRoutes: RegisterRoutes = (router, s) => {
-  const { boardStore, userStore, meetings, entitlements, send, requireBoardRole } = s;
+  const { boardStore, userStore, meetings, entitlements, send, requireBoardRole, meter } = s;
 
   router.get("/api/boards/:id/search", async (ctx) => {
     const { req, res } = ctx;
     const boardId = ctx.param("id");
+    if (!meter(req, res, "/api/boards/:id/search")) return;
     const guard = await requireBoardRole(req, res, boardId, "viewer", "/api/boards/:id/search");
     if (!guard.ok) return;
 

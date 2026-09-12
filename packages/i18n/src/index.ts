@@ -164,6 +164,10 @@ export const en: Messages = {
   "intel.inbox.merge.confirm": "Merge",
   "intel.inbox.merge.cancel": "Cancel",
   "intel.inbox.merge.failed": "The merge did not validate against the current board.",
+  "a11y.skip.link": "Skip to main content",
+  "canvas.status.summary": "Board {name}: {nodes} nodes, {shapes} shapes.",
+  "canvas.status.selected": "Selected {n} objects.",
+  "canvas.status.nothing": "Nothing selected.",
 };
 
 /**
@@ -298,6 +302,10 @@ export const hu: Messages = {
   "intel.inbox.merge.confirm": "Egyesítés",
   "intel.inbox.merge.cancel": "Mégse",
   "intel.inbox.merge.failed": "Az egyesítés nem validálódott a jelenlegi tábla ellen.",
+  "a11y.skip.link": "Ugrás a fő tartalomra",
+  "canvas.status.summary": "{name} tábla: {nodes} csomópont, {shapes} alakzat.",
+  "canvas.status.selected": "{n} objektum kijelölve.",
+  "canvas.status.nothing": "Nincs kijelölés.",
 };
 
 const BUNDLES: Record<Locale, Messages> = { en, hu };
