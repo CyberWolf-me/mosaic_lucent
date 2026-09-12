@@ -8,6 +8,7 @@ export * from "./reducer.js";
 export * from "./inverse.js";
 export * from "./operationHistory.js";
 export * from "./layout.js";
+export * from "./layoutEngine.js";
 export * from "./visualBenchmark.js";
 export * from "./benchmarkBoards.js";
 export * from "./edgeTiers.js";

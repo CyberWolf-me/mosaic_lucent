@@ -1,4 +1,5 @@
 import type { DiagramKind, Node, Position, Size, Workspace } from "./model.js";
+import { getLayoutOverride, type DiagramLayoutEngine } from "./layoutEngine.js";
 
 /**
  * Deterministic layout. The AI never sets coordinates (docs/25); this pass turns
@@ -132,6 +133,12 @@ export function computeLayoutWithRoutes(
   workspace: Workspace,
   options: LayoutOptions = {},
 ): { layout: LayoutResult; routes: EdgeRoutes } {
+  // The Phase 1 boundary (doc 18, ADR 0038): a registered engine that
+  // supports this request handles it; with no override set — the production
+  // default — the built-in dispatch runs exactly as it always has.
+  const override = getLayoutOverride();
+  const request = { workspace, options };
+  if (override && override.supports(request)) return override.layout(request);
   return dispatchLayoutWithRoutes(workspace, options);
 }
 
@@ -623,7 +630,7 @@ function radialLayout(
   workspace: Workspace,
   opts: Required<Omit<LayoutOptions, "strategy">>,
 ): LayoutResult {
-  const { nodeSize, ringGap } = opts;
+  const { nodeSize, ringGap, nodeGap } = opts;
   const nodeIds = Object.keys(workspace.nodes);
   const result: LayoutResult = {};
   // Per-node measured size so a long label gets the room it needs (M0.5).
@@ -677,6 +684,11 @@ function radialLayout(
     for (const id of orphans) ringOf.set(id, ring);
   }
 
+  // Monotonicity trackers for the ring spacing (see the population
+  // constraint inside the loop): each ring must clear the previous one.
+  let prevRadius = 0;
+  let prevWidest = nodeSize.width;
+
   rings.forEach((ids, ring) => {
     if (ring === 0) {
       const centre = ids[0]!;
@@ -691,7 +703,23 @@ function radialLayout(
     // step also has to scale with the widest node in the ring, otherwise a
     // long-label node on one ring overlaps the next ring's nodes.
     const widest = Math.max(...ids.map((id) => measured.get(id)?.width ?? nodeSize.width));
-    const radius = ring * (ringGap + widest / 2);
+    // POPULATION constraint (Phase 0 finding, mixed-region fixture): the
+    // index formula above sizes a ring by DEPTH only — a ring holding 66
+    // branches got the same radius as one holding 6, and they overlapped.
+    // A ring must also be big enough that its nodes, at their measured
+    // widths, fit around it: required circumference ≈ Σ widths + a gap per
+    // node, so radius ≥ that ÷ 2π.
+    const totalWidth = ids.reduce((sum, id) => sum + (measured.get(id)?.width ?? nodeSize.width), 0);
+    const populationRadius = (totalWidth + ids.length * nodeGap) / (Math.PI * 2);
+    // Rings are monotonically spaced: a crowded inner ring pushes the next
+    // ring out rather than letting it collapse back inside.
+    const radius = Math.max(
+      ring * (ringGap + widest / 2),
+      prevRadius + ringGap + (prevWidest + widest) / 2,
+      populationRadius,
+    );
+    prevRadius = radius;
+    prevWidest = widest;
     // Start at -90° so the first branch sits above the centre.
     const step = (Math.PI * 2) / ids.length;
     ids.forEach((id, i) => {
@@ -1462,3 +1490,20 @@ export function separateRegions(workspace: Workspace, growerId: string): LayoutR
   }
   return Object.keys(shifts).length > 0 ? shifts : null;
 }
+
+/**
+ * The built-in engine, behind the Phase 1 boundary (doc 18). This is the
+ * same dispatch `computeLayoutWithRoutes` runs when no override is set,
+ * exposed as a named engine so the benchmark runner, the pins, and the
+ * Phase 2 ELK comparison can address it through the interface instead of
+ * through the implementation's entry points. The region method is the
+ * ADR 0015 seam; its spatial-additivity invariant ("region out = 0") is
+ * pinned in visual-benchmark.test.ts.
+ */
+export const CURRENT_LAYOUT_ENGINE: DiagramLayoutEngine = {
+  id: "lucent-current",
+  supports: () => true,
+  layout: ({ workspace, options }) => dispatchLayoutWithRoutes(workspace, options),
+  relayoutRegion: (workspace, groupId, options) =>
+    relayoutRegionWithRoutes(workspace, groupId, options ?? {}),
+};

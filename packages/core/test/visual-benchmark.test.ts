@@ -18,14 +18,26 @@
 import { describe, expect, it } from "vitest";
 import {
   BOARD_FACTORIES,
+  adversarialBoard,
+  denseBoard,
   layeredBoard,
+  longEdgeBoard,
+  mixedRegionBoard,
   radialBoard,
   swimlaneBoard,
   treeBoard,
 } from "../src/benchmarkBoards.js";
 import { createWorkspace } from "../src/model.js";
-import { measureVisualMetrics } from "../src/visualBenchmark.js";
-import { computeLayout } from "../src/layout.js";
+import { measureMovementAfterEdit, measureVisualMetrics } from "../src/visualBenchmark.js";
+import {
+  applyLayout,
+  applyRoutes,
+  computeLayout,
+  computeLayoutWithRoutes,
+  relayoutRegionWithRoutes,
+  CURRENT_LAYOUT_ENGINE,
+} from "../src/layout.js";
+import { setLayoutOverride, type DiagramLayoutEngine } from "../src/layoutEngine.js";
 
 const SCALES = [20, 40, 80, 150, 300, 500] as const;
 
@@ -76,6 +88,34 @@ describe("synthetic benchmark boards", () => {
     // Radial has one topic node reaching several branches.
     const radial = radialBoard(40);
     expect(Object.values(radial.edges).filter((e) => e.relationship === "spans").length).toBeGreaterThanOrEqual(3);
+    // Dense carries ~2.2–2.5× edges per node (the fan-in stress).
+    const dense = denseBoard(150);
+    expect(Object.keys(dense.edges).length).toBeGreaterThanOrEqual(2 * 150);
+    // Adversarial carries cycles (back edges) AND diamonds — the V5 defect
+    // class and the ordering pass's coin flips, on one board.
+    const adversarial = adversarialBoard(150);
+    expect(Object.values(adversarial.edges).filter((e) => e.relationship === "falls back to").length).toBeGreaterThanOrEqual(2);
+    expect(Object.values(adversarial.edges).filter((e) => e.relationship === "merges into").length).toBeGreaterThanOrEqual(2);
+    // Long edges: skips span a quarter, a half, and three quarters of the
+    // depth — asserted via the layer metadata the generator stamps.
+    const longEdge = longEdgeBoard(100);
+    const layerOf = (nid: string) => longEdge.nodes[nid]!.metadata!.layer as number;
+    const spans = Object.values(longEdge.edges)
+      .filter((e) => e.relationship === "bypasses")
+      .map((e) => Math.abs(layerOf(e.target) - layerOf(e.source)));
+    expect(Math.max(...spans)).toBeGreaterThanOrEqual(10);
+    expect(new Set(spans).size).toBeGreaterThanOrEqual(3);
+    // Mixed regions: two kind-regions plus ungrouped board flow (ADR 0014).
+    const mixed = mixedRegionBoard(80);
+    expect(mixed.groups["region-mind"]!.kind).toBe("mindmap");
+    expect(mixed.groups["region-tree"]!.kind).toBe("decisiontree");
+    const ungrouped = Object.values(mixed.nodes).filter((n) => !n.groupId);
+    expect(ungrouped.length).toBeGreaterThanOrEqual(3);
+    // …and at least one cross-region edge, so cohesion has a cross set.
+    const withRegion = (nid: string) => Boolean(mixed.nodes[nid]!.groupId);
+    expect(
+      Object.values(mixed.edges).some((e) => withRegion(e.source) !== withRegion(e.target)),
+    ).toBe(true);
   });
 });
 
@@ -194,6 +234,188 @@ describe("layout compute stays fast enough to measure", () => {
       const a = computeLayout(factory.build(150));
       const b = computeLayout(factory.build(150));
       expect(a, factory.label).toEqual(b);
+    }
+  });
+});
+
+describe("phase 0 metrics on hand-built geometry", () => {
+  const box = (x: number, y: number) => ({
+    position: { x, y },
+    size: { width: 10, height: 10 },
+  });
+
+  function fourNodeBoard() {
+    const ws = createWorkspace();
+    for (const id of ["a", "b", "c", "d"]) {
+      ws.nodes[id] = { id, nodeType: "x", label: id };
+    }
+    return ws;
+  }
+
+  it("an edge through a foreign node box counts; a clean edge does not", () => {
+    const ws = fourNodeBoard();
+    // a → b runs left to right THROUGH c, which sits on the line between them.
+    ws.edges.e1 = { id: "e1", source: "a", target: "b", relationship: "r" };
+    ws.nodes.c = { ...ws.nodes.c!, label: "c" };
+    const through = measureVisualMetrics(ws, {}, {
+      a: box(0, 0),
+      b: box(100, 0),
+      c: box(50, 0),
+      d: box(0, 100),
+    });
+    expect(through.edgesThroughNodes).toBe(1);
+    // Same board, c out of the way: zero.
+    const clean = measureVisualMetrics(ws, {}, {
+      a: box(0, 0),
+      b: box(100, 0),
+      c: box(50, 50),
+      d: box(0, 100),
+    });
+    expect(clean.edgesThroughNodes).toBe(0);
+  });
+
+  it("bends count route waypoints; unrouted edges bend zero", () => {
+    const ws = fourNodeBoard();
+    ws.edges.e1 = { id: "e1", source: "a", target: "b", relationship: "r" };
+    ws.edges.e2 = {
+      id: "e2",
+      source: "c",
+      target: "d",
+      relationship: "r",
+      route: [{ x: 50, y: 200 }, { x: 60, y: 200 }],
+    };
+    const metrics = measureVisualMetrics(ws, {}, {
+      a: box(0, 0),
+      b: box(100, 0),
+      c: box(0, 100),
+      d: box(100, 100),
+    });
+    expect(metrics.edgeBendsMean).toBeCloseTo(1, 5); // (0 + 2) / 2 edges
+  });
+
+  it("viewport coverage is node area over bounding box", () => {
+    const ws = fourNodeBoard();
+    const metrics = measureVisualMetrics(ws, {}, {
+      a: box(0, 0),
+      b: box(90, 0),
+      c: box(0, 90),
+      d: box(90, 90),
+    });
+    // Four 10×10 boxes in a 100×100 bbox → 400/10000.
+    expect(metrics.viewportCoverage).toBeCloseTo(0.04, 5);
+  });
+
+  it("cohesion: intra-region edges shorter than cross-region edges yield < 1", () => {
+    const ws = createWorkspace();
+    ws.groups.g1 = { id: "g1", label: "G1", children: ["a", "b"] };
+    ws.nodes.a = { id: "a", nodeType: "x", label: "a", groupId: "g1" };
+    ws.nodes.b = { id: "b", nodeType: "x", label: "b", groupId: "g1" };
+    ws.nodes.c = { id: "c", nodeType: "x", label: "c" };
+    ws.edges.intra = { id: "intra", source: "a", target: "b", relationship: "r" };
+    ws.edges.cross = { id: "cross", source: "b", target: "c", relationship: "r" };
+    const metrics = measureVisualMetrics(ws, {}, {
+      a: box(0, 0),
+      b: box(10, 0),
+      c: box(1000, 0),
+    });
+    expect(metrics.cohesionRatio).toBeCloseTo(10 / 990, 5);
+  });
+
+  it("cohesion is null when no edge touches a group", () => {
+    const ws = fourNodeBoard();
+    ws.edges.e1 = { id: "e1", source: "a", target: "b", relationship: "r" };
+    const metrics = measureVisualMetrics(ws, {}, {
+      a: box(0, 0),
+      b: box(100, 0),
+      c: box(0, 100),
+      d: box(100, 100),
+    });
+    expect(metrics.cohesionRatio).toBeNull();
+  });
+});
+
+describe("movement after edit (spatial additivity, Phase 0)", () => {
+  it("the region-scoped path moves nothing outside the region", () => {
+    // The app's commit invariant (ADR 0015): an addition relayouts the
+    // anchor's group; every node outside restates its position.
+    const m = measureMovementAfterEdit(mixedRegionBoard(120));
+    expect(m.regionScoped).toBeTruthy();
+    expect(m.regionScoped!.movedOutsideRegion).toBe(0);
+  });
+
+  it("full relayout accounts for every pre-existing node", () => {
+    for (const factory of BOARD_FACTORIES) {
+      const m = measureMovementAfterEdit(factory.build(80));
+      expect(m.fullRelayout.movedCount + m.fullRelayout.identicalCount).toBe(m.nodeCount);
+    }
+  });
+
+  it("the swimlane board is region-scoped too (lanes are groups)", () => {
+    const m = measureMovementAfterEdit(swimlaneBoard(100));
+    expect(m.regionScoped).toBeTruthy();
+    expect(m.regionScoped!.movedOutsideRegion).toBe(0);
+  });
+});
+
+describe("the layout-engine boundary (Phase 1)", () => {
+  it("CURRENT_LAYOUT_ENGINE reproduces computeLayoutWithRoutes exactly", () => {
+    for (const factory of BOARD_FACTORIES) {
+      const built = factory.build(150);
+      const throughBoundary = CURRENT_LAYOUT_ENGINE.layout({ workspace: built, options: {} });
+      const direct = computeLayoutWithRoutes(built);
+      expect(throughBoundary.layout, factory.label).toEqual(direct.layout);
+      expect(throughBoundary.routes, factory.label).toEqual(direct.routes);
+    }
+  });
+
+  it("relayoutRegion through the boundary matches the implementation", () => {
+    const built = mixedRegionBoard(80);
+    // Stamp positions first (the engine's region seam reads current geometry).
+    const stamped = applyRoutes(
+      applyLayout(built, computeLayout(built)),
+      computeLayoutWithRoutes(built).routes,
+    );
+    const throughBoundary = CURRENT_LAYOUT_ENGINE.relayoutRegion!(stamped, "region-mind");
+    const direct = relayoutRegionWithRoutes(stamped, "region-mind");
+    expect(throughBoundary).toEqual(direct);
+  });
+
+  it("a registered override engine serves supported requests; clearing restores the default", () => {
+    const built = layeredBoard(40);
+    const sentinel = { layout: { "x-fake": { position: { x: 1, y: 2 }, size: { width: 3, height: 4 } } }, routes: {} };
+    const fake: DiagramLayoutEngine = {
+      id: "test-override",
+      supports: (req) => req.workspace.id === built.id,
+      layout: () => sentinel as unknown as ReturnType<DiagramLayoutEngine["layout"]>,
+    };
+    try {
+      setLayoutOverride(fake);
+      const { layout } = computeLayoutWithRoutes(built);
+      expect(layout).toEqual(sentinel.layout);
+    } finally {
+      setLayoutOverride(null);
+    }
+    // The default path is restored — the real engine answers again.
+    const restored = computeLayoutWithRoutes(built);
+    expect(restored.layout["n-000"]).toBeTruthy();
+    expect(Object.keys(restored.layout).length).toBe(40);
+  });
+
+  it("an override that does not support a request is skipped, not fatal", () => {
+    const built = layeredBoard(40);
+    const refusing: DiagramLayoutEngine = {
+      id: "test-refusing",
+      supports: () => false,
+      layout: () => {
+        throw new Error("must never be called");
+      },
+    };
+    try {
+      setLayoutOverride(refusing);
+      const { layout } = computeLayoutWithRoutes(built);
+      expect(Object.keys(layout).length).toBe(40);
+    } finally {
+      setLayoutOverride(null);
     }
   });
 });

@@ -165,9 +165,263 @@ export interface BoardFactory {
   build: (n: number, seed?: number) => Workspace;
 }
 
+/**
+ * Local edge helper with collision-safe ids: the adversarial and dense
+ * generators can legitimately produce two edges between the same pair
+ * (multi-parent + diamond rules), and a silent id overwrite would drop an
+ * edge and undercount the workload.
+ */
+function addEdgeUnique(ws: Workspace, source: string, target: string, relationship: string): Edge {
+  let id = `e-${source}-${target}`;
+  for (let i = 2; ws.edges[id]; i++) id = `e-${source}-${target}-${i}`;
+  const edge: Edge = { id, source, target, relationship };
+  ws.edges[id] = edge;
+  return edge;
+}
+
+/**
+ * DENSE layered workload (Phase 0): the fan-in/fan-out stress the layered
+ * engine meets on real architecture boards — 2–3 parents per node, skip
+ * edges, same-layer peer edges (which the DFS layering must resolve), and
+ * the return edge. Edge count ≈ 2.2–2.5× node count at every scale.
+ */
+export function denseBoard(n: number, seed = 1): Workspace {
+  const ws = createWorkspace({ id: "bench-dense", name: `Dense ${n}`, diagramKind: "flowchart" });
+  const layers = Math.max(2, Math.round(Math.sqrt(n)));
+  const perLayer = Math.max(2, Math.ceil(n / layers));
+  const rows: string[][] = [];
+  let count = 0;
+  for (let l = 0; l < layers && count < n; l++) {
+    rows.push([]);
+    for (let j = 0; j < perLayer && count < n; j++, count++) {
+      const node = addNode(ws, count, "service");
+      node.metadata = { layer: l };
+      rows[l]!.push(node.id);
+    }
+  }
+  for (let l = 1; l < rows.length; l++) {
+    const prev = rows[l - 1]!;
+    const cur = rows[l]!;
+    cur.forEach((cid, j) => {
+      // Fan-in 2: two parents in the previous layer, stride-offset.
+      addEdgeUnique(ws, prev[(j + seed) % prev.length]!, cid, "calls");
+      addEdgeUnique(ws, prev[(j + seed + 1) % prev.length]!, cid, "calls");
+      // Skip edge two layers back, every other node.
+      if (l > 1 && (j + seed) % 2 === 0) {
+        addEdgeUnique(ws, rows[l - 2]![(j + seed) % rows[l - 2]!.length]!, cid, "bypasses");
+      }
+    });
+    // Same-layer peers: the ordering pass must place these without dropping
+    // the row structure.
+    for (let j = 0; j + 1 < cur.length; j += 3) {
+      addEdgeUnique(ws, cur[j]!, cur[j + 1]!, "pairs with");
+    }
+  }
+  const first = rows[0]?.[0];
+  const lastRow = rows[rows.length - 1] ?? [];
+  const last = lastRow[lastRow.length - 1];
+  if (first && last && first !== last) addEdgeUnique(ws, last, first, "returns to");
+  return ws;
+}
+
+/**
+ * ADVERSARIAL workload (Phase 0): everything the layering pass exists to
+ * survive, on one board — repeated diamonds, triple fan-ins, and a back edge
+ * every third layer (each one a cycle the DFS layering must detect without
+ * starving layers, the exact defect class the V5 resolution fixed once).
+ */
+export function adversarialBoard(n: number, seed = 1): Workspace {
+  const ws = createWorkspace({
+    id: "bench-adversarial",
+    name: `Adversarial ${n}`,
+    diagramKind: "flowchart",
+  });
+  const layers = Math.max(3, Math.round(Math.sqrt(n)));
+  const perLayer = Math.max(2, Math.ceil(n / layers));
+  const rows: string[][] = [];
+  let count = 0;
+  for (let l = 0; l < layers && count < n; l++) {
+    rows.push([]);
+    for (let j = 0; j < perLayer && count < n; j++, count++) {
+      const node = addNode(ws, count, "service");
+      node.metadata = { layer: l };
+      rows[l]!.push(node.id);
+    }
+  }
+  for (let l = 1; l < rows.length; l++) {
+    const prev = rows[l - 1]!;
+    const cur = rows[l]!;
+    cur.forEach((cid, j) => {
+      addEdgeUnique(ws, prev[(j + seed) % prev.length]!, cid, "calls");
+      // Triple fan-in for every third node: two layers back, two parents.
+      if (l > 1 && j % 3 === 0) {
+        const back = rows[l - 2]!;
+        addEdgeUnique(ws, back[(j + seed) % back.length]!, cid, "bypasses");
+        addEdgeUnique(ws, back[(j + seed + 2) % back.length]!, cid, "bypasses");
+      }
+    });
+    // Explicit diamond every four nodes: u → a, u → b, a → w, b → w — the
+    // shape that forces the ordering pass to choose a side for the middle
+    // pair, twice per diamond.
+    if (l + 2 < rows.length && cur.length >= 2 && rows[l + 1]!.length >= 2) {
+      const u = cur[0]!;
+      const a = rows[l + 1]![0]!;
+      const b = rows[l + 1]![1]!;
+      const w = rows[l + 2]![0]!;
+      addEdgeUnique(ws, u, a, "branches to");
+      addEdgeUnique(ws, u, b, "branches to");
+      addEdgeUnique(ws, a, w, "merges into");
+      addEdgeUnique(ws, b, w, "merges into");
+    }
+    // A back edge every third layer: l → l-3 (a cycle whenever a forward
+    // path exists — which it always does from layer 0).
+    if (l >= 3 && l % 3 === 0) {
+      addEdgeUnique(ws, cur[cur.length - 1]!, rows[l - 3]![0]!, "falls back to");
+    }
+  }
+  const first = rows[0]?.[0];
+  const lastRow = rows[rows.length - 1] ?? [];
+  const last = lastRow[lastRow.length - 1];
+  if (first && last && first !== last) addEdgeUnique(ws, last, first, "returns to");
+  return ws;
+}
+
+/**
+ * LONG-EDGE workload (Phase 0): constant row width of 4 keeps the deep-chain
+ * wrap gate (median row ≤ 3) OFF, so skip edges MUST span a quarter, a half,
+ * and three quarters of the board's depth — the "one edge crossing
+ * everything" case as a graded workload, from hundreds to thousands of px as
+ * the ladder scales.
+ */
+export function longEdgeBoard(n: number, seed = 1): Workspace {
+  const ws = createWorkspace({
+    id: "bench-longedge",
+    name: `Long edge ${n}`,
+    diagramKind: "flowchart",
+  });
+  const width = 4;
+  const layers = Math.max(3, Math.ceil(n / width));
+  const rows: string[][] = [];
+  let count = 0;
+  for (let l = 0; l < layers && count < n; l++) {
+    rows.push([]);
+    for (let j = 0; j < width && count < n; j++, count++) {
+      const node = addNode(ws, count, "service");
+      node.metadata = { layer: l };
+      rows[l]!.push(node.id);
+    }
+  }
+  const depth = rows.length - 1;
+  const spans = [
+    Math.max(1, Math.round(depth * 0.25)),
+    Math.max(2, Math.round(depth * 0.5)),
+    Math.max(3, Math.round(depth * 0.75)),
+  ];
+  for (let l = 0; l < rows.length; l++) {
+    const row = rows[l]!;
+    // The spine: one chain edge per layer pair, first column.
+    if (l + 1 < rows.length && row[0] && rows[l + 1]![0]) {
+      addEdgeUnique(ws, row[0], rows[l + 1]![0]!, "calls");
+    }
+    // The long skips: second column, spanning ¼ / ½ / ¾ of the depth.
+    const span = spans[l % 3]!;
+    if (row[1] && l + span <= depth && rows[l + span]![1]) {
+      addEdgeUnique(ws, row[1], rows[l + span]![1]!, "bypasses");
+    }
+  }
+  const first = rows[0]?.[0];
+  const lastRow = rows[rows.length - 1] ?? [];
+  const last = lastRow[0];
+  if (first && last && first !== last) addEdgeUnique(ws, last, first, "returns to");
+  return ws;
+}
+
+/**
+ * MIXED MULTI-REGION workload (Phase 0): ADR 0014's real shape — one board,
+ * several kind-regions packed as a band, plus ungrouped board flow. A
+ * mind-map region (40%), a decision-tree region (30%), and a plain layered
+ * chain above them (30%), with one cross-region edge so the cohesion metric
+ * has a cross set. Regions carry their own kinds; the board stays flowchart.
+ */
+export function mixedRegionBoard(n: number, _seed = 1): Workspace {
+  const ws = createWorkspace({
+    id: "bench-mixed",
+    name: `Mixed regions ${n}`,
+    diagramKind: "flowchart",
+  });
+  const nMind = Math.min(Math.max(6, Math.round(n * 0.4)), n - 9);
+  const nTree = Math.min(Math.max(6, Math.round(n * 0.3)), n - nMind - 3);
+  let count = 0;
+
+  // Mind-map region: a topic, branches fanning off it, short leaf chains.
+  const mindChildren: string[] = [];
+  const topic = addNode(ws, count++, "topic");
+  topic.groupId = "region-mind";
+  mindChildren.push(topic.id);
+  let branches = 0;
+  let prevLeaf: string | null = null;
+  while (count < nMind) {
+    const isBranch = branches < Math.ceil((nMind - 1) / 3);
+    const node = addNode(ws, count++, isBranch ? "branch" : "idea");
+    node.groupId = "region-mind";
+    mindChildren.push(node.id);
+    if (isBranch) {
+      addEdgeUnique(ws, topic.id, node.id, "spans");
+      branches++;
+      prevLeaf = node.id;
+    } else if (prevLeaf) {
+      addEdgeUnique(ws, prevLeaf, node.id, "supports");
+      prevLeaf = node.id;
+    }
+  }
+  ws.groups["region-mind"] = {
+    id: "region-mind",
+    label: "Ideas",
+    children: mindChildren,
+    kind: "mindmap",
+  };
+
+  // Decision-tree region: a ternary tree.
+  const treeStart = count;
+  const treeChildren: string[] = [];
+  while (count < treeStart + nTree) {
+    const i = count - treeStart;
+    const node = addNode(ws, count, i === 0 ? "root" : "choice");
+    count++;
+    node.groupId = "region-tree";
+    treeChildren.push(node.id);
+    if (i > 0) {
+      const parent = ws.nodes[`${id("n", treeStart + Math.floor((i - 1) / 3))}`]!;
+      addEdgeUnique(ws, parent.id, node.id, "leads to");
+    }
+  }
+  ws.groups["region-tree"] = {
+    id: "region-tree",
+    label: "Decisions",
+    children: treeChildren,
+    kind: "decisiontree",
+  };
+
+  // Board flow above the region strip: an ungrouped layered chain, with one
+  // edge feeding the mind-map topic (the cohesion metric's cross set).
+  let flowPrev: string | null = null;
+  while (count < n) {
+    const node = addNode(ws, count, "step");
+    count++;
+    if (flowPrev) addEdgeUnique(ws, flowPrev, node.id, "then");
+    flowPrev = node.id;
+  }
+  if (flowPrev) addEdgeUnique(ws, flowPrev, topic.id, "feeds");
+  return ws;
+}
+
 /** The benchmark's board vocabulary, keyed by what the live pass ran. */
 export const BOARD_FACTORIES: readonly BoardFactory[] = [
   { kind: "flowchart", label: "layered (flowchart/architecture)", build: layeredBoard },
+  { kind: "flowchart", label: "dense (architecture, fan-in 2-3)", build: denseBoard },
+  { kind: "flowchart", label: "adversarial (diamonds+fan-in+cycles)", build: adversarialBoard },
+  { kind: "flowchart", label: "long-edge (deep spine, 1/4-3/4 skips)", build: longEdgeBoard },
+  { kind: "flowchart", label: "mixed regions (mind+tree+flow)", build: mixedRegionBoard },
   { kind: "mindmap", label: "radial (mind map)", build: radialBoard },
   { kind: "decisiontree", label: "tree (decision tree/org chart)", build: treeBoard },
   { kind: "process", label: "swimlane (process map)", build: swimlaneBoard },
