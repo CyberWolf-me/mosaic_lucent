@@ -1959,3 +1959,26 @@ fixed the next day, each pinned by a regression test:
 - [ ] Not fixed, deliberately (C-bucket build-next): V2 layout wrap at
       depth, S1 failed-generation workspace bleed, V5 ≥80-node readability,
       M3 supersede-proposal surprise, server-level provider retry.
+
+## The 2026-09 advisory review's roadmap, executed (2026-09-11, tag review-phases-complete)
+
+The review's four phases, run to completion: Phase 0 the live-pass fix
+batch with the seam smoke; Phase 1 the visual benchmark, the routed
+layered engine (cycle-safe layering, the wrap gate, Edge.route polylines
+— crossings 10,871→902 at 500 nodes), zoom-density relationship tiers,
+and the composition derivation; Phase 2 the generation outcome ledger,
+the promote-endpoint truth fix (it shipped in M2.6), the two-instance
+deployment rehearsal script (PG-conditional; CI runs the arms), and the
+prompt-injection gate fixture; Phase 3 the attention layer ("What needs
+my attention?" on the execution dashboard — live-verified) and the §10
+product analytics (board_created, share_link_created, and the
+signup→first-board activation distribution, observed once per org).
+
+- [x] Every phase: fix → test → live check → commit; three live browser
+      checks passed (routed geometry in the rendered SVG, corridors hiding
+      at 25% zoom, the attention surface with all four signals).
+- [x] Final combined gate: 2,520 tests green across six workspaces,
+      typecheck 0. Run record: docs/eval-results/2026-09-11-review-phases-run.md.
+- [ ] Real-team pilots (the review's Phase 3 "3–5 teams") — human-gated
+      by design; the instrument panel (product counters, attention,
+      benchmark) now exists to read them by.
