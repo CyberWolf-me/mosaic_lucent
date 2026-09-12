@@ -23,7 +23,7 @@
 > mixed-region boards, at 20–400× the compute cost; no adoption decision is
 > made — see
 > [`eval-results/2026-09-12-elk-comparison.md`](./eval-results/2026-09-12-elk-comparison.md).
-> Phase 3 is decided, provisionally: [ADR 0039](./adr/0039-hybrid-engine-selection.md) records Result B — ELK for the flat graph families, the hand-written engines elsewhere — valid unless the human-half pass (batched at the end of this run) fails ELK's output. Phase 4's engine side is complete: the ELK adapter gained the ADR 0015 region seam, the layout service ([layoutService.ts](../packages/web/src/diagram/layoutService.ts)) routes by kind with fallback-to-built-in and retain-geometry degradation, the 100+1 spatial-additivity acceptance is pinned as a test, and `elkjs` is version-pinned (the React commit-path integration and the Web Worker are deliberately the next step, needing live verification). Phase 5 is complete: count-driven density bands joined zoom in `edgeDensity` (intimate boards render identically; ≥31 nodes subdue secondary edges; ≥151 keep only primary structure), wired through the renderer, tested. Phase 6's adapter half is complete: the license review resolved the gates (bpmn-js's watermark clause accepted as product conditions, ELK's EPL-2.0 standard), [docs/19](./19-bpmn-subset.md) defines the supported BPMN subset, and the round-trip adapter lives at `packages/web/src/diagram/bpmn/` with both directions tested. The bpmn-js viewer lens is the remaining Phase 6 piece — a browser surface with live verification, per the license conditions. Phases 7–8 remain gated on the human pass and the viewer.
+> Phase 3 is decided, provisionally: [ADR 0039](./adr/0039-hybrid-engine-selection.md) records Result B — ELK for the flat graph families, the hand-written engines elsewhere — valid unless the human-half pass (batched at the end of this run) fails ELK's output. Phase 4's engine side is complete: the ELK adapter gained the ADR 0015 region seam, the layout service ([layoutService.ts](../packages/web/src/diagram/layoutService.ts)) routes by kind with fallback-to-built-in and retain-geometry degradation, the 100+1 spatial-additivity acceptance is pinned as a test, and `elkjs` is version-pinned (the React commit-path integration and the Web Worker are deliberately the next step, needing live verification). Phase 5 is complete: count-driven density bands joined zoom in `edgeDensity` (intimate boards render identically; ≥31 nodes subdue secondary edges; ≥151 keep only primary structure), wired through the renderer, tested. Phase 6's adapter half is complete: the license review resolved the gates (bpmn-js's watermark clause accepted as product conditions, ELK's EPL-2.0 standard), [docs/19](./19-bpmn-subset.md) defines the supported BPMN subset, and the round-trip adapter lives at `packages/web/src/diagram/bpmn/` with both directions tested. The license gate then fired (doc 19): the bpmn.io watermark is unacceptable, so the viewer and the editing bridge are cancelled — no bpmn.io code will ever enter the repo. The BPMN work survives as **XML interchange**, which stands tested. Phases 7–8 are re-scoped in their phase notes; the human pass still carries the ADR 0039 verdict.
 
 ## Why this document exists
 
@@ -303,6 +303,15 @@ operation carries a coordinate.
 
 ### Phase 6 — The BPMN lens, read-only (license-gated)
 
+> **Cancelled (2026-09-12): the license gate failed.** The bpmn.io watermark
+> condition is unacceptable for Lucent's commercial UI; no bpmn.io code will ever
+> enter the repo. The viewer is dead; the surviving half is **BPMN 2.0 XML
+> interchange** — the adapter and its round-trip tests stand, exporting and
+> importing the subset with external tools ([doc 19](./19-bpmn-subset.md)
+> records the decision). A Lucent-drawn BPMN-styled process lens (the
+> standard's visual conventions, our renderer) is a possible future with no
+> external code.
+
 **Entry gate — licenses before code.** ELK is EPL-2.0 (relevant only if
 adopted in Phase 3/4). bpmn-js is MIT **with a condition: the bpmn.io
 watermark in rendered diagrams must remain visible and unobscured.** In a
@@ -338,6 +347,11 @@ pulled forward because it gates whether this phase may ship at all.
 
 ### Phase 7 — The BPMN editing bridge (only after the read-only lens proves out)
 
+> **Cancelled with the viewer (2026-09-12):** the bridge existed to turn
+> bpmn-js modeler events into validated operations; with no bpmn-js there is no
+> modeler. Editing a BPMN-styled lens, if one ever exists, is ordinary Lucent
+> editing — every change already flows through the operation protocol.
+
 **Goal:** enable editing without an unvalidated back door.
 
 1. **Every write is an operation.** bpmn-js modeler events → BPMN adapter →
@@ -361,6 +375,11 @@ two-client consistency holds; the subset round-trips.
 **Source:** advisory V12, V14, V18, V19, V24, V25 (BPMN half).
 
 ### Phase 8 — Unified lenses and final acceptance
+
+> **Re-scoped (2026-09-12):** the BPMN items below reduce to **BPMN XML in the
+> export menu** for process boards — no in-app BPMN rendering. The rest of
+> Phase 8 (cross-engine consistency, visual diff, exports, the scripted
+> acceptance) is unaffected.
 
 **Goal:** one workspace, many representations, one interaction model — and
 the proof.
@@ -420,9 +439,9 @@ protocol; the consistency checklist is signed off.
 | 3 — adoption decision | 2 | evidence gate |
 | 4 — integration | 3 = Result A or B | build opens on the gate |
 | 5 — intent / density / routing | 0's metrics; independent of the ELK verdict | build opens on the gate |
-| 6 — BPMN read-only | license review; benefits from Phase 5's density work | build opens on the gate |
-| 7 — BPMN editing bridge | 6 | build opens on the gate |
-| 8 — lenses + final acceptance | the outcomes of 3–7 | final gate |
+| 6 — BPMN XML interchange | ~~license review~~ **answered: viewer cancelled** (doc 19); adapter + round-trip tests stand | done (interchange only) |
+| 7 — BPMN editing bridge | cancelled with the viewer — no bpmn-js, no modeler | — |
+| 8 — lenses + final acceptance | outcomes of 3–6 (BPMN re-scoped to export) | final gate |
 
 Phases 5 and 6 do not wait on the ELK verdict: intent, tiers, and density
 are engine-agnostic and partly exist already. Their completion is warranted

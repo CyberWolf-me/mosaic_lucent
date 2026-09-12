@@ -6,6 +6,17 @@
 > license conditions under which the lens may ship. Until this subset grows,
 > no surface may claim "Lucent supports BPMN" beyond it.
 
+> **Decision (2026-09-12, same day — the gate fired):** the bpmn.io watermark
+> condition is not acceptable for Lucent's commercial UI. **No bpmn.io code —
+> bpmn-js, diagram-js, bpmn-moddle — will ever enter the repo**, executing clause 3
+> below. The in-app BPMN viewer and the editing bridge (doc 18, Phases 6–7) are
+> cancelled. The subset now means **XML interchange only**: Lucent exports and
+> imports BPMN 2.0 documents — the OMG standard — through the adapter
+> (`bpmnAdapter.ts`, Lucent's own code, carrying no bpmn.io terms), so processes
+> round-trip with any external BPMN tool. A Lucent-drawn BPMN-styled process lens
+> (the standard's visual conventions are not proprietary; our own renderer)
+> remains a possible future with no external code.
+
 ## The license gate (reviewed 2026-09-12, before code)
 
 - **bpmn-js** — the bpmn.io license (Camunda's modified MIT): standard MIT
