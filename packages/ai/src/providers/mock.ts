@@ -360,6 +360,32 @@ const scripts: Script[] = [
     },
   },
   {
+    // Phase 5 (doc 18): the layout-intent script — "read it left to right"
+    // / "happy path" becomes a SET_LAYOUT_INTENT (ids and enums, never
+    // coordinates — the doctrine's positive form). The mock reads the
+    // summary's REAL spine candidates: the longest then-chain the board
+    // already holds, in narrative order, falls back to the two highest-
+    // degree nodes when no chain reads cleanly. Pinned by the golden
+    // intent case.
+    match: (m) => /left to right|happy path|read.*(horizont|left.to.right)/i.test(m),
+    build: (req) => {
+      const spine = longestThenChain(req.summary);
+      return {
+        explanation:
+          `Stated the board's layout intent: a left-to-right read, with the ` +
+          `main flow (${spine.slice(0, 3).join(" → ")}${spine.length > 3 ? " → …" : ""}) as the spine. ` +
+          `The layout engine takes it from here — positions stay its call.`,
+        operations: [
+          {
+            op: "SET_LAYOUT_INTENT",
+            direction: "horizontal",
+            ...(spine.length >= 2 ? { primaryFlow: spine } : {}),
+          },
+        ] as Operation[],
+      };
+    },
+  },
+  {
     // P0-3: statement-kind scripts (Stage C2: the doctrine as data now). A
     // rejection visibly supersedes — the statement flips to rejected, never
     // silence and never a second contradictory node; a correction replaces

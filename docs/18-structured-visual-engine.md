@@ -23,7 +23,7 @@
 > mixed-region boards, at 20–400× the compute cost; no adoption decision is
 > made — see
 > [`eval-results/2026-09-12-elk-comparison.md`](./eval-results/2026-09-12-elk-comparison.md).
-> Phase 3 is decided, provisionally: [ADR 0039](./adr/0039-hybrid-engine-selection.md) records Result B — ELK for the flat graph families, the hand-written engines elsewhere — valid unless the human-half pass (batched at the end of this run) fails ELK's output. Phase 4's engine side is complete: the ELK adapter gained the ADR 0015 region seam, the layout service ([layoutService.ts](../packages/web/src/diagram/layoutService.ts)) routes by kind with fallback-to-built-in and retain-geometry degradation, the 100+1 spatial-additivity acceptance is pinned as a test, and `elkjs` is version-pinned (the React commit-path integration and the Web Worker are deliberately the next step, needing live verification). Phase 5 is complete: count-driven density bands joined zoom in `edgeDensity` (intimate boards render identically; ≥31 nodes subdue secondary edges; ≥151 keep only primary structure), wired through the renderer, tested. Phase 6's adapter half is complete: the license review resolved the gates (bpmn-js's watermark clause accepted as product conditions, ELK's EPL-2.0 standard), [docs/19](./19-bpmn-subset.md) defines the supported BPMN subset, and the round-trip adapter lives at `packages/web/src/diagram/bpmn/` with both directions tested. The license gate then fired (doc 19): the bpmn.io watermark is unacceptable, so the viewer and the editing bridge are cancelled — no bpmn.io code will ever enter the repo. The BPMN work survives as **XML interchange**, which stands tested. Phases 7–8 are re-scoped in their phase notes; the human pass still carries the ADR 0039 verdict.
+> Phase 3 is decided, provisionally: [ADR 0039](./adr/0039-hybrid-engine-selection.md) records Result B — ELK for the flat graph families, the hand-written engines elsewhere — valid unless the human-half pass (batched at the end of this run) fails ELK's output. **Phase 4 is complete (2026-09-12, live-verified):** the commit path is now two-phase — the synchronous built-in pass commits instantly (scoped, spatial-additivity intact), then an epoch-guarded async **ELK refinement** re-flows the same scope through the production seam; ELK runs in a **Web Worker** (ADR 0039's "real, not conditional" clause: main-thread ELK costs 0.87–2 s at 500 nodes) with a nested real ELK worker inside ours, 20 s timeout, respawn-on-death, and reject-to-fallback on transport failure; boot/adopt became conditional (a positioned board is never re-arranged — the never-rearrange invariant now covers persisted ELK geometry); degraded state shows "layout couldn't update + Retry" in the status bar (never a blank canvas); **golden geometry fixtures** pin elkjs 0.12.0 on three representative boards (`test/elkGolden*.ts`, `scripts/regen-elk-goldens.ts` — a bump is a deliberate, gated act); pinned live: the refinement badge cycles on adopt, ELK's geometry lands on screen (fingerprint-verified on 24- and 126-node boards), and the main thread records **zero long tasks** during a 126-node refinement. One finding on record: elkjs's in-process "fake worker" **cannot be imported inside a worker** (its UMD export arm self-installs onto `self.onmessage` in worker scope) and its bundled default factory dies under Vite's transform — the adapter now passes an explicit `workerFactory` (nested Web Worker in the browser, in-process backend in Node), see `elkLayoutEngine.ts`'s header. Phase 5 is complete: count-driven density bands joined zoom in `edgeDensity` (intimate boards render identically; ≥31 nodes subdue secondary edges; ≥151 keep only primary structure), wired through the renderer, tested. Phase 6's adapter half is complete: the license review resolved the gates (bpmn-js's watermark clause accepted as product conditions, ELK's EPL-2.0 standard), [docs/19](./19-bpmn-subset.md) defines the supported BPMN subset, and the round-trip adapter lives at `packages/web/src/diagram/bpmn/` with both directions tested. The license gate then fired (doc 19): the bpmn.io watermark is unacceptable, so the viewer and the editing bridge are cancelled — no bpmn.io code will ever enter the repo. The BPMN work survives as **XML interchange**, which stands tested. Phases 7–8 are re-scoped in their phase notes; the human pass still carries the ADR 0039 verdict.
 
 ## Why this document exists
 
@@ -244,6 +244,22 @@ freeze's credibility — it spends fixtures.
 
 ### Phase 4 — Production integration (only on adoption)
 
+> **Complete (2026-09-12, live-verified).** The four items below shipped as:
+> the two-phase commit (sync built-in pass → epoch-guarded async ELK
+> refinement through [layoutService.ts](../packages/web/src/diagram/layoutService.ts)
+> with the worker engine as primary), the Web Worker pair
+> (`elk/layoutWorker.ts` + `elk/elkWorkerEngine.ts` — nested real ELK worker
+> inside ours, id-correlated, 20 s timeout, respawn after death/timeout,
+> reject-to-fallback), the failure surface (`degraded` status + "Retry
+> layout", geometry always retained), and the golden fixtures
+> (`test/elkGoldenFixtures.ts` + `scripts/regen-elk-goldens.ts`). The
+> spatial-additivity acceptance (advisory's 100+1) stays pinned in
+> `layoutService.test.ts` through the region path, and the refinement
+> executes the same scope phase 1 decided — the invariant holds for both
+> engines. Found and fixed live: elkjs's fake worker self-installs in worker
+> scope (never importable from one) — the adapter passes an explicit
+> `workerFactory` instead.
+
 Ordered tasks, each with its own acceptance:
 
 1. **Incremental policy — the Lucent-specific layer.** The candidate
@@ -446,7 +462,7 @@ protocol; the consistency checklist is signed off.
 | 1 — layout boundary | 0's metrics pinned | legal now (the experiment's apparatus) |
 | 2 — ELK comparison | 1 | legal now (measurement) |
 | 3 — adoption decision | 2 | evidence gate |
-| 4 — integration | 3 = Result A or B | build opens on the gate |
+| 4 — integration | 3 = Result A or B | **done** (two-phase commit + worker, live-verified) |
 | 5 — intent / density / routing | 0's metrics; independent of the ELK verdict | build opens on the gate |
 | 6 — BPMN XML interchange | ~~license review~~ **answered: viewer cancelled** (doc 19); adapter + round-trip tests stand | done (interchange only) |
 | 7 — BPMN editing bridge | cancelled with the viewer — no bpmn-js, no modeler | — |

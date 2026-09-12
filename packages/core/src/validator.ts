@@ -294,6 +294,18 @@ export function validateOperations(workspace: Workspace, ops: Operation[]): Vali
       case "CREATE_DIAGRAM":
       case "TRANSFORM_DIAGRAM":
         break;
+      case "SET_LAYOUT_INTENT": {
+        // Intent may reference nodes created earlier in the same batch (a
+        // fresh board's spine arrives with the board), so the check is
+        // against the batch-evolving node set like every other op.
+        for (const id of op.primaryFlow ?? []) {
+          if (!nodes.has(id)) err(`primaryFlow node "${id}" does not exist`);
+        }
+        for (const id of op.emphasis ?? []) {
+          if (!nodes.has(id)) err(`emphasis node "${id}" does not exist`);
+        }
+        break;
+      }
       case "CREATE_WIREFRAME":
         if (wireframes.has(op.id)) err(`wireframe "${op.id}" already exists`);
         wireframes.add(op.id);

@@ -43,6 +43,7 @@ import {
   type LayoutOptions,
   type LayoutResult,
 } from "./layout.js";
+import { routeStyleFor, routedVertices } from "./routing.js";
 
 /** One line segment in canvas coordinates. */
 interface Segment {
@@ -202,7 +203,15 @@ export function measureVisualMetrics(
       continue;
     }
     edgesCounted++;
-    const path: Array<{ x: number; y: number }> = [s, ...(edge.route ?? []), t];
+    // Phase 5 routing styles: the drawn vertices come from the shared
+    // drawn-truth helper (routedVertices), which squares ortho corners —
+    // the crossing/bend/through metrics must count what the renderer draws
+    // per family, not the raw waypoint list. Route-less edges (no route)
+    // keep the single centre-to-centre segment.
+    const path =
+      edge.route && edge.route.length > 0
+        ? routedVertices(s, t, edge.route, routeStyleFor(workspace.diagramKind))
+        : [s, t];
     bendsTotal += path.length - 2;
     let edgeLength = 0;
     const edgeSegments: Segment[] = [];

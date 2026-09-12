@@ -347,6 +347,24 @@ const operationSchema = z.discriminatedUnion("op", [
     op: z.literal("TRANSFORM_DIAGRAM"),
     to: diagramKind,
   }),
+  /**
+   * Layout intent (doc 18, Phase 5, advisory V7): the AI states WHAT the
+   * diagram should emphasize — never WHERE anything sits. This is the whole
+   * op: ids and enums, not one coordinate. It is a replace-whole patch, so
+   * the model may send emphasis without re-sending direction it doesn't
+   * mean to change… and a later SET_LAYOUT_INTENT replaces the intent
+   * outright (deliberate: a new intent is a new statement about the board,
+   * not a merge — merging two model turns into one hybrid intent would be
+   * a layout nobody asked for).
+   */
+  z.object({
+    op: z.literal("SET_LAYOUT_INTENT"),
+    direction: z.enum(["vertical", "horizontal"]).optional(),
+    /** Node ids in narrative order. Must exist (validator); no coordinates. */
+    primaryFlow: z.array(z.string().min(1)).max(50).optional(),
+    /** Node ids to keep salient. Must exist (validator). */
+    emphasis: z.array(z.string().min(1)).max(50).optional(),
+  }),
   z.object({
     op: z.literal("CREATE_WIREFRAME"),
     id: z.string().min(1),

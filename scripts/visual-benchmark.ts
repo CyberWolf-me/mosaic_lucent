@@ -31,6 +31,66 @@ const MOVEMENT_SCALES = [100, 200];
 const args = process.argv.slice(2);
 const asJson = args.includes("--json");
 
+// Routing-style sweep (doc 18, Phase 5, advisory V10): measure the identical
+// ladder under each FORCED route style, so the per-family table is decided
+// from numbers rather than taste. The layout is FIXED per board (computed
+// once, passed into the metric); the swept style rides the metric's own
+// routeStyleFor lookup by measuring a clone whose diagramKind maps to the
+// swept style — a kind whose policy is the style, never a kind that would
+// change the layout itself (layout is pre-supplied either way). Prints
+// style × board × scale and exits. Defined here, invoked after engine
+// selection + warm-up below.
+const routingArg = args.find((a) => a.startsWith("--routing"));
+async function runRoutingSweep(): Promise<void> {
+  const { routeStyleFor } = await import("../packages/core/src/routing.js");
+  const styles = ["polyline", "ortho", "spline"] as const;
+  const ROUTING_SCALES = [150, 300, 500];
+  // A kind per style: each maps to that style in the policy table, and none
+  // changes geometry here (the layout arrives pre-computed).
+  const KIND_WITH_POLICY = {
+    polyline: "flowchart",
+    ortho: "process",
+    spline: "architecture",
+  } as const;
+  const header = [
+    "board".padEnd(36),
+    "style".padStart(9),
+    "nodes".padStart(5),
+    "cross".padStart(7),
+    "bend".padStart(6),
+    "thru".padStart(5),
+    "eMean".padStart(7),
+    "policy".padStart(9),
+  ].join("");
+  console.log(`Routing-style sweep — engine: ${engine.id} (layout fixed; the DRAWN style varies)\n`);
+  console.log(header);
+  console.log("-".repeat(header.length));
+  for (const factory of BOARD_FACTORIES) {
+    for (const n of ROUTING_SCALES) {
+      const built = factory.build(n);
+      const { layout, routes } = await engine.layout({ workspace: built, options: {} });
+      const routed = applyRoutes(applyLayout(built, layout), routes);
+      for (const style of styles) {
+        const stamped = { ...routed, diagramKind: KIND_WITH_POLICY[style] as typeof routed.diagramKind };
+        const m = measureVisualMetrics(stamped, {}, layout);
+        console.log(
+          [
+            factory.label.padEnd(36),
+            style.padStart(9),
+            String(m.nodeCount).padStart(5),
+            String(m.crossings).padStart(7),
+            m.edgeBendsMean.toFixed(2).padStart(6),
+            String(m.edgesThroughNodes).padStart(5),
+            String(Math.round(m.edgeLengthMean)).padStart(7),
+            routeStyleFor(factory.kind).padStart(9),
+          ].join(""),
+        );
+      }
+    }
+  }
+  process.exit(0);
+}
+
 // Engine selection (Phase 2): `--engine=elk` runs the identical ladder
 // through the ELK candidate behind the Phase 1 boundary. Everything else
 // runs the built-in engine. NOTE: an elk run resolves @lucent/core to
@@ -57,6 +117,8 @@ if (engineArg) {
 // worker/ELK init, which would poison every small-board median.
 measureVisualMetrics(BOARD_FACTORIES[0].build(20));
 await engine.layout({ workspace: BOARD_FACTORIES[0].build(20), options: {} });
+
+if (routingArg) await runRoutingSweep();
 
 interface Row {
   board: string;

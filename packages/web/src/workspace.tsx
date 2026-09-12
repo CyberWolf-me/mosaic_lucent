@@ -33,7 +33,12 @@ import {
   type Workspace,
 } from "@lucent/core";
 import { streamGenerate, PlanRefusalError } from "./api.js";
-import { layoutBoard, relayoutRegionScoped } from "./diagram/layoutService.js";
+import {
+  elkEligible,
+  elkRegionEligible,
+  layoutBoard,
+  relayoutRegionScoped,
+} from "./diagram/layoutService.js";
 import { WORKER_ELK_ENGINE } from "./diagram/elk/index.js";
 import { pushRegionNeighbors } from "./diagram/regionGrowth.js";
 import { classifyTurn } from "./meetings.js";
@@ -304,6 +309,15 @@ export interface WorkspaceState {
    * SET_GROUP_KIND — same op, same undo.
    */
   setRegionKind: (groupId: string, kind: DiagramKind | null) => void;
+  /**
+   * Doc 18 Phase 4 — the two-phase layout's async half, surfaced. `refining`
+   * while the ELK worker re-flows the board/region phase 1 just committed;
+   * `degraded` when every engine failed on a commit-path re-flow (phase-1
+   * geometry is on screen; `retryLayout` re-attempts). Never an error state
+   * the user must clear — the board is always valid.
+   */
+  layoutStatus: { phase: "idle" } | { phase: "refining" } | { phase: "degraded" };
+  retryLayout: () => void;
   /** Apply manual board operations (shapes/links/node moves) and commit to
    * history (docs/13). Returns false when the batch fails validation, so callers
    * can report the failure instead of appearing to succeed. */
@@ -345,9 +359,12 @@ export function proposalThreshold(): number {
 function laidOut(ws: Workspace): Workspace {
   // No strategy is passed: computeLayout picks radial for mind maps and layered
   // otherwise, so switching representation actually changes the arrangement.
-  // Routes ride along (V5): the same pass derives the long edges' bend
-  // points, stamped exactly like the node positions it computes.
-  const { layout, routes } = computeLayoutWithRoutes(ws, { direction: "vertical" });
+  // No direction either (Phase 5): core resolves the board's layout intent
+  // (SET_LAYOUT_INTENT) as the default — absent intent stays vertical, so
+  // existing boards render exactly as before. Routes ride along (V5): the
+  // same pass derives the long edges' bend points, stamped exactly like the
+  // node positions it computes.
+  const { layout, routes } = computeLayoutWithRoutes(ws);
   return applyRoutes(applyLayout(ws, layout), routes);
 }
 
@@ -518,12 +535,25 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   // board fetched from the server. Silent here on purpose: this runs before any
   // chat surface exists to report into, and nobody asked for this board by name —
   // parseWorkspaceOrDefault warns the console and hands back an empty one.
+  // Doc 18 Phase 4: a board saved by this build carries geometry (ELK-refined
+  // boards included), so boot lays out ONLY when positions are missing —
+  // same conditional as adoptBoard/openProject. Unconditional relayout would
+  // re-stamp built-in geometry over a saved ELK board and rearrange it on
+  // every reload (the M2 never-rearrange violation).
+  const bootNeedsLayout = Boolean(
+    restored &&
+      Object.values(withDefaults(restored.workspace).nodes).some((n) => !n.position),
+  );
   const historyRef = useRef(
     new OperationHistory(
-      // A restored board may predate positions on this node (history replay,
-      // an old save, a server fetch): lay it out once at boot so the canvas
-      // never renders every card stacked at the origin.
-      restored ? laidOut(withDefaults(restored.workspace)) : createWorkspace(),
+      // A restored board may predate positions (history replay, an old save,
+      // a server fetch): lay it out once at boot so the canvas never renders
+      // every card stacked at the origin.
+      restored
+        ? bootNeedsLayout
+          ? laidOut(withDefaults(restored.workspace))
+          : withDefaults(restored.workspace)
+        : createWorkspace(),
       restored ? "loaded" : "initial",
     ),
   );
@@ -620,35 +650,48 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
    * Doc 18 Phase 4 — the two-phase layout, status half. Phase 1 is the
    * synchronous built-in pass every commit already runs (instant, scoped,
    * contract-identical to pre-Phase-4 behaviour). Phase 2 is the async ELK
-   * refinement (ADR 0039's hybrid selection) that follows a legitimate layout
-   * pass and re-lays out the same scope through the worker: better geometry
-   * on the flat graph families, off the main thread. `refining` while in
-   * flight; `degraded` when ELK and every fallback failed — phase 1's
-   * geometry is already on screen and valid, so this is a quality notice
-   * ("Layout couldn't be updated — retry?"), never a blank canvas (doc 18
-   * Phase 4 item 3).
+   * refinement (ADR 0039's hybrid selection) that follows a legitimate
+   * re-flow and re-lays out the same scope through the worker: better
+   * geometry on the flat graph families, off the main thread. `refining`
+   * while in flight; `degraded` when ELK and every fallback failed on a
+   * commit-path re-flow — phase-1 geometry is already on screen and valid,
+   * so that is a quality notice ("Layout couldn't be updated — retry"),
+   * never a blank canvas (doc 18 Phase 4 item 3).
    */
   const [layoutStatus, setLayoutStatus] = useState<
     { phase: "idle" } | { phase: "refining" } | { phase: "degraded" }
   >({ phase: "idle" });
   /**
-   * The refinement's epoch: bumped whenever the board's semantic state moves
-   * under an in-flight refinement (a second send, an undo, a remote frame).
-   * The guard at swap-in time makes every landing check "was this result
-   * computed for the board that is still current?" — a stale result is
-   * dropped on the floor. Same pattern the streaming pill uses (genAbortRef)
-   * for the same reason: async work must never clobber newer sync state.
+   * Latest-value mirrors (assigned during render, read in async landings —
+   * a state change always renders before any promise callback can run, so
+   * these are current whenever a refinement lands):
+   *  - `workspaceRef` is the staleness guard: a refinement carries the
+   *    workspace it was computed FROM, and applies only if that object is
+   *    still the current one. Any commit, undo, remote frame, or project
+   *    switch replaces the workspace object and thereby drops every
+   *    in-flight refinement — async work must never clobber newer sync state.
+   *  - `chatRef`/`projectNameRef` let a refinement persist the ELK geometry
+   *    with the LATEST conversation, never the conversation captured when it
+   *    fired (persisting a stale one would drop the newest chat entries).
    */
-  const layoutEpochRef = useRef(0);
+  const workspaceRef = useRef(workspace);
+  workspaceRef.current = workspace;
+  const chatRef = useRef(chat);
+  chatRef.current = chat;
+  const projectNameRef = useRef(projectName);
+  projectNameRef.current = projectName;
   /**
-   * What a refinement re-lays out: the whole board, or one region's members.
-   * The refinement NEVER runs its own scope decision — it executes the scope
-   * phase 1 already decided, so the spatial-additivity invariant (region out
-   * = 0) holds for both engines alike.
+   * Live handle to the refinement (assigned during render, right after its
+   * definition below). `connectSync` and `adoptBoard` are defined EARLIER in
+   * the component body than `refineLayout` and capture their closures once
+   * (deps `[]` / `[connectSync]`), so they reach the refinement through this
+   * ref — the same read-at-call-time pattern the armed STT callbacks use.
+   * Without it, a remote frame arriving after a project switch would run a
+   * refinement whose `persist` still points at the previous project's slot.
    */
-  const layoutScopeRef = useRef<LayoutScope>({ kind: "board" });
-  /** The retry affordance: re-run the refinement over the current board. */
-  const [layoutRetry, setLayoutRetry] = useState<(() => void) | null>(null);
+  const refineRef = useRef<
+    (from: Workspace, scope: LayoutScope, persistOnLand?: boolean) => void
+  >(() => {});
   // Live collaborators. Populated only when a server-side board is open and the
   // realtime socket is connected; empty in the offline/solo localStorage flow.
   const [peers, setPeers] = useState<Peer[]>([]);
@@ -697,6 +740,14 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         setWorkspace(positioned);
         setTick((t) => t + 1);
         applyingRemote.current = false;
+        // Phase 2 (doc 18 Phase 4): a wholesale delivery re-derived geometry,
+        // so the ELK refinement is legitimate — WITHOUT persisting (peers
+        // derive their own geometry; ops carry no coordinates) and without
+        // history (already handled above by syncFromRemote). Reached through
+        // the live ref: this callback is armed once, before `refineLayout`
+        // exists, and a project switch must leave a late frame refining the
+        // CURRENT board with the CURRENT persist slot.
+        if (hasUnpositioned) refineRef.current(positioned, { kind: "board" });
       },
       onPeers: setPeers,
       onStatus: setSyncStatus,
@@ -804,6 +855,11 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       historyRef.current = new OperationHistory(safe, "loaded shared board");
       setWorkspace(safe);
       setTick((t) => t + 1);
+      // Phase 2 (doc 18 Phase 4): geometry was re-derived for an unpositioned
+      // server board, so the ELK refinement follows — without persisting
+      // (this board is server-owned; the localStorage slot belongs to the
+      // previous local project). Via the live ref like connectSync's frame.
+      if (hasUnpositioned) refineRef.current(safe, { kind: "board" });
       connectSync(board.id, safe);
     },
     [connectSync],
@@ -871,22 +927,156 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   );
 
   /**
+   * Doc 18 Phase 4 — the async half of the two-phase layout. Runs AFTER the
+   * synchronous built-in pass has already committed phase-1 geometry (which
+   * is valid, so nothing below can blank the canvas) and re-lays out the SAME
+   * scope through the layout service with the worker ELK engine as primary:
+   *
+   *  - `scope.kind === "region"`: the region phase 1 re-flowed, re-laid by
+   *    ELK, merged at its current origin, with the same neighbour-push as
+   *    phase 1 (ELK can need more room than the built-in geometry did).
+   *  - `scope.kind === "board"`: a full-board pass over the ELK-eligible
+   *    families only (`elkEligible`); everything else skips before any
+   *    worker traffic.
+   *
+   * Ownership: a refinement never touches history (it is geometry over an
+   * already-committed batch, not a semantic change) and never sends ops (ops
+   * carry no coordinates — every client derives geometry from the same
+   * semantics deterministically, so peers' own refinements converge to the
+   * same ELK output without any traffic).
+   *
+   * Staleness + coalescing: a landing applies only if `from` is still the
+   * current workspace object — any commit/undo/remote-frame/project-switch
+   * replaces the object and thereby drops every in-flight refinement. While
+   * one refinement is in flight, further fires are skipped and remembered;
+   * when the in-flight one lands, the remembered fire re-runs against the
+   * CURRENT board. A multiplayer op burst therefore costs at most one ELK
+   * run per burst, not one per frame.
+   *
+   * `persistOnLand` is set ONLY by the paths that already persist phase-1
+   * geometry with a conversation (commit/undo/redo/restore, an unpositioned
+   * boot). The remote/adopt paths never persist a refinement: peers derive
+   * their own geometry, and an adopted shared board shares the previous
+   * project's localStorage slot — writing it would corrupt that record.
+   */
+  const refineInFlight = useRef(false);
+  const refineQueued = useRef<{
+    from: Workspace;
+    scope: LayoutScope;
+    persistOnLand: boolean;
+  } | null>(null);
+  const refineLayout = useCallback(
+    async (from: Workspace, scope: LayoutScope, persistOnLand = false) => {
+      // Skip before any worker traffic: families ELK did not win, and region
+      // scopes whose region is not ELK-eligible (the service would answer
+      // with the built-in engine — geometry phase 1 already produced).
+      if (scope.kind === "board" ? !elkEligible(from) : !elkRegionEligible(from, scope.groupId!)) {
+        return;
+      }
+      if (refineInFlight.current) {
+        refineQueued.current = { from, scope, persistOnLand };
+        return;
+      }
+      refineInFlight.current = true;
+      setLayoutStatus({ phase: "refining" });
+      let degraded = false;
+      try {
+        let refined: Workspace | null = null;
+        if (scope.kind === "region" && scope.groupId) {
+          const result = await relayoutRegionScoped(from, scope.groupId, {}, {
+            primary: WORKER_ELK_ENGINE,
+          });
+          // The built-in fallback inside the service re-produces phase-1's
+          // own geometry — applying it would be a no-op, so only an ELK
+          // outcome continues. `degraded` here means both engines failed;
+          // the region keeps phase-1 geometry and the notice fires.
+          if (result.degraded) {
+            degraded = true;
+          } else if (result.engineId === WORKER_ELK_ENGINE.id) {
+            refined = pushRegionNeighbors(result.workspace, scope.groupId);
+          }
+        } else {
+          const result = await layoutBoard(from, {}, { primary: WORKER_ELK_ENGINE });
+          if (result.degraded) {
+            degraded = true;
+          } else if (result.engineId === WORKER_ELK_ENGINE.id) {
+            refined = result.workspace;
+          }
+        }
+        if (refined && workspaceRef.current === from) {
+          setWorkspace(refined);
+          setTick((t) => t + 1);
+          if (persistOnLand) persist(refined, chatRef.current, projectNameRef.current);
+        }
+      } catch {
+        // The service's own contract makes an exception here near-impossible
+        // (it degrades rather than throws), but a crash in the refinement
+        // must never reach the render path. Phase-1 geometry stands.
+      } finally {
+        refineInFlight.current = false;
+        setLayoutStatus(degraded ? { phase: "degraded" } : { phase: "idle" });
+        // The queued fire re-runs with its OWN from — the board it was fired
+        // for. If that board was replaced while the earlier refinement ran
+        // (a project switch, a peer frame), the re-fire's landing gate drops
+        // it; firing it against the CURRENT board instead would refine a
+        // board that never asked (and a queued region scope could even
+        // rearrange a freshly loaded positioned board — an M2 violation).
+        const queued = refineQueued.current;
+        refineQueued.current = null;
+        if (queued) {
+          void refineLayout(queued.from, queued.scope, queued.persistOnLand);
+        }
+      }
+    },
+    [persist],
+  );
+  refineRef.current = refineLayout;
+
+  /** Retry a degraded refinement: same board, same rules, fresh attempt. */
+  const retryLayout = useCallback(() => {
+    void refineLayout(workspaceRef.current, { kind: "board" });
+  }, [refineLayout]);
+
+  /**
+   * The boot phase-2 fire: a restored board whose positions were missing got
+   * phase-1 geometry in the initial state computation above — the ELK
+   * refinement follows once the hooks exist to fire it. StrictMode's double
+   * mount is harmless: the second fire coalesces behind the first, and the
+   * landing gate makes both idempotent. Not persisted — the record's turn to
+   * write comes with the next commit.
+   */
+  useEffect(() => {
+    if (restored && bootNeedsLayout) {
+      refineRef.current(historyRef.current.current(), { kind: "board" });
+    }
+    // Boot fires once; the flags are captured on purpose.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /**
    * Apply a local batch and record it as one history entry. Inverse ops are
    * computed against the pre-batch workspace so undo is multiplayer-safe (M0.4).
    *
    * M2: the relayout is SCOPED — when the batch touched nodes all inside one
    * group, only that group re-flows at its current origin and the rest of the
    * board keeps its committed positions (the spatial-additivity invariant).
+   *
+   * Doc 18 Phase 4: two-phase. Phase 1 is the sync scoped pass above (the
+   * commit is durable and interactive the moment it returns); phase 2 — the
+   * async ELK refinement over the same scope — follows, epoch-guarded. A
+   * phase-2 landing that arrives after another change already replaced the
+   * workspace is dropped; the newer commit's own refinement replaces it.
    */
   const commit = useCallback(
     (next: Workspace, ops: Operation[], label: string, conversation: ChatEntry[], name: string) => {
-      const positioned = laidOutScoped(next, touchedIdsOf(ops)).ws;
+      const { ws: positioned, scope } = laidOutScoped(next, touchedIdsOf(ops));
       historyRef.current.commit(ops, label);
       setWorkspace(positioned);
       setTick((t) => t + 1);
       persist(positioned, conversation, name);
+      void refineLayout(positioned, scope, true);
     },
-    [persist],
+    [persist, refineLayout],
   );
 
   /**
@@ -1557,8 +1747,11 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     if (ops.length > 0) {
       syncRef.current?.commit(ops, "undo");
       persist(positioned, chat, projectName);
+      // Phase 2 (doc 18 Phase 4): the replayed board re-derives geometry, so
+      // the ELK refinement is legitimate here too.
+      void refineLayout(positioned, { kind: "board" }, true);
     }
-  }, [chat, persist, projectName]);
+  }, [chat, persist, projectName, refineLayout]);
   const redo = useCallback(() => {
     const { workspace: next, ops } = historyRef.current.redo();
     // Same as undo: the replayed workspace has no positions of its own.
@@ -1568,8 +1761,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     if (ops.length > 0) {
       syncRef.current?.commit(ops, "redo");
       persist(positioned, chat, projectName);
+      void refineLayout(positioned, { kind: "board" }, true);
     }
-  }, [chat, persist, projectName]);
+  }, [chat, persist, projectName, refineLayout]);
 
   const restoreVersion = useCallback(
     (index: number) => {
@@ -1588,8 +1782,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       setChat(conversation);
       if (ops.length > 0) syncRef.current?.commit(ops, "restore");
       persist(positioned, conversation, projectName);
+      // Same phase-2 rule as undo/redo: restore re-derives geometry.
+      void refineLayout(positioned, { kind: "board" }, true);
     },
-    [chat, persist, projectName],
+    [chat, persist, projectName, refineLayout],
   );
 
   const selectDiagram = useCallback(
@@ -1903,6 +2099,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     restoreVersion,
     selectDiagram,
     setRegionKind,
+    layoutStatus,
+    retryLayout,
     nameFor,
     applyManual,
     newProject,

@@ -6,6 +6,7 @@ import {
   type ReactNode,
   type SVGProps,
 } from "react";
+import { routedVertices } from "@lucent/core";
 import type { DotColor } from "../scene.js";
 
 /**
@@ -317,14 +318,35 @@ export interface Point {
  * so two relationships between the same pair are both readable.
  *
  * With `route` bend points (the layout's corridor for a long edge), the path
- * is the routed polyline instead: anchor → each waypoint → anchor, with
- * small rounded joins so the bends read as drawn corners rather than a
- * sawtooth. `pathLength` normalisation downstream still applies (dash
- * animations measure the whole polyline).
+ * is the routed corridor instead, in the style the board's family chose
+ * (Phase 5, advisory V10 — routeStyleFor): polyline = straight segments
+ * through each waypoint; ortho = the squared corners of core's
+ * routedVertices (BPMN/process); spline = Catmull-Rom through the waypoints
+ * so a long corridor reads as one curve instead of a sawtooth
+ * (architecture/journey). `pathLength` normalisation downstream still
+ * applies (dash animations measure the whole path whatever its shape).
+ *
+ * The vertex list comes from core's `routedVertices` — the shared drawn
+ * truth — passed by the caller as `vertices`, so the canvas, the labels, the
+ * culling spans, and the export all draw the same points the benchmark
+ * counted. `route` stays for the route-less call sites.
  */
-export function makePath(a: Point, b: Point, dir: "h" | "v" = "h", spread = 0, route: Point[] = []): string {
+export function makePath(
+  a: Point,
+  b: Point,
+  dir: "h" | "v" = "h",
+  spread = 0,
+  route: Point[] = [],
+  style: "polyline" | "ortho" | "spline" = "polyline",
+  vertices?: Point[],
+): string {
   if (route.length > 0) {
-    const pts = [a, ...route, b];
+    // `vertices` lets a caller that computed the drawn points once (the
+    // render loop shares them with the label midpoint) pass them through;
+    // otherwise the style derives them here — same derivation, no second
+    // truth.
+    const pts = vertices ?? routedVertices(a, b, route, style);
+    if (style === "spline") return splinePath(pts);
     let d = `M ${pts[0]!.x} ${pts[0]!.y}`;
     for (let i = 1; i < pts.length; i++) {
       d += ` L ${pts[i]!.x} ${pts[i]!.y}`;
@@ -342,6 +364,35 @@ export function makePath(a: Point, b: Point, dir: "h" | "v" = "h", spread = 0, r
     return `M ${a.x} ${a.y} C ${a.x + spread} ${mid}, ${b.x + spread} ${mid}, ${b.x} ${b.y}`;
   }
   return `M ${a.x} ${a.y} L ${b.x} ${b.y}`;
+}
+
+/**
+ * Catmull-Rom spline through `pts` as SVG cubic segments: each interior
+ * vertex becomes the joint of one C command whose control arms are the
+ * neighbouring-vertex tangents at 1/6 the segment length — the standard
+ * uniform Catmull-Rom → Bézier conversion. Deterministic, passes exactly
+ * through every waypoint, never overshoots the corridor by more than the
+ * tangent length (bounded, unlike a naive quadratic through all points).
+ */
+function splinePath(pts: Point[]): string {
+  if (pts.length < 3) {
+    let d = `M ${pts[0]!.x} ${pts[0]!.y}`;
+    for (let i = 1; i < pts.length; i++) d += ` L ${pts[i]!.x} ${pts[i]!.y}`;
+    return d;
+  }
+  let d = `M ${pts[0]!.x} ${pts[0]!.y}`;
+  for (let i = 0; i + 1 < pts.length; i++) {
+    const p0 = pts[i - 1] ?? pts[i]!;
+    const p1 = pts[i]!;
+    const p2 = pts[i + 1]!;
+    const p3 = pts[i + 2] ?? p2;
+    const c1x = p1.x + (p2.x - p0.x) / 6;
+    const c1y = p1.y + (p2.y - p0.y) / 6;
+    const c2x = p2.x - (p3.x - p1.x) / 6;
+    const c2y = p2.y - (p3.y - p1.y) / 6;
+    d += ` C ${c1x} ${c1y}, ${c2x} ${c2y}, ${p2.x} ${p2.y}`;
+  }
+  return d;
 }
 
 export function ConnectorDefs() {

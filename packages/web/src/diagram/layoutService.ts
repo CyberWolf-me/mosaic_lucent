@@ -29,7 +29,7 @@ import {
   type LayoutOptions,
   type Workspace,
 } from "@lucent/core";
-import { ELK_LAYOUT_ENGINE } from "./elk/index.js";
+import { ELK_LAYOUT_ENGINE, WORKER_ELK_ENGINE } from "./elk/index.js";
 
 const ELK_KINDS: ReadonlySet<string> = new Set([
   "flowchart",
@@ -47,10 +47,17 @@ export interface LayoutOutcome {
 }
 
 export interface LayoutEngines {
-  /** The preferred engine (default: ELK — the adapter declines non-ELK work). */
+  /** The preferred engine (default: ELK worker — main-thread ELK breaches
+   * the interactive budget at scale; the proxy falls back to built-in on
+   * worker failure, never freezes). */
   primary?: DiagramLayoutEngine;
-  /** The safety net (default: the built-in engine). */
+  /** The safety net (default: the built-in engine; also used when the
+   * worker cannot spawn / dies / hangs — a frozen UI is worse than quieter
+   * geometry). */
   fallback?: DiagramLayoutEngine;
+  /** The worker proxy (optional override — reaches ELK off the main thread
+   * behind the Phase 1 boundary, matching ADR 0039). */
+  worker?: DiagramLayoutEngine;
 }
 
 /** ADR 0039 routing: ELK only for the flat graph families it won. */
@@ -88,7 +95,7 @@ export async function layoutBoard(
   options: LayoutOptions = {},
   engines: LayoutEngines = {},
 ): Promise<LayoutOutcome> {
-  const primary = engines.primary ?? ELK_LAYOUT_ENGINE;
+  const primary = engines.primary ?? (engines.worker ?? WORKER_ELK_ENGINE) ?? ELK_LAYOUT_ENGINE;
   const fallback = engines.fallback ?? CURRENT_LAYOUT_ENGINE;
 
   if (elkEligible(workspace)) {

@@ -240,6 +240,16 @@ export const workspaceSchema = z.object({
     "orgchart",
     "bpmn",
   ]),
+  // Layout intent (Phase 5): optional and additive — every pre-intent board
+  // parses unchanged. Ids are validated only as strings here; the op-level
+  // validator checks node existence when the AI SETS an intent.
+  layoutIntent: z
+    .object({
+      direction: z.enum(["vertical", "horizontal"]).optional(),
+      primaryFlow: z.array(z.string().min(1)).optional(),
+      emphasis: z.array(z.string().min(1)).optional(),
+    })
+    .optional(),
   nodes: z.record(z.string(), nodeSchema).default({}),
   edges: z.record(z.string(), edgeSchema).default({}),
   groups: z.record(z.string(), groupSchema).default({}),

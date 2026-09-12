@@ -127,6 +127,8 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
     onCitation,
     selectDiagram,
     setRegionKind,
+    layoutStatus,
+    retryLayout,
     applyManual,
     projectName,
     undo,
@@ -2283,8 +2285,25 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
               {/* Semantic-zoom note (UX-4): edge labels hide below 70% (see
                   DiagramLayer), so say why the board looks quieter. */}
               {zoom < 70 && nodeCount > 0 ? " · overview — zoom in for labels" : ""}
+              {/* Doc 18 Phase 4: the async ELK refinement is in flight over
+                  the committed phase-1 geometry — the board is valid, this
+                  only explains the one beat where it settles. */}
+              {layoutStatus.phase === "refining" ? " · refining layout" : ""}
+              {/* Degraded: every engine failed on a commit-path re-flow;
+                  phase-1 geometry stands and the retry re-attempts. Quiet
+                  status, never a modal (doc 18 Phase 4 item 3). */}
+              {layoutStatus.phase === "degraded" ? " · layout couldn't update" : ""}
             </span>
           </StatusBadge>
+          {layoutStatus.phase === "degraded" && (
+            <button
+              className="icon-btn"
+              onClick={retryLayout}
+              title="Re-run the layout refinement"
+            >
+              Retry layout
+            </button>
+          )}
         </>
       )}
     </div>
@@ -2344,8 +2363,9 @@ function applyPreview(
   // without this every one of them rendered at the origin, stacked on top of each
   // other and on top of the existing board — the preview looked broken and then
   // "fixed itself" on Apply. Routes ride along (V5): the preview draws the same
-  // corridors the applied board will.
-  const { layout, routes } = computeLayoutWithRoutes(merged, { direction: "vertical" });
+  // corridors the applied board will. No direction passed (Phase 5): the
+  // board's layout intent resolves, so the preview previews the intent too.
+  const { layout, routes } = computeLayoutWithRoutes(merged);
   return applyRoutes(applyLayout(merged, layout), routes);
 }
 

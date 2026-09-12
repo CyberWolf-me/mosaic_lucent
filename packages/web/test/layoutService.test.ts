@@ -10,6 +10,7 @@ import { describe, expect, it } from "vitest";
 import {
   applyLayout,
   applyRoutes,
+  computeLayoutWithRoutes,
   createWorkspace,
   layeredBoard,
   mixedRegionBoard,
@@ -17,7 +18,7 @@ import {
   type DiagramLayoutEngine,
   type Workspace,
 } from "@lucent/core";
-import { ELK_LAYOUT_ENGINE } from "../src/diagram/elk/index.js";
+import { ELK_LAYOUT_ENGINE, WorkerElkEngine, WORKER_ELK_ENGINE } from "../src/diagram/elk/index.js";
 import { elkEligible, layoutBoard, relayoutRegionScoped } from "../src/diagram/layoutService.js";
 
 /** A flowchart region of `n` members plus `k` ungrouped flow nodes. */
@@ -95,6 +96,79 @@ describe("layout service routing (ADR 0039)", () => {
     expect(outcome.workspace).toBe(ws); // geometry retained, not blanked
   });
 });
+
+describe("the production engine path — the worker proxy (doc 18 Phase 4)", () => {
+  it("an unspawnable worker rejects and the built-in fallback answers", async () => {
+    // Node has no Worker: the production defaultSpawn returns null, which is
+    // exactly the "browser blocked workers" production case. The service's
+    // contract: fall back, never throw into the render path.
+    const outcome = await layoutBoard(layeredBoard(40), {}, { primary: WORKER_ELK_ENGINE });
+    expect(outcome.engineId).toBe("lucent-current");
+    expect(outcome.degraded).toBe(false);
+  });
+
+  it("a worker proxy behind a scripted worker produces ELK geometry", async () => {
+    const fake = new FakeReplyingWorker();
+    const proxy = new WorkerElkEngine(() => fake as unknown as Worker);
+    const outcome = await layoutBoard(layeredBoard(20), {}, { primary: proxy });
+    expect(outcome.engineId).toBe(proxy.id);
+    expect(fake.requests).toHaveLength(1);
+    // The stamped workspace carries the geometry the fake produced for the
+    // node it placed (n-000: (5,5)); nodes the fake never listed keep the
+    // positions they already held — applyLayout's own contract.
+    expect(outcome.workspace.nodes["n-000"]?.position).toEqual({ x: 5, y: 5 });
+  });
+
+  it("region scope through the service: decline falls to the built-in region pass", async () => {
+    const ws = regionBoard(20, 2);
+    const stamped = applyRoutes(
+      applyLayout(ws, computeLayoutWithRoutes(ws).layout),
+      computeLayoutWithRoutes(ws).routes,
+    );
+    const declining = new WorkerElkEngine(() => new FakeDecliningWorker() as unknown as Worker);
+    const outcome = await relayoutRegionScoped(stamped, "region-main", {}, { primary: declining });
+    // The worker declined in band; the built-in engine's region pass answers.
+    expect(outcome.engineId).toBe("lucent-current");
+    expect(outcome.degraded).toBe(false);
+  });
+});
+
+/** A fake worker that replies with a fixed single-node layout. */
+class FakeReplyingWorker {
+  onmessage: ((event: MessageEvent) => void) | null = null;
+  onerror: (() => void) | null = null;
+  requests: unknown[] = [];
+  postMessage(envelope: unknown): void {
+    this.requests.push(envelope);
+    const { id } = envelope as { id: number };
+    queueMicrotask(() => {
+      this.onmessage?.({
+        data: {
+          kind: "layout-done",
+          id,
+          layout: { "n-000": { position: { x: 5, y: 5 }, size: { width: 50, height: 50 } } },
+          routes: {},
+        },
+      } as MessageEvent);
+    });
+  }
+  terminate(): void {}
+}
+
+/** A fake worker whose every region request is declined in band. */
+class FakeDecliningWorker {
+  onmessage: ((event: MessageEvent) => void) | null = null;
+  onerror: (() => void) | null = null;
+  postMessage(envelope: unknown): void {
+    const { id, kind } = envelope as { id: number; kind: string };
+    queueMicrotask(() => {
+      this.onmessage?.({
+        data: kind === "region" ? { kind: "region-declined", id } : { kind: "layout-error", id, message: "no" },
+      } as MessageEvent);
+    });
+  }
+  terminate(): void {}
+}
 
 describe("the spatial-additivity invariant through ELK (Phase 4)", () => {
   it("the advisory's 100+1 test, scoped: outside nodes are pixel-identical", async () => {

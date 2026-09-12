@@ -36,6 +36,15 @@ export function edgeTier(workspace: Workspace, edge: Edge): EdgeTier {
   const source = workspace.nodes[edge.source];
   const target = workspace.nodes[edge.target];
   if (!source || !target) return "secondary";
+  // Phase 5 emphasis (doc 18): a node the intent marks salient keeps its
+  // structural edges primary — the demotions below exist to make the OVERVIEW
+  // readable, and the user explicitly said this part of the story is the
+  // point. Quiet edges stay quiet: emphasis is about which structure is
+  // salient, never about turning execution metadata into the main flow.
+  const emphasized =
+    workspace.layoutIntent?.emphasis?.includes(source.id) ||
+    workspace.layoutIntent?.emphasis?.includes(target.id);
+  if (emphasized) return "primary";
   // Long edges the layout routed, or edges crossing a region boundary:
   // context, not the primary path.
   if (edge.route && edge.route.length > 0) return "secondary";

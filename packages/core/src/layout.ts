@@ -47,6 +47,24 @@ const DEFAULTS: Required<Omit<LayoutOptions, "strategy">> = {
   laneGap: 150,
 };
 
+/**
+ * The effective direction for one layout pass (doc 18, Phase 5): an explicit
+ * option wins (a call site that states direction outranks stored intent — the
+ * manual paths pass their own); absent that, the board's stored layout intent
+ * is the AI's statement of reading direction; absent that, vertical. ONE
+ * resolution point, applied where options merge with DEFAULTS, so the sync
+ * engine, the region paths, and any candidate engine behind the boundary
+ * all flow the same way. Direction is the only intent field that changes
+ * geometry globally — primaryFlow (spine weighting) and emphasis (tier
+ * promotion) are consumed by their own passes below.
+ */
+function withIntentDefaults(workspace: Workspace, options: LayoutOptions): Required<Omit<LayoutOptions, "strategy">> {
+  const merged = { ...DEFAULTS, ...options };
+  const intentDirection = workspace.layoutIntent?.direction;
+  if (!options.direction && intentDirection) merged.direction = intentDirection;
+  return merged;
+}
+
 /** Which geometry suits each representation. */
 const STRATEGY_FOR_KIND: Record<DiagramKind, LayoutStrategy> = {
   flowchart: "layered",
@@ -171,14 +189,17 @@ function dispatchLayoutWithRoutes(
   if (Object.keys(workspace.nodes).length === 0) return { layout: {}, routes: {} };
   // Region partitioning first, exactly as the old computeLayout body did:
   // each region lays out under its own strategy, board flow separately.
+  // The merged options carry the board's intent direction (withIntentDefaults
+  // is applied once at this choke point so every strategy below flows it).
+  const merged = withIntentDefaults(workspace, options);
   if (!options.strategy) {
     const partition = splitByRegions(workspace);
-    if (partition) return layoutWithRegionsRoutes(workspace, partition, { ...DEFAULTS, ...options });
+    if (partition) return layoutWithRegionsRoutes(workspace, partition, merged);
   }
   const strategy = options.strategy ?? STRATEGY_FOR_KIND[workspace.diagramKind] ?? "layered";
-  if (strategy === "radial") return { layout: radialLayout(workspace, { ...DEFAULTS, ...options }), routes: {} };
-  if (strategy === "tree") return { layout: treeLayout(workspace, { ...DEFAULTS, ...options }), routes: {} };
-  if (strategy === "swimlane") return { layout: swimlaneLayout(workspace, { ...DEFAULTS, ...options }), routes: {} };
+  if (strategy === "radial") return { layout: radialLayout(workspace, merged), routes: {} };
+  if (strategy === "tree") return { layout: treeLayout(workspace, merged), routes: {} };
+  if (strategy === "swimlane") return { layout: swimlaneLayout(workspace, merged), routes: {} };
   return layeredLayoutWithRoutes(workspace, options);
 }
 
@@ -186,7 +207,7 @@ function layeredLayoutWithRoutes(
   workspace: Workspace,
   options: LayoutOptions = {},
 ): { layout: LayoutResult; routes: EdgeRoutes } {
-  const opts = { ...DEFAULTS, ...options };
+  const opts = withIntentDefaults(workspace, options);
   const nodeIds = Object.keys(workspace.nodes);
   const result: LayoutResult = {};
   if (nodeIds.length === 0) return { layout: result, routes: {} };
@@ -320,6 +341,35 @@ function layeredLayoutWithRoutes(
     dummyOfEdge.set(edge.id, chain);
   }
 
+  // PRIMARY-FLOW SPINE (doc 18, Phase 5, advisory V7): consecutive spine nodes
+  // get VIRTUAL ordering hops — a dummy between every layer gap their
+  // layers span — so the barycenter sweeps pull the story's nodes toward one
+  // shared cross-axis position and the spine reads as a corridor. These are
+  // never real edges and never enter dummyOfEdge, so they produce no drawn
+  // route: they bias ORDER only, which is exactly the division of labor the
+  // doctrine draws (the AI says what the story is; the engine decides where
+  // everything, spine included, actually sits). Deterministic by
+  // construction: the virtual chains depend only on the layer assignment,
+  // which the pass above fixed. Duplicates (spine naming the same node twice,
+  // or a pair already directly connected) are harmless — one extra hop
+  // reinforcing what the sweep already wants — and a pair already holding a
+  // real dummy chain is skipped so the real corridor is not doubled.
+  const spine = (workspace.layoutIntent?.primaryFlow ?? []).filter((id, i, a) =>
+    layer.has(id) && a.indexOf(id) === i,
+  );
+  for (let i = 0; i + 1 < spine.length; i++) {
+    const a = spine[i]!;
+    const b = spine[i + 1]!;
+    const la = layer.get(a)!;
+    const lb = layer.get(b)!;
+    if (la === lb) continue;
+    const from = Math.min(la, lb);
+    const to = Math.max(la, lb);
+    for (let l = from + 1; l < to; l++) {
+      layers.set(l, [...(layers.get(l) ?? []), `${DUMMY_PREFIX}spine_${i}_${l - from - 1}`]);
+    }
+  }
+
   const { nodeSize, layerGap, nodeGap, direction } = opts;
   const sortedLayers = [...layers.keys()].sort((a, b) => a - b);
 
@@ -349,6 +399,28 @@ function layeredLayoutWithRoutes(
       ensureOut(a);
       incoming.get(b)!.push(a);
       outgoingRouted.get(a)!.push(b);
+    }
+  }
+  // Spine hops: each virtual chain a—spine dummy—…—b, biasing the sweeps
+  // exactly like a real routed hop would (the walk below covers every
+  // consecutive spine pair; layers were fixed above).
+  for (let i = 0; i + 1 < spine.length; i++) {
+    const a = spine[i]!;
+    const b = spine[i + 1]!;
+    const la = layer.get(a)!;
+    const lb = layer.get(b)!;
+    const from = Math.min(la, lb);
+    const to = Math.max(la, lb);
+    const path: string[] = [a];
+    for (let l = from + 1; l < to; l++) path.push(`${DUMMY_PREFIX}spine_${i}_${l - from - 1}`);
+    path.push(b);
+    for (let j = 0; j + 1 < path.length; j++) {
+      const x = path[j]!;
+      const y = path[j + 1]!;
+      ensureIn(y);
+      ensureOut(x);
+      incoming.get(y)!.push(x);
+      outgoingRouted.get(x)!.push(y);
     }
   }
   // Unrouted (adjacent-layer) edges keep their direct hops in both maps —
@@ -1344,7 +1416,7 @@ export function relayoutRegionWithRoutes(
     .map((n) => n.id);
   if (memberIds.length === 0) return null;
 
-  const opts = { ...DEFAULTS, ...options };
+  const opts = withIntentDefaults(workspace, options);
   const kind = group.kind ?? workspace.diagramKind;
   const sub = subWorkspaceFor(workspace, memberIds, kind);
   const subOut = layoutSingleRoutes(sub, kind, opts);
@@ -1411,7 +1483,7 @@ export function relayoutRegion(
     .map((n) => n.id);
   if (memberIds.length === 0) return null;
 
-  const opts = { ...DEFAULTS, ...options };
+  const opts = withIntentDefaults(workspace, options);
   const kind = group.kind ?? workspace.diagramKind;
   // The group's own layout, in its own coordinate frame.
   const sub = subWorkspaceFor(workspace, memberIds, kind);

@@ -1985,3 +1985,51 @@ signup→first-board activation distribution, observed once per org).
 - [ ] Real-team pilots (the review's Phase 3 "3–5 teams") — human-gated
       by design; the instrument panel (product counters, attention,
       benchmark) now exists to read them by.
+
+## Stage V — the structured visual engine (docs/18, 2026-09-12)
+
+The nine-phase plan, executed against the benchmark:
+
+- [x] Phase 0 baseline complete — four new fixture families (adversarial,
+      dense, mixed-region, long-edge ladder), five new metrics (bends,
+      label-overlap estimate, cohesion, coverage, movement-after-edit),
+      and one engine defect found and fixed by the harness itself (radial
+      rings sized by depth, not population).
+- [x] Phase 1 boundary — `DiagramLayoutEngine` in core; pins, runner, and
+      the region seam route through it; ladder byte-identical.
+- [x] Phase 2 ELK comparison — elkjs 0.12 behind the boundary: wins every
+      flat graph family (dense 4,350 vs 8,396 crossings at 500; zero
+      through-node edges), loses swimlane/radial/mixed outright at 20–400×
+      cost. Report: docs/eval-results/2026-09-12-elk-comparison.md.
+- [x] Phase 3 gate — ADR 0039: the hybrid selection (Result B), ELK for
+      flowchart/architecture/journey/bpmn, ours for everything else;
+      provisional on the human-half pass.
+- [x] Phase 4 production integration (live-verified) — the two-phase
+      commit: sync built-in pass (scoped, spatial-additivity pinned by the
+      100+1 test) commits instantly, then an epoch-guarded ELK refinement
+      re-flows the same scope through the service; ELK runs in a Web
+      Worker (nested real ELK worker inside ours; 20 s timeout; respawn
+      after death; reject→built-in-fallback on transport failure), so the
+      main thread recorded zero long tasks during a live 126-node
+      refinement; boot/adopt conditional (positioned boards never
+      re-arranged — now also covering persisted ELK geometry); degraded
+      surface = status-bar notice + Retry, never a blank canvas; golden
+      geometry fixtures pin elkjs 0.12.0 (test/elkGolden*.ts +
+      scripts/regen-elk-goldens.ts — a bump is a deliberate, gated act).
+      Found live + fixed: elkjs's in-process fake worker self-installs in
+      worker scope (its UMD export arm writes `self.onmessage`) — the
+      adapter passes an explicit workerFactory (browser: nested Web
+      Worker; Node: in-process backend).
+- [x] Phase 5 density — count-driven bands joined zoom in `edgeDensity`
+      (≥31 subdue secondary; ≥151 primary only), renderer-wired, tested.
+- [x] Phase 6 BPMN XML interchange — the license gate cancelled the
+      viewer; the subset + round-trip adapter stand (docs/19); then the
+      V1 core landed Lucent-native (bpmn as a first-class kind + region
+      lens, parallel gateway, our own OMG-convention shapes).
+- [ ] Phases 7–8 — 7 cancelled with the viewer; 8's remaining items
+      (lens picker polish, cross-engine consistency, visual diff,
+      exports incl. BPMN XML in the menu, the scripted acceptance
+      conversation) carry the final gate.
+- [ ] The human-half pass — batched at the end of the run; it carries
+      ADR 0039's verdict (the fallback becomes permanent if ELK's output
+      loses on comprehension/cleanup/preference).

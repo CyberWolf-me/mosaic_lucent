@@ -1,5 +1,11 @@
 import { useMemo } from "react";
-import { densityBand, edgeDensity, type DensityBand, type Workspace } from "@lucent/core";
+import {
+  densityBand,
+  edgeDensity,
+  routedVertices,
+  type DensityBand,
+  type Workspace,
+} from "@lucent/core";
 import { anchor, ConnectorDefs, makePath, NodeCard, type NodeState } from "./atoms.js";
 import { techMarkFor } from "./techMarks.js";
 import { KIND_TINT } from "../statementUi.js";
@@ -357,10 +363,16 @@ export function DiagramLayer({
           // endpoint is prominent, so the selected node's relationships
           // remain readable while unrelated clusters recede.
           const edgeFocus = focus ? focusEdgeOpacity(focus, e.source, e.target) : 1;
+          // The drawn corridor's vertex list (Phase 5): core's shared
+          // drawn-truth derivation — ortho squares the corners, spline
+          // curves through the same waypoints. The label midpoint below and
+          // the crossing metric in the benchmark consume the same list.
+          const vertices =
+            e.route.length > 0 ? routedVertices(a, b, e.route, e.routeStyle) : undefined;
           return (
             <path
               key={e.id}
-              d={makePath(a, b, e.dir, spread, e.route)}
+              d={makePath(a, b, e.dir, spread, e.route, e.routeStyle, vertices)}
               className={cls}
               // Normalize the path's own length to 100 units so the draw-in
               // animation is geometry-independent. The old animation lived on
@@ -415,7 +427,10 @@ export function DiagramLayer({
           let mx: number;
           let my: number;
           if (e.route.length > 0) {
-            const pts = [a, ...e.route, b];
+            // The SAME drawn vertices as the stroke (Phase 5): an ortho
+            // label rides the squared corridor the eye follows, not the
+            // raw waypoint diagonal. routedVertices is the one derivation.
+            const pts = routedVertices(a, b, e.route, e.routeStyle);
             const segs = pts.slice(1).map((p, i) => ({
               len: Math.hypot(p.x - pts[i]!.x, p.y - pts[i]!.y),
               from: pts[i]!,

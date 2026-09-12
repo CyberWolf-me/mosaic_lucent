@@ -334,6 +334,23 @@ export function applyOperation(workspace: Workspace, op: Operation): Workspace {
       break;
     }
 
+    case "SET_LAYOUT_INTENT": {
+      // Phase 5: replace-whole (the op's contract — see operations.ts). An
+      // empty object is a legitimate "clear the intent": {} means every field
+      // absent, which downstream consumers read as "no intent".
+      const { direction, primaryFlow, emphasis } = op;
+      if (direction === undefined && primaryFlow === undefined && emphasis === undefined) {
+        delete next.layoutIntent;
+      } else {
+        next.layoutIntent = {
+          ...(direction !== undefined ? { direction } : {}),
+          ...(primaryFlow !== undefined ? { primaryFlow: [...primaryFlow] } : {}),
+          ...(emphasis !== undefined ? { emphasis: [...emphasis] } : {}),
+        };
+      }
+      break;
+    }
+
     case "CREATE_WIREFRAME": {
       next.wireframes[op.id] = {
         id: op.id,

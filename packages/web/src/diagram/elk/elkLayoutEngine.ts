@@ -29,6 +29,19 @@
  */
 
 import ELK from "elkjs/lib/elk.bundled.js";
+// elkjs's own web-worker script, as a URL Vite serves (dev AND build). ELK's
+// in-process "fake worker" CANNOT be used from inside our layout worker: the
+// UMD's export arm checks `typeof document === "undefined" && typeof self !==
+// "undefined"` and, finding itself in a worker scope, SELF-INSTALLS onto the
+// global `self.onmessage` instead of exporting (found live in the Phase 4
+// browser pass — the import returned `{}` and would also hijack our worker's
+// own message handler). The nested real Worker is elkjs's intended browser
+// architecture: it runs the GWT engine on a dedicated thread INSIDE our
+// worker, so the main thread stays free (the whole point of doc 18 Phase 4).
+// In Node (tests, benchmark) there is no Web Worker, so the fallback factory
+// builds the in-process backend from the same package via createRequire —
+// the shape Node's CJS interop always yields (`module.exports.Worker`).
+import elkWorkerUrl from "elkjs/lib/elk-worker.min.js?url";
 import {
   measureNode,
   nodeCardExtraHeight,
@@ -69,6 +82,36 @@ interface ElkGraph {
   edges: Array<{ id: string; sources: string[]; targets: string[] }>;
 }
 
+/**
+ * The backend factory elkjs receives. Browser (dev + build): a real nested
+ * Web Worker running elkjs's GWT script from the URL Vite serves — elkjs's
+ * intended architecture, one more thread off our main thread. Node (tests,
+ * benchmark): no Web Worker exists, so the in-process backend from the same
+ * package via createRequire, whose CJS interop stably yields `.Worker`.
+ */
+async function makeElkWorkerFactory(): Promise<(url?: string) => Worker> {
+  if (typeof Worker === "function") {
+    // The GWT script is a classic worker (no ESM): elkjs passes the URL
+    // through, and the nested worker inherits our worker's origin.
+    return () => new Worker(elkWorkerUrl);
+  }
+  // Node path — import at call time so bundlers never inline it. The
+  // ESM-safe createRequire keeps this legal under tsx/vitest transforms.
+  const { createRequire } = await import("node:module");
+  const nodeRequire = createRequire(import.meta.url);
+  const fake = nodeRequire("elkjs/lib/elk-worker.min.js") as {
+    Worker: new () => ElkFakeWorker;
+  };
+  return () => new fake.Worker() as unknown as Worker;
+}
+
+/** The subset of elkjs's fake-worker surface ELK's PromisedWorker uses. */
+interface ElkFakeWorker {
+  onmessage: ((answer: { data: unknown }) => void) | null;
+  postMessage(message: unknown): unknown;
+  terminate(): void;
+}
+
 export class ElkLayoutEngine implements DiagramLayoutEngine {
   readonly id = "elk-0.12";
 
@@ -77,7 +120,7 @@ export class ElkLayoutEngine implements DiagramLayoutEngine {
   }
 
   async layout({ workspace, options }: DiagramLayoutRequest): Promise<DiagramLayoutResult> {
-    const elk = new ELK();
+    const elk = new ELK({ workerFactory: await makeElkWorkerFactory() });
     const graph = this.toElkGraph(workspace, options);
     const out = await elk.layout(graph);
 
@@ -94,7 +137,13 @@ export class ElkLayoutEngine implements DiagramLayoutEngine {
 
   /** Lucent workspace → ELK compound graph. Groups become containers. */
   private toElkGraph(workspace: Workspace, options: DiagramLayoutRequest["options"]): ElkGraph {
-    const direction = options.direction === "horizontal" ? "RIGHT" : "DOWN";
+    // Intent direction (doc 18 Phase 5): the same precedence the built-in
+    // engine applies — explicit option > stored intent > vertical. Both
+    // engines must read one intent or the async refinement would flip a
+    // horizontal board back to vertical.
+    const effectiveDirection =
+      options.direction ?? workspace.layoutIntent?.direction ?? "vertical";
+    const direction = effectiveDirection === "horizontal" ? "RIGHT" : "DOWN";
     const kind = workspace.diagramKind;
     const algorithm = ALGORITHM_FOR_KIND[kind];
     const layoutOptions: Record<string, string> = {

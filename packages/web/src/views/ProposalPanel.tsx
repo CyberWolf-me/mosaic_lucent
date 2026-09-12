@@ -172,6 +172,17 @@ function describe(op: Operation): { op: OpBadge; title: string; sub: string } {
       };
     case "TRANSFORM_DIAGRAM":
       return { op: "move", title: op.to, sub: "Transform representation" };
+    case "SET_LAYOUT_INTENT": {
+      const parts: string[] = [];
+      if (op.direction) parts.push(op.direction);
+      if (op.primaryFlow) parts.push(`spine ×${op.primaryFlow.length}`);
+      if (op.emphasis) parts.push(`emphasis ×${op.emphasis.length}`);
+      return {
+        op: "mod",
+        title: op.direction ?? "Layout intent",
+        sub: parts.length > 0 ? parts.join(" · ") : "Clear layout intent",
+      };
+    }
     case "CREATE_WIREFRAME":
       return { op: "add", title: op.title, sub: `New ${op.viewport} wireframe` };
     case "DELETE_WIREFRAME":

@@ -230,6 +230,23 @@ export function inverseOperations(ops: readonly Operation[], before: Workspace):
         if (prevKind !== op.to) inverses.unshift({ op: "TRANSFORM_DIAGRAM", to: prevKind });
         break;
       }
+      case "SET_LAYOUT_INTENT": {
+        // Restore the prior intent field-for-field. Absent → the inverse
+        // clears it ({} deletes, per the reducer's replace-whole contract).
+        // An identical intent inverts to the same op, which is harmless.
+        const prev = walking.layoutIntent;
+        if (!prev || (!prev.direction && !prev.primaryFlow && !prev.emphasis)) {
+          inverses.unshift({ op: "SET_LAYOUT_INTENT" });
+        } else {
+          inverses.unshift({
+            op: "SET_LAYOUT_INTENT",
+            ...(prev.direction !== undefined ? { direction: prev.direction } : {}),
+            ...(prev.primaryFlow !== undefined ? { primaryFlow: [...prev.primaryFlow] } : {}),
+            ...(prev.emphasis !== undefined ? { emphasis: [...prev.emphasis] } : {}),
+          });
+        }
+        break;
+      }
       case "CREATE_WIREFRAME":
         inverses.unshift({ op: "DELETE_WIREFRAME", id: op.id });
         break;

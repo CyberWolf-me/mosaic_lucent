@@ -700,10 +700,43 @@ export interface Comment {
   mentions?: string[];
 }
 
+/**
+ * Layout intent (doc 18, Phase 5): WHAT a diagram should emphasize, stated
+ * without a single coordinate — the AI may bias the engine's choices, never
+ * place anything (the doctrine's positive form: "the AI may state intent,
+ * never position"). All fields optional so a partial intent is valid; an
+ * absent intent changes nothing anywhere (every consumer defaults to today's
+ * behavior).
+ */
+export interface LayoutIntent {
+  /** Reading direction of the flow: vertical = top→bottom, horizontal = left→right. */
+  direction?: "vertical" | "horizontal";
+  /**
+   * The story's spine: node ids in narrative order (startEvent → … →
+   * endEvent, or hub → periphery). The layered engine weights the
+   * barycenter sweeps so spine nodes order deterministically toward a
+   * straight corridor; nothing is forced — the graph can still disagree.
+   */
+  primaryFlow?: string[];
+  /**
+   * Nodes the user is meant to keep an eye on. Emphasis promotes the node's
+   * edges' visual tier (secondary → primary), so an emphasized story stays
+   * readable at overview zoom where the density policy would otherwise
+   * subdue it. It never changes geometry.
+   */
+  emphasis?: string[];
+}
+
 export interface Workspace {
   id: string;
   name: string;
   diagramKind: DiagramKind;
+  /**
+   * The board's layout intent — WHAT the diagram emphasizes, not WHERE
+   * anything sits. Absent on every pre-intent board, so it is optional and
+   * additive; the AI sets it through the validated SET_LAYOUT_INTENT op.
+   */
+  layoutIntent?: LayoutIntent;
   nodes: Record<string, Node>;
   edges: Record<string, Edge>;
   groups: Record<string, Group>;

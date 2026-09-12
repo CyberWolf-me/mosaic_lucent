@@ -127,6 +127,12 @@ describe("schema still validates what the tool advertises", () => {
       SET_GROUP_KIND: { op: "SET_GROUP_KIND", id: "g", kind: "mindmap" },
       CREATE_DIAGRAM: { op: "CREATE_DIAGRAM", kind: "flowchart" },
       TRANSFORM_DIAGRAM: { op: "TRANSFORM_DIAGRAM", to: "mindmap" },
+      SET_LAYOUT_INTENT: {
+        op: "SET_LAYOUT_INTENT",
+        direction: "horizontal",
+        primaryFlow: ["a"],
+        emphasis: ["a"],
+      },
       CREATE_WIREFRAME: { op: "CREATE_WIREFRAME", id: "w", title: "W", root: { kind: "screen" } },
       DELETE_WIREFRAME: { op: "DELETE_WIREFRAME", id: "w" },
       CREATE_SHAPE: {

@@ -1,4 +1,5 @@
 import type { Shape, Workspace } from "@lucent/core";
+import { routeStyleFor, routedVertices } from "@lucent/core";
 import { DIAGRAM_LABELS } from "../scene.js";
 import type { DiagramKind } from "@lucent/core";
 
@@ -322,9 +323,10 @@ export function buildBoardSvg(workspace: Workspace, pad = 40): string {
   // the same position/size defaults as `toScene` so an unplaced endpoint still
   // draws (the serializer used to skip unplaced nodes entirely and never drew
   // edges at all — the exported file was cards-without-links or worse).
-  // A routed edge (V5) exports its drawn polyline — the corridor through the
-  // rows, matching what the canvas shows — via points=; route-less edges keep
-  // the <line> form.
+  // A routed edge (V5) exports its drawn corridor — matching what the canvas
+  // shows — via points=, through the SAME routedVertices the canvas and the
+  // benchmark use (Phase 5: an ortho board exports squared corners); route-
+  // less edges keep the <line> form.
   let connectorSvg = "";
   for (const e of Object.values(workspace.edges)) {
     const s = workspace.nodes[e.source];
@@ -335,13 +337,14 @@ export function buildBoardSvg(workspace: Workspace, pad = 40): string {
     const x2 = (t.position?.x ?? 0) + (t.size?.width ?? 160) / 2;
     const y2 = (t.position?.y ?? 0) + (t.size?.height ?? 64) / 2;
     if (e.route && e.route.length > 0) {
-      const pts = [
-        [x1, y1] as const,
-        ...e.route.map((p) => [p.x, p.y] as const),
-        [x2, y2] as const,
-      ];
+      const pts = routedVertices(
+        { x: x1, y: y1 },
+        { x: x2, y: y2 },
+        e.route,
+        routeStyleFor(workspace.diagramKind),
+      );
       connectorSvg +=
-        `<polyline points="${pts.map(([x, y]) => `${x},${y}`).join(" ")}" fill="none" stroke="#8a8a90" stroke-width="1.5" marker-end="url(#export-arrow)"/>`;
+        `<polyline points="${pts.map((p) => `${p.x},${p.y}`).join(" ")}" fill="none" stroke="#8a8a90" stroke-width="1.5" marker-end="url(#export-arrow)"/>`;
     } else {
       connectorSvg +=
         `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#8a8a90" stroke-width="1.5" marker-end="url(#export-arrow)"/>`;

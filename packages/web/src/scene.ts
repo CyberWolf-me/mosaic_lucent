@@ -1,4 +1,11 @@
-import { edgeTiers, type DiagramKind, type Node, type Workspace } from "@lucent/core";
+import {
+  edgeTiers,
+  routeStyleFor,
+  type DiagramKind,
+  type Node,
+  type RouteStyle,
+  type Workspace,
+} from "@lucent/core";
 
 /**
  * Presentation mapping from the semantic model to the reference visual language.
@@ -75,6 +82,14 @@ export interface PlacedEdge {
    * policy (edgeDensity) consumes it.
    */
   tier: "primary" | "secondary" | "quiet";
+  /**
+   * Which drawn path a ROUTED edge takes (Phase 5, advisory V10): derived
+   * from the board's diagram kind by routeStyleFor — one derivation here,
+   * every consumer (path, label midpoint, culling, export) reads it.
+   * "polyline" for route-less edges is inert: the renderer only consults
+   * the style when route.length > 0.
+   */
+  routeStyle: RouteStyle;
 }
 
 export type Side = "l" | "r" | "t" | "b";
@@ -140,6 +155,7 @@ export function toScene(workspace: Workspace): {
       parallelIndex,
       route: e.route ?? [],
       tier: tiers[e.id] ?? "primary",
+      routeStyle: routeStyleFor(workspace.diagramKind),
     };
   });
 
