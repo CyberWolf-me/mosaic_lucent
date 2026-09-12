@@ -44,3 +44,4 @@ back to it.
 | [0035](0035-the-narrowing-agent.md) | The narrowing agent: AI-initiated external proposals through the same human gate (Stage D9) | Accepted |
 | [0036](0036-the-execution-eras-close.md) | The execution eras close: the freeze rule, the era regression, D-numbering's honest end (Stage D10) | Accepted |
 | [0037](0037-execution-intelligence.md) | Execution Intelligence: the drives relation, the rollup doctrine, the create-the-work bridge (Stage E) | Accepted |
+| [0038](0038-diagram-engines-own-geometry.md) | Diagram engines own geometry; Lucent owns meaning — the Stage V boundary | Accepted |

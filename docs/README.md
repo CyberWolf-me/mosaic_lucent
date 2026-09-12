@@ -31,6 +31,7 @@ describe intent; 9 is the original build plan and is explicitly superseded.
 | 15  | [15-execution-plan.md](./15-execution-plan.md)                                 | Phased execution plan (A–G) and the testing model                                                                |
 | 16  | [16-meeting-evaluation.md](./16-meeting-evaluation.md)                         | The meeting-intelligence scoresheet: metrics, fixtures, run protocol                                             |
 | 17  | [17-engineering-roadmap.md](./17-engineering-roadmap.md)                       | The feature freeze, the decision gates, the keep-list, and what reopens engineering                              |
+| 18  | [18-structured-visual-engine.md](./18-structured-visual-engine.md)             | The structured visual engine: phases, gates, the ELK comparison, the BPMN lens                                   |
 | —   | [checklist.md](./checklist.md)                                                 | **Audited current status**, feature by feature. The source of truth.                                             |
 
 ### Decisions and operations
