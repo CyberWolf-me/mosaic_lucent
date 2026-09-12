@@ -13,6 +13,7 @@ import {
   applyOperations,
   applyRoutes,
   computeLayoutWithRoutes,
+  densityBand,
   edgeDensity,
   edgeTier,
   edgeTiers,
@@ -152,5 +153,40 @@ describe("the zoom-density policy", () => {
         expect(visHi).toBeGreaterThanOrEqual(visLo);
       }
     }
+  });
+});
+
+describe("density bands (doc 18 Phase 5)", () => {
+  it("bands follow the advisory's node-count boundaries", () => {
+    expect(densityBand(1)).toBe("intimate");
+    expect(densityBand(30)).toBe("intimate");
+    expect(densityBand(31)).toBe("grouped");
+    expect(densityBand(80)).toBe("grouped");
+    expect(densityBand(81)).toBe("regional");
+    expect(densityBand(150)).toBe("regional");
+    expect(densityBand(151)).toBe("overview");
+    expect(densityBand(300)).toBe("overview");
+    expect(densityBand(301)).toBe("atlas");
+  });
+
+  it("the intimate band is exactly the pre-band behavior", () => {
+    for (const zoom of [1, 0.6, 0.55, 0.4, 0.29, 0.1]) {
+      for (const tier of ["primary", "secondary", "quiet"] as const) {
+        expect(edgeDensity(tier, zoom, "intimate")).toEqual(edgeDensity(tier, zoom));
+      }
+    }
+  });
+
+  it("a grouped board subdues secondary edges even at full zoom; primary never recedes", () => {
+    expect(edgeDensity("secondary", 1, "grouped")).toEqual({ opacity: 0.45, hidden: false });
+    expect(edgeDensity("secondary", 1, "regional")).toEqual({ opacity: 0.45, hidden: false });
+    expect(edgeDensity("primary", 1, "atlas")).toEqual({ opacity: 1, hidden: false });
+  });
+
+  it("overview and atlas boards keep only primary structure at full zoom", () => {
+    expect(edgeDensity("secondary", 1, "overview")).toEqual({ opacity: 0, hidden: true });
+    expect(edgeDensity("quiet", 1, "atlas")).toEqual({ opacity: 0, hidden: true });
+    // Zooming in cannot outrun the band: the cap is a ceiling.
+    expect(edgeDensity("secondary", 3, "overview")).toEqual({ opacity: 0, hidden: true });
   });
 });

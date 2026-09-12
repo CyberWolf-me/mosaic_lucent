@@ -68,9 +68,41 @@ export interface EdgeDensity {
   hidden: boolean;
 }
 
-export function edgeDensity(tier: EdgeTier, zoom: number): EdgeDensity {
-  if (zoom >= 0.55) return { opacity: 1, hidden: false };
-  if (zoom >= 0.3) {
+/**
+ * The density bands (doc 18 Phase 5, the advisory's count-driven policy):
+ * how MANY nodes a board holds shifts how much relationship detail survives,
+ * independent of zoom. The five advisory bands collapse into three edge
+ * policies via a zoom cap — above 30 nodes secondary edges subdue even at
+ * full zoom; above 150 only primary structure survives the deep-zoom-out
+ * ladder. `intimate` is the exact pre-band behavior (cap 1 = no change), so
+ * every existing board renders identically until it grows past 30 nodes.
+ */
+export type DensityBand = "intimate" | "grouped" | "regional" | "overview" | "atlas";
+
+export function densityBand(nodeCount: number): DensityBand {
+  if (nodeCount <= 30) return "intimate";
+  if (nodeCount <= 80) return "grouped";
+  if (nodeCount <= 150) return "regional";
+  if (nodeCount <= 300) return "overview";
+  return "atlas";
+}
+
+const BAND_ZOOM_CAP: Record<DensityBand, number> = {
+  intimate: 1,
+  grouped: 0.54,
+  regional: 0.54,
+  overview: 0.29,
+  atlas: 0.29,
+};
+
+export function edgeDensity(
+  tier: EdgeTier,
+  zoom: number,
+  band: DensityBand = "intimate",
+): EdgeDensity {
+  const effective = Math.min(zoom, BAND_ZOOM_CAP[band]);
+  if (effective >= 0.55) return { opacity: 1, hidden: false };
+  if (effective >= 0.3) {
     if (tier === "secondary") return { opacity: 0.45, hidden: false };
     return { opacity: 1, hidden: false };
   }
