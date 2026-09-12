@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { edgeDensity, type Workspace } from "@lucent/core";
+import { densityBand, edgeDensity, type DensityBand, type Workspace } from "@lucent/core";
 import { anchor, ConnectorDefs, makePath, NodeCard, type NodeState } from "./atoms.js";
 import { techMarkFor } from "./techMarks.js";
 import { KIND_TINT } from "../statementUi.js";
@@ -93,6 +93,11 @@ export function DiagramLayer({
   const zoomTier = scale >= 0.8 ? "full" : scale >= 0.45 ? "mid" : "far";
   const zoomClass = zoomTier === "mid" ? "zoom-mid" : zoomTier === "far" ? "zoom-far" : "";
   const hideNodeDetail = zoomTier === "far";
+
+  // Count-driven density (doc 18 Phase 5): the band rides alongside the zoom
+  // tier — a 300-node board behaves like a zoomed-out board even at full
+  // zoom, so secondary and quiet edges recede by the same measured policy.
+  const band: DensityBand = densityBand(scene.nodes.length);
 
   // The in-flight drag is applied per node rather than by re-mapping the whole
   // array, so the cards and their connectors still track the cursor together
@@ -227,7 +232,7 @@ export function DiagramLayer({
       : groups;
 
   return (
-    <div className={zoomClass} style={{ position: "absolute", inset: 0 }}>
+    <div className={["density-" + band, zoomClass].filter(Boolean).join(" ")} style={{ position: "absolute", inset: 0 }}>
       {/* Semantic groups, drawn behind everything. CREATE_GROUP has always been
           part of the operation schema and the model emits it (process maps depend
           on it for swimlanes), but the canvas never rendered groups — so "group
@@ -332,7 +337,7 @@ export function DiagramLayer({
           // quiet (execution metadata) recede, so the overview reads as the
           // board's flow, not a wall of connectors. Mid zoom: secondary dims
           // to 0.45. Zoomed in: everything at full weight.
-          const density = edgeDensity(e.tier, scale);
+          const density = edgeDensity(e.tier, scale, band);
           if (density.hidden) return null;
           const cls = [
             proposed ? "dashed emerging" : isQuiet ? "edge-dep" : "",
@@ -390,7 +395,7 @@ export function DiagramLayer({
           if (!from || !to || !e.relationship) return null;
           // Labels follow their edge's density: a secondary edge receded at
           // mid zoom loses its label, and a hidden edge hides it entirely.
-          const labelDensity = edgeDensity(e.tier, scale);
+          const labelDensity = edgeDensity(e.tier, scale, band);
           if (labelDensity.hidden) return null;
           const a = anchor(from, e.fromSide);
           const b = anchor(to, e.toSide);
