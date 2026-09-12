@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { ThemeRoot } from "./settings.js";
-import { WorkspaceProvider, useWorkspace } from "./workspace.js";
+import { WorkspaceProvider, useWorkspace, type CanvasLens, type View } from "./workspace.js";
 import { ToastProvider } from "./ui/Toast.js";
 import { SettingsModal } from "./ui/Settings.js";
 import { CanvasView } from "./views/CanvasView.js";
@@ -28,9 +28,11 @@ import {
   UPGRADE_PATH,
   currentRoute,
   decideScreen,
+  getViewQuery,
   navigate,
   normalizePath,
   replacePath,
+  setViewQuery,
   subscribeToRoute,
   type Route,
 } from "./routes.js";
@@ -49,7 +51,50 @@ import { primeCsrfToken } from "./http.js";
  *    invites dead ends in a build that otherwise sent all three emails.
  */
 function Router({ onOpenSettings }: { onOpenSettings: (section?: string) => void }) {
-  const { view, setView } = useWorkspace();
+  const { view, setView, lens, setLens } = useWorkspace();
+  // UX-1: deep-link ?view=canvas&lens=kanban. Mount-only read so the browser's
+  // Back stays browser-owned; every write below uses replaceState (no entry).
+  useEffect(() => {
+    const q = getViewQuery();
+    if (!q.view) return;
+    const validViews: ReadonlySet<string> = new Set([
+      "dashboard",
+      "canvas",
+      "history",
+      "meeting",
+      "intelligence",
+      "execution",
+      "wireframe",
+      "sequence",
+      "er",
+      "board",
+      "document",
+      "admin",
+      "analytics",
+    ]);
+    const validLenses: ReadonlySet<string> = new Set([
+      "visual",
+      "kanban",
+      "document",
+      "wireframe",
+      "sequence",
+      "er",
+    ]);
+    if (!validViews.has(q.view)) return;
+    // setView folds legacy board-like views into canvas+lens; when both view
+    // and lens are present the explicit lens wins (setView("canvas") resets
+    // to visual, so lens applies after).
+    setView(q.view as View);
+    if (q.lens && validLenses.has(q.lens)) setLens(q.lens as CanvasLens);
+    // Mount-only: view/lens are the source of truth afterwards.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  // Write view/lens back to the URL. replaceState keeps ?board=/?invite= and
+  // never adds a history entry, so Back is not broken. No popstate dispatch,
+  // so this cannot loop with the route listener.
+  useEffect(() => {
+    setViewQuery(view, view === "canvas" ? lens : undefined);
+  }, [view, lens]);
   // Org pages sit *on top of* the board, so their Back returns to the canvas
   // — the surface the user came from. It deliberately does NOT touch the
   // browser history stack: views are React state and never push history

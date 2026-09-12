@@ -315,6 +315,40 @@ describe("operation protocol end to end (Stage B)", () => {
     const log = await h.boardStore.loadLog(boardId);
     expect(log).toHaveLength(1);
   });
+
+  it("an ops-route batch reaches the live room (found live: 2026-09-10)", async () => {
+    // The pre-fix route wrote only to the store: the room's in-memory state
+    // kept serving its stale truth, the connected peer never saw the ops,
+    // and a later eviction snapshotted that stale state — permanently
+    // emptying the board for future ws joiners. The route now commits
+    // room-first (the B3 approve's dual-path pattern), so a live peer
+    // receives the batch as an ordinary broadcast.
+    const h = (open = await harness());
+    const owner = await signup(h, "roomfirst@example.com");
+    const created = await api(h, "/api/boards", {
+      method: "POST",
+      token: owner.token,
+      body: JSON.stringify({ name: "Room first", workspace: createWorkspace() }),
+    });
+    const boardId = created.body.id as string;
+
+    const socket = await joinBoard(h, boardId, owner.token);
+    const opFrame = frame(socket, ["op"]);
+
+    const applied = await api(h, `/api/boards/${boardId}/ops`, {
+      method: "POST",
+      token: owner.token,
+      body: JSON.stringify({
+        ops: [{ op: "CREATE_NODE", id: "n-rf", nodeType: "step", label: "From the route" }],
+      }),
+    });
+    expect(applied.status).toBe(200);
+
+    const seen = await opFrame;
+    expect(seen.type).toBe("op");
+    expect(seen.entry.ops[0].op).toBe("CREATE_NODE");
+    expect(seen.entry.ops[0].id).toBe("n-rf");
+  });
 });
 
 function socketSend(socket: WebSocket, msg: unknown): void {

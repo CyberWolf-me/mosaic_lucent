@@ -57,6 +57,19 @@ export function MobileBoardView(): React.ReactElement {
     return () => window.removeEventListener("resize", onResize);
   }, []);
 
+  // Escape closes the comment sheets (target picker or composer).
+  useEffect(() => {
+    if (!commentOpen) return;
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === "Escape") {
+        setCommentOpen(false);
+        setCommentTarget(null);
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [commentOpen]);
+
   const openCommentOn = (targetId: string): void => {
     setCommentTarget(targetId);
     setCommentOpen(true);
@@ -163,7 +176,12 @@ export function MobileBoardView(): React.ReactElement {
       )}
 
       {commentOpen && !commentTarget && (
-        <div className="mobile-comment-sheet" role="dialog" aria-label="Choose a comment target">
+        <div
+          className="mobile-comment-sheet"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Choose a comment target"
+        >
           <div className="mobile-comment-list">
             {commentTargets.length === 0 && (
               <p className="muted small">Nothing to comment on yet.</p>
@@ -185,7 +203,12 @@ export function MobileBoardView(): React.ReactElement {
       )}
 
       {commentOpen && commentTarget && (
-        <div className="mobile-comment-sheet" role="dialog" aria-label="Add a comment">
+        <div
+          className="mobile-comment-sheet"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Add a comment"
+        >
           <textarea
             autoFocus
             value={commentText}

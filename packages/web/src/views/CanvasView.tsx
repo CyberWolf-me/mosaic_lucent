@@ -17,6 +17,15 @@ import { ToolIco } from "../ui/icons.js";
 import { EmptyState } from "./EmptyState.js";
 import { Tour } from "../ui/Tour.js";
 import { ProposalPanel } from "./ProposalPanel.js";
+import { AttentionPanel } from "./AttentionPanel.js";
+import { WhyThis } from "./WhyThis.js";
+import { BoardView } from "./BoardView.js";
+import { DocumentView } from "./DocumentView.js";
+import { WireframeView } from "./WireframeView.js";
+import { SequenceView } from "./SequenceView.js";
+import { ErView } from "./ErView.js";
+import { Menu } from "../ui/primitives.js";
+import { buildAttention } from "../attention.js";
 import { VoiceOverlay } from "./VoiceOverlay.js";
 import { PresentMode } from "./PresentMode.js";
 import { PenLayer } from "./PenLayer.js";
@@ -104,6 +113,8 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
     chat,
     busy,
     streamChars,
+    genPhase: aiPhase,
+    cancelSend,
     canvasPhase,
     proposal,
     listening,
@@ -122,6 +133,10 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
     peers,
     readOnly,
     setView,
+    lens,
+    setLens,
+    syncStatus,
+    boardId,
   } = useWorkspace();
   const [settings] = useSettings();
   const { notify } = useToast();
@@ -171,6 +186,12 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
   const [commentTarget, setCommentTarget] = useState<string | null>(null);
   const [inboxOpen, setInboxOpen] = useState(false);
   const [menu, setMenu] = useState<{ x: number; y: number; regionId?: string } | null>(null);
+  /** UX-1: single Board-tools menu replaces the 4-button right pileup. */
+  const [toolsOpen, setToolsOpen] = useState(false);
+  /** UX-3: attention drawer (proposal/skipped/blocked/at-risk/inbound/sync). */
+  const [attentionOpen, setAttentionOpen] = useState(false);
+  /** UX-2: WhyThis popover for the focused node. */
+  const [whyNode, setWhyNode] = useState<string | null>(null);
 
   /**
    * The diagram region the current selection sits inside, if any: a region is a
@@ -1571,14 +1592,40 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
     </div>
   );
 
+  // UX-2: named phases replace the char counter as the status model.
+  // The workspace owns the phase; the char count rides along as detail.
+  const PHASE_LABEL: Record<string, string> = {
+    understanding: "Understanding…",
+    constructing: "Constructing…",
+    validating: "Validating…",
+    applying: "Applying…",
+  };
   const status =
     canvasPhase === "generating"
-      ? streamChars > 0
-        ? { text: `Receiving response… ${streamChars} characters` }
-        : { text: "Constructing your diagram…" }
+      ? {
+          text:
+            (aiPhase ? PHASE_LABEL[aiPhase] : "Constructing your diagram…") +
+            (streamChars > 0 ? ` · ${streamChars} characters received` : ""),
+        }
       : canvasPhase === "proposing"
         ? { text: `Proposing ${proposal?.operations.length ?? 0} changes` }
         : null;
+  const genPhase = aiPhase;
+  const genProgress =
+    canvasPhase === "generating" && streamChars > 0 ? `${streamChars} characters received` : null;
+
+  // UX-3: one attention count across proposal/skipped/blocked/at-risk/sync.
+  // Inbound + sync errors arrive via props where known; here proposal +
+  // skipped ops from chat + offline state. Blocked/at-risk derive inside.
+  const skippedCount =
+    [...chat].reverse().find((e) => (e.skippedOps?.length ?? 0) > 0)?.skippedOps?.length ?? 0;
+  const attentionItems = buildAttention(workspace, {
+    proposal: proposal ? { operations: proposal.operations, request: proposal.request } : null,
+    skippedCount,
+    disconnected: boardId !== null && syncStatus !== "online",
+  });
+  // UX-6: names of peers currently selecting something (contest awareness).
+  const peerEditors = peers.filter((p) => (p.selection?.length ?? 0) > 0);
 
   // The proposal panel occupies the right rail; hide the top-right tool cluster
   // and the minimap while it is open so nothing overlaps the review panel.
@@ -1595,6 +1642,18 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
   // fresh board silently does nothing — the drag lands on the hero.
   const drawingArmed = tool !== "select" && tool !== "hand";
   const showHero = canvasPhase === "empty" && !drawingArmed;
+
+  // UX-1: lenses render here, inside the Canvas entry — one board URL
+  // (?view=canvas&lens=kanban) covers them. Each lens view is a full
+  // surface (own TopBar/LeftRail/composer); the rail's Canvas button
+  // returns to the visual lens. No separate destinations, no bouncing.
+  if (!showHero && lens !== "visual") {
+    if (lens === "kanban") return <BoardView onOpenSettings={onOpenSettings} />;
+    if (lens === "document") return <DocumentView onOpenSettings={onOpenSettings} />;
+    if (lens === "wireframe") return <WireframeView onOpenSettings={onOpenSettings} />;
+    if (lens === "sequence") return <SequenceView onOpenSettings={onOpenSettings} />;
+    if (lens === "er") return <ErView onOpenSettings={onOpenSettings} />;
+  }
 
   return (
     <div style={{ position: "absolute", inset: 0 }}>
@@ -1747,6 +1806,7 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
                 onExpand={(label) => void send(`Expand the "${label}" node into its sub-steps.`)}
                 onTransform={() => selectDiagram(nextDiagramKind(workspace.diagramKind))}
                 onComment={() => setCommentTarget(selected)}
+                onWhy={(id) => setWhyNode(id)}
                 onOpenMeeting={(meetingId, turnRange) => {
                   // The ✦ trust loop: jump to the meeting that created this
                   // node. The meeting id rides in the URL (?meeting=<id>) —
@@ -1772,6 +1832,20 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
                 // is rejected exactly like a bad model op.
                 onApply={canEdit ? applyManual : undefined}
               />
+            )}
+            {/* UX-2: one-tap provenance. The HUD answers "why is this here?"
+                with the meeting quote + source jump + undo, not a tooltip. */}
+            {whyNode && workspace.nodes[whyNode]?.position && (
+              <div
+                style={{
+                  position: "absolute",
+                  left: workspace.nodes[whyNode]!.position!.x,
+                  top: (workspace.nodes[whyNode]!.position!.y ?? 0) + 60,
+                  zIndex: 45,
+                }}
+              >
+                <WhyThis nodeId={whyNode} onClose={() => setWhyNode(null)} />
+              </div>
             )}
             {/* Live collaborators' cursors and selections track content space. */}
             {peers.length > 0 && <PresenceCursors peers={peers} />}
@@ -1808,29 +1882,64 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
             />
           )}
 
-          {rightClusterVisible && (
-            <button
-              className="polish-btn"
-              onClick={() =>
-                void send(
-                  "Review this board and improve it: fix unclear or inconsistent labels, " +
-                    "add any obviously missing steps or connections, remove duplicates, and " +
-                    "group related nodes. Change only what genuinely improves it, and explain " +
-                    "each change.",
-                )
-              }
-              disabled={busy || (nodeCount === 0 && shapes.length === 0)}
-              title="Ask Lucent to review and improve this board"
-            >
-              <Ico.Sparkle /> Polish
-            </button>
-          )}
+          {/* Polish lives in the Board-tools menu (UX-1): one entry point,
+              not a permanent button competing with the canvas. */}
 
           <TopBar crumbs={crumbs} meta={meta} onOpenSettings={onOpenSettings} />
           {readOnly && (
             <div className="readonly-banner" role="status" aria-live="polite">
               <Ico.Eye />
               <span>You're viewing this board. Ask the owner for edit access to change it.</span>
+            </div>
+          )}
+          {/* UX-6: realtime awareness. The protocol is sequenced + correct;
+              the surface was toast-only. A persistent bar names the state. */}
+          {boardId !== null && syncStatus !== "online" && (
+            <div
+              className="sync-banner"
+              role="status"
+              aria-live="polite"
+              style={{
+                position: "absolute",
+                top: 60,
+                left: "50%",
+                transform: "translateX(-50%)",
+                zIndex: 30,
+                fontSize: 12,
+                padding: "6px 14px",
+                borderRadius: 999,
+                border: "1px solid var(--stroke-2)",
+                background: "oklch(from var(--canvas-2) l c h / 0.92)",
+                color: "var(--ink-1)",
+              }}
+            >
+              {syncStatus === "connecting"
+                ? "Reconnecting… edits are queued."
+                : "Offline — edits save locally and sync when the server is reachable."}
+            </div>
+          )}
+          {/* UX-6: contest awareness — a peer acting on a selection you can see. */}
+          {peerEditors.length > 0 && (
+            <div
+              className="peer-banner"
+              role="status"
+              style={{
+                position: "absolute",
+                top: 92,
+                left: "50%",
+                transform: "translateX(-50%)",
+                zIndex: 30,
+                fontSize: 11.5,
+                padding: "5px 12px",
+                borderRadius: 999,
+                border: "1px solid var(--stroke-1)",
+                background: "oklch(from var(--canvas-2) l c h / 0.85)",
+                color: "var(--ink-2)",
+              }}
+            >
+              {peerEditors.length === 1
+                ? "A collaborator is editing a selection."
+                : `${peerEditors.length} collaborators are editing selections.`}
             </div>
           )}
           {canEdit && (
@@ -1844,32 +1953,102 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
           )}
           <LeftRail side="right" />
 
+          {/* UX-1 L1/L2/L3: one Board-tools menu (L2) replaces the four-button
+              right pileup (Polish/Templates/Timer/Vote). The comment bell
+              stays separate — comments are attention, not tools. */}
           {rightClusterVisible && (
-            <button
-              className="templates-btn"
-              onClick={() => setTemplatesOpen(true)}
-              title="Insert a template"
-            >
-              <Ico.Book /> Templates
-            </button>
+            <div style={{ position: "absolute", top: 72, right: 64, zIndex: 30 }}>
+              <button
+                className="templates-btn"
+                style={{ position: "static" }}
+                onClick={() => setToolsOpen((v) => !v)}
+                aria-haspopup="menu"
+                aria-expanded={toolsOpen}
+                aria-label="Board tools"
+                title="Board tools"
+              >
+                <Ico.Book /> Tools
+              </button>
+              {toolsOpen && (
+                <Menu onClose={() => setToolsOpen(false)} label="Board tools">
+                  <button
+                    role="menuitem"
+                    disabled={busy || (nodeCount === 0 && shapes.length === 0)}
+                    onClick={() => {
+                      setToolsOpen(false);
+                      void send(
+                        "Review this board and improve it: fix unclear or inconsistent labels, " +
+                          "add any obviously missing steps or connections, remove duplicates, and " +
+                          "group related nodes. Change only what genuinely improves it, and explain " +
+                          "each change.",
+                      );
+                    }}
+                  >
+                    <Ico.Sparkle /> Polish board
+                  </button>
+                  <button
+                    role="menuitem"
+                    onClick={() => {
+                      setToolsOpen(false);
+                      setTemplatesOpen(true);
+                    }}
+                  >
+                    <Ico.Book /> Insert a template
+                  </button>
+                  <button
+                    role="menuitem"
+                    onClick={() => {
+                      setToolsOpen(false);
+                      setTimerOpen((v) => !v);
+                    }}
+                  >
+                    <Ico.History /> Workshop timer
+                  </button>
+                  <button
+                    role="menuitem"
+                    onClick={() => {
+                      setToolsOpen(false);
+                      setVotePanelOpen((v) => !v);
+                    }}
+                  >
+                    ▲ {voting ? "Stop voting" : "Voting and reactions"}
+                  </button>
+                </Menu>
+              )}
+            </div>
           )}
-          {rightClusterVisible && (
-            <button
-              className="timer-btn"
-              onClick={() => setTimerOpen((v) => !v)}
-              title="Workshop timer"
-            >
-              <Ico.History /> Timer
-            </button>
-          )}
-          {rightClusterVisible && (
-            <button
-              className={`vote-btn ${voting ? "on" : ""}`}
-              onClick={() => setVotePanelOpen((v) => !v)}
-              title="Voting and reactions"
-            >
-              ▲ Vote
-            </button>
+          {/* UX-3: the one attention entry. Count rides the button; the
+              queue itself is a drawer, every row a jump to the evidence. */}
+          {attentionItems.length > 0 && (
+            <div style={{ position: "absolute", top: 116, right: 64, zIndex: 30 }}>
+              <button
+                className="timer-btn"
+                style={{ position: "static", borderColor: "var(--amber-3)" }}
+                onClick={() => setAttentionOpen((v) => !v)}
+                aria-expanded={attentionOpen}
+                aria-label={`Needs attention, ${attentionItems.length} items`}
+                title={`${attentionItems.length} thing${attentionItems.length > 1 ? "s need" : " needs"} review`}
+              >
+                ⚠ {attentionItems.length} to review
+              </button>
+              {attentionOpen && (
+                <div
+                  role="dialog"
+                  aria-label="Needs attention"
+                  style={{
+                    marginTop: 8,
+                    width: 300,
+                    padding: 12,
+                    background: "oklch(from var(--canvas-2) l c h / 0.95)",
+                    border: "1px solid var(--stroke-2)",
+                    borderRadius: "var(--r-lg)",
+                    boxShadow: "var(--elev-3)",
+                  }}
+                >
+                  <AttentionPanel items={attentionItems} />
+                </div>
+              )}
+            </div>
           )}
           {rightClusterVisible && (
             <div className="notif-wrap">
@@ -1878,6 +2057,7 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
                 className={`inbox-btn ${openThreads ? "has" : ""}`}
                 onClick={() => setInboxOpen((v) => !v)}
                 title={openThreads ? `${openThreads} open thread(s)` : "All comments"}
+                aria-label={openThreads ? `${openThreads} open comment threads` : "All comments"}
               >
                 All
               </button>
@@ -1966,6 +2146,9 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
           {mode !== "present" && (
             <AIPill
               status={status}
+              phase={genPhase}
+              progressNote={genProgress}
+              onCancel={busy ? () => cancelSend() : undefined}
               placeholder="Refine, add, or transform — just describe it"
               value={message}
               onChange={setMessage}
@@ -2043,6 +2226,9 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
               {nodeCount} nodes
               {openThreads > 0 ? ` · ${openThreads} open comment${openThreads > 1 ? "s" : ""}` : ""}
               {selected ? " · 1 selected" : settings.autosave ? " · Autosaved" : ""}
+              {/* Semantic-zoom note (UX-4): edge labels hide below 70% (see
+                  DiagramLayer), so say why the board looks quieter. */}
+              {zoom < 70 && nodeCount > 0 ? " · overview — zoom in for labels" : ""}
             </span>
           </StatusBadge>
         </>
@@ -2116,6 +2302,7 @@ function SelectionHud({
   onExpand,
   onTransform,
   onComment,
+  onWhy,
   onOpenMeeting,
   onApply,
 }: {
@@ -2125,6 +2312,8 @@ function SelectionHud({
   onExpand: (label: string) => void;
   onTransform: () => void;
   onComment: () => void;
+  /** UX-2: open the WhyThis provenance popover for this node. */
+  onWhy?: (id: string) => void;
   /** Open the meeting a provenance stamp points at (null = the view itself). */
   onOpenMeeting?: (meetingId: string | null, turnRange?: [number, number]) => void;
   /** Commit manual ops through the same validator the AI path uses. */
@@ -2143,6 +2332,13 @@ function SelectionHud({
       <button onClick={onTransform}>Transform</button>
       <button onClick={() => onExpand(node.label)}>Expand</button>
       <button onClick={onComment}>Comment</button>
+      <button
+        onClick={() => onWhy?.(id)}
+        title="Why is this here? Show the evidence behind this node."
+        aria-label={`Why is this here: ${node.label}`}
+      >
+        Why?
+      </button>
       {/* Meeting provenance (M2/P0-3/Stage A → Stage C2): a node created from
           a meeting extract can always answer "why is this here?" — the quoted
           words that produced it plus the statement KINDS the turns carried,

@@ -291,7 +291,7 @@ export function IntelligenceView(_: { onOpenSettings?: (section?: string) => voi
                   {c.supportsInbound && pendingInbound > 0 && (
                     <span
                       className="mono"
-                      aria-label={`${pendingInbound} external changes`}
+                      aria-label={`${pendingInbound} external changes across providers`}
                       style={{
                         fontSize: 10,
                         padding: "1px 6px",

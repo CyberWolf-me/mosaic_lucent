@@ -177,9 +177,21 @@ export function NodeCard({
   return (
     <div
       className={cls}
+      tabIndex={0}
+      role="button"
+      aria-label={title}
       onClick={draggable ? undefined : (e) => onClick?.(e.shiftKey || e.metaKey || e.ctrlKey)}
       onMouseDown={onMouseDown}
       onDoubleClick={onRename ? () => setEditing(true) : undefined}
+      onKeyDown={(e) => {
+        if (editing) return;
+        if (e.key === "Enter") {
+          e.preventDefault();
+          e.stopPropagation();
+          if (onRename) setEditing(true);
+          else onClick?.(false);
+        }
+      }}
       style={{
         left: x,
         top: y,

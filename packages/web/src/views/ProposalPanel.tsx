@@ -5,10 +5,17 @@ import type { Operation } from "@lucent/core";
 /** Proposal review panel, ported from reference/screen_proposing.jsx and wired
  * to the real pending proposal + apply-as-one-commit action (docs/15). */
 export function ProposalPanel() {
-  const { proposal, applyProposal, cancelProposal } = useWorkspace();
+  const { proposal, applyProposal, cancelProposal, chat } = useWorkspace();
   if (!proposal) return null;
 
   const changes = proposal.operations.map(describe);
+  // Partial-application honesty (M1/UX-2): the gate or the server may have
+  // skipped ops while proposing the rest. The proposal record itself carries
+  // no skipped list, so fall back to the review-gate reply in chat.
+  const proposalSkipped = (proposal as unknown as { skippedOps?: Array<{ op: string; reason: string }> })
+    .skippedOps;
+  const chatSkipped = [...chat].reverse().find((e) => (e.skippedOps?.length ?? 0) > 0)?.skippedOps;
+  const skipped = proposalSkipped ?? chatSkipped ?? [];
 
   return (
     <div className="right-panel">
@@ -30,7 +37,15 @@ export function ProposalPanel() {
             </span>
             Lucent proposes {proposal.operations.length} changes
           </div>
-          <div className="panel-sub">Preview · Applies as one commit</div>
+          <div className="panel-sub">Preview · applies what still fits · reports the rest</div>
+          {skipped.length > 0 && (
+            <div
+              className="mono"
+              style={{ fontSize: 10.5, color: "var(--amber-2)", marginTop: 4 }}
+            >
+              {skipped.length} change{skipped.length === 1 ? "" : "s"} didn&apos;t fit — see chat for details
+            </div>
+          )}
         </div>
         <button className="icon-btn" style={{ padding: 6, height: 28 }} onClick={cancelProposal}>
           <Ico.X />

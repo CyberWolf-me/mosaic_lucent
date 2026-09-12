@@ -176,3 +176,33 @@ export function subscribeToRoute(listener: () => void): () => void {
   window.addEventListener("popstate", listener);
   return () => window.removeEventListener("popstate", listener);
 }
+
+/* ------------------------- view/lens query (UX-1) ------------------------- */
+
+/**
+ * View/lens share the address bar with capability tokens (`?board=`, `?invite=`,
+ * `?token=`). These helpers read/write only `view`/`lens`, preserving every
+ * other param. Writes use `replaceState` (no history entry) so Back keeps
+ * working; they never dispatch `popstate`, so the write-back effect in App.tsx
+ * cannot loop with the route listener.
+ */
+export function getViewQuery(): { view?: string; lens?: string } {
+  if (typeof window === "undefined") return {};
+  const params = new URLSearchParams(window.location.search);
+  const view = params.get("view");
+  const lens = params.get("lens");
+  return {
+    ...(view && view.trim().length > 0 ? { view } : {}),
+    ...(lens && lens.trim().length > 0 ? { lens } : {}),
+  };
+}
+
+export function setViewQuery(view: string, lens?: string): void {
+  if (typeof window === "undefined") return;
+  const url = new URL(window.location.href);
+  if (view && view.trim().length > 0) url.searchParams.set("view", view);
+  else url.searchParams.delete("view");
+  if (lens && lens.trim().length > 0) url.searchParams.set("lens", lens);
+  else url.searchParams.delete("lens");
+  window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+}

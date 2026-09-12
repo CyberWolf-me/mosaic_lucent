@@ -5,7 +5,7 @@ import type { WorkspaceState } from "../workspace.js";
 import { Ico } from "../ui/icons.js";
 import { executionProjection, planDerivedActionIds } from "../execution.js";
 import { IntegrationPanel } from "./IntegrationPanel.js";
-import { fetchOrgIntegrations } from "../boards.js";
+import { fetchIntegrationLinks, fetchOrgIntegrations, type IntegrationLink } from "../boards.js";
 import { getCurrentOrgId } from "../orgs.js";
 import { resolveLocale, t } from "@lucent/i18n";
 
@@ -16,6 +16,28 @@ const PROVIDER_DISPLAY_NAME: Record<string, string> = {
   jira: "Jira",
   fake: "Fake",
 };
+
+/** Local mirror of what left Lucent (UX-3 execution ledger). */
+const SYNC_LEDGER_KEY = "lucent.syncLedger";
+
+function readSyncLedger(): IntegrationLink[] {
+  try {
+    const raw = localStorage.getItem(SYNC_LEDGER_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as unknown;
+    return Array.isArray(parsed) ? (parsed as IntegrationLink[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeSyncLedger(links: IntegrationLink[]): void {
+  try {
+    localStorage.setItem(SYNC_LEDGER_KEY, JSON.stringify(links));
+  } catch {
+    /* storage full or unavailable: the server list remains the truth */
+  }
+}
 
 /**
  * The Execution view (Stage E2, ADR 0037): one screen answering "how is
@@ -58,6 +80,9 @@ export function ExecutionView(_: { onOpenSettings?: (section?: string) => void }
   >([]);
   const [panelProvider, setPanelProvider] = useState<string | null>(null);
   const { boardId } = useWorkspace() as unknown as { boardId: string | null };
+  // UX-3 execution ledger: what left Lucent. Server links are the truth;
+  // localStorage keeps the last seen list for offline reads.
+  const [syncLedger, setSyncLedger] = useState<IntegrationLink[]>(() => readSyncLedger());
   useEffect(() => {
     let cancelled = false;
     void (async () => {
@@ -70,6 +95,19 @@ export function ExecutionView(_: { onOpenSettings?: (section?: string) => void }
       cancelled = true;
     };
   }, []);
+  useEffect(() => {
+    if (!boardId) return;
+    let cancelled = false;
+    void (async () => {
+      const links = await fetchIntegrationLinks(boardId);
+      if (cancelled) return;
+      setSyncLedger(links);
+      writeSyncLedger(links);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [boardId]);
 
   if (empty) {
     return (
@@ -381,6 +419,55 @@ export function ExecutionView(_: { onOpenSettings?: (section?: string) => void }
             </div>
           )}
         </div>
+      </div>
+      {/* — UX-3 execution ledger: what left Lucent (approved external sends) — */}
+      <div
+        style={{
+          background: "oklch(from var(--canvas-2) l c h / 0.75)",
+          border: "1px solid var(--stroke-1)",
+          borderRadius: 16,
+          padding: "14px 18px",
+        }}
+      >
+        <div style={{ fontSize: 12.5, fontVariationSettings: "'wght' 550" }}>
+          Sent externally — what left Lucent
+        </div>
+        {syncLedger.length === 0 ? (
+          <div className="mono" style={{ fontSize: 11, color: "var(--ink-3)", marginTop: 8 }}>
+            Nothing sent externally yet — approved sends appear here.
+          </div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 10 }}>
+            {syncLedger.map((link) => (
+              <div
+                key={`${link.provider}-${link.externalId}-${link.nodeId}`}
+                style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}
+              >
+                <span className="mono" style={{ fontSize: 11, color: "var(--ink-0)" }}>
+                  {link.externalId}
+                </span>
+                <span className="mono" style={{ fontSize: 10.5, color: "var(--ink-3)" }}>
+                  {link.provider} · {link.status}
+                </span>
+                {link.url && (
+                  <a
+                    href={link.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="mono"
+                    style={{ fontSize: 11, color: "var(--amber-2)" }}
+                  >
+                    ↗ open
+                  </a>
+                )}
+                <span style={{ flex: 1 }} />
+                <span className="mono" style={{ fontSize: 10.5, color: "var(--ink-3)" }}>
+                  {new Date(link.syncedAt).toLocaleString()}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
       {panelProvider && (
         <IntegrationPanel

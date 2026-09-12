@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { TopBar, LeftRail } from "../ui/Chrome.js";
 import { Ico } from "../ui/icons.js";
 import { useWorkspace } from "../workspace.js";
@@ -16,7 +16,7 @@ import {
   type MeetingTurn,
 } from "../meetings.js";
 import { differentialPrompt, shouldExtract } from "../meeting-extract.js";
-import { objectsByTurn } from "../meetingTimeline.js";
+import { isLiveProvenance, objectsByTurn, pointsAtLive } from "../meetingTimeline.js";
 
 /**
  * Meeting mode (E3 / R3): live capture into a transcript that persists per
@@ -58,6 +58,23 @@ const KIND_ORDER: Array<NonNullable<MeetingTurn["kind"]>> = [
   "requirement",
 ];
 
+/**
+ * Splice topic-break markers into a turn slice for extraction prompts (UX-5).
+ * Breaks are indices into the displayed transcript; each becomes a plain
+ * separator line the model reads as a topic boundary. The transcript itself
+ * is untouched — breaks are render-local state.
+ */
+function withTopicBreaks(list: MeetingTurn[], breaks: number[]): MeetingTurn[] {
+  if (breaks.length === 0) return list;
+  const marks = new Set(breaks);
+  const out: MeetingTurn[] = [];
+  for (let i = 0; i <= list.length; i++) {
+    if (marks.has(i)) out.push({ speaker: "You", at: Date.now(), text: "── topic break ──" });
+    if (i < list.length) out.push(list[i]!);
+  }
+  return out;
+}
+
 export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: string) => void }) {
   const { setView, send, boardId, projectName, workspace, onCitation } = useWorkspace();
   const { notify } = useToast();
@@ -87,6 +104,10 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
   const setLiveMeetingTurnCount = (n: number): void => {
     liveMeetingTurnCountRef.current = n;
   };
+  // Topic breaks (UX-5): separator indices into the displayed transcript.
+  // Render-local — the saved transcript is never rewritten — and spliced
+  // into extraction prompts as "── topic break ──" lines.
+  const [topicBreaks, setTopicBreaks] = useState<number[]>([]);
 
   const voiceSupported = isAnyVoiceSupported();
   const livekitConfigured = settings.livekitTokenUrl.trim().length > 0;
@@ -382,7 +403,10 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
   };
 
   const onExtract = (meeting: MeetingTranscript): void => {
-    const prompt = promptFromTranscript(meeting);
+    const prompt = promptFromTranscript({
+      ...meeting,
+      turns: withTopicBreaks(meeting.turns, topicBreaks),
+    });
     setView("canvas");
     // send() lands on the canvas with the prompt, through the standard
     // generate path — the user watches the diagram appear like any other.
@@ -391,6 +415,12 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
 
   const shown = selectedMeeting;
   const displayTurns = shown ? shown.turns : turns;
+  // Topic breaks index into the displayed transcript — switching transcripts
+  // would misalign them, so they reset with the view.
+  const shownId = shown?.id ?? null;
+  useEffect(() => {
+    setTopicBreaks([]);
+  }, [shownId]);
   // Reverse provenance (Stage C3): which board objects each turn of the
   // SELECTED meeting produced. Computed from the workspace this browser
   // already holds — C2 put provenance in the state, so no server call is
@@ -400,6 +430,96 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
     () => (shown ? objectsByTurn(workspace, shown.id, shown.turns.length) : null),
     [workspace, shown],
   );
+
+  // Live provenance keys (UX-5): the running capture stamps the open server
+  // id once it exists, and "live-session" before that — both are live. The
+  // guard keeps the set to genuinely live stamps.
+  const liveKeys = useMemo(() => {
+    const keys = new Set<string>(["live-session"]);
+    if (liveMeetingId && !isLiveProvenance(liveMeetingId)) keys.add(liveMeetingId);
+    return keys;
+  }, [liveMeetingId]);
+
+  // Live provisional chips (UX-5): while capturing, the objects the running
+  // loop just stamped chip each turn provisionally via pointsAtLive — the
+  // saved-view exclusion in pointsAt would list nothing here.
+  const liveByTurn = useMemo(() => {
+    if (shown) return null;
+    const byTurn = new Map<number, string[]>();
+    for (const node of Object.values(workspace.nodes)) {
+      const records = [node.provenance, node.statement?.provenance];
+      for (const record of records) {
+        if (!record) continue;
+        let matched = false;
+        for (const key of liveKeys) {
+          if (pointsAtLive(record, key)) {
+            matched = true;
+            break;
+          }
+        }
+        if (!matched) continue;
+        if (!record.turnRange) continue;
+        for (
+          let i = Math.max(0, record.turnRange[0]);
+          i <= record.turnRange[1] && i < turns.length;
+          i++
+        ) {
+          const bucket = byTurn.get(i) ?? [];
+          if (!bucket.includes(node.id)) bucket.push(node.id);
+          byTurn.set(i, bucket);
+        }
+      }
+    }
+    return byTurn;
+  }, [workspace, shown, liveKeys, turns.length]);
+
+  const markTopicBreak = (): void => {
+    const at = displayTurns.length;
+    if (topicBreaks.includes(at)) {
+      notify("A topic break is already marked here.");
+      return;
+    }
+    setTopicBreaks([...topicBreaks, at].sort((a, b) => a - b));
+    notify("Topic break marked.");
+  };
+
+  // Per-turn correction (UX-5): re-extract the transcript FROM this turn, so
+  // a misheard or corrected passage rebuilds without re-sending everything
+  // before it. Same pipeline as the live loop — differential prompt plus the
+  // same provenance shape — over the slice, with topic breaks spliced in. A
+  // saved meeting hands off to the canvas like onExtract; a live capture
+  // sends in the background so recording survives.
+  const onReextractFrom = (startIndex: number): void => {
+    if (startIndex < 0 || startIndex >= displayTurns.length) return;
+    const slice = withTopicBreaks(
+      displayTurns.slice(startIndex),
+      topicBreaks.filter((b) => b >= startIndex).map((b) => b - startIndex),
+    );
+    if (slice.length === 0) return;
+    const meetingId = shown ? shown.id : (liveMeetingId ?? "live-session");
+    const prompt = differentialPrompt(slice);
+    if (shown) setView("canvas");
+    void send(prompt, undefined, {
+      provenance: {
+        meetingId,
+        turns: slice.map((t) => t.text),
+        turnRange: [startIndex, displayTurns.length - 1],
+        turnKinds: slice
+          .map((t) => t.kind)
+          .filter((k): k is NonNullable<MeetingTurn["kind"]> => Boolean(k)),
+      },
+    });
+    notify(shown ? "Re-extracting from that turn on the canvas." : "Re-extracting from that turn.");
+  };
+
+  // Per-object correction (UX-5): provenance is append-only on the board — no
+  // core op clears it — so "unlink" is honest navigation: the node opens on
+  // the canvas for review, with a toast saying so, instead of pretending to
+  // delete the link.
+  const onUnlink = (id: string): void => {
+    notify("Provenance is read-only — opened the node on the canvas to review.");
+    onCitation({ kind: "node", id });
+  };
 
   return (
     <div style={{ position: "absolute", inset: 0 }}>
@@ -472,6 +592,15 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
                   Extract diagram <Ico.Arrow />
                 </button>
               )}
+              {displayTurns.length > 0 && (
+                <button
+                  className="btn"
+                  onClick={markTopicBreak}
+                  title="Insert a topic separator — re-extractions treat it as a new topic"
+                >
+                  Mark topic break
+                </button>
+              )}
             </div>
           </div>
 
@@ -494,56 +623,169 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
               // Reverse provenance (Stage C3): the objects this turn produced,
               // rendered under the words that created them — the Stage C
               // document's "Used to create N objects · View on board".
-              const produced = reverseByTurn?.get(i);
+              // Live capture (UX-5) chips the same from the provisional
+              // live-session stamps via pointsAtLive.
+              const produced = reverseByTurn?.get(i) ?? liveByTurn?.get(i);
+              const provisional = !shown && (liveByTurn?.has(i) ?? false);
               return (
-              <div
-                key={i}
-                className={`meeting-turn${i === turnFlash ? " highlight" : ""}`}
-                data-turn={i}
-              >
-                <span className="mono small meeting-turn-speaker">{t.speaker}</span>
-                <span style={{ flex: 1, fontSize: 13.5, color: "var(--ink-1)" }}>{t.text}</span>
-                {t.kind && (
-                  <span
-                    className="mono"
-                    style={{
-                      fontSize: 9.5,
-                      letterSpacing: "0.08em",
-                      textTransform: "uppercase",
-                      color: extractColor[t.kind],
-                      flexShrink: 0,
-                    }}
-                  >
-                    {t.kind}
-                  </span>
-                )}
-                {produced && produced.length > 0 && (
-                  <button
-                    className="mono turn-objects-link"
-                    style={{
-                      display: "block",
-                      width: "100%",
-                      textAlign: "left",
-                      marginTop: 4,
-                      fontSize: 10,
-                      letterSpacing: "0.05em",
-                      textTransform: "uppercase",
-                      color: "var(--amber-2)",
-                      background: "transparent",
-                      border: "none",
-                      padding: 0,
-                      cursor: "pointer",
-                    }}
-                    title={`View on board: ${produced.join(", ")}`}
-                    onClick={() => onCitation({ kind: "node", id: produced[0]! })}
-                  >
-                    ✦ {produced.length} object{produced.length === 1 ? "" : "s"} on the board ·
-                    view
-                  </button>
-                )}
-              </div>
+                <Fragment key={i}>
+                  {topicBreaks.includes(i) && (
+                    <button
+                      className="mono small"
+                      title="Remove topic break"
+                      onClick={() =>
+                        setTopicBreaks((prev) => prev.filter((b) => b !== i))
+                      }
+                      style={{
+                        alignSelf: "stretch",
+                        textAlign: "center",
+                        margin: "6px 0",
+                        fontSize: 10,
+                        letterSpacing: "0.08em",
+                        color: "var(--ink-3)",
+                        background: "transparent",
+                        border: "none",
+                        borderTop: "1px dashed var(--stroke-2)",
+                        padding: "6px 0 0",
+                        cursor: "pointer",
+                      }}
+                    >
+                      ── topic break ──
+                    </button>
+                  )}
+                  <div data-turn={i}>
+                    <div className={`meeting-turn${i === turnFlash ? " highlight" : ""}`}>
+                      <span className="mono small meeting-turn-speaker">{t.speaker}</span>
+                      <span style={{ flex: 1, fontSize: 13.5, color: "var(--ink-1)" }}>
+                        {t.text}
+                      </span>
+                      {t.kind && (
+                        <span
+                          className="mono"
+                          style={{
+                            fontSize: 9.5,
+                            letterSpacing: "0.08em",
+                            textTransform: "uppercase",
+                            color: extractColor[t.kind],
+                            flexShrink: 0,
+                          }}
+                        >
+                          {t.kind}
+                        </span>
+                      )}
+                    </div>
+                    <div
+                      style={{
+                        display: "flex",
+                        gap: 12,
+                        flexWrap: "wrap",
+                        alignItems: "baseline",
+                        margin: "0 0 6px 10px",
+                      }}
+                    >
+                      <button
+                        className="mono"
+                        title="Re-extract the board from this turn onward"
+                        onClick={() => onReextractFrom(i)}
+                        style={{
+                          fontSize: 10,
+                          letterSpacing: "0.05em",
+                          textTransform: "uppercase",
+                          color: "var(--ink-3)",
+                          background: "transparent",
+                          border: "none",
+                          padding: 0,
+                          cursor: "pointer",
+                        }}
+                      >
+                        Re-extract from here
+                      </button>
+                      {produced && produced.length > 0 && (
+                        <span
+                          className="mono"
+                          style={{
+                            fontSize: 10,
+                            letterSpacing: "0.05em",
+                            textTransform: "uppercase",
+                            color: "var(--amber-2)",
+                          }}
+                          title={`View on board: ${produced.join(", ")}`}
+                        >
+                          ✦ {produced.length} object{produced.length === 1 ? "" : "s"} on
+                          the board{provisional ? " · provisional" : ""}
+                        </span>
+                      )}
+                      {produced?.map((id) => (
+                        <span
+                          key={id}
+                          style={{ display: "inline-flex", gap: 8, alignItems: "baseline" }}
+                        >
+                          <button
+                            className="mono turn-objects-link"
+                            title={`View on board: ${id}`}
+                            onClick={() => onCitation({ kind: "node", id })}
+                            style={{
+                              fontSize: 10,
+                              letterSpacing: "0.05em",
+                              textTransform: "uppercase",
+                              color: "var(--amber-2)",
+                              background: "transparent",
+                              border: "none",
+                              padding: 0,
+                              cursor: "pointer",
+                            }}
+                          >
+                            view
+                          </button>
+                          <button
+                            className="mono"
+                            title="Unlink this object from the turn (provenance is read-only — opens the node on the canvas)"
+                            onClick={() => onUnlink(id)}
+                            style={{
+                              fontSize: 10,
+                              letterSpacing: "0.05em",
+                              textTransform: "uppercase",
+                              color: "var(--ink-3)",
+                              background: "transparent",
+                              border: "none",
+                              padding: 0,
+                              cursor: "pointer",
+                            }}
+                          >
+                            Unlink from turn
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                </Fragment>
               );
             })}
+            {/* A break marked past the last turn has no turn row to hang on. */}
+            {topicBreaks.includes(displayTurns.length) && displayTurns.length > 0 && (
+              <button
+                className="mono small"
+                title="Remove topic break"
+                onClick={() =>
+                  setTopicBreaks((prev) => prev.filter((b) => b !== displayTurns.length))
+                }
+                style={{
+                  alignSelf: "stretch",
+                  textAlign: "center",
+                  margin: "6px 0",
+                  fontSize: 10,
+                  letterSpacing: "0.08em",
+                  color: "var(--ink-3)",
+                  background: "transparent",
+                  border: "none",
+                  borderTop: "1px dashed var(--stroke-2)",
+                  padding: "6px 0 0",
+                  cursor: "pointer",
+                }}
+              >
+                ── topic break ──
+              </button>
+            )}
           </div>
         </div>
 

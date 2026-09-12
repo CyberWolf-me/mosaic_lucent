@@ -89,7 +89,8 @@ export function Tour({ onDone }: { onDone?: () => void }): React.ReactElement | 
     if (!visible) return;
     const onKey = (e: KeyboardEvent): void => {
       if (e.key === "Escape") finish();
-      if (e.key === "ArrowRight" || e.key === "Enter") next();
+      else if (e.key === "ArrowRight" || e.key === "Enter") next();
+      else if (e.key === "ArrowLeft") setStep((s) => Math.max(0, s - 1));
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
@@ -100,8 +101,14 @@ export function Tour({ onDone }: { onDone?: () => void }): React.ReactElement | 
 
   return (
     <>
-      <div className="tour-scrim" onClick={finish} aria-hidden="true" />
-      <div role="dialog" aria-modal="false" aria-label={`Tour: ${s.title}`} className="tour-card">
+      <div className="tour-scrim" onClick={finish} />
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={`Tour: ${s.title}`}
+        className="tour-card"
+        tabIndex={-1}
+      >
         <div className="mono tour-step-indicator">
           {step + 1} / {STEPS.length}
         </div>

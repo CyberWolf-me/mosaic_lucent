@@ -12,6 +12,7 @@ export type GridStyle = "dots" | "lines" | "off";
 export type Motion = "full" | "reduced";
 export type SttProviderId = "browser" | "whisper" | "livekit";
 export type BoardStyle = "clean" | "sketch";
+export type ApprovalThreshold = "always" | "large" | "never";
 
 export interface Settings {
   theme: Theme;
@@ -34,6 +35,8 @@ export interface Settings {
   livekitRoom: string;
   /** Clean (Miro/FigJam) vs. Sketch (Excalidraw hand-drawn) rendering (docs/14 §23). */
   boardStyle: BoardStyle;
+  /** When the AI must ask before applying changes (UX-1). */
+  approvalThreshold: ApprovalThreshold;
 }
 
 const LS_KEY = "lucent.settings";
@@ -51,6 +54,7 @@ export const DEFAULT_SETTINGS: Settings = {
   livekitTokenUrl: "",
   livekitRoom: "lucent-voice",
   boardStyle: "clean",
+  approvalThreshold: "large",
 };
 
 type Listener = (s: Settings) => void;

@@ -430,8 +430,23 @@ export async function streamGenerate(
   selection?: string[],
   history?: ChatEntry[],
   attachments?: { images?: ImageAttachment[]; documents?: DocumentAttachment[] },
+  externalSignal?: AbortSignal,
 ): Promise<GenerateResponse> {
   const controller = new AbortController();
+  // UX-2: user cancellation shares the abort path with the activity timeout.
+  // A flag keeps the two distinguishable so Cancel reports "cancelled",
+  // not "timed out".
+  let userCancelled = false;
+  const onExternalAbort = (): void => {
+    userCancelled = true;
+    controller.abort();
+  };
+  if (externalSignal) {
+    if (externalSignal.aborted) {
+      throw new Error("Cancelled — nothing was applied.");
+    }
+    externalSignal.addEventListener("abort", onExternalAbort, { once: true });
+  }
   let timer = setTimeout(() => controller.abort(), GENERATE_TIMEOUT_MS);
   const touch = (): void => {
     clearTimeout(timer);
@@ -454,7 +469,9 @@ export async function streamGenerate(
     });
   } catch (err) {
     clearTimeout(timer);
+    externalSignal?.removeEventListener("abort", onExternalAbort);
     if ((err as Error).name === "AbortError") {
+      if (userCancelled) throw new Error("Cancelled — nothing was applied.");
       throw new Error("Generation timed out before the server responded — please try again.");
     }
     throw new Error(
@@ -539,12 +556,15 @@ export async function streamGenerate(
     await readEvents();
   } catch (err) {
     clearTimeout(timer);
+    externalSignal?.removeEventListener("abort", onExternalAbort);
     if ((err as Error).name === "AbortError") {
+      if (userCancelled) throw new Error("Cancelled — nothing was applied.");
       throw new Error("Generation timed out mid-stream — please try again.");
     }
     throw new Error("The stream was interrupted before it finished — please try again.");
   }
   clearTimeout(timer);
+  externalSignal?.removeEventListener("abort", onExternalAbort);
 
   if (failure) throw new Error(failure);
   if (!done) throw new Error("The stream ended without a result — please try again.");

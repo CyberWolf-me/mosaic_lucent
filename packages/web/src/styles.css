@@ -5847,3 +5847,48 @@ html[data-theme="light"] .allowance-note.spent {
   position: static;
   font-size: 10.5px;
 }
+
+/* === UX-6 a11y + responsive + UX-7 design-system consolidation (append-only) === */
+:root {
+  --bg-0: var(--canvas-0);
+  --bg-1: var(--canvas-1);
+  --bg-2: var(--canvas-2);
+  --text-0: var(--ink-0);
+  --text-1: var(--ink-1);
+  --border-0: var(--stroke-1);
+  --border-1: var(--stroke-1);
+  --accent: var(--amber-2);
+  --panel-0: var(--canvas-2);
+  --line: var(--stroke-1);
+}
+.toast-host { z-index: 600; }
+.selection-hud { max-width: calc(100vw - 32px); overflow: hidden; }
+.swatch, .vote-toggle, .cmt-send, .cmt-actions button, .eng-vote, .eng-react, .insp-swatch, .vote-reset, .cmt-inbox-resolve { min-height: 24px; min-width: 24px; }
+.field { display: flex; flex-direction: column; gap: 6px; }
+.field-label { font-size: 12.5px; color: var(--ink-0); }
+.field-input { width: 100%; }
+.badge { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--stroke-1); font-size: 11px; color: var(--ink-1); }
+.badge-info { color: var(--sig-blue); border-color: var(--stroke-2); }
+.badge-success { color: var(--sig-green); border-color: var(--stroke-2); }
+.badge-warn { color: var(--amber-1); border-color: var(--stroke-2); }
+.badge-error { color: var(--sig-red); border-color: var(--stroke-2); }
+input:focus-visible, textarea:focus-visible { outline: 2px solid var(--amber-1); outline-offset: 1px; }
+@media (max-width: 1100px) {
+  .top-bar .actions { flex-wrap: wrap; row-gap: 4px; }
+  .templates-btn, .timer-btn, .vote-btn, .polish-btn { flex-wrap: wrap; }
+}
+@media (max-width: 900px) {
+  .ai-pill { width: calc(100vw - 32px); min-width: 0; max-width: calc(100vw - 32px); }
+  .ai-pill-wrap { width: calc(100vw - 32px); }
+  h1 { font-size: 32px !important; padding: 0 16px; }
+  .board-columns { grid-template-columns: 1fr; left: 12px; right: 12px; overflow-y: auto; }
+  .settings-modal { width: calc(100vw - 16px); grid-template-columns: 1fr; }
+  .settings-nav { border-right: 0; border-bottom: 1px solid var(--stroke-1); flex-direction: row; flex-wrap: wrap; }
+  .mobile-board { overflow: hidden; }
+  .mobile-canvas-inner svg { max-width: 100%; }
+}
+@media (max-width: 720px) {
+  .minimap { display: none; }
+  .present-caption { min-width: 0; width: calc(100vw - 32px); max-width: calc(100vw - 32px); }
+  .comment-panel, .comment-inbox, .vote-panel { width: calc(100vw - 32px); right: 16px; }
+}

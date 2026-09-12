@@ -104,3 +104,21 @@ export function objectsByTurn(
   }
   return byTurn;
 }
+
+/**
+ * Provisional live-session provenance (UX-5): the same equality as pointsAt
+ * but WITHOUT the live-session exclusion, so the live meeting view can chip
+ * the objects the running capture just stamped. Saved views keep using
+ * pointsAt/objectsByTurn, which honestly list nothing for "live-session".
+ */
+export function pointsAtLive(
+  provenance: { meetingId?: string } | undefined,
+  meetingId: string,
+): boolean {
+  return provenance?.meetingId === meetingId;
+}
+
+/** True when a meeting id is the provisional live-capture stamp. */
+export function isLiveProvenance(meetingId: string): boolean {
+  return meetingId === LIVE_SESSION;
+}

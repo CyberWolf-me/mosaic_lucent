@@ -59,18 +59,24 @@ export function PresentMode({
   if (!current) return null;
 
   return (
-    <div className="present-caption" role="group" aria-label="Presentation controls">
+    <div
+      className="present-caption"
+      role="region"
+      aria-roledescription="presentation"
+      aria-label={`Presentation${frameLabel ? `: ${frameLabel}` : ""} — step ${step + 1} of ${count}`}
+    >
       <button
         className="present-nav"
         onClick={() => go(-1)}
         disabled={step <= 0}
         title="Previous · ←"
+        aria-label="Previous slide"
       >
         <Ico.Down style={{ transform: "rotate(90deg)" }} />
       </button>
 
       <div className="present-body">
-        <div className="present-meta">
+        <div className="present-meta" aria-live="polite" aria-atomic="true">
           {frameLabel ? `${frameLabel} · ` : ""}Step {step + 1} of {count}
           {current.meta ? ` · ${current.meta}` : ""}
         </div>
@@ -82,11 +88,17 @@ export function PresentMode({
         onClick={() => go(1)}
         disabled={step >= count - 1}
         title="Next · →"
+        aria-label="Next slide"
       >
         <Ico.Down style={{ transform: "rotate(-90deg)" }} />
       </button>
       <div className="present-sep" />
-      <button className="present-nav" onClick={onExit} title="Exit · Esc">
+      <button
+        className="present-nav"
+        onClick={onExit}
+        title="Exit · Esc"
+        aria-label="Exit presentation"
+      >
         <Ico.X />
       </button>
     </div>

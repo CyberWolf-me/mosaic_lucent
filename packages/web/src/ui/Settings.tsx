@@ -695,11 +695,38 @@ export function SettingsModal({
               </div>
               <div className="setting-row">
                 <div className="label">Approval threshold</div>
-                <div className="desc">When Lucent must ask before applying changes.</div>
-                <div className="segmented">
-                  <button>Always</button>
-                  <button className="active">Large changes</button>
-                  <button>Never</button>
+                <div className="desc">
+                  Always reviews everything. Large changes auto-applies small edits. Never
+                  auto-applies, but destructive and external actions are still reviewed.
+                </div>
+                <div className="segmented" role="radiogroup" aria-label="Approval threshold">
+                  <button
+                    className={s.approvalThreshold === "always" ? "active" : ""}
+                    aria-pressed={s.approvalThreshold === "always"}
+                    title="Always — review everything"
+                    aria-label="Always — review everything"
+                    onClick={() => setS({ approvalThreshold: "always" })}
+                  >
+                    Always
+                  </button>
+                  <button
+                    className={s.approvalThreshold === "large" ? "active" : ""}
+                    aria-pressed={s.approvalThreshold === "large"}
+                    title="Large changes — auto-apply small edits"
+                    aria-label="Large changes — auto-apply small edits"
+                    onClick={() => setS({ approvalThreshold: "large" })}
+                  >
+                    Large changes
+                  </button>
+                  <button
+                    className={s.approvalThreshold === "never" ? "active" : ""}
+                    aria-pressed={s.approvalThreshold === "never"}
+                    title="Never — auto-apply, still review destructive/external"
+                    aria-label="Never — auto-apply, still review destructive/external"
+                    onClick={() => setS({ approvalThreshold: "never" })}
+                  >
+                    Never
+                  </button>
                 </div>
               </div>
             </>

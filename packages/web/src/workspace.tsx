@@ -93,6 +93,9 @@ export type View =
 /** Canvas sub-state is derived from the data, not stored separately. */
 export type CanvasPhase = "empty" | "generating" | "main" | "proposing" | "voice";
 
+/** Canvas lenses (UX-1): alternate renderings of the same board on the canvas. */
+export type CanvasLens = "visual" | "kanban" | "document" | "wireframe" | "sequence" | "er";
+
 /** Realtime link state. "offline" covers both signed-out and disconnected. */
 export type SyncStatus = "offline" | "connecting" | "online";
 
@@ -166,9 +169,15 @@ export interface SendAttachments {
   plan?: { statementIds: string[] };
 }
 
+/** UX-2: user-facing generation phases (stream chars are display-only detail). */
+export type GenPhase = "understanding" | "constructing" | "validating" | "applying";
+
 export interface WorkspaceState {
   view: View;
   setView: (v: View) => void;
+  /** Active canvas lens (UX-1). Only meaningful when `view` is `"canvas"`. */
+  lens: CanvasLens;
+  setLens: (l: CanvasLens) => void;
 
   projectId: string;
   projectName: string;
@@ -180,6 +189,10 @@ export interface WorkspaceState {
   busy: boolean;
   /** M5/E1: streamed-payload characters received so far while busy; 0 otherwise. */
   streamChars: number;
+  /** UX-2: which generation phase the pill should name; null when idle. */
+  genPhase: GenPhase | null;
+  /** UX-2: abort the in-flight generation; safe before apply, no-op otherwise. */
+  cancelSend: () => void;
   listening: boolean;
   setListening: (v: boolean) => void;
 
@@ -290,8 +303,13 @@ export interface WorkspaceState {
 
 const Ctx = createContext<WorkspaceState | null>(null);
 
-/** Operations beyond this count present as a reviewable proposal (docs/15). */
-const PROPOSAL_THRESHOLD = 5;
+/** Review-gate threshold from settings (UX-1): always=>0, large=>5, never=>Infinity. */
+export function proposalThreshold(): number {
+  const mode = settingsStore.get().approvalThreshold;
+  if (mode === "always") return 0;
+  if (mode === "never") return Infinity;
+  return 5;
+}
 
 function laidOut(ws: Workspace): Workspace {
   // No strategy is passed: computeLayout picks radial for mind maps and layered
@@ -479,7 +497,46 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       restored ? "loaded" : "initial",
     ),
   );
-  const [view, setView] = useState<View>("canvas");
+  const [view, setViewState] = useState<View>("canvas");
+  const [lens, setLens] = useState<CanvasLens>("visual");
+  /**
+   * UX-1: legacy board-like views are canvas lenses now. Keep the `View` type
+   * unchanged for compat, but fold those cases into canvas+lens so one board
+   * URL (`?view=canvas&lens=kanban`) covers them. Direct `"canvas"` resets to
+   * the visual lens; lens buttons do `setView("canvas")` then `setLens(...)`
+   * in that order so the reset does not wipe the lens.
+   */
+  const setView = useCallback((v: View) => {
+    switch (v) {
+      case "board":
+        setLens("kanban");
+        setViewState("canvas");
+        return;
+      case "document":
+        setLens("document");
+        setViewState("canvas");
+        return;
+      case "wireframe":
+        setLens("wireframe");
+        setViewState("canvas");
+        return;
+      case "sequence":
+        setLens("sequence");
+        setViewState("canvas");
+        return;
+      case "er":
+        setLens("er");
+        setViewState("canvas");
+        return;
+      case "canvas":
+        setLens("visual");
+        setViewState("canvas");
+        return;
+      default:
+        setViewState(v);
+        return;
+    }
+  }, []);
   const [projectId, setProjectId] = useState(restored?.id ?? newProjectId());
   const [projectName, setProjectName] = useState(restored?.name ?? uniqueProjectName());
   // Called, not passed: `useState` treats a bare function as a lazy initializer
@@ -490,6 +547,13 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [busy, setBusy] = useState(false);
   /** M5/E1: characters of the streamed payload received so far (display only). */
   const [streamChars, setStreamChars] = useState(0);
+  /** UX-2: named generation phase; drives the pill status + Cancel. */
+  const [genPhase, setGenPhase] = useState<GenPhase | null>(null);
+  const genAbortRef = useRef<AbortController | null>(null);
+  /** UX-2: user cancellation. Aborts the stream; the send catch reports it. */
+  const cancelSend = useCallback(() => {
+    genAbortRef.current?.abort();
+  }, []);
   const [listening, setListening] = useState(false);
   /**
    * Stage C1: the AI pill's Build/Ask mode. Workspace-level (not view-level)
@@ -848,22 +912,33 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       const withUser: ChatEntry[] = [...chat, { role: "user", text }];
       setChat(withUser);
       setBusy(true);
+      // UX-2: named phases replace the raw char counter as the status model.
+      const aborter = new AbortController();
+      genAbortRef.current = aborter;
+      setGenPhase("understanding");
       try {
         // `chat` (not withUser) is the prior conversation; the current message is
         // sent separately, so passing withUser would duplicate it.
         let streamed = 0;
+        let sawDelta = false;
         const result = await streamGenerate(
           text,
           workspace,
           (delta) => {
             streamed += delta.length;
             setStreamChars(streamed);
+            if (!sawDelta) {
+              sawDelta = true;
+              setGenPhase("constructing");
+            }
           },
           selection,
           chat,
           attachments,
+          aborter.signal,
         );
         setStreamChars(0);
+        setGenPhase("validating");
         // Answer-only reply (a question about the board): no ops, just explain.
         // A "this belongs on its own board" reply (the prompt's parallel-diagram
         // rule) is the other case that arrives with no ops — the explanation says
@@ -988,8 +1063,13 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         };
 
         // Large batches on an existing diagram present as a proposal to review.
+        // Threshold is dynamic from settings (UX-1): always=>0 (everything
+        // proposes), large=>5, never=>Infinity (destructive/external still
+        // propose on the server path; kept simple here).
         const isLarge =
-          result.operations.length > PROPOSAL_THRESHOLD && Object.keys(workspace.nodes).length > 0;
+          result.operations.length > proposalThreshold() &&
+          Object.keys(workspace.nodes).length > 0;
+        setGenPhase("applying");
 
         if (isLarge) {
           const conversation: ChatEntry[] = [
@@ -1087,8 +1167,14 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         // error persisted in chat, but re-running meant retyping the whole
         // request. A plan or quota refusal is NOT retriable by retrying — the
         // message already says what to do instead — so only transport and
-        // provider failures carry the prompt.
-        const retriable = !(err instanceof PlanRefusalError) && !/quota|rate limit|plan|auth|access/i.test((err as Error).message ?? "");
+        // provider failures carry the prompt. A user Cancel is never
+        // retriable-as-failure: nothing was applied and retry is the pill.
+        const msg = (err as Error).message ?? "";
+        const cancelled = /^cancelled\b/i.test(msg);
+        const retriable =
+          !cancelled &&
+          !(err instanceof PlanRefusalError) &&
+          !/quota|rate limit|plan|auth|access/i.test(msg);
         const conversation: ChatEntry[] = [
           ...withUser,
           {
@@ -1104,6 +1190,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         persist(workspace, conversation, projectName);
       } finally {
         setBusy(false);
+        setGenPhase(null);
+        genAbortRef.current = null;
       }
     },
     [busy, chat, workspace, commitAndShare, projectName, readOnly, persist, boardId],
@@ -1670,6 +1758,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const value: WorkspaceState = {
     view,
     setView,
+    lens,
+    setLens,
     projectId,
     projectName,
     setProjectName,
@@ -1677,6 +1767,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     chat,
     busy,
     streamChars,
+    genPhase,
+    cancelSend,
     listening,
     setListening,
     proposal,

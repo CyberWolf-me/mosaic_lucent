@@ -10,6 +10,7 @@ import {
 } from "@lucent/core";
 import { TopBar, LeftRail, StatusBadge } from "../ui/Chrome.js";
 import { AIPill } from "../ui/AIPill.js";
+import { useToast } from "../ui/Toast.js";
 import { fetchIntegrationLinks, type IntegrationLink } from "../boards.js";
 import { Ico } from "../ui/icons.js";
 import { useWorkspace } from "../workspace.js";
@@ -223,6 +224,7 @@ function IssueCard({
   onDragEnd: () => void;
   onNudge: (dir: -1 | 1) => void;
 }) {
+  const { notify } = useToast();
   const issue = node.issue!;
   // A full sentence for AT: label, type, status, who it's assigned to,
   // (Stage D1) the deadline, and (Stage D3) derived blockers/risks, and
@@ -252,8 +254,12 @@ function IssueCard({
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
       onKeyDown={(e) => {
-        // Keyboard equivalent of dragging between columns.
-        if (e.key === "ArrowRight" || e.key === "]") {
+        // Enter/Space on a card is a no-op by design: the card is already
+        // focused, and moving it is the arrow-key path below.
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          notify("Use ← → to move between columns");
+        } else if (e.key === "ArrowRight" || e.key === "]") {
           e.preventDefault();
           onNudge(1);
         } else if (e.key === "ArrowLeft" || e.key === "[") {
@@ -343,7 +349,12 @@ function IssueCard({
         )}
         <span style={{ flex: 1 }} />
         {issue.assignee && (
-          <span className="issue-assignee" title={issue.assignee} aria-hidden="true">
+          <span
+            className="issue-assignee"
+            title={issue.assignee}
+            role="img"
+            aria-label={issue.assignee}
+          >
             {initials(issue.assignee)}
           </span>
         )}

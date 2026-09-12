@@ -86,6 +86,14 @@ export function DiagramLayer({
   if (scene.nodes.length === 0) return null;
   const { byId, edges } = scene;
 
+  // Semantic zoom (UX-4): the detail tier follows the viewport zoom so a
+  // zoomed-out board stays readable — mid zoom drops secondary text, far zoom
+  // keeps only structure. The tier also lands as a zoom-mid/zoom-far class on
+  // the root for CSS, while the expensive labels are gated directly here.
+  const zoomTier = scale >= 0.8 ? "full" : scale >= 0.45 ? "mid" : "far";
+  const zoomClass = zoomTier === "mid" ? "zoom-mid" : zoomTier === "far" ? "zoom-far" : "";
+  const hideNodeDetail = zoomTier === "far";
+
   // The in-flight drag is applied per node rather than by re-mapping the whole
   // array, so the cards and their connectors still track the cursor together
   // (endpoints resolve through `byId`, which holds every node) without throwing
@@ -219,7 +227,7 @@ export function DiagramLayer({
       : groups;
 
   return (
-    <div style={{ position: "absolute", inset: 0 }}>
+    <div className={zoomClass} style={{ position: "absolute", inset: 0 }}>
       {/* Semantic groups, drawn behind everything. CREATE_GROUP has always been
           part of the operation schema and the model emits it (process maps depend
           on it for swimlanes), but the canvas never rendered groups — so "group
@@ -375,7 +383,8 @@ export function DiagramLayer({
           "publishes", "guards") and the canvas used to throw it away, so an
           architecture diagram showed arrows with no stated meaning. */}
       {showEdgeLabels &&
-        finalEdges.map((e) => {
+        scale >= 0.7 &&
+        finalEdges.map((e, i) => {
           const from = nodeAt(e.source);
           const to = nodeAt(e.target);
           if (!from || !to || !e.relationship) return null;
@@ -421,7 +430,14 @@ export function DiagramLayer({
             <div
               key={`lbl-${e.id}`}
               className="edge-label"
-              style={{ left: mx, top: my, opacity: labelDensity.opacity }}
+              // Parallel-edge deconfliction: the fan spread already separates
+              // bezier labels, so only stagger vertically when the fan index
+              // is 0 (routed labels ride one corridor) — by list index then.
+              style={{
+                left: mx,
+                top: my + (e.parallelIndex === 0 ? ((i % 3) - 1) * 10 : 0),
+                opacity: labelDensity.opacity,
+              }}
             >
               {e.relationship}
             </div>
@@ -460,7 +476,8 @@ export function DiagramLayer({
             // (and any unknown type, whose meta IS the uppercased nodeType)
             // that renders the same word twice — "ISSUE" over "issue". Only
             // show it when it actually adds a word the meta row doesn't have.
-            {...(n.nodeType.toLowerCase() === n.meta.toLowerCase()
+            // Far zoom (UX-4) drops it entirely, like the statement chip.
+            {...(n.nodeType.toLowerCase() === n.meta.toLowerCase() || hideNodeDetail
               ? {}
               : { sub: n.nodeType })}
             dot={n.dot}
@@ -476,8 +493,11 @@ export function DiagramLayer({
             onEditConsumed={onRenameConsumed}
             // Stage C2: the statement chip — kind·status under the label,
             // tinted by kind (statementUi's map), dimmed when settled.
-            {...(n.statement ? { statement: n.statement } : {})}
-            {...(n.statement ? { statementTint: KIND_TINT[n.statement.kind] } : {})}
+            // Far zoom (UX-4) drops it with the sub caption.
+            {...(n.statement && !hideNodeDetail ? { statement: n.statement } : {})}
+            {...(n.statement && !hideNodeDetail
+              ? { statementTint: KIND_TINT[n.statement.kind] }
+              : {})}
             {...(onRenameNode ? { onRename: (label: string) => onRenameNode(n.id, label) } : {})}
             {...(onMoveNode
               ? {

@@ -96,6 +96,53 @@ Ordered by severity, with the protocol's taxonomy:
     the app in the empty state with no toast/error (§16-adjacent trust issue
     — the server's `/metrics` and logs show the 502s the user never sees).
 
+## Fix status (2026-09-11 repair pass)
+
+What was fixed the day after, and what was deliberately not:
+
+**Fixed (code + regression tests):**
+
+- **1 (E1 server-crash) and 4 (S5 silent no-op) — one fix.**
+  `safeParseProgrammaticOperations` in `core/src/operations.ts` checks raw
+  keys before zod: an op whose `op` name is known but carries unknown keys
+  (top-level `statement` fields on SET_STATEMENT; `patch` on UPDATE_ISSUE) is
+  rejected with `unknown key "<k>" on <OP>`. Wired into both writer paths —
+  the ws `op` frame handler (`server/src/realtime.ts`) and the ops HTTP route
+  (`server/src/routes/boardOps.ts`, now 422 with issue messages). Tests:
+  `core/test/statement.test.ts` (crash shape, patch wrapper, canonical batch
+  still accepted), `server/test/board-ops-route.test.ts` (422 wire contract).
+- **2 (M1/M2 ops-route/room split) — fixed with the B3 dual-path pattern.**
+  The route now commits room-first (`commitForBoard` + `broadcastProposal`)
+  so a live peer sees the batch as an ordinary broadcast, falling back to the
+  appendOp path when no room is hosted. Independently, `evictRoom` no longer
+  snapshots blind: it compares the room version against the store's
+  `latestSeq` and skips the snapshot when the store is ahead — a room that
+  missed writes can no longer overwrite newer persisted state with stale
+  truth. Test: `server/test/opProtocol.e2e.test.ts` "an ops-route batch
+  reaches the live room".
+- **3 (P1 history window) — fixed.** `historyWindow` detects
+  `baseSeq >= newest` (a snapshot at the head, no prune) and floors the
+  window to the newest `limit` entries instead of returning an empty range.
+  Verified the matrix: head 7 / base 7 → fromSeq 1 (was 8); all other cases
+  unchanged. Test: `server/test/history-route.test.ts`.
+- **9 (P2 Intelligence placeholders) — fixed.** The evidence `t()` call now
+  passes `existing`/`dup` alongside a/b/m. Contract tests in
+  `i18n/test/i18n.test.ts`: no surviving `{token}` in en+hu, all inbox keys
+  satisfiable.
+- **11 (provider failures invisible) — diagnosis corrected, then fixed.**
+  The error is toasted and persisted; the real gap was that the persisted
+  error entry offered no way forward. `ChatEntry` gains `retryPrompt` (set on
+  retriable failures — not plan refusals, not quota/auth), and `AIPill`
+  renders a **Try again** action that resends the original prompt. Tests via
+  typecheck + web suite; the shape is exercised in the persistence schema.
+
+**Not fixed (remain as recorded):** 5 (V2 layout wrap), 6 (S1
+failed-generation workspace bleed), 7 (E3 unasserted status translation —
+assessed acceptable), 8 (V5 ≥80-node readability), 10 (M3 supersede-UX
+surprise), and the provider-502 retry at the server level (the reliability
+score's root cause). These are the C-bucket build-next items, not overnight
+patches.
+
 ## A–D buckets (§37)
 
 - **A (ship as-is):** 7, 9, 10 — cosmetic or documented semantics.

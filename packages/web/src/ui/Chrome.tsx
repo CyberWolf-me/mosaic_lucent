@@ -4,7 +4,7 @@ import { CommandOverlay } from "./CommandOverlay.js";
 import { NotificationTray } from "./NotificationTray.js";
 import { ProfileMenu } from "./ProfileMenu.js";
 import { getSessionUser } from "../session.js";
-import { useWorkspace, type View } from "../workspace.js";
+import { useWorkspace, type CanvasLens, type View } from "../workspace.js";
 import {
   createShareLink,
   listMembers,
@@ -70,52 +70,52 @@ export function TopBar({
       {meta}
       <div className="spacer" />
       <div className="actions">
-        {/* Outside the `actions ?? …` fallback on purpose: notifications are
+        {/* Outside any conditional on purpose: notifications are
             account-scoped, so a view that supplies its own action cluster must
-            not be a view where they disappear. */}
+            not be a view where they disappear. Share/Profile likewise always
+            render — a view's `actions` augment the cluster, never replace it. */}
         <NotificationTray />
-        {actions ?? (
-          <>
-            {readOnly && (
-              <span className="view-only-chip" role="status" aria-label="View only">
-                <Ico.Eye /> View only
-              </span>
-            )}
-            <button
-              className="icon-btn"
-              onClick={() => setShare(true)}
-              aria-label="Share workspace"
-            >
-              <Ico.Share /> Share
-            </button>
-            <button
-              className="icon-btn"
-              onClick={() => setView("meeting")}
-              title="Meeting mode"
-              aria-label="Meeting mode"
-            >
-              <Ico.Present /> Present
-            </button>
-            <button
-              className="icon-btn"
-              onClick={() => setView("admin")}
-              title="Workspace admin"
-              aria-label="Workspace admin"
-            >
-              Admin
-            </button>
-            <button
-              className="icon-btn"
-              onClick={() => setView("analytics")}
-              title="Workspace analytics"
-              aria-label="Workspace analytics"
-            >
-              Analytics
-            </button>
-            <div style={{ width: 8 }} />
-            <ProfileMenu onOpenSettings={onOpenSettings} />
-          </>
-        )}
+        {actions}
+        <>
+          {readOnly && (
+            <span className="view-only-chip" role="status" aria-label="View only">
+              <Ico.Eye /> View only
+            </span>
+          )}
+          <button
+            className="icon-btn"
+            onClick={() => setShare(true)}
+            aria-label="Share workspace"
+          >
+            <Ico.Share /> Share
+          </button>
+          <button
+            className="icon-btn"
+            onClick={() => setView("meeting")}
+            title="Meeting mode"
+            aria-label="Meeting mode"
+          >
+            <Ico.Present /> Present
+          </button>
+          <button
+            className="icon-btn"
+            onClick={() => setView("admin")}
+            title="Workspace admin"
+            aria-label="Workspace admin"
+          >
+            Admin
+          </button>
+          <button
+            className="icon-btn"
+            onClick={() => setView("analytics")}
+            title="Workspace analytics"
+            aria-label="Workspace analytics"
+          >
+            Analytics
+          </button>
+          <div style={{ width: 8 }} />
+          <ProfileMenu onOpenSettings={onOpenSettings} />
+        </>
       </div>
       {share && <ShareDialog onClose={() => setShare(false)} />}
     </div>
@@ -494,17 +494,22 @@ function ShareDialog({ onClose }: { onClose: () => void }) {
   );
 }
 
+/** UX-1 shell: primary surfaces. Lens items below are canvas lenses, not views. */
 const RAIL_ITEMS: { id: string; icon: keyof typeof Ico; label: string; view: View }[] = [
   { id: "projects", icon: "Folder", label: "Projects", view: "dashboard" },
   { id: "canvas", icon: "Layers", label: "Canvas", view: "canvas" },
-  { id: "sequence", icon: "Flow", label: "Sequence", view: "sequence" },
-  { id: "er", icon: "Mind", label: "ER diagram", view: "er" },
-  { id: "board", icon: "Grid", label: "Board", view: "board" },
-  { id: "document", icon: "Book", label: "Document", view: "document" },
   { id: "meeting", icon: "Journey", label: "Meeting", view: "meeting" },
   { id: "intelligence", icon: "Sparkle", label: "Intelligence", view: "intelligence" },
   { id: "execution", icon: "Gauge", label: "Execution", view: "execution" },
-  { id: "wireframe", icon: "Grid", label: "Wireframe", view: "wireframe" },
+];
+
+/** Second rail group: alternate canvas lenses on the same board (UX-1). */
+const RAIL_LENSES: { id: string; icon: keyof typeof Ico; label: string; lens: CanvasLens }[] = [
+  { id: "kanban", icon: "Grid", label: "Kanban", lens: "kanban" },
+  { id: "document", icon: "Book", label: "Document", lens: "document" },
+  { id: "wireframe", icon: "Grid", label: "Wireframe", lens: "wireframe" },
+  { id: "sequence", icon: "Flow", label: "Sequence", lens: "sequence" },
+  { id: "er", icon: "Mind", label: "ER diagram", lens: "er" },
 ];
 
 export function LeftRail({
@@ -514,7 +519,7 @@ export function LeftRail({
   side?: "left" | "right";
   onOpenSettings?: (section?: string) => void;
 }) {
-  const { view, setView, newProject, workspace } = useWorkspace();
+  const { view, setView, lens, setLens, newProject, workspace } = useWorkspace();
   const [searchOpen, setSearchOpen] = useState(false);
   const [confirmNew, setConfirmNew] = useState(false);
 
@@ -545,22 +550,59 @@ export function LeftRail({
       <div className={`left-rail ${side === "right" ? "on-right" : ""}`}>
         {RAIL_ITEMS.map((it) => {
           const Icon = Ico[it.icon];
+          const active =
+            it.view === "canvas" ? view === "canvas" && lens === "visual" : view === it.view;
           return (
             <button
               key={it.id}
-              className={`rail-btn ${view === it.view ? "active" : ""}`}
+              className={`rail-btn ${active ? "active" : ""}`}
               title={it.label}
+              aria-label={it.label}
+              aria-current={active ? "page" : undefined}
               onClick={() => setView(it.view)}
             >
               <Icon />
             </button>
           );
         })}
+        <div className="rail-divider" />
+        {RAIL_LENSES.map((it) => {
+          const Icon = Ico[it.icon];
+          const active = view === "canvas" && lens === it.lens;
+          return (
+            <button
+              key={it.id}
+              className={`rail-btn ${active ? "active" : ""}`}
+              title={it.label}
+              aria-label={it.label}
+              aria-current={active ? "page" : undefined}
+              onClick={() => {
+                // setView first: setView("canvas") resets to the visual lens,
+                // so the explicit lens applies after.
+                setView("canvas");
+                setLens(it.lens);
+              }}
+            >
+              <Icon />
+            </button>
+          );
+        })}
         <div style={{ flex: 1 }} />
-        <button className="rail-btn" title="History" onClick={() => setView("history")}>
+        <button
+          className={`rail-btn ${view === "history" ? "active" : ""}`}
+          title="History"
+          aria-label="History"
+          aria-current={view === "history" ? "page" : undefined}
+          onClick={() => setView("history")}
+        >
           <Ico.History />
         </button>
-        <button className="rail-btn" title="Search · ⌘K" onClick={() => setSearchOpen(true)}>
+        <button
+          className="rail-btn"
+          title="Search · ⌘K"
+          aria-label="Search"
+          onClick={() => setSearchOpen(true)}
+        >
           <Ico.Search />
         </button>
         <div className="rail-divider" />
@@ -570,6 +612,7 @@ export function LeftRail({
         <button
           className="rail-btn"
           title="New workspace"
+          aria-label="New workspace"
           onClick={() => (hasWork ? setConfirmNew(true) : newProject())}
         >
           <Ico.Plus />

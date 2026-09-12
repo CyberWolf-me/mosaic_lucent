@@ -7,14 +7,17 @@ import { createContext, useCallback, useContext, useState, type ReactNode } from
  * about what is a stub.
  */
 
+export type ToastTone = "info" | "success" | "error";
+
 export interface Toast {
   id: number;
   text: string;
   icon?: ReactNode;
+  tone?: ToastTone;
 }
 
 interface ToastApi {
-  notify: (text: string, icon?: ReactNode) => void;
+  notify: (text: string, icon?: ReactNode, tone?: ToastTone) => void;
 }
 
 const Ctx = createContext<ToastApi | null>(null);
@@ -22,9 +25,9 @@ const Ctx = createContext<ToastApi | null>(null);
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
 
-  const notify = useCallback((text: string, icon?: ReactNode) => {
+  const notify = useCallback((text: string, icon?: ReactNode, tone?: ToastTone) => {
     const id = Date.now() + Math.random();
-    setToasts((t) => [...t, { id, text, icon }]);
+    setToasts((t) => [...t, { id, text, icon, tone }]);
     setTimeout(() => {
       setToasts((t) => t.filter((x) => x.id !== id));
     }, 2600);
@@ -35,7 +38,12 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       {children}
       <div className="toast-host">
         {toasts.map((t) => (
-          <div key={t.id} className="toast">
+          <div
+            key={t.id}
+            className="toast"
+            role={t.tone === "error" ? "alert" : "status"}
+            aria-live={t.tone === "error" ? "assertive" : "polite"}
+          >
             {t.icon}
             <span>{t.text}</span>
           </div>

@@ -59,6 +59,8 @@ export function CommandOverlay({
   const [active, setActive] = useState(0);
   /** Server search results for the current query (null: nothing fetched yet). */
   const [search, setSearch] = useState<BoardSearchResponse | null>(null);
+  /** True after a server search failure/offline — surfaced inline, not silent. */
+  const [searchError, setSearchError] = useState(false);
   /** The ask-bridge composer: the input becomes the question field. */
   const [askMode, setAskMode] = useState(false);
   const [askText, setAskText] = useState("");
@@ -181,6 +183,7 @@ export function CommandOverlay({
   useEffect(() => {
     if (!searchQuery || searchQuery.length < SEARCH_MIN_QUERY) {
       setSearch(null);
+      setSearchError(false);
       return;
     }
     let cancelled = false;
@@ -188,11 +191,15 @@ export function CommandOverlay({
     const timer = window.setTimeout(() => {
       void searchBoard(boardId!, searchQuery, controller.signal)
         .then((res) => {
-          if (!cancelled && res && res.query === searchQuery) setSearch(res);
+          if (!cancelled && res && res.query === searchQuery) {
+            setSearch(res);
+            setSearchError(false);
+          }
         })
         .catch(() => {
-          // Aborted or offline: keep whatever was showing; an error banner in
-          // a palette is noise the local fallback already covers.
+          // Offline or aborted: surface it inline — the palette still shows
+          // local results, but the user must know server search failed.
+          if (!cancelled) setSearchError(true);
         });
     }, SEARCH_DEBOUNCE_MS);
     return () => {
@@ -548,6 +555,15 @@ export function CommandOverlay({
                 grouped.revisions.map((hit, i) =>
                   searchRow(hit, searchOffset + grouped.nodes.length + grouped.turns.length + i),
                 )}
+              {!useLocalScan && searchError && (
+                <div
+                  className="mono"
+                  role="status"
+                  style={{ padding: "10px 12px", fontSize: 10.5, color: "var(--ink-3)" }}
+                >
+                  Search unavailable offline — showing local results.
+                </div>
+              )}
               {!useLocalScan && search?.windowTruncated && (
                 <div
                   className="mono"

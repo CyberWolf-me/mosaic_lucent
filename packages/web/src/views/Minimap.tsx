@@ -75,15 +75,17 @@ export function Minimap({
           </button>
         )}
       </div>
-      {/* The map is a pointer-only convenience: it is kept out of the
-          accessibility tree (aria-hidden) rather than exposing a pan control
-          keyboard users can't operate. Keyboard navigation of the canvas is
-          provided elsewhere — Fit (Shift+1), zoom to selection (Shift+2), and
-          Ctrl +/-/0 — so no capability is lost by hiding it here. */}
+      {/* The map is a pointer-only convenience: it exposes a labelled image
+          role rather than hiding from the accessibility tree, but dragging it
+          is still pointer-only. Keyboard navigation of the canvas is provided
+          elsewhere — Fit (Shift+1), zoom to selection (Shift+2), and
+          Ctrl +/-/0 — so no capability is lost by not operating the map
+          from the keyboard. */}
       <svg
         width={W}
         height={H}
-        aria-hidden="true"
+        role="img"
+        aria-label={`Board overview: ${nodeRects.length} nodes, ${shapeRects.length} shapes${viewport ? "; viewport rectangle shown" : ""}`}
         style={onNavigate ? { cursor: "pointer", pointerEvents: "auto" } : undefined}
         onPointerDown={(e) => {
           if (!onNavigate) return;
@@ -100,8 +102,8 @@ export function Minimap({
             key={n.id}
             x={tx(n.position!.x)}
             y={ty(n.position!.y)}
-            width={Math.max(2, n.size!.width * scale)}
-            height={Math.max(2, n.size!.height * scale)}
+            width={Math.max(4, n.size!.width * scale)}
+            height={Math.max(4, n.size!.height * scale)}
             rx={1.5}
             fill="var(--ink-2)"
             opacity={0.7}
@@ -112,8 +114,8 @@ export function Minimap({
             key={s.id}
             x={tx(s.position.x)}
             y={ty(s.position.y)}
-            width={Math.max(2, s.size.width * scale)}
-            height={Math.max(2, s.size.height * scale)}
+            width={Math.max(4, s.size.width * scale)}
+            height={Math.max(4, s.size.height * scale)}
             rx={s.kind === "ellipse" ? 4 : 1.5}
             fill={s.kind === "frame" ? "none" : "var(--amber-2)"}
             stroke={s.kind === "frame" ? "var(--stroke-3)" : "none"}
@@ -132,6 +134,13 @@ export function Minimap({
             strokeWidth={1}
             rx={2}
           />
+        )}
+        {/* Region counts (UX-4): past this many nodes the 4px rects merge into
+            a wash, so say so instead of pretending each rect is readable. */}
+        {nodeRects.length > 150 && (
+          <text x={8} y={H - 8} fontSize={9} fill="var(--ink-3)" fontFamily="var(--font-mono)">
+            {nodeRects.length} nodes — zoom in for detail
+          </text>
         )}
       </svg>
     </div>

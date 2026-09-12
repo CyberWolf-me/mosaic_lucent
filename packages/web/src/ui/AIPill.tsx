@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
 import { Ico } from "./icons.js";
 import { AllowanceNote } from "./Paywall.js";
 import type { ChatEntry } from "../persistence.js";
@@ -16,6 +16,16 @@ export interface PillStatus {
 
 export type PillMode = "build" | "ask";
 
+/** UX-2 generation phase: the machine-readable half of the pill status. */
+export type AIPhase = "understanding" | "constructing" | "validating" | "applying";
+
+const PHASE_LABEL: Record<AIPhase, string> = {
+  understanding: "Understanding…",
+  constructing: "Constructing…",
+  validating: "Validating…",
+  applying: "Applying…",
+};
+
 export function AIPill({
   placeholder,
   status,
@@ -32,6 +42,9 @@ export function AIPill({
   busy = false,
   shifted = false,
   readOnly = false,
+  phase = null,
+  progressNote = null,
+  onCancel,
 }: {
   /** Mode-aware callers pass one; the default stays the Build wording. */
   placeholder?: string;
@@ -63,11 +76,25 @@ export function AIPill({
    * failure. The conversation stays readable.
    */
   readOnly?: boolean;
+  /**
+   * UX-2 generation phase. Null when idle — the pill then renders `status`
+   * (or nothing), exactly as before.
+   */
+  phase?: AIPhase | null;
+  /** UX-2 machine progress alongside the phase ("12 characters received"). */
+  progressNote?: string | null;
+  /** UX-2 cancel. Rendered only while busy; the workspace owns the abort. */
+  onCancel?: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const bars = useRef(Array.from({ length: 14 }, () => 20 + Math.random() * 60));
+  const inputId = useId();
   const hasMode = mode !== undefined && onModeChange !== undefined;
   const askMode = hasMode && mode === "ask";
+  const phaseText = phase
+    ? `${PHASE_LABEL[phase]}${progressNote ? ` — ${progressNote}` : ""}`
+    : null;
+  const statusText = phaseText ?? status?.text ?? null;
 
   return (
     <div className={`ai-pill-wrap${shifted ? " shifted" : ""}`}>
@@ -77,10 +104,30 @@ export function AIPill({
           Reads the live status itself and renders nothing when there is nothing
           to say, which is most of the month. */}
       <AllowanceNote />
-      {status && (
+      {statusText && (
         <div className="pill-status">
           <span className="pulse" />
-          <span>{status.text}</span>
+          <span>{statusText}</span>
+          {busy && onCancel && (
+            <button
+              type="button"
+              aria-label="Cancel generation"
+              onClick={onCancel}
+              style={{
+                marginLeft: 4,
+                fontSize: 11,
+                fontFamily: "var(--font-mono)",
+                padding: "2px 8px",
+                borderRadius: 999,
+                border: "1px solid var(--stroke-2)",
+                background: "transparent",
+                color: "var(--ink-1)",
+                cursor: "pointer",
+              }}
+            >
+              Cancel
+            </button>
+          )}
         </div>
       )}
 
@@ -142,11 +189,13 @@ export function AIPill({
             mutates, Ask reads. Rendered as the app's established segmented
             control, only for mounts that own a mode. */}
         {hasMode && !readOnly && (
-          <div className="segmented" style={{ flexShrink: 0 }}>
+          <div className="segmented" style={{ flexShrink: 0 }} role="radiogroup" aria-label="Build or Ask mode">
             <button
               className={mode === "build" ? "active" : ""}
               onClick={() => onModeChange!("build")}
               title="Describe what to build — Lucent changes the board"
+              aria-pressed={mode === "build"}
+              aria-label="Build mode"
             >
               Build
             </button>
@@ -154,6 +203,8 @@ export function AIPill({
               className={mode === "ask" ? "active" : ""}
               onClick={() => onModeChange!("ask")}
               title="Ask about the board and its history — read-only, with citations"
+              aria-pressed={mode === "ask"}
+              aria-label="Ask mode"
             >
               Ask
             </button>
@@ -175,17 +226,23 @@ export function AIPill({
             </span>
           </div>
         ) : (
-          <input
-            value={value}
-            onChange={(e) => onChange?.(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") onSubmit?.();
-            }}
-            placeholder={
-              placeholder ??
-              (askMode ? "Ask about this board's history…" : "Ask Lucent to build something…")
-            }
-          />
+          <>
+            <label htmlFor={inputId} className="sr-only">
+              Ask Lucent
+            </label>
+            <input
+              id={inputId}
+              value={value}
+              onChange={(e) => onChange?.(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") onSubmit?.();
+              }}
+              placeholder={
+                placeholder ??
+                (askMode ? "Ask about this board's history…" : "Ask Lucent to build something…")
+              }
+            />
+          </>
         )}
         {!readOnly && <span className="kbd">⌘K</span>}
         {!readOnly && (
@@ -194,11 +251,19 @@ export function AIPill({
               className={`mic-btn ${listening ? "active" : ""}`}
               onClick={onToggleMic}
               title={voiceSupported ? "Voice" : "Voice not supported in this browser"}
+              aria-label={listening ? "Stop voice input" : "Start voice input"}
+              aria-pressed={listening}
               style={voiceSupported ? undefined : { opacity: 0.45 }}
             >
               <Ico.Mic />
             </button>
-            <button className="send-btn" onClick={onSubmit} disabled={busy} title="Send">
+            <button
+              className="send-btn"
+              onClick={onSubmit}
+              disabled={busy}
+              title="Send"
+              aria-label="Send message"
+            >
               <Ico.Send />
             </button>
           </>
