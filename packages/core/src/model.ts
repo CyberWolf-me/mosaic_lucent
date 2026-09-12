@@ -17,7 +17,8 @@ export type DiagramKind =
   | "journey"
   | "decisiontree"
   | "process"
-  | "orgchart";
+  | "orgchart"
+  | "bpmn";
 
 /** Coordinates are always assigned by the layout engine, never by the AI. */
 export interface Position {

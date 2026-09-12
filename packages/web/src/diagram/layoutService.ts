@@ -31,7 +31,12 @@ import {
 } from "@lucent/core";
 import { ELK_LAYOUT_ENGINE } from "./elk/index.js";
 
-const ELK_KINDS: ReadonlySet<string> = new Set(["flowchart", "architecture", "journey"]);
+const ELK_KINDS: ReadonlySet<string> = new Set([
+  "flowchart",
+  "architecture",
+  "journey",
+  "bpmn",
+]);
 
 export interface LayoutOutcome {
   workspace: Workspace;

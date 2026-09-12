@@ -3,7 +3,7 @@ import { densityBand, edgeDensity, type DensityBand, type Workspace } from "@luc
 import { anchor, ConnectorDefs, makePath, NodeCard, type NodeState } from "./atoms.js";
 import { techMarkFor } from "./techMarks.js";
 import { KIND_TINT } from "../statementUi.js";
-import { DIAGRAM_LABELS } from "../scene.js";
+import { DIAGRAM_LABELS, bpmnShapeFor } from "../scene.js";
 import {
   boundsWithDrag,
   cullRect,
@@ -194,6 +194,14 @@ export function DiagramLayer({
     const gid = regionOf(id);
     return gid !== undefined && collapsedSet.has(gid);
   };
+  // The BPMN lens is per-region (ADR 0014): a node renders BPMN shapes when
+  // its region's kind — else the board kind — is "bpmn". Everything else on
+  // the board renders exactly as before.
+  const regionKindOf = new Map(
+    groups.filter((g) => g.kind).map((g) => [g.id, g.kind] as const),
+  );
+  const lensKindOf = (id: string) =>
+    regionKindOf.get(regionOf(id) ?? "") ?? workspace.diagramKind;
   const finalNodes =
     collapsedSet.size > 0 ? drawNodes.filter((n) => !isCollapsedMember(n.id)) : drawNodes;
   const finalEdges =
@@ -502,6 +510,12 @@ export function DiagramLayer({
             {...(n.statement && !hideNodeDetail ? { statement: n.statement } : {})}
             {...(n.statement && !hideNodeDetail
               ? { statementTint: KIND_TINT[n.statement.kind] }
+              : {})}
+            // The BPMN lens (docs/19): shapes are a presentation choice of
+            // the lens, computed per node from its region's kind. Undefined
+            // on every non-BPMN board — the ordinary card renders.
+            {...(bpmnShapeFor(n.nodeType, lensKindOf(n.id))
+              ? { bpmnShape: bpmnShapeFor(n.nodeType, lensKindOf(n.id)) }
               : {})}
             {...(onRenameNode ? { onRename: (label: string) => onRenameNode(n.id, label) } : {})}
             {...(onMoveNode

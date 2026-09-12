@@ -238,6 +238,7 @@ export const workspaceSchema = z.object({
     "decisiontree",
     "process",
     "orgchart",
+    "bpmn",
   ]),
   nodes: z.record(z.string(), nodeSchema).default({}),
   edges: z.record(z.string(), edgeSchema).default({}),

@@ -311,6 +311,15 @@ operation carries a coordinate.
 > records the decision). A Lucent-drawn BPMN-styled process lens (the
 > standard's visual conventions, our renderer) is a possible future with no
 > external code.
+>
+> **Update (later 2026-09-12): the future arrived.** The V1 core subset is
+> implemented Lucent-native: `bpmn` is a first-class diagram kind (operation
+> contract, layered layout, ELK-eligible per ADR 0039) and a region lens;
+> the shapes are our own rendering of the OMG conventions (○ ◎ □ ◇X ◇+ via
+> NodeCard + CSS, `bpmnShapeFor` in scene.ts); `parallel` is the one new
+> node semantic; the XML adapter round-trips it all including the parallel
+> gateway. Doc 19 carries the implementation table — V2 (subprocess, pools,
+> lanes, message flow) is the next increment.
 
 **Entry gate — licenses before code.** ELK is EPL-2.0 (relevant only if
 adopted in Phase 3/4). bpmn-js is MIT **with a condition: the bpmn.io

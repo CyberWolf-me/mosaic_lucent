@@ -34,6 +34,7 @@ const DIAGRAM_TO_KIND: Record<DiagramKind, { kind: string; mini: MiniKind }> = {
   decisiontree: { kind: "Decision trees", mini: "flow" },
   process: { kind: "Process maps", mini: "flow" },
   orgchart: { kind: "Org charts", mini: "mind" },
+  bpmn: { kind: "BPMN processes", mini: "flow" },
 };
 
 export function DashboardView({ onOpenSettings }: { onOpenSettings: (section?: string) => void }) {

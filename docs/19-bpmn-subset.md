@@ -35,6 +35,29 @@
   applies to ELK itself and modifications to it, not to Lucent). elkjs is
   version-pinned per ADR 0039.
 
+## The V1 core subset — implemented (2026-09-12, Lucent-rendered)
+
+The advisory's V1 core — Start/End events, Task, Sequence Flow, XOR Gateway,
+**Parallel Gateway** — is implemented as a Lucent-native lens, no external
+toolkit:
+
+- `bpmn` is a first-class diagram kind (operation contract, layout → layered,
+  ELK-eligible per ADR 0039's flat-graph rule) and a region lens
+  (SET_GROUP_KIND) — ADR 0014's mechanism, nothing new.
+- Shapes are presentation: `bpmnShapeFor` (scene.ts) maps node semantics to
+  the OMG visual conventions — entry→○, exit→◎, step→□, choice→◇X,
+  parallel→◇+ — rendered by NodeCard + CSS. The model carries no BPMN
+  specifics except the one genuinely new semantic: the `parallel` node type.
+- Interchange round-trips, including parallelGateway (bpmnLens.test.ts).
+
+| Advisory V-item | Status |
+| --- | --- |
+| V1 core (start/end, task, flow, XOR, parallel) | **done, Lucent-rendered** |
+| V2 (subprocess, pools, lanes, message flow) | next — lanes map to groups; subprocess maps to region-collapse |
+| V3 (timer/message/error/boundary events) | deferred — needs model semantics first |
+| V4 (data objects/stores, event subprocesses) | deferred |
+| V5 (choreography, conversation) | deferred (doc 18 always excluded it) |
+
 ## Supported subset (round-trips both ways)
 
 | BPMN element | Lucent mapping | Notes |

@@ -56,6 +56,7 @@ const STRATEGY_FOR_KIND: Record<DiagramKind, LayoutStrategy> = {
   decisiontree: "tree",
   orgchart: "tree",
   process: "swimlane",
+  bpmn: "layered",
 };
 
 export type LayoutResult = Record<string, { position: Position; size: Size }>;

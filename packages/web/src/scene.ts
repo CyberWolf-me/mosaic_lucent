@@ -154,4 +154,39 @@ export const DIAGRAM_LABELS: Record<DiagramKind, string> = {
   decisiontree: "Decision tree",
   process: "Process map",
   orgchart: "Org chart",
+  bpmn: "BPMN process",
 };
+
+/**
+ * BPMN lens shape for one node (docs/19 V1 core, rendered by Lucent — no
+ * external toolkit). Returns undefined unless the node is seen through a
+ * `bpmn` lens, so every other board renders byte-identically. The LENS is
+ * the region's own kind when the node sits in a kind-region (ADR 0014),
+ * else the board kind. Node semantics map: entry→○ start, exit→◎ end,
+ * step/task→□ task, choice/gateway→◇X exclusive, parallel→◇+ parallel —
+ * the model carries meaning; the lens chooses the convention.
+ */
+export type BpmnLensShape = "event" | "eventEnd" | "gateway" | "gatewayParallel" | "task";
+
+export function bpmnShapeFor(
+  nodeType: string,
+  lens: DiagramKind | undefined,
+): BpmnLensShape | undefined {
+  if (lens !== "bpmn") return undefined;
+  switch (nodeType) {
+    case "entry":
+    case "start":
+      return "event";
+    case "exit":
+    case "end":
+      return "eventEnd";
+    case "parallel":
+      return "gatewayParallel";
+    case "choice":
+    case "gateway":
+    case "decision":
+      return "gateway";
+    default:
+      return "task";
+  }
+}

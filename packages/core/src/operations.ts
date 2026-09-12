@@ -27,6 +27,7 @@ const diagramKind = z.enum([
   "decisiontree",
   "process",
   "orgchart",
+  "bpmn",
 ]);
 
 /** Work-tracking (Jira-style) fields attached to a node. All optional so the

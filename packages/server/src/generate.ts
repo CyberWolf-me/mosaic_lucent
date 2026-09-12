@@ -54,6 +54,7 @@ const summarySchema = z.object({
     "decisiontree",
     "process",
     "orgchart",
+    "bpmn",
   ]),
   nodes: z
     .array(
@@ -123,6 +124,7 @@ const summarySchema = z.object({
             "decisiontree",
             "process",
             "orgchart",
+            "bpmn",
           ])
           .optional(),
       }),

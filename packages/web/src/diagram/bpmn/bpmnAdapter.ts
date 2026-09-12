@@ -20,12 +20,13 @@ const BPMNDI_NS = "http://www.omg.org/spec/BPMN/20100524/DI";
 const DC_NS = "http://www.omg.org/spec/DD/20100524/DC";
 const DI_NS = "http://www.omg.org/spec/DD/20100524/DI";
 
-/** Lucent nodeType → BPMN element (docs/19's table). Unknown → task. */
+/** Lucent nodeType → BPMN element (docs/19's V1 core subset). Unknown → task. */
 const TYPE_TO_BPMN: Record<string, string> = {
   entry: "startEvent",
   exit: "endEvent",
   choice: "exclusiveGateway",
   gateway: "exclusiveGateway",
+  parallel: "parallelGateway",
   step: "task",
   service: "task",
   task: "task",
@@ -35,6 +36,7 @@ const BPMN_TO_TYPE: Record<string, string> = {
   startEvent: "entry",
   endEvent: "exit",
   exclusiveGateway: "choice",
+  parallelGateway: "parallel",
   task: "step",
 };
 

@@ -48,6 +48,7 @@ const ALGORITHM_FOR_KIND: Record<DiagramKind, string> = {
   decisiontree: "mrtree",
   orgchart: "mrtree",
   process: "layered",
+  bpmn: "layered",
 };
 
 interface ElkNode {

@@ -5892,3 +5892,86 @@ input:focus-visible, textarea:focus-visible { outline: 2px solid var(--amber-1);
   .present-caption { min-width: 0; width: calc(100vw - 32px); max-width: calc(100vw - 32px); }
   .comment-panel, .comment-inbox, .vote-panel { width: calc(100vw - 32px); right: 16px; }
 }
+
+/* ── BPMN lens shapes (docs/19 V1 core) ─────────────────────────────────
+   Lucent's own rendering of the OMG visual conventions — no external
+   toolkit. The card's BOX stays whatever the layout engine reserved
+   (anchors, minimap, comment pins all read it); these classes restyle the
+   visible core. Events are compact circles with the label beside/below;
+   gateways are diamonds carrying an X (exclusive) or + (parallel) marker;
+   tasks are the familiar rounded rect, restyled to read BPMN. */
+
+.node.bpmn-task {
+  border-radius: 10px;
+  background: var(--canvas-2);
+}
+
+.node.bpmn-event,
+.node.bpmn-event-end {
+  min-width: 0;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border-radius: 50%;
+  background: var(--canvas-2);
+  border: 1.5px solid var(--ink-2);
+  align-items: center;
+}
+
+.node.bpmn-event-end {
+  border-width: 4px;
+}
+
+.node.bpmn-event .node-title,
+.node.bpmn-event-end .node-title,
+.node.bpmn-gateway .node-title,
+.node.bpmn-gateway-parallel .node-title {
+  position: absolute;
+  top: calc(100% + 3px);
+  left: 50%;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  background: var(--canvas-1);
+  padding: 0 3px;
+  border-radius: 4px;
+  font-size: 11px;
+  color: var(--ink-1);
+}
+
+.node.bpmn-gateway,
+.node.bpmn-gateway-parallel {
+  min-width: 0;
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  background: var(--canvas-2);
+  border: 1.5px solid var(--amber-2);
+  transform: rotate(45deg);
+  border-radius: 4px;
+  align-items: center;
+}
+
+.node.bpmn-gateway .node-mark,
+.node.bpmn-gateway-parallel .node-mark {
+  transform: rotate(-45deg);
+  display: flex;
+}
+
+/* The gateway diamond rotates its card; the children counter-rotate so
+   text stays horizontal. The meta row is hidden on compact shapes. */
+.node.bpmn-event .node-meta,
+.node.bpmn-event-end .node-meta,
+.node.bpmn-gateway .node-meta,
+.node.bpmn-gateway-parallel .node-meta {
+  display: none;
+}
+
+.node.bpmn-gateway .bpmn-gateway-marker,
+.node.bpmn-gateway-parallel .bpmn-gateway-marker {
+  transform: rotate(-45deg);
+  align-items: center;
+  justify-content: center;
+  display: flex;
+  width: 100%;
+  height: 100%;
+}

@@ -60,6 +60,7 @@ export function NodeCard({
   onEditConsumed,
   statement,
   statementTint,
+  bpmnShape,
 }: {
   x: number;
   y: number;
@@ -102,6 +103,13 @@ export function NodeCard({
   statement?: { kind: string; status: string };
   /** The chip's tint, by kind (statementUi.KIND_TINT at the call site). */
   statementTint?: string;
+  /**
+   * BPMN lens shape (docs/19 V1 core, rendered by Lucent — no external
+   * toolkit): event → circle (thin=start, thick=end), gateway → diamond
+   * with an X (exclusive) or + (parallel) marker, task → rounded rect.
+   * Undefined renders the ordinary card; the LENS decides, never the model.
+   */
+  bpmnShape?: "event" | "eventEnd" | "gateway" | "gatewayParallel" | "task";
 }) {
   const cls = [
     "node",
@@ -109,6 +117,17 @@ export function NodeCard({
     appear ? "appear" : "",
     dimmed ? "dimmed" : "",
     draggable ? "draggable" : "",
+    bpmnShape === "task"
+      ? "bpmn-task"
+      : bpmnShape === "event"
+        ? "bpmn-event"
+        : bpmnShape === "eventEnd"
+          ? "bpmn-event-end"
+          : bpmnShape === "gateway"
+            ? "bpmn-gateway"
+            : bpmnShape === "gatewayParallel"
+              ? "bpmn-gateway-parallel"
+              : "",
   ]
     .filter(Boolean)
     .join(" ");
@@ -206,6 +225,22 @@ export function NodeCard({
         animationDelay: state === "emerging" ? `${delay}ms, ${delay + 400}ms` : `${delay}ms`,
       }}
     >
+      {(bpmnShape === "gateway" || bpmnShape === "gatewayParallel") && (
+        // The BPMN marker: X = exactly one path (exclusive), + = all paths
+        // (parallel). Drawn counter-rotated inside the rotated diamond card
+        // so it stays upright; the CSS class handles the counter-rotation.
+        <span className="node-mark bpmn-gateway-marker" style={{ color: "var(--amber-2)" }}>
+          {bpmnShape === "gateway" ? (
+            <svg width={13} height={13} viewBox="0 0 13 13" aria-hidden>
+              <path d="M2 2 L11 11 M11 2 L2 11" stroke="currentColor" strokeWidth={1.8} fill="none" />
+            </svg>
+          ) : (
+            <svg width={13} height={13} viewBox="0 0 13 13" aria-hidden>
+              <path d="M6.5 1.5 V11.5 M1.5 6.5 H11.5" stroke="currentColor" strokeWidth={1.8} fill="none" />
+            </svg>
+          )}
+        </span>
+      )}
       {meta && (
         <div className="node-meta">
           {mark ? (
