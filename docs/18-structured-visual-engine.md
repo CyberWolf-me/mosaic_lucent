@@ -23,7 +23,7 @@
 > mixed-region boards, at 20–400× the compute cost; no adoption decision is
 > made — see
 > [`eval-results/2026-09-12-elk-comparison.md`](./eval-results/2026-09-12-elk-comparison.md).
-> Phase 3 (the gate) awaits the human-half pass.
+> Phase 3 is decided, provisionally: [ADR 0039](./adr/0039-hybrid-engine-selection.md) records Result B — ELK for the flat graph families, the hand-written engines elsewhere — valid unless the human-half pass (batched at the end of this run) fails ELK's output. Phase 4's engine side is complete: the ELK adapter gained the ADR 0015 region seam, the layout service ([layoutService.ts](../packages/web/src/diagram/layoutService.ts)) routes by kind with fallback-to-built-in and retain-geometry degradation, the 100+1 spatial-additivity acceptance is pinned as a test, and `elkjs` is version-pinned (the React commit-path integration and the Web Worker are deliberately the next step, needing live verification). Phase 5 is complete: count-driven density bands joined zoom in `edgeDensity` (intimate boards render identically; ≥31 nodes subdue secondary edges; ≥151 keep only primary structure), wired through the renderer, tested. Phase 6's adapter half is complete: the license review resolved the gates (bpmn-js's watermark clause accepted as product conditions, ELK's EPL-2.0 standard), [docs/19](./19-bpmn-subset.md) defines the supported BPMN subset, and the round-trip adapter lives at `packages/web/src/diagram/bpmn/` with both directions tested. The bpmn-js viewer lens is the remaining Phase 6 piece — a browser surface with live verification, per the license conditions. Phases 7–8 remain gated on the human pass and the viewer.
 
 ## Why this document exists
 
@@ -229,6 +229,16 @@ budget, and the human pass preferring ELK's output or tying.
 Freeze compatibility: this is exactly docs/17's rule that measurement never
 stops and building is evidence-gated. Nothing in Phase 3 spends the
 freeze's credibility — it spends fixtures.
+
+> **Decision (2026-09-12, [ADR 0039](./adr/0039-hybrid-engine-selection.md)):**
+> Result B — the hybrid selection — is recorded and **provisional on the
+> human-half pass**, which the product owner has scheduled for the end of the
+> implementation run. ELK serves `flowchart`/`architecture`/`journey` boards
+> and regions; the hand-written engines keep `mindmap`, `decisiontree`,
+> `orgchart`, `process`, and mixed-region boards; all production use goes
+> through the boundary behind a fallback-protected async service; `elkjs` is
+> pinned. If the human pass fails ELK's output, the fallback becomes
+> permanent by superseding ADR.
 
 **Source:** advisory V4.
 

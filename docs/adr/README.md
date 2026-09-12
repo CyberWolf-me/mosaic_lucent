@@ -45,3 +45,4 @@ back to it.
 | [0036](0036-the-execution-eras-close.md) | The execution eras close: the freeze rule, the era regression, D-numbering's honest end (Stage D10) | Accepted |
 | [0037](0037-execution-intelligence.md) | Execution Intelligence: the drives relation, the rollup doctrine, the create-the-work bridge (Stage E) | Accepted |
 | [0038](0038-diagram-engines-own-geometry.md) | Diagram engines own geometry; Lucent owns meaning — the Stage V boundary | Accepted |
+| [0039](0039-hybrid-engine-selection.md) | The hybrid engine selection: ELK for flat graph families, hand-written engines elsewhere — provisional on the human pass (Stage V) | Accepted |
