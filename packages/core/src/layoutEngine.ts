@@ -51,13 +51,13 @@ export interface DiagramLayoutEngine {
    * region's current origin, restating every node outside the group. The
    * spatial-additivity invariant ("region out = 0") is pinned in
    * visual-benchmark.test.ts and any engine implementing this method must
-   * preserve it.
+   * preserve it. May be async (ELK's is), like `layout`.
    */
   relayoutRegion?(
     workspace: Workspace,
     groupId: string,
     options?: LayoutOptions,
-  ): { layout: LayoutResult; routes: EdgeRoutes } | null;
+  ): { layout: LayoutResult; routes: EdgeRoutes } | null | Promise<{ layout: LayoutResult; routes: EdgeRoutes } | null>;
 }
 
 /**
