@@ -1424,6 +1424,23 @@ export function createApp(deps: AppDeps): App {
     labelNames: [],
   });
 
+  // The §10 product counters: behavior, not infrastructure. Label-free per
+  // the cardinality rule — the event vocabulary is fixed in telemetry.ts,
+  // and per-org/per-user splits are the log's job, never a series label.
+  const productTotal = metrics.counter({
+    name: "lucent_product_events_total",
+    help: "Product behavior events (board_created, share_link_created, …).",
+    labelNames: ["event"],
+  });
+  const timeToFirstBoard = metrics.histogram({
+    name: "lucent_time_to_first_board_seconds",
+    help: "Signup to the org's first board, in seconds (the activation metric).",
+    labelNames: [],
+    // Activation spans minutes to months; coarse buckets answer "how fast
+    // do teams activate" without per-user series.
+    buckets: [60, 300, 900, 3600, 21600, 86400, 604800, 2592000],
+  });
+
   // Realtime connection lifetime (docs/reliability/slo.md, "Realtime
   // reachability"): the share of sockets still connected at the five-minute
   // mark is the SLO, and it is only answerable from a duration histogram.
@@ -1471,6 +1488,14 @@ export function createApp(deps: AppDeps): App {
         // where a high-cardinality field is free.
         aiProposeTotal.inc();
         aiProposeDuration.observe(event.ms / 1000);
+        break;
+      case "product":
+        // The event label is the FIXED vocabulary (bounded, like refusal
+        // reasons) — never a dynamic id.
+        productTotal.inc({ event: event.event });
+        break;
+      case "timeToFirstBoard":
+        timeToFirstBoard.observe(event.seconds);
         break;
       default:
         break;
@@ -2971,6 +2996,17 @@ export function createApp(deps: AppDeps): App {
           stored.workspace = parsed.workspace!;
         }
         await boardStore.put(stored);
+        // §10 product analytics: the activation counters ride the create.
+        telemetry.record({ kind: "product", event: "board_created" });
+        if (!existing && (await boardStore.countForOrg(targetOrgId)) === 1 && typeof user.createdAt === "number") {
+          // The org's FIRST board (count AFTER this create is exactly 1 and
+          // the board is new): signup → first board, the activation metric
+          // the review named first. Observed once per org by construction.
+          telemetry.record({
+            kind: "timeToFirstBoard",
+            seconds: Math.max(0, Math.round((Date.now() - user.createdAt) / 1000)),
+          });
+        }
         send(res, 201, { id: stored.id, name: stored.name, updatedAt: stored.updatedAt });
       } catch (err) {
         send(res, 400, { error: "bad request", detail: (err as Error).message });
@@ -3155,6 +3191,7 @@ export function createApp(deps: AppDeps): App {
           revokedAt: null,
         };
         await boardStore.createShareLink(link);
+        telemetry.record({ kind: "product", event: "share_link_created" });
         send(res, 201, { token: link.token, role: link.role, expiresAt: link.expiresAt });
       } catch (err) {
         send(res, 400, { error: "bad request", detail: (err as Error).message });

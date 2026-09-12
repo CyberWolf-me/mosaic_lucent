@@ -62,7 +62,23 @@ export type TelemetryEvent =
       kind: "refused";
       route: string;
       reason: "rate" | "quota" | `csrf:${string}` | `plan:${string}`;
-    };
+    }
+  /**
+   * PRODUCT ANALYTICS (2026-09 review §10): "what do users actually do?" —
+   * the behavioral counters, as distinct from the technical RED series. The
+   * vocabulary is a FIXED, small set (the D10 cardinality rule: the series
+   * are label-free, so a new event means a new name here, never a dynamic
+   * label). Extending it is a deliberate act, one line.
+   */
+  | { kind: "product"; event: ProductEvent }
+  /** The activation metric (§10's headline): signup → first board, in
+   * seconds, observed once per org's first board. Its own kind because it
+   * is a distribution, not a count — the histogram is the deliverable. */
+  | { kind: "timeToFirstBoard"; seconds: number };
+
+/** The product-event vocabulary. Fixed on purpose; extend deliberately. */
+export const PRODUCT_EVENTS = ["board_created", "share_link_created"] as const;
+export type ProductEvent = (typeof PRODUCT_EVENTS)[number];
 
 export interface ErrorRecord {
   at: number;
@@ -102,6 +118,11 @@ export interface MetricsSnapshot {
     otherFailures: number;
     repairs: number;
   };
+  /** The §10 product counters: behavior, not infrastructure. */
+  product: {
+    events: Record<ProductEvent, number>;
+    timeToFirstBoard: { p50: number; p95: number; samples: number };
+  };
 }
 
 /** Keep the last N errors so /metrics can show what is actually failing. */
@@ -139,6 +160,9 @@ export class Telemetry {
   private generateValidation = 0;
   private generateOther = 0;
   private generateRepairs = 0;
+  /** The product counters (§10): what users actually do. */
+  private readonly productCounts = new Map<ProductEvent, number>();
+  private readonly timeToFirstBoardSamples: number[] = [];
   private readonly byStatus = new Map<number, number>();
   private refusedRate = 0;
   private refusedQuota = 0;
@@ -200,6 +224,15 @@ export class Telemetry {
         this.aiProposeCount += 1;
         this.aiProposeLatencies.push(event.ms);
         if (this.aiProposeLatencies.length > LATENCY_SAMPLES) this.aiProposeLatencies.shift();
+        break;
+      case "product": {
+        const current = this.productCounts.get(event.event) ?? 0;
+        this.productCounts.set(event.event, current + 1);
+        break;
+      }
+      case "timeToFirstBoard":
+        this.timeToFirstBoardSamples.push(event.seconds);
+        if (this.timeToFirstBoardSamples.length > LATENCY_SAMPLES) this.timeToFirstBoardSamples.shift();
         break;
       case "error":
         this.errorTotal += 1;
@@ -266,6 +299,20 @@ export class Telemetry {
         validationFailures: this.generateValidation,
         otherFailures: this.generateOther,
         repairs: this.generateRepairs,
+      },
+      product: {
+        events: PRODUCT_EVENTS.reduce(
+          (acc, e) => {
+            acc[e] = this.productCounts.get(e) ?? 0;
+            return acc;
+          },
+          {} as Record<ProductEvent, number>,
+        ),
+        timeToFirstBoard: {
+          p50: percentile([...this.timeToFirstBoardSamples].sort((a, b) => a - b), 50),
+          p95: percentile([...this.timeToFirstBoardSamples].sort((a, b) => a - b), 95),
+          samples: this.timeToFirstBoardSamples.length,
+        },
       },
     };
   }
