@@ -31,9 +31,32 @@ const MOVEMENT_SCALES = [100, 200];
 const args = process.argv.slice(2);
 const asJson = args.includes("--json");
 
+// Engine selection (Phase 2): `--engine=elk` runs the identical ladder
+// through the ELK candidate behind the Phase 1 boundary. Everything else
+// runs the built-in engine. NOTE: an elk run resolves @lucent/core to
+// source, so invoke with `npx tsx --conditions=development` — the default
+// resolution would read stale dist/.
+let engine: import("../packages/core/src/layoutEngine.js").DiagramLayoutEngine =
+  CURRENT_LAYOUT_ENGINE;
+const engineArg = args.find((a) => a.startsWith("--engine="));
+if (engineArg) {
+  const id = engineArg.split("=")[1];
+  if (id === "elk") {
+    ({ ELK_LAYOUT_ENGINE: engine } = await import(
+      "../packages/web/src/diagram/elk/elkLayoutEngine.js"
+    ));
+  } else {
+    console.error(`unknown engine "${id}" (supported: elk)`);
+    process.exit(1);
+  }
+}
+
 // Warm-up: JIT-compile the layout path once so the first measurement isn't
 // polluted by interpreter startup (the runner reports steady-state numbers).
+// The selected engine gets its own warm-up call — ELK's first layout pays
+// worker/ELK init, which would poison every small-board median.
 measureVisualMetrics(BOARD_FACTORIES[0].build(20));
+await engine.layout({ workspace: BOARD_FACTORIES[0].build(20), options: {} });
 
 interface Row {
   board: string;
@@ -58,21 +81,28 @@ for (const factory of BOARD_FACTORIES) {
     // same fixture every time (generators are pure). Each build is routed
     // and stamped exactly as the app does (applyLayout + applyRoutes), so
     // the crossings count the polylines the renderer will actually draw.
-    const runs = [0, 1, 2].map(() => {
+    // Through the Phase 1 boundary: the engine interface, not the
+    // implementation's entry point — the selected engine is the only thing
+    // that changes between runs.
+    const runs = [];
+    for (let i = 0; i < 3; i++) {
       const built = factory.build(n);
-      // Through the Phase 1 boundary: the engine interface, not the
-      // implementation's entry point — the Phase 2 ELK comparison swaps
-      // exactly this object and nothing else.
-      const { layout, routes } = CURRENT_LAYOUT_ENGINE.layout({
-        workspace: built,
-        options: {},
-      });
+      // Time the ENGINE call itself: measureVisualMetrics receives the
+      // pre-supplied layout (so it measures the engine's geometry, not a
+      // recompute) and therefore cannot time the layout anymore.
+      const t0 = performance.now();
+      const { layout, routes } = await engine.layout({ workspace: built, options: {} });
+      const engineMs = performance.now() - t0;
       const routed = applyRoutes(applyLayout(built, layout), routes);
-      return measureVisualMetrics(routed);
-    });
-    const median = (pick: (m: (typeof runs)[number]) => number) =>
-      runs.map(pick).sort((a, b) => a - b)[1];
-    const m = runs[0];
+      // Measure THE ENGINE'S geometry: without passing `layout` here the
+      // measurement would recompute with the built-in engine — invisible for
+      // the self-consistent default, garbage for any candidate engine.
+      const metrics = measureVisualMetrics(routed, {}, layout);
+      runs.push({ metrics, engineMs });
+    }
+    const median = (pick: (m: (typeof runs)[number]["metrics"]) => number) =>
+      runs.map((r) => pick(r.metrics)).sort((a, b) => a - b)[1];
+    const m = runs[0]!.metrics;
     rows.push({
       board: factory.label,
       nodes: m.nodeCount,
@@ -86,7 +116,7 @@ for (const factory of BOARD_FACTORIES) {
       through: median((r) => r.edgesThroughNodes),
       coverage: Number(median((r) => r.viewportCoverage).toFixed(2)),
       cohesion: m.cohesionRatio === null ? null : Number(m.cohesionRatio.toFixed(2)),
-      layoutMs: Number(median((r) => r.layoutMs).toFixed(1)),
+      layoutMs: Number([...runs.map((r) => r.engineMs)].sort((a, b) => a - b)[1]!.toFixed(1)),
     });
   }
 }
@@ -102,25 +132,30 @@ interface MovementRow {
   regionMovedInside: number | null;
 }
 
+// Movement is measured through the core's SYNC relayout paths; it is only
+// meaningful for the built-in engine. An async candidate's incremental
+// behavior is the Phase 4 policy, not a Phase 2 column.
 const movementRows: MovementRow[] = [];
-for (const factory of BOARD_FACTORIES) {
-  for (const n of MOVEMENT_SCALES) {
-    const m = measureMovementAfterEdit(factory.build(n));
-    movementRows.push({
-      board: factory.label,
-      nodes: m.nodeCount,
-      anchorGroup: m.regionScoped?.groupId ?? null,
-      fullMoved: m.fullRelayout.movedCount,
-      fullIdentical: m.fullRelayout.identicalCount,
-      fullMaxDisp: m.fullRelayout.maxDisplacement,
-      regionMovedOutside: m.regionScoped?.movedOutsideRegion ?? null,
-      regionMovedInside: m.regionScoped?.movedInsideRegion ?? null,
-    });
+if (engine === CURRENT_LAYOUT_ENGINE) {
+  for (const factory of BOARD_FACTORIES) {
+    for (const n of MOVEMENT_SCALES) {
+      const m = measureMovementAfterEdit(factory.build(n));
+      movementRows.push({
+        board: factory.label,
+        nodes: m.nodeCount,
+        anchorGroup: m.regionScoped?.groupId ?? null,
+        fullMoved: m.fullRelayout.movedCount,
+        fullIdentical: m.fullRelayout.identicalCount,
+        fullMaxDisp: m.fullRelayout.maxDisplacement,
+        regionMovedOutside: m.regionScoped?.movedOutsideRegion ?? null,
+        regionMovedInside: m.regionScoped?.movedInsideRegion ?? null,
+      });
+    }
   }
 }
 
 if (asJson) {
-  console.log(JSON.stringify({ rows, movementRows }, null, 2));
+  console.log(JSON.stringify({ engine: engine.id, rows, movementRows }, null, 2));
 } else {
   const header = [
     "board".padEnd(36),
@@ -136,7 +171,7 @@ if (asJson) {
     "coh".padStart(5),
     "ms".padStart(6),
   ].join("");
-  console.log("Lucent visual benchmark — deterministic baseline (median of 3)\n");
+  console.log(`Lucent visual benchmark — engine: ${engine.id} (median of 3)\n`);
   console.log(header);
   console.log("-".repeat(header.length));
   for (const r of rows) {
@@ -171,24 +206,31 @@ if (asJson) {
     "region out".padStart(11),
     "region in".padStart(10),
   ].join("");
-  console.log("\nMovement after edit — one probe node added to the highest-degree node\n");
-  console.log(mHeader);
-  console.log("-".repeat(mHeader.length));
-  for (const r of movementRows) {
+  if (engine === CURRENT_LAYOUT_ENGINE) {
+    console.log("\nMovement after edit — one probe node added to the highest-degree node\n");
+    console.log(mHeader);
+    console.log("-".repeat(mHeader.length));
+    for (const r of movementRows) {
+      console.log(
+        [
+          r.board.padEnd(36),
+          String(r.nodes).padStart(5),
+          String(r.fullMoved).padStart(11),
+          String(r.fullIdentical).padStart(10),
+          `${r.fullMaxDisp.toFixed(0)}px`.padStart(8),
+          r.regionMovedOutside === null ? "       n/a" : String(r.regionMovedOutside).padStart(11),
+          r.regionMovedInside === null ? "       n/a" : String(r.regionMovedInside).padStart(10),
+        ].join(""),
+      );
+    }
     console.log(
-      [
-        r.board.padEnd(36),
-        String(r.nodes).padStart(5),
-        String(r.fullMoved).padStart(11),
-        String(r.fullIdentical).padStart(10),
-        `${r.fullMaxDisp.toFixed(0)}px`.padStart(8),
-        r.regionMovedOutside === null ? "       n/a" : String(r.regionMovedOutside).padStart(11),
-        r.regionMovedInside === null ? "       n/a" : String(r.regionMovedInside).padStart(10),
-      ].join(""),
+      "\nfull=whole-board relayout (worst case)  region=the app's scoped path (ADR 0015);" +
+        "\nregion out MUST be 0 — outside nodes restate their positions by construction.",
+    );
+  } else {
+    console.log(
+      "\nMovement after edit: not comparable for async engines through the sync harness" +
+        " — the incremental policy is Phase 4 work (doc 18).",
     );
   }
-  console.log(
-    "\nfull=whole-board relayout (worst case)  region=the app's scoped path (ADR 0015);" +
-      "\nregion out MUST be 0 — outside nodes restate their positions by construction.",
-  );
 }

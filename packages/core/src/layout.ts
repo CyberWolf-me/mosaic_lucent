@@ -135,10 +135,20 @@ export function computeLayoutWithRoutes(
 ): { layout: LayoutResult; routes: EdgeRoutes } {
   // The Phase 1 boundary (doc 18, ADR 0038): a registered engine that
   // supports this request handles it; with no override set — the production
-  // default — the built-in dispatch runs exactly as it always has.
+  // default — the built-in dispatch runs exactly as it always has. The seam
+  // is synchronous by contract: an async engine (ELK) must be awaited
+  // directly by its consumers, never routed through here.
   const override = getLayoutOverride();
   const request = { workspace, options };
-  if (override && override.supports(request)) return override.layout(request);
+  if (override && override.supports(request)) {
+    const result = override.layout(request);
+    if (result instanceof Promise) {
+      throw new Error(
+        `layout engine "${override.id}" is async and cannot serve the synchronous seam`,
+      );
+    }
+    return result;
+  }
   return dispatchLayoutWithRoutes(workspace, options);
 }
 

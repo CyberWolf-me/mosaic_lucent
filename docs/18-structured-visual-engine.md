@@ -16,7 +16,14 @@
 > `DiagramLayoutEngine` boundary lives in
 > `packages/core/src/layoutEngine.ts` with the built-in engine behind it
 > (`CURRENT_LAYOUT_ENGINE` in `layout.ts`), runner and pins go through it,
-> and the ladder output is byte-identical (modulo timing). Phase 2 is next.
+> and the ladder output is byte-identical (modulo timing). Phase 2 is
+> complete: the ELK candidate ran the identical ladder behind the boundary —
+> it wins every flat graph family (48% fewer crossings on dense, routes that
+> clear every node box) and loses outright on swimlane, radial, and
+> mixed-region boards, at 20–400× the compute cost; no adoption decision is
+> made — see
+> [`eval-results/2026-09-12-elk-comparison.md`](./eval-results/2026-09-12-elk-comparison.md).
+> Phase 3 (the gate) awaits the human-half pass.
 
 ## Why this document exists
 

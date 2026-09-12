@@ -37,7 +37,14 @@ export interface DiagramLayoutResult {
 export interface DiagramLayoutEngine {
   readonly id: string;
   supports(request: DiagramLayoutRequest): boolean;
-  layout(request: DiagramLayoutRequest): DiagramLayoutResult;
+  /**
+   * May be async (ELK is inherently so). The synchronous core seam
+   * (`computeLayoutWithRoutes`) can only consume SYNC engines — an async
+   * engine is consumed by awaiting `layout` directly, which is exactly the
+   * benchmark harness's path today and the web-worker path (doc 18, Phase 4)
+   * in production.
+   */
+  layout(request: DiagramLayoutRequest): DiagramLayoutResult | Promise<DiagramLayoutResult>;
   /**
    * The ADR 0015 seam, optional because the advisory's whole-board contract
    * does not know about it: re-layout ONE group and merge back at the
