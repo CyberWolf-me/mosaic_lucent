@@ -205,7 +205,80 @@ export class ElkLayoutEngine implements DiagramLayoutEngine {
     }
     return routes;
   }
+  /**
+   * The ADR 0015 seam, ELK-flavoured: re-layout ONE group's members through
+   * ELK and merge back at the region's current origin, restating every node
+   * outside the group — the spatial-additivity contract ("region out = 0")
+   * pinned in the core's benchmark tests. Only ELK's winning families
+   * (layered kinds) are handled here; other kinds return null so the caller
+   * falls back to the built-in engine. The affected-subgraph policy from the
+   * advisory is exactly the group: Lucent's regions are the affected region.
+   */
+  async relayoutRegion(
+    workspace: Workspace,
+    groupId: string,
+    options: DiagramLayoutRequest["options"] = {},
+  ): Promise<DiagramLayoutResult | null> {
+    const group = workspace.groups[groupId];
+    if (!group) return null;
+    const kind = group.kind ?? workspace.diagramKind;
+    if (!ELK_ELIGIBLE_KINDS.has(kind)) return null;
+    const members = Object.values(workspace.nodes).filter((n) => n.groupId === groupId);
+    if (members.length === 0) return null;
+    const placed = members.filter((n) => n.position);
+    if (placed.length === 0) return null;
+
+    // The region IS the board in its own frame: no containers, internal
+    // edges only — the same sub-workspace shape relayoutRegionWithRoutes
+    // builds for the built-in engine.
+    const memberIds = new Set(members.map((n) => n.id));
+    const sub: Workspace = {
+      ...workspace,
+      diagramKind: kind,
+      nodes: Object.fromEntries(members.map((n) => [n.id, n])),
+      edges: Object.fromEntries(
+        Object.values(workspace.edges)
+          .filter((e) => memberIds.has(e.source) && memberIds.has(e.target))
+          .map((e) => [e.id, e]),
+      ),
+      groups: {},
+    };
+    const out = await this.layout({ workspace: sub, options });
+
+    // Merge at the region's CURRENT origin, so a growing region does not
+    // jump across the board.
+    const originX = Math.min(...placed.map((n) => n.position!.x));
+    const originY = Math.min(...placed.map((n) => n.position!.y));
+    const fresh = Object.values(out.layout);
+    const dx = originX - Math.min(...fresh.map((e) => e.position.x));
+    const dy = originY - Math.min(...fresh.map((e) => e.position.y));
+
+    const layout: DiagramLayoutResult["layout"] = {};
+    for (const [id, node] of Object.entries(workspace.nodes)) {
+      if (node.groupId === groupId) continue;
+      if (node.position && node.size) {
+        layout[id] = { position: node.position, size: node.size };
+      }
+    }
+    for (const [id, entry] of Object.entries(out.layout)) {
+      layout[id] = {
+        position: { x: entry.position.x + dx, y: entry.position.y + dy },
+        size: entry.size,
+      };
+    }
+    const routes: DiagramLayoutResult["routes"] = {};
+    for (const [edgeId, pts] of Object.entries(out.routes)) {
+      routes[edgeId] = pts.map((p) => ({ x: p.x + dx, y: p.y + dy }));
+    }
+    return { layout, routes };
+  }
 }
 
-/** The Phase 2 candidate, exported as an engine object for the harness. */
+const ELK_ELIGIBLE_KINDS: ReadonlySet<DiagramKind> = new Set<DiagramKind>([
+  "flowchart",
+  "architecture",
+  "journey",
+]);
+
+/** The Phase 2 candidate (ADR 0039: production for the flat graph families). */
 export const ELK_LAYOUT_ENGINE: DiagramLayoutEngine = new ElkLayoutEngine();
