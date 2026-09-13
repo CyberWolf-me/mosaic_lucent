@@ -59,7 +59,12 @@ const throwing: DiagramLayoutEngine = {
 
 describe("layout service routing (ADR 0039)", () => {
   it("routes flat flowchart boards to ELK", async () => {
-    const outcome = await layoutBoard(layeredBoard(40));
+    // The routing pin: an ELK-eligible board must reach ELK, never the
+    // built-in engine. The primary is injected because the DEFAULT primary
+    // is the worker proxy, which cannot spawn under vitest's Node runtime —
+    // that default chain (worker rejects → built-in answers) is the
+    // unspawnable-worker test below.
+    const outcome = await layoutBoard(layeredBoard(40), {}, { primary: ELK_LAYOUT_ENGINE });
     expect(outcome.engineId).toBe("elk-0.12");
     expect(outcome.degraded).toBe(false);
   });

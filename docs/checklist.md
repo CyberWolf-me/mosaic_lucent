@@ -2020,8 +2020,21 @@ The nine-phase plan, executed against the benchmark:
       worker scope (its UMD export arm writes `self.onmessage`) — the
       adapter passes an explicit workerFactory (browser: nested Web
       Worker; Node: in-process backend).
-- [x] Phase 5 density — count-driven bands joined zoom in `edgeDensity`
-      (≥31 subdue secondary; ≥151 primary only), renderer-wired, tested.
+- [x] Phase 5 complete (2026-09-13), all three items — **density**: count-
+      driven bands joined zoom in `edgeDensity` (≥31 subdue secondary; ≥151
+      primary only), renderer-wired, tested; **intent hints**: `SET_LAYOUT_INTENT`
+      (direction / primaryFlow / emphasis — ids and enums, never coordinates)
+      re-flows direction deterministically, biases the spine's layered ordering
+      via virtual hops, and promotes emphasized nodes' edges out of the
+      secondary tier; the MockProvider reads the board's real then-chain
+      ("read it left to right" names the actual flow), pinned by layout tests
+      + golden cases; **routing styles**: the per-family table is measured, not
+      taste (`--routing` sweep → docs/eval-results/2026-09-13-routing-styles.md)
+      — ortho for the layered/routed families (26–55% fewer crossings) and
+      process, polyline inert for never-routing families, no spline selection;
+      provisional on the human pass (collinear overlap is the recorded caveat);
+      the shared `routedVertices` is the one drawn truth (canvas, labels,
+      culling, SVG export, benchmark all ask it).
 - [x] Phase 6 BPMN XML interchange — the license gate cancelled the
       viewer; the subset + round-trip adapter stand (docs/19); then the
       V1 core landed Lucent-native (bpmn as a first-class kind + region

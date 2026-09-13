@@ -90,31 +90,49 @@ export const GOLDEN_SET: readonly GoldenCase[] = [
   },
 
   {
-    id: "parallel-diagram-refusal",
-    // Found by the live test pass: a request about an UNRELATED system must
-    // not be merged into a populated board. The prompt's new rule says answer
-    // with no ops and point at a new board, so the client can offer the
-    // one-click action. Zero ops IS the correct answer here.
-    message: "Build a marketing analytics pipeline with event tracking",
+    id: "layout-intent-stated",
+    // Phase 5 (doc 18): "read it left to right" states layout intent, it
+    // never positions nodes. The mock reads the summary's REAL spine: on
+    // the seeded checkout→payments flow, the chain reads cleanly, so the
+    // intent names those ids in narrative order — never a coordinate.
+    message: "Make this flow read left to right, like a timeline",
     summary: seeded,
-    minOperations: 0,
-    forbidOperations: [{ op: "CREATE_NODE" }],
-    explanationIncludes: "own board",
+    expectOperations: [
+      { op: "SET_LAYOUT_INTENT", direction: "horizontal", primaryFlow: ["checkout", "payments"] },
+    ],
+    // The doctrine's hard line: intent is ids and enums only. The op
+    // schema has no coordinate field, but forbid the shape anyway.
+    forbidOperations: [
+      { op: "MOVE_NODE" },
+      { op: "CREATE_NODE" },
+      { op: "DELETE_NODE", id: "checkout" },
+    ],
+    explanationIncludes: "left-to-right",
   },
   {
-    id: "unrelated-on-empty-board-builds",
-    // The same words on an EMPTY board are just the next thing to build: a
-    // connected seed flow, not a refusal. A populated-board-only rule would
-    // strand a fresh user whose first diagram happens to name a system in
-    // the match list.
-    message: "Build a marketing analytics pipeline with event tracking",
-    summary: empty,
-    minOperations: 5,
+    id: "layout-intent-happy-path-spine",
+    // The same contract over a longer story: "the happy path" asks for the
+    // main flow's spine, and the intent must name exactly the nodes the
+    // summary's own chain holds — start to end, no invented ids.
+    message: "Emphasize the happy path when you lay this out",
+    summary: summarizeWorkspace(
+      applyOperations(createWorkspace(), [
+        { op: "CREATE_DIAGRAM", kind: "flowchart" },
+        { op: "CREATE_NODE", id: "signup", nodeType: "screen", label: "Sign-up" },
+        { op: "CREATE_NODE", id: "verify", nodeType: "service", label: "Email verification" },
+        { op: "CREATE_NODE", id: "plan", nodeType: "screen", label: "Plan choice" },
+        { op: "CREATE_NODE", id: "pay", nodeType: "service", label: "Stripe payment" },
+        { op: "CREATE_NODE", id: "support", nodeType: "service", label: "Support queue" },
+        { op: "CONNECT_NODES", source: "signup", target: "verify", relationship: "next" },
+        { op: "CONNECT_NODES", source: "verify", target: "plan", relationship: "next" },
+        { op: "CONNECT_NODES", source: "plan", target: "pay", relationship: "pays" },
+        { op: "CONNECT_NODES", source: "support", target: "verify", relationship: "depends_on" },
+      ]),
+    ),
     expectOperations: [
-      { op: "CONNECT_NODES", relationship: "starts" },
-      { op: "CONNECT_NODES", relationship: "yields" },
+      { op: "SET_LAYOUT_INTENT", primaryFlow: ["signup", "verify", "plan", "pay"] },
     ],
-    forbidOperations: [{ op: "DELETE_NODE" }],
+    forbidOperations: [{ op: "MOVE_NODE" }],
   },
 
   {

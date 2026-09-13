@@ -43,7 +43,7 @@ import {
   type LayoutOptions,
   type LayoutResult,
 } from "./layout.js";
-import { routeStyleFor, routedVertices } from "./routing.js";
+import { routeStyleFor, routedVertices, type RouteStyle } from "./routing.js";
 
 /** One line segment in canvas coordinates. */
 interface Segment {
@@ -128,12 +128,16 @@ function percentile(sorted: number[], p: number): number {
  * Measure a workspace's layout. `layout` may be pre-supplied (a real board's
  * geometry) or computed here from `options` (the benchmark path) — the metrics
  * are the same either way, which is what lets a synthetic run and a live
- * browser screenshot argue from one vocabulary.
+ * browser screenshot argue from one vocabulary. `routeStyleOverride` forces
+ * the drawn style for routed edges (the --routing sweep's controlled
+ * variable): the default is the board kind's own policy, exactly what the
+ * renderer draws.
  */
 export function measureVisualMetrics(
   workspace: Workspace,
   options: LayoutOptions = {},
   layout?: ReturnType<typeof computeLayout>,
+  routeStyleOverride?: RouteStyle,
 ): VisualMetrics {
   const start = performance.now();
   const placed = layout ?? computeLayout(workspace, options);
@@ -210,7 +214,7 @@ export function measureVisualMetrics(
     // keep the single centre-to-centre segment.
     const path =
       edge.route && edge.route.length > 0
-        ? routedVertices(s, t, edge.route, routeStyleFor(workspace.diagramKind))
+        ? routedVertices(s, t, edge.route, routeStyleOverride ?? routeStyleFor(workspace.diagramKind))
         : [s, t];
     bendsTotal += path.length - 2;
     let edgeLength = 0;

@@ -284,12 +284,21 @@ describe("phase 0 metrics on hand-built geometry", () => {
       relationship: "r",
       route: [{ x: 50, y: 200 }, { x: 60, y: 200 }],
     };
-    const metrics = measureVisualMetrics(ws, {}, {
-      a: box(0, 0),
-      b: box(100, 0),
-      c: box(0, 100),
-      d: box(100, 100),
-    });
+    // Polyline pinned as the controlled variable: under the board kind's own
+    // policy (flowchart → ortho) each diagonal approach segment squares into
+    // an elbow and the mean rises to 2 — that drawn-truth behavior is what
+    // the routing-styles tests pin; THIS test pins the raw waypoint count.
+    const metrics = measureVisualMetrics(
+      ws,
+      {},
+      {
+        a: box(0, 0),
+        b: box(100, 0),
+        c: box(0, 100),
+        d: box(100, 100),
+      },
+      "polyline",
+    );
     expect(metrics.edgeBendsMean).toBeCloseTo(1, 5); // (0 + 2) / 2 edges
   });
 

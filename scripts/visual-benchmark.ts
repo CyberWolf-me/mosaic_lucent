@@ -34,10 +34,11 @@ const asJson = args.includes("--json");
 // Routing-style sweep (doc 18, Phase 5, advisory V10): measure the identical
 // ladder under each FORCED route style, so the per-family table is decided
 // from numbers rather than taste. The layout is FIXED per board (computed
-// once, passed into the metric); the swept style rides the metric's own
-// routeStyleFor lookup by measuring a clone whose diagramKind maps to the
-// swept style — a kind whose policy is the style, never a kind that would
-// change the layout itself (layout is pre-supplied either way). Prints
+// once, passed into the metric); the swept style is the metric's explicit
+// routeStyleOverride — the controlled variable, no kind-stamping (the
+// first sweep's kind-clone trick worked only while some kinds mapped to
+// each style; the final table maps every routed kind to ortho, so a clone
+// would silently re-measure ortho under a wrong label). Prints
 // style × board × scale and exits. Defined here, invoked after engine
 // selection + warm-up below.
 const routingArg = args.find((a) => a.startsWith("--routing"));
@@ -45,13 +46,6 @@ async function runRoutingSweep(): Promise<void> {
   const { routeStyleFor } = await import("../packages/core/src/routing.js");
   const styles = ["polyline", "ortho", "spline"] as const;
   const ROUTING_SCALES = [150, 300, 500];
-  // A kind per style: each maps to that style in the policy table, and none
-  // changes geometry here (the layout arrives pre-computed).
-  const KIND_WITH_POLICY = {
-    polyline: "flowchart",
-    ortho: "process",
-    spline: "architecture",
-  } as const;
   const header = [
     "board".padEnd(36),
     "style".padStart(9),
@@ -71,8 +65,7 @@ async function runRoutingSweep(): Promise<void> {
       const { layout, routes } = await engine.layout({ workspace: built, options: {} });
       const routed = applyRoutes(applyLayout(built, layout), routes);
       for (const style of styles) {
-        const stamped = { ...routed, diagramKind: KIND_WITH_POLICY[style] as typeof routed.diagramKind };
-        const m = measureVisualMetrics(stamped, {}, layout);
+        const m = measureVisualMetrics(routed, {}, layout, style);
         console.log(
           [
             factory.label.padEnd(36),

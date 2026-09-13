@@ -1,5 +1,5 @@
 import { safeParseOperations, type Operation } from "@lucent/core";
-import type { GenerateRequest, GenerateResult, LLMProvider, StreamCallbacks } from "../provider.js";
+import type { GenerateRequest, GenerateResult, LLMProvider, StreamCallbacks, WorkspaceSummary } from "../provider.js";
 import type { AnswerCitation, AnswerRequest, AnswerResult } from "../answer.js";
 import {
   MAX_AI_SELECTED_ACTIONS,
@@ -30,6 +30,77 @@ function slug(text: string): string {
       .replace(/^-+|-+$/g, "")
       .slice(0, 40) || "node"
   );
+}
+
+/**
+ * The intent script's spine reader (doc 18, Phase 5): the longest then-chain
+ * the summary's board already holds, in narrative order — source→target walks
+ * over narrative relationships (the flow vocabulary this provider and the
+ * golden boards emit), with execution metadata (depends_on/blocks/drives)
+ * never counting as story. Deterministic like core's composition.ts: each
+ * start follows the FIRST eligible outgoing edge (summary order), no
+ * revisits, and the longest walk wins, first-declared start breaking ties.
+ * Capped at the primaryFlow schema's 50 so a long chain can never produce
+ * an op the validator would reject. Falls back to the two highest-degree
+ * nodes when no chain of ≥2 reads cleanly, and to an empty spine when the
+ * board holds no connected nodes.
+ */
+function longestThenChain(summary: WorkspaceSummary): string[] {
+  const nodes = summary.nodes;
+  if (nodes.length === 0) return [];
+  const FLOW = new Set([
+    "then",
+    "next",
+    "leads to",
+    "goes to",
+    "pays",
+    "confirms",
+    "sends",
+    "ships",
+    "browses",
+    "adds",
+    "guards",
+    "starts",
+    "yields",
+    "produces",
+    "triggers",
+    "branch",
+  ]);
+  const ids = new Set(nodes.map((n) => n.id));
+  const adj = new Map<string, string[]>();
+  const degree = new Map<string, number>();
+  const order = new Map(nodes.map((n, i) => [n.id, i]));
+  for (const n of nodes) degree.set(n.id, 0);
+  for (const e of summary.edges) {
+    degree.set(e.source, (degree.get(e.source) ?? 0) + 1);
+    degree.set(e.target, (degree.get(e.target) ?? 0) + 1);
+    if (!FLOW.has(e.relationship) || !ids.has(e.source) || !ids.has(e.target)) continue;
+    const outs = adj.get(e.source) ?? [];
+    outs.push(e.target);
+    adj.set(e.source, outs);
+  }
+  let spine: string[] = [];
+  for (const n of nodes) {
+    const walk: string[] = [];
+    const seen = new Set<string>();
+    let cursor: string | undefined = n.id;
+    while (cursor !== undefined && !seen.has(cursor)) {
+      seen.add(cursor);
+      walk.push(cursor);
+      cursor = (adj.get(cursor) ?? []).find((t) => !seen.has(t));
+    }
+    if (walk.length > spine.length) spine = walk;
+  }
+  if (spine.length >= 2) return spine.slice(0, 50);
+  // No chain reads cleanly: the two highest-degree connected nodes,
+  // declaration order breaking ties — the summary's real subject candidates.
+  const ranked = [...nodes]
+    .filter((n) => (degree.get(n.id) ?? 0) > 0)
+    .sort(
+      (a, b) =>
+        (degree.get(b.id) ?? 0) - (degree.get(a.id) ?? 0) || order.get(a.id)! - order.get(b.id)!,
+    );
+  return ranked.slice(0, 2).map((n) => n.id);
 }
 
 /** A short region label from a request like "also add a mind map for pricing ideas". */
