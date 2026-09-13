@@ -610,7 +610,19 @@ function toStoredAuditEntry(row: DbAuditEntry): StoredAuditEntry {
   };
 }
 
-/** pg's `foreign_key_violation` (SQLSTATE 23503), however the driver wraps it. */
+/**
+ * pg's `foreign_key_violation` (SQLSTATE 23503), however the driver wraps it.
+ * Drizzle wraps every failed query in its own error and carries the driver's
+ * error on `cause`, so the SQLSTATE lives one level down (the audit contract
+ * test pins this); walk the chain rather than trusting the top level.
+ */
 function isForeignKeyViolation(err: unknown): boolean {
-  return typeof err === "object" && err !== null && (err as { code?: unknown }).code === "23503";
+  let current: unknown = err;
+  for (let depth = 0; current !== null && current !== undefined && depth < 4; depth += 1) {
+    if (typeof current === "object" && (current as { code?: unknown }).code === "23503") {
+      return true;
+    }
+    current = (current as { cause?: unknown }).cause;
+  }
+  return false;
 }

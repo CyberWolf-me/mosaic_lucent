@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq } from "drizzle-orm";
 import type { Db } from "../db/client.js";
 import { proposals } from "../db/schema.js";
 import {
@@ -31,38 +31,52 @@ export class PostgresProposalStore implements ProposalStore {
     input: NewProposal,
   ): Promise<{ proposal: StoredProposal; supersededId: string | null }> {
     const id = newProposalId();
-    const result = await this.target.db.execute(sql`
-      with retired as (
-        update ${proposals}
-           set "status" = 'superseded', "decided_at" = ${input.createdAt}::bigint
-         where "board_id" = ${input.boardId} and "status" = 'pending'
-         returning "id"
-      ), ins as (
-        insert into ${proposals}
-          ("id", "org_id", "board_id", "meeting_id", "status", "operations",
-           "request", "explanation", "provenance", "created_by", "created_at")
-        select ${id}, ${input.orgId}, ${input.boardId}, ${input.meetingId ?? null}::text,
-               'pending', ${JSON.stringify(input.operations)}::jsonb,
-               ${input.request}, ${input.explanation ?? null}::text,
-               ${input.provenance ? JSON.stringify(input.provenance) : null}::jsonb,
-               ${input.createdBy}, ${input.createdAt}::bigint
-         where not exists (select 1 from retired)
-         returning "id"
-      )
-      select (select id from ins) as inserted,
-             (select id from retired) as retired
-    `);
-    const row = result.rows[0] as { inserted: string | null; retired: string | null } | undefined;
-    const retiredId = row?.retired ?? null;
-    const insertedId = row?.inserted ?? null;
-    if (insertedId === null || insertedId === undefined) {
-      // Another pending row survived the race (its create won between our
-      // UPDATE and INSERT). Refuse rather than crash the caller: the client
-      // re-reads the board's pending proposal and shows THAT one — the
-      // invariant (one pending per board) held, just not in our favour.
-      throw new Error("a pending proposal already exists on this board");
+    // Two statements in ONE transaction on a dedicated connection — NOT a
+    // data-modifying CTE. Postgres evaluates a partial unique index against
+    // the statement's own snapshot, so a single retire-and-insert statement
+    // raises 23505 on the pending row the same statement retired (pinned by
+    // pg-store.test.ts); as separate statements the UPDATE's index effect is
+    // visible to the INSERT. The partial unique index then backs the
+    // one-pending-per-board invariant against any concurrent create.
+    const conn = await this.target.pool.connect();
+    let retiredId: string | null = null;
+    try {
+      await conn.query("begin");
+      const retired = await conn.query(
+        `update "proposals" set "status" = 'superseded', "decided_at" = $1::bigint
+          where "board_id" = $2 and "status" = 'pending' returning "id"`,
+        [String(input.createdAt), input.boardId],
+      );
+      retiredId = retired.rows[0]?.id ?? null;
+      await conn.query(
+        `insert into "proposals"
+           ("id", "org_id", "board_id", "meeting_id", "status", "operations",
+            "request", "explanation", "provenance", "created_by", "created_at")
+         values ($1, $2, $3, $4::text, 'pending', $5::jsonb, $6, $7::text, $8::jsonb, $9, $10::bigint)`,
+        [
+          id,
+          input.orgId,
+          input.boardId,
+          input.meetingId ?? null,
+          JSON.stringify(input.operations),
+          input.request,
+          input.explanation ?? null,
+          input.provenance ? JSON.stringify(input.provenance) : null,
+          input.createdBy,
+          String(input.createdAt),
+        ],
+      );
+      await conn.query("commit");
+    } catch (err) {
+      await conn.query("rollback").catch(() => {
+        // The connection is already aborted; the pool release below is the
+        // recovery. Swallow so the original error is what the caller sees.
+      });
+      throw err;
+    } finally {
+      conn.release();
     }
-    const created = await this.get(input.boardId, insertedId);
+    const created = await this.get(input.boardId, id);
     if (!created) throw new Error("proposal insert reported success but read back empty");
     return { proposal: created, supersededId: retiredId };
   }

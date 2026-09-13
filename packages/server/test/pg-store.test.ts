@@ -501,6 +501,7 @@ describeIf("PostgresAssetStore", () => {
   const tag = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
   const ORG = `org_as_${tag}`;
   const BOARD = `brd_as_${tag}`;
+  const BOARD_B = `brd_asb_${tag}`;
   const USER = `usr_as_${tag}`;
 
   let store: PostgresAssetStore;
@@ -580,9 +581,33 @@ describeIf("PostgresAssetStore", () => {
   });
 
   it("listForBoard scopes to the board, oldest first", async () => {
+    // A second board with its own asset, so the scoping half of the contract
+    // is actually exercised: the earlier form only ever created assets on
+    // BOARD, so "scopes to the board" was asserted against nothing.
+    const { emptyWorkspace } = await import("../src/boards.js");
+    await boards.put({
+      id: BOARD_B,
+      orgId: ORG,
+      ownerId: USER,
+      name: "Assets B",
+      workspace: emptyWorkspace("AB"),
+      createdAt: 0,
+      updatedAt: 0,
+    });
+    await store.create({ ...asset(`ast_${tag}_b`, `chk_${tag}_b`, 10), boardId: BOARD_B });
     await store.create({ ...asset(`ast_${tag}_3`, `chk_${tag}_3`, 10), createdAt: 200 });
     await store.create({ ...asset(`ast_${tag}_4`, `chk_${tag}_4`, 10), createdAt: 100 });
     const list = await store.listForBoard(BOARD);
-    expect(list.map((a) => a.id).slice(-2)).toEqual([`ast_${tag}_4`, `ast_${tag}_3`]);
+    const ids = list.map((a) => a.id);
+    // Scoping: the sibling board's asset is absent.
+    expect(ids).not.toContain(`ast_${tag}_b`);
+    // Oldest first: _4 (createdAt 100, inserted second, deliberately out of
+    // order) sorts before _3 (createdAt 200) — createdAt is the contract,
+    // not insertion order. The dedupe test's survivor (_2a, createdAt ~now)
+    // stays on the same board and sorts last; assert only the relative
+    // order of the two this test controls so the suites stay independent.
+    expect(ids).toContain(`ast_${tag}_3`);
+    expect(ids).toContain(`ast_${tag}_4`);
+    expect(ids.indexOf(`ast_${tag}_4`)).toBeLessThan(ids.indexOf(`ast_${tag}_3`));
   });
 });

@@ -33,7 +33,8 @@ describe intent; 9 is the original build plan and is explicitly superseded.
 | 17  | [17-engineering-roadmap.md](./17-engineering-roadmap.md)                       | The feature freeze, the decision gates, the keep-list, and what reopens engineering                              |
 | 18  | [18-structured-visual-engine.md](./18-structured-visual-engine.md)             | The structured visual engine: phases, gates, the ELK comparison, the BPMN lens                                   |
 | 19  | [19-bpmn-subset.md](./19-bpmn-subset.md)                             | The BPMN subset: the license decision (no bpmn-js — XML interchange only), supported elements |
-| —   | [checklist.md](./checklist.md)                                                 | **Audited current status**, feature by feature. The source of truth.                                             |
+| 20  | [20-production-architecture.md](./20-production-architecture.md)             | Production architecture: the advisory audited, logical/runtime diagrams, phases P0–P7 |
+| —   | [checklist.md](./checklist.md)                                                 | **Audited current status**, feature by feature. The source of truth. |
 
 ### Decisions and operations
 

@@ -280,9 +280,10 @@ export class PostgresBoardStore implements BoardStore {
                ${actor.actorType}, ${actor.actorId},
                ${initiatedBy}::text, ${approvedBy}::text
           from head
-         where ${expected}::bigint is null or head.seq + 1 = ${expected}::bigint
-        on conflict ("board_id", "seq") do nothing
-        returning "seq", "operation_id"
+         where (${expected}::bigint is null or head.seq + 1 = ${expected}::bigint)
+           and not exists (select 1 from prior)
+         on conflict ("board_id", "seq") do nothing
+         returning "seq", "operation_id"
       )
       select (select seq from ins) as seq,
              (select operation_id from ins) as operation_id,
