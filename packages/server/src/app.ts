@@ -1522,6 +1522,19 @@ export function createApp(deps: AppDeps): App {
   }
 
   /**
+   * P1 (docs/20): the per-request correlation id, reachable from any route
+   * body that holds `req`. Set once by `observe` before the handler runs; a
+   * WeakMap because the entry should live exactly as long as the request
+   * object does. The value is the SAME id the access log line and the
+   * `x-request-id` response header carry, so a telemetry outcome row, an
+   * error record, and the access log join on one id end to end.
+   */
+  const requestIds = new WeakMap<IncomingMessage, string>();
+  function traceOf(req: IncomingMessage): string | undefined {
+    return requestIds.get(req);
+  }
+
+  /**
    * Wraps every request: correlation id, access-log line, RED series, and the
    * outermost try/catch.
    *
@@ -1538,6 +1551,7 @@ export function createApp(deps: AppDeps): App {
   ): Promise<void> {
     const startedAt = process.hrtime.bigint();
     const requestId = requestIdOf(req);
+    requestIds.set(req, requestId);
     const method = (req.method ?? "GET").toUpperCase();
     const route = routeLabel(req.url ?? "/");
     res.setHeader("x-request-id", requestId);
@@ -1573,7 +1587,7 @@ export function createApp(deps: AppDeps): App {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       httpUnhandled.inc({ route });
-      telemetry.record({ kind: "error", route, status: 500, message });
+      telemetry.record({ kind: "error", route, status: 500, message, requestId });
       logger.error("unhandled_request_error", { requestId, method, route, message });
       // The id travels in the body too: it is the one thing a user can quote
       // back that finds the exact line in the log.
@@ -3539,7 +3553,9 @@ export function createApp(deps: AppDeps): App {
         // EVERY attempt is recorded with its outcome (the 2026-09 review §7):
         // the counters must answer "is Lucent unreliable, or is the provider?"
         // from the totals, so failures join the generate lane instead of
-        // hiding in the generic error channel.
+        // hiding in the generic error channel. The request's correlation id
+        // rides along (P1): the outcome row and the access-log line join on
+        // it, and a failed generation can be traced to its exact request.
         telemetry.record({
           kind: "generate",
           ms: Date.now() - started,
@@ -3547,6 +3563,7 @@ export function createApp(deps: AppDeps): App {
           operations: ops,
           outcome: result.outcome,
           repaired: result.repaired,
+          requestId: traceOf(req),
         });
         if (result.status >= 400) {
           telemetry.record({
@@ -3554,6 +3571,7 @@ export function createApp(deps: AppDeps): App {
             route: "/api/generate",
             status: result.status,
             message: JSON.stringify((result.body as { error?: string })?.error ?? result.body),
+            requestId: traceOf(req),
           });
         } else {
           // (The success generate event was recorded above with every attempt.)
@@ -3586,6 +3604,7 @@ export function createApp(deps: AppDeps): App {
           route: "/api/generate",
           status: 400,
           message: (err as Error).message,
+          requestId: traceOf(req),
         });
         send(res, 400, { error: "bad request", detail: (err as Error).message });
       }
@@ -3683,6 +3702,7 @@ export function createApp(deps: AppDeps): App {
           operations: outcome.operations,
           outcome: outcome.outcome,
           repaired: outcome.repaired,
+          requestId: traceOf(req),
         });
         if (outcome.status >= 400) {
           telemetry.record({
@@ -3690,6 +3710,7 @@ export function createApp(deps: AppDeps): App {
             route: "/api/generate/stream",
             status: outcome.status,
             message: `stream refused (${outcome.status})`,
+            requestId: traceOf(req),
           });
           return;
         }
@@ -3715,6 +3736,7 @@ export function createApp(deps: AppDeps): App {
           route: "/api/generate/stream",
           status: 400,
           message: (err as Error).message,
+          requestId: traceOf(req),
         });
       }
       return;
@@ -3758,12 +3780,14 @@ export function createApp(deps: AppDeps): App {
             route: "/api/image",
             status: result.status,
             message: JSON.stringify((result.body as { error?: string })?.error ?? result.body),
+            requestId: traceOf(req),
           });
         } else {
           telemetry.record({
             kind: "image",
             ms: Date.now() - started,
             provider: imageProvider.name,
+            requestId: traceOf(req),
           });
           if (imageCtx.orgId) {
             // The model is the provider's, not the response's: an images
@@ -3791,6 +3815,7 @@ export function createApp(deps: AppDeps): App {
           route: "/api/image",
           status: 400,
           message: (err as Error).message,
+          requestId: traceOf(req),
         });
         send(res, 400, { error: "bad request", detail: (err as Error).message });
       }

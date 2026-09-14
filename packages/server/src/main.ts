@@ -560,7 +560,7 @@ metrics.collect(() => liveRooms.set(realtime.roomCount()));
 const pruneTimer = setInterval(() => {
   usage.prune();
   authLimiter.prune();
-  void tickets.prune().catch(() => {});
+  void tickets.prune();
 }, 10 * 60_000);
 pruneTimer.unref?.();
 
