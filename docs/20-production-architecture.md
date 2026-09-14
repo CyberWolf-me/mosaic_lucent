@@ -202,29 +202,29 @@ It stops at the route.
 The substrate everything async in P3/P4 rides on. The advisory's problem
 statement: DB transaction succeeds but event publish fails, or vice versa.
 
-- [ ] Migration: `outbox_events` table — `id` (uuid), `type`, `board_id?`,
+- [x] Migration: `outbox_events` table — `id` (uuid), `type`, `board_id?`,
       `org_id?`, `payload` (jsonb, small — notification-shaped, never op
       payloads; the fanout payload-size rule applies), `created_at`,
       `dispatched_at?`, `attempts`, `last_error?`.
-- [ ] Writes are **inside the transaction that changes state**:
+- [x] Writes are **inside the transaction that changes state**:
       `BoardOperationCommitted` (with the op's seq, not the op),
       `MeetingEnded`, `ProposalApproved`, `ExternalTaskSynced`,
       `IntegrationSyncCompleted`, `StripeEventApplied`. Only commit points
       that already exist gain a row — no new mutation paths.
-- [ ] Dispatcher: in-process poller (SELECT … WHERE dispatched_at IS NULL
+- [x] Dispatcher: in-process poller (SELECT … WHERE dispatched_at IS NULL
       ORDER BY created_at LIMIT n FOR UPDATE SKIP LOCKED — same
       first-wins/re-claim discipline the execution ledger uses,
       `store/pg-integrations.ts:432`), delivering to in-process subscribers.
       At-least-once; consumers idempotent by `event.id`.
-- [ ] First consumers, chosen from what the code already wants:
+- [x] First consumers, chosen from what the code already wants:
       transactional email (the recorded hook in `email/http.ts` — the
       durable outbox it says belongs "with the job runner"), the search
       corpus invalidation hint, product counters (replacing direct
       `telemetry.record` calls where an event already carries the fact).
-- [ ] In-memory dev path: the outbox degrades to a synchronous dispatcher
+- [x] In-memory dev path: the outbox degrades to a synchronous dispatcher
       when no `LUCENT_DATABASE_URL` — matching how every other store in the
       repo is optional (ADR 0006).
-- [ ] **Acceptance:** (1) commit succeeds, process dies before dispatch →
+- [x] **Acceptance:** (1) commit succeeds, process dies before dispatch →
       after restart the event still delivers (test kills the dispatcher
       between commit and delivery); (2) duplicate delivery is observable and
       harmless (consumer records `event.id` once); (3) an event row written
@@ -237,7 +237,7 @@ The advisory's §9: `setInterval` in the API process means N instances run N
 sweeps. §37's "Now" list names moving the sweeps; this phase builds the
 substrate and does that move.
 
-- [ ] Migration: `jobs` table — `id`, `family` (`ai` | `media` |
+- [x] Migration: `jobs` table — `id`, `family` (`ai` | `media` |
       `integration` | `maintenance`), `type`, `payload` jsonb, `status`
       (`queued` | `claimed` | `done` | `failed`), `attempts`, `run_after`,
       `claimed_by?`, `claimed_at?`, `result?`, `created_at`. Claim =
@@ -246,26 +246,26 @@ substrate and does that move.
       WHERE, stale window) — it is already proven in
       `integrations/ledger.ts` + `pg-integrations.ts`; do not invent a new
       concurrency model.
-- [ ] Worker entrypoint: `src/worker.ts` in `@lucent/server` — same image,
+- [x] Worker entrypoint: `src/worker.ts` in `@lucent/server` — same image,
       `LUCENT_ROLE=worker`, no HTTP listener, claims by family, graceful
       drain. One queue, Postgres-backed, no Redis (ADR 0004's stance holds
       until a measured need).
-- [ ] Scheduler: `LUCENT_ROLE=scheduler` (or leader-election-free: the job
+- [x] Scheduler: `LUCENT_ROLE=scheduler` (or leader-election-free: the job
       claim itself dedupes) enqueues recurring jobs — sweep-stripe,
       sweep-execution, sweep-webhooks, link-gc, prune-history — on the
       intervals `main.ts:551–807` uses today. The `unref()`'d timers are
       deleted from the API process; single-process dev keeps working via
       `LUCENT_ROLE=all` (default), which runs scheduler+worker in-process —
       the compose file's one-server mode is unchanged.
-- [ ] Move the sweeps (their bodies are already pure, testable functions —
+- [x] Move the sweeps (their bodies are already pure, testable functions —
       `sweepStripeEvents`, the ledger sweep, webhook sweep): each becomes a
       job handler registered against a family.
 - [ ] docker-compose: add a `worker` service (same image, `LUCENT_ROLE=worker`)
       so dev/prod parity is visible locally.
-- [ ] Metrics: queue depth per family, oldest queued job age, claim rate,
+- [x] Metrics: queue depth per family, oldest queued job age, claim rate,
       attempt counts — the advisory §22 additions that only exist once a
       queue does.
-- [ ] **Acceptance:** two API instances + one worker: exactly one sweeper
+- [x] **Acceptance:** two API instances + one worker: exactly one sweeper
       claims each tick (race test mirroring `two-instance.test.ts`'s commit
       race); `LUCENT_ROLE=all` dev mode behaves as today; the API process
       has no `setInterval` sweeps.
