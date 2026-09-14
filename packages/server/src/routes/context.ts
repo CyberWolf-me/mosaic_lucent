@@ -183,19 +183,28 @@ export interface RouteServices {
     caller?: StoredUser,
   ): Promise<{ ok: true; user: StoredUser; role: Role; board: StoredBoard } | { ok: false }>;
   requireCsrf(req: IncomingMessage, res: ServerResponse, route: string): boolean;
+  /**
+   * P5: these are awaited because the limit may be enforced by a shared
+   * Postgres counter rather than an in-process Map. A boolean return is
+   * awaitable, so the in-memory path costs nothing for the change.
+   */
   applyAuthLimiter(
     req: IncomingMessage,
     res: ServerResponse,
     email: string,
     route: string,
-  ): boolean;
-  applyAccountLimiter(req: IncomingMessage, res: ServerResponse, route: string): boolean;
+  ): boolean | Promise<boolean>;
+  applyAccountLimiter(
+    req: IncomingMessage,
+    res: ServerResponse,
+    route: string,
+  ): boolean | Promise<boolean>;
   applyMailLimiter(
     req: IncomingMessage,
     res: ServerResponse,
     email: string,
     route: string,
-  ): boolean;
+  ): boolean | Promise<boolean>;
 
   // --- Seams ----------------------------------------------------------------
   notifyUser<K extends NotificationKind>(event: NotifyEvent<K>): void;

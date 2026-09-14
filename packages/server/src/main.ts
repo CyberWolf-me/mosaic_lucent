@@ -13,6 +13,7 @@ import { migrate as runMigrations } from "./db/migrate.js";
 import { PostgresUserStore } from "./store/pg-users.js";
 import { PostgresBoardStore } from "./store/pg-boards.js";
 import { Limiter } from "./limiter.js";
+import { PostgresRateLimiter } from "./rateStore.js";
 import { InMemoryTicketStore } from "./realtimeTicket.js";
 import { InMemoryJobQueue, JobRunner, PostgresJobQueue, type JobQueue } from "./jobs.js";
 import { enqueueRecurring, familiesFor, parseRole, runsJobs, runsScheduler, servesHttp, workerId } from "./roles.js";
@@ -425,6 +426,17 @@ if (db) {
 }
 const usage = new UsageTracker(limits);
 const authLimiter = new Limiter(config.authLimiter.perWindow, config.authLimiter.windowMs);
+// P5 (docs/20): with Postgres configured, rate limiting is SHARED. The
+// in-process `Limiter` is per-process, so two API replicas behind one
+// balancer each grant the full window — the auth limiter included, which is
+// the brute-force guard on login. The Postgres counter is consulted instead,
+// and the in-memory one stays the honest single-instance path.
+const sharedLimiter = db
+  ? new PostgresRateLimiter(db, {
+      perWindow: config.authLimiter.perWindow,
+      windowMs: config.authLimiter.windowMs,
+    })
+  : undefined;
 // M3 follow-up (docs/20 P5): with Postgres configured and two instances
 // behind one balancer, a ticket minted on A must work when the upgrade lands
 // on B — the PgTicketStore makes mint/consume cross-instance while keeping
@@ -543,6 +555,7 @@ const { server, realtime } = createApp({
   limits,
   telemetry: new Telemetry(),
   authLimiter,
+  sharedLimiter,
   tickets,
   // M0.6: serve the built web app on the same origin so a single `npm start`
   // boots the whole product. Omitted in tests; the dev split has Vite serving

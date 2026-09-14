@@ -1495,3 +1495,36 @@ export const jobs = pgTable(
 
 export type DbJob = typeof jobs.$inferSelect;
 export type DbNewJob = typeof jobs.$inferInsert;
+
+/**
+ * Shared rate-limit and quota counters (docs/20 P5, advisory §12/§26).
+ *
+ * `Limiter` and `UsageTracker` are per-process Maps, so two API instances
+ * grant twice the configured limit — the auth limiter included, which is the
+ * brute-force guard. One row per (key, window) makes the counter shared and
+ * the increment atomic in a single upsert.
+ *
+ * Deliberately a COUNTER, not a log of hits: a fixed window is one row per
+ * key per window, where a sliding log would be one row per request on the
+ * hottest path in the system, with a sweep to keep it from growing forever.
+ *
+ * `windowStart` carries both meanings the two callers need: a rounded
+ * millisecond timestamp for the per-minute limiter, and midnight UTC for the
+ * daily quota. The composite primary key is what makes the upsert atomic.
+ */
+export const rateCounters = pgTable(
+  "rate_counters",
+  {
+    key: text("key").notNull(),
+    windowStart: bigint("window_start", { mode: "number" }).notNull(),
+    hits: bigint("hits", { mode: "number" }).notNull().default(0),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.key, t.windowStart] }),
+    // The prune scan: drop windows that have rolled past.
+    windowIdx: index("rate_counters_window_idx").on(t.windowStart),
+  }),
+);
+
+export type DbRateCounter = typeof rateCounters.$inferSelect;
+export type DbNewRateCounter = typeof rateCounters.$inferInsert;

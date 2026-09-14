@@ -2,6 +2,7 @@ import { describe, expect, it, beforeEach } from "vitest";
 import { InMemoryPresenceStore } from "../src/presence.js";
 import type { PresenceUpsert } from "../src/presence.js";
 import { colorForUser } from "../src/room.js";
+import { boards, organizations, users } from "../src/db/schema.js";
 
 /**
  * PresenceStore unit tests (M3, ADR 0004). Presence is the state that has to
@@ -392,6 +393,59 @@ describePg("presence parity — PostgresPresenceStore", () => {
     // test file, so a TRUNCATE here keeps the run isolated without a per-test
     // schema setup.
     await db.pool.query("DELETE FROM presence");
+    // `presence.board_id` carries a real FK to `boards`, which itself FKs org
+    // and owner. This suite asserts cross-instance presence semantics, not FK
+    // enforcement, so the anchors are seeded once here — the same shape
+    // `pg-integrations` and `outbox` need, and the reason this suite only ever
+    // passed when the table was empty of real constraints.
+    const now = Date.now();
+    await db.db
+      .insert(organizations)
+      .values({ id: "org-presence", name: "Presence Org", createdAt: now })
+      .onConflictDoNothing();
+    await db.db
+      .insert(users)
+      .values({
+        id: "usr_presence",
+        email: "presence@example.com",
+        name: "Presence",
+        passwordHash: "x",
+        tokenVersion: 0,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .onConflictDoNothing();
+    // `presence.user_id` also carries an FK. The suite's participants are
+    // `usr_1`/`usr_2`; seeding them here is what the constraint requires and
+    // what the suite's own assertions never cared about.
+    for (const userId of ["usr_1", "usr_2"]) {
+      await db.db
+        .insert(users)
+        .values({
+          id: userId,
+          email: `${userId}@example.com`,
+          name: userId,
+          passwordHash: "x",
+          tokenVersion: 0,
+          createdAt: now,
+          updatedAt: now,
+        })
+        .onConflictDoNothing();
+    }
+    for (const boardId of ["brd_1", "brd_2"]) {
+      await db.db
+        .insert(boards)
+        .values({
+          id: boardId,
+          orgId: "org-presence",
+          ownerId: "usr_presence",
+          name: `Presence ${boardId}`,
+          workspace: { nodes: {}, edges: {}, groups: {} } as never,
+          createdAt: now,
+          updatedAt: now,
+        })
+        .onConflictDoNothing();
+    }
   });
 
   async function pgStore(

@@ -56,7 +56,7 @@ import {
   type StoredBoard,
 } from "./boards.js";
 import { RealtimeServer } from "./realtime.js";
-import type { Limiter } from "./limiter.js";
+import type { Limiter, LimiterDecision } from "./limiter.js";
 import type { TicketStore } from "./realtimeTicket.js";
 import type { StaticHandler } from "./static.js";
 import type { SessionStore } from "./sessions.js";
@@ -144,6 +144,13 @@ export interface AppDeps {
   limits: UsageLimits;
   telemetry: Telemetry;
   authLimiter: Limiter;
+  /**
+   * P5 (docs/20): the shared, cross-instance rate limiter. When configured,
+   * it is consulted INSTEAD of the in-process `authLimiter`, so two API
+   * replicas enforce one limit rather than two. Absent in single-instance
+   * dev and in tests, where the in-memory limiter is correct.
+   */
+  sharedLimiter?: { check(key: string, now?: number): Promise<LimiterDecision> };
   tickets: TicketStore;
   /** M1: when provided, browsers authenticate via an httpOnly cookie. */
   sessionStore?: SessionStore;
@@ -441,6 +448,7 @@ export function createApp(deps: AppDeps): App {
     limits,
     telemetry,
     authLimiter,
+    sharedLimiter,
     tickets,
     sessionStore,
     mailer,
@@ -982,9 +990,27 @@ export function createApp(deps: AppDeps): App {
     res: ServerResponse,
     email: string,
     route: string,
-  ): boolean {
+  ): Promise<boolean> | boolean {
     const key = `${clientKey(req)}|${normalizeForKey(email)}`;
-    const decision = authLimiter.check(key);
+    return applyLimiterDecision(req, res, key, route);
+  }
+  /**
+   * The one place a limiter decision is taken and reported (P5).
+   *
+   * When a shared store is configured the check is a Postgres round trip, so
+   * this returns a Promise; in single-instance dev it resolves synchronously
+   * through the in-memory `Limiter`. Call sites `await` it either way, which
+   * costs nothing when the value is already a boolean.
+   */
+  async function applyLimiterDecision(
+    req: IncomingMessage,
+    res: ServerResponse,
+    key: string,
+    route: string,
+  ): Promise<boolean> {
+    const decision = sharedLimiter
+      ? await sharedLimiter.check(key)
+      : authLimiter.check(key);
     if (decision.allowed) return true;
     telemetry.record({ kind: "refused", route, reason: "rate", requestId: traceOf(req) });
     sendWithHeaders(
@@ -1004,18 +1030,9 @@ export function createApp(deps: AppDeps): App {
    * The cap is the limiter's per-window; the key only depends on the IP so
    * the same IP cannot schedule and cancel deletion rapidly in alternation.
    */
-  function applyAccountLimiter(req: IncomingMessage, res: ServerResponse, route: string): boolean {
+  async function applyAccountLimiter(req: IncomingMessage, res: ServerResponse, route: string): Promise<boolean> {
     const key = `account|${clientKey(req)}`;
-    const decision = authLimiter.check(key);
-    if (decision.allowed) return true;
-    telemetry.record({ kind: "refused", route, reason: "rate", requestId: traceOf(req) });
-    sendWithHeaders(
-      res,
-      429,
-      { error: "too many attempts", retryAfterSeconds: decision.retryAfterSeconds },
-      { "retry-after": String(decision.retryAfterSeconds) },
-    );
-    return false;
+    return applyLimiterDecision(req, res, key, route);
   }
 
   /**
@@ -1039,15 +1056,15 @@ export function createApp(deps: AppDeps): App {
    * is already hopeless, and a per-IP cap there would break every suite that
    * redeems several tokens from 127.0.0.1.
    */
-  function applyMailLimiter(
+  async function applyMailLimiter(
     req: IncomingMessage,
     res: ServerResponse,
     email: string,
     route: string,
-  ): boolean {
+  ): Promise<boolean> {
     const ip = clientIp(req);
     for (const key of [`mail|${ip}|${normalizeForKey(email)}`, `mail|${ip}`]) {
-      const decision = authLimiter.check(key);
+      const decision = sharedLimiter ? await sharedLimiter.check(key) : authLimiter.check(key);
       if (decision.allowed) continue;
       telemetry.record({ kind: "refused", route, reason: "rate", requestId: traceOf(req) });
       sendWithHeaders(
@@ -2607,7 +2624,7 @@ export function createApp(deps: AppDeps): App {
         const raw = await readBody(req);
         const parsed = raw ? JSON.parse(raw) : {};
         const email = typeof parsed.email === "string" ? parsed.email : "";
-        if (!applyAuthLimiter(req, res, email, "/api/auth/signup")) return;
+        if (!(await applyAuthLimiter(req, res, email, "/api/auth/signup"))) return;
         const result = await handleSignup(authCtx, parsed, orgStore, requestOrigin(req));
         writeHandleResult(res, result);
       } catch (err) {
@@ -2620,7 +2637,7 @@ export function createApp(deps: AppDeps): App {
         const raw = await readBody(req);
         const parsed = raw ? JSON.parse(raw) : {};
         const email = typeof parsed.email === "string" ? parsed.email : "";
-        if (!applyAuthLimiter(req, res, email, "/api/auth/login")) return;
+        if (!(await applyAuthLimiter(req, res, email, "/api/auth/login"))) return;
         const result = await handleLogin(authCtx, parsed, requestOrigin(req));
         writeHandleResult(res, result);
       } catch (err) {
@@ -2697,7 +2714,7 @@ export function createApp(deps: AppDeps): App {
       // cookie-authenticated and the only stable key is the IP. A 429 stops
       // an attacker from hammering the schedule endpoint to flip the grace
       // window or racing the cancel endpoint.
-      if (!applyAccountLimiter(req, res, "/api/account/delete")) return;
+      if (!(await applyAccountLimiter(req, res, "/api/account/delete"))) return;
       const result = await handleScheduleDeletion(
         authCtx,
         req.headers.cookie ?? null,
@@ -2708,7 +2725,7 @@ export function createApp(deps: AppDeps): App {
     }
     if (req.method === "POST" && req.url === "/api/account/delete/cancel") {
       if (!requireCsrf(req, res, "/api/account/delete/cancel")) return;
-      if (!applyAccountLimiter(req, res, "/api/account/delete/cancel")) return;
+      if (!(await applyAccountLimiter(req, res, "/api/account/delete/cancel"))) return;
       const result = await handleCancelDeletion(
         authCtx,
         req.headers.cookie ?? null,
@@ -2802,7 +2819,7 @@ export function createApp(deps: AppDeps): App {
         const raw = await readBody(req);
         const parsed = raw ? JSON.parse(raw) : {};
         const email = typeof parsed.email === "string" ? parsed.email : "";
-        if (!applyMailLimiter(req, res, email, "/api/auth/verify/request")) return;
+        if (!(await applyMailLimiter(req, res, email, "/api/auth/verify/request"))) return;
         const result = await handleRequestVerification(authCtx, parsed);
         writeHandleResult(res, result);
       } catch (err) {
@@ -2833,7 +2850,7 @@ export function createApp(deps: AppDeps): App {
         const raw = await readBody(req);
         const parsed = raw ? JSON.parse(raw) : {};
         const email = typeof parsed.email === "string" ? parsed.email : "";
-        if (!applyMailLimiter(req, res, email, "/api/auth/reset/request")) return;
+        if (!(await applyMailLimiter(req, res, email, "/api/auth/reset/request"))) return;
         const result = await handleRequestPasswordReset(authCtx, parsed);
         writeHandleResult(res, result);
       } catch (err) {

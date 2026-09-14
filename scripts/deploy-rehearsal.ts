@@ -46,8 +46,38 @@ interface Instance {
   proc: ChildProcess;
   port: number;
   base: string;
+  ws: string;
   start(): Promise<void>;
   kill(): Promise<void>;
+}
+
+/**
+ * Attempt a WebSocket upgrade and report whether it connected (P5 arm 5).
+ *
+ * Bounded with a timeout: a rejected upgrade on this Node version leaves the
+ * socket hanging rather than erroring promptly, so waiting forever would turn
+ * a FAIL into a hang.
+ */
+async function tryWsUpgrade(wsBase: string, ticket: string): Promise<boolean> {
+  const { WebSocket } = await import("ws");
+  return new Promise<boolean>((resolve) => {
+    let settled = false;
+    const done = (ok: boolean) => {
+      if (settled) return;
+      settled = true;
+      try {
+        socket.close();
+      } catch {
+        /* already closed */
+      }
+      resolve(ok);
+    };
+    const socket = new WebSocket(`${wsBase}/ws?ticket=${encodeURIComponent(ticket)}`);
+    socket.on("open", () => done(true));
+    socket.on("error", () => done(false));
+    socket.on("unexpected-response", () => done(false));
+    setTimeout(() => done(false), 4_000);
+  });
 }
 
 function instance(name: "A" | "B", port: number): Instance {
@@ -57,6 +87,7 @@ function instance(name: "A" | "B", port: number): Instance {
     proc: null as unknown as ChildProcess,
     port,
     base,
+    ws: `ws://127.0.0.1:${port}`,
     async start() {
       proc = spawn(
         process.execPath,
@@ -181,6 +212,50 @@ async function main() {
       "4. restart persistence — A restarts and every write survives",
       aAfterRestart.status === 200 && nodesRestarted.includes("node-a") && nodesRestarted.includes("node-b"),
       `restarted A sees: ${nodesRestarted.join(", ") || "nothing"}`,
+    );
+
+    // --- ARM 5 (P5): the WS ticket is cross-instance ---
+    // A ticket is minted on A and redeemed on B's WebSocket upgrade. Before
+    // PgTicketStore this was deliberately impossible (the in-memory store is
+    // per-process, and the suite pinned that); with two instances behind a
+    // stateless ingress it is the difference between working and 401-ing
+    // roughly half the time.
+    const minted = await api(a.base, "/api/realtime/ticket", { method: "POST", token });
+    const ticket = minted.body.ticket as string | undefined;
+    const wsTicketOk = await tryWsUpgrade(b.ws, ticket ?? "");
+    arm(
+      "5. PgTicketStore — a ticket minted on A opens a socket on B",
+      minted.status === 200 && Boolean(ticket) && wsTicketOk,
+      `mint on A: ${minted.status}, upgrade on B: ${wsTicketOk ? "connected" : "rejected"}`,
+    );
+
+    // --- ARM 6 (P5): the rate limit is shared, not doubled ---
+    // The auth limiter is the brute-force guard on login. With per-process
+    // counters, alternating instances doubles the allowance. This drives
+    // enough wrong-password logins across BOTH instances to cross the
+    // configured window and asserts a 429 arrives well before 2×.
+    const limit = Number(process.env.LUCENT_REHEARSAL_AUTH_LIMIT ?? 20);
+    let attempts = 0;
+    let refused = false;
+    let firstRefusalAt = 0;
+    while (attempts < limit * 2 && !refused) {
+      attempts += 1;
+      const target = attempts % 2 === 0 ? a.base : b.base;
+      const res = await api(target, "/api/auth/login", {
+        method: "POST",
+        body: JSON.stringify({ email: "rehearsal-limiter@example.com", password: "wrong-password" }),
+      });
+      if (res.status === 429) {
+        refused = true;
+        firstRefusalAt = attempts;
+      }
+    }
+    arm(
+      "6. shared rate limit — two instances do not double the window",
+      refused && firstRefusalAt <= limit,
+      refused
+        ? `refused after ${firstRefusalAt} attempts across both instances (limit ${limit})`
+        : `never refused after ${attempts} attempts — the limit is per-instance, not shared`,
     );
   } finally {
     await b.kill();
