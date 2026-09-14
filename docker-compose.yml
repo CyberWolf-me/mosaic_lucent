@@ -61,5 +61,32 @@ services:
       retries: 3
       start_period: 15s
 
+  # P3/P4 (docs/20): the worker. Same image, `LUCENT_ROLE=worker` — no HTTP
+  # listener, claims jobs by family. It exists here so dev/prod parity is
+  # visible locally: the sweeps that used to run on a timer inside `server`
+  # now run here, and `server` runs none of them.
+  #
+  # Delay before starting is deliberate: the worker's first tick will find the
+  # jobs table only after `server` has migrated on boot. It retries on the
+  # next tick if it loses that race, so this is a courtesy, not a dependency.
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      server:
+        condition: service_started
+    command: ["node", "packages/server/dist/main.js"]
+    environment:
+      LUCENT_ROLE: worker
+      LUCENT_DATABASE_URL: postgres://lucent:lucent@postgres:5432/lucent
+      LUCENT_SESSION_SECRET: change-me-32-bytes-minimum-aaaaaaaaaaaaaaaaaa
+      # Every family by default. Narrow it to scale one family out, e.g.
+      # `LUCENT_JOB_FAMILIES: ai` for a dedicated AI worker.
+      LUCENT_JOB_FAMILIES: ai,media,integration,maintenance
+
 volumes:
   lucent_pgdata:

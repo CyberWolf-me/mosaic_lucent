@@ -16,6 +16,9 @@ import { Limiter } from "./limiter.js";
 import { InMemoryTicketStore } from "./realtimeTicket.js";
 import { InMemoryJobQueue, JobRunner, PostgresJobQueue, type JobQueue } from "./jobs.js";
 import { enqueueRecurring, familiesFor, parseRole, runsJobs, runsScheduler, servesHttp, workerId } from "./roles.js";
+import { buildAiHandlers } from "./workers/ai.js";
+import { buildMediaHandlers } from "./workers/media.js";
+import { buildIntegrationHandlers } from "./workers/integration.js";
 import { createStaticHandler } from "./static.js";
 import { resolve as resolvePath } from "node:path";
 import { InMemorySessionStore, PostgresSessionStore, type SessionStore } from "./sessions.js";
@@ -491,10 +494,15 @@ if (scim) {
   console.log(`[lucent] scim: gateway configured (idp=${scimConfig!.idp})`);
 }
 
+// P4: hoisted so the AI worker family's image job can hold the same provider
+// instance the route uses. One provider object, chosen once: the worker path
+// and the request path must bill and behave identically.
+const imageProvider = selectImageProvider();
+
 const { server, realtime } = createApp({
   config,
   provider,
-  imageProvider: selectImageProvider(),
+  imageProvider,
   userStore: stores.userStore,
   boardStore: stores.boardStore,
   // M1: wire the session store alongside the user/board stores. Tests can
@@ -874,6 +882,16 @@ const jobRunner = runsJobs(role)
         "sweep-stripe": async () => void (await sweepStripe()),
         "sweep-execution": async () => void (await sweepIntegration()),
         "sweep-webhooks": async () => void (await sweepIntegration()),
+        // P4: the worker families. The AI family's image job is the one with
+        // real work today; media and integration ship their claim paths with
+        // reserved bodies (docs/20 P4 says so explicitly).
+        ...buildAiHandlers({
+          imageProvider,
+          outbox,
+          logger: { info: (e, f) => logger.info(e, f) },
+        }),
+        ...buildMediaHandlers({ logger: { info: (e, f) => logger.info(e, f) } }),
+        ...buildIntegrationHandlers({ logger: { info: (e, f) => logger.info(e, f) } }),
         "prune-jobs": async () => {
           if (jobQueue instanceof PostgresJobQueue) {
             await jobQueue.prune(30 * 24 * 60 * 60 * 1000);
