@@ -97,7 +97,7 @@ async function join(
   boardId: string,
   userId: string,
 ): Promise<{ socket: WebSocket; welcome: Welcome }> {
-  const ticket = tickets.mint(userId);
+  const ticket = await tickets.mint(userId);
   const socket = new WebSocket(`${wsUrl}/ws?ticket=${encodeURIComponent(ticket)}`);
   await new Promise<void>((resolve, reject) => {
     socket.once("open", () => resolve());

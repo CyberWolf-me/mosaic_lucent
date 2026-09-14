@@ -117,6 +117,19 @@ podDisruptionBudget:
   enabled: true
   minAvailable: 1
 
+# Horizontal autoscaling. When enabled, the HPA owns the replica count and
+# `replicaCount` is ignored (deployment.yaml drops its `replicas` field so
+# the two never fight). The metrics below target the server's own exposed
+# signals (CPU) plus connection load; keep requests/limits set above or the
+# CPU percentage has nothing to scale against.
+autoscaling:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 6
+  targetCPUUtilizationPercentage: 70
+  # Optional second signal; leave empty for CPU-only.
+  targetMemoryUtilizationPercentage: ""
+
 # ServiceMonitor for Prometheus. Disabled by default; set to true in
 # clusters where the Prometheus operator is installed.
 serviceMonitor:

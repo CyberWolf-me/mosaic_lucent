@@ -2869,7 +2869,7 @@ export function createApp(deps: AppDeps): App {
       if (!requireCsrf(req, res, "/api/realtime/ticket")) return;
       const user = await requireUser(req, res);
       if (!user) return;
-      const ticket = tickets.mint(user.id);
+      const ticket = await tickets.mint(user.id);
       send(res, 200, { ticket, ttlMs: config.realtimeTicketTtlMs });
       return;
     }

@@ -1347,3 +1347,27 @@ export type DbIntegrationWebhookEvent = typeof integrationWebhookEvents.$inferSe
 export type DbNewIntegrationWebhookEvent = typeof integrationWebhookEvents.$inferInsert;
 export type DbIntegrationInboundChange = typeof integrationInboundChanges.$inferSelect;
 export type DbNewIntegrationInboundChange = typeof integrationInboundChanges.$inferInsert;
+
+/**
+ * WebSocket auth tickets (M0.3), Postgres twin (docs/20 P5). One row per
+ * minted ticket; `consume` is a DELETE ... RETURNING so single-use holds
+ * across every API instance behind a stateless ingress. Rows live for the
+ * ticket TTL (~60s); `prune()` bounds the table.
+ */
+export const wsTickets = pgTable(
+  "ws_tickets",
+  {
+    ticket: text("ticket").primaryKey(),
+    userId: text("user_id").notNull(),
+    expiresAt: bigint("expires_at", { mode: "number" }).notNull(),
+  },
+  (t) => ({
+    // The prune scan and size() read the window, not the whole table.
+    expiryIdx: index("ws_tickets_expiry_idx").on(t.expiresAt),
+    // Who holds live tickets, if an operator ever needs to revoke by user.
+    userIdx: index("ws_tickets_user_idx").on(t.userId),
+  }),
+);
+
+export type DbWsTicket = typeof wsTickets.$inferSelect;
+export type DbNewWsTicket = typeof wsTickets.$inferInsert;

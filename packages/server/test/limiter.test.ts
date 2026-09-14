@@ -57,39 +57,39 @@ describe("Limiter", () => {
 });
 
 describe("InMemoryTicketStore", () => {
-  it("mints opaque tickets and consumes them once", () => {
+  it("mints opaque tickets and consumes them once", async () => {
     const t = new InMemoryTicketStore(60_000);
-    const ticket = t.mint("usr_1");
-    expect(t.consume(ticket)).toBe("usr_1");
-    expect(t.consume(ticket)).toBeNull();
+    const ticket = await t.mint("usr_1");
+    expect(await t.consume(ticket)).toBe("usr_1");
+    expect(await t.consume(ticket)).toBeNull();
   });
 
-  it("rejects an unknown ticket", () => {
+  it("rejects an unknown ticket", async () => {
     const t = new InMemoryTicketStore(60_000);
-    expect(t.consume("never-minted")).toBeNull();
+    expect(await t.consume("never-minted")).toBeNull();
   });
 
-  it("rejects an expired ticket", () => {
+  it("rejects an expired ticket", async () => {
     const t = new InMemoryTicketStore(60_000);
-    const ticket = t.mint("usr_1");
-    expect(t.consume(ticket, Date.now() + 120_000)).toBeNull();
+    const ticket = await t.mint("usr_1");
+    expect(await t.consume(ticket, Date.now() + 120_000)).toBeNull();
   });
 
-  it("prune drops only expired entries", () => {
+  it("prune drops only expired entries", async () => {
     const t = new InMemoryTicketStore(60_000);
-    t.mint("a");
-    t.mint("b");
-    const removed = t.prune(Date.now() + 120_000);
+    await t.mint("a");
+    await t.mint("b");
+    const removed = await t.prune(Date.now() + 120_000);
     expect(removed).toBe(2);
-    expect(t.size()).toBe(0);
+    expect(await t.size()).toBe(0);
   });
 
-  it("different users get different tickets", () => {
+  it("different users get different tickets", async () => {
     const t = new InMemoryTicketStore(60_000);
-    const a = t.mint("u_a");
-    const b = t.mint("u_b");
+    const a = await t.mint("u_a");
+    const b = await t.mint("u_b");
     expect(a).not.toBe(b);
-    expect(t.consume(a)).toBe("u_a");
-    expect(t.consume(b)).toBe("u_b");
+    expect(await t.consume(a)).toBe("u_a");
+    expect(await t.consume(b)).toBe("u_b");
   });
 });

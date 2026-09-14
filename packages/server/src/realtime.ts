@@ -145,22 +145,26 @@ export class RealtimeServer {
       }
       const ticket = url.searchParams.get("ticket");
       // Atomic consume: a ticket used by a parallel upgrade is already gone.
-      const userId = ticket ? this.deps.tickets.consume(ticket) : null;
-      if (!userId) {
-        socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
-        socket.destroy();
-        return;
-      }
-      void this.deps.userStore
-        .findById(userId)
-        .then((user) => {
-          if (!user) {
+      // Async since the Postgres ticket store (docs/20 P5) made the seam a
+      // Promise — the in-memory twin resolves on the microtask queue, so
+      // single-process dev pays no round trip.
+      const consume = ticket ? this.deps.tickets.consume(ticket) : Promise.resolve(null);
+      void consume
+        .then((userId) => {
+          if (!userId) {
             socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
             socket.destroy();
             return;
           }
-          this.wss.handleUpgrade(req, socket, head, (ws) => {
-            this.onConnection(ws, user.id, user.name);
+          return this.deps.userStore.findById(userId).then((user) => {
+            if (!user) {
+              socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
+              socket.destroy();
+              return;
+            }
+            this.wss.handleUpgrade(req, socket, head, (ws) => {
+              this.onConnection(ws, user.id, user.name);
+            });
           });
         })
         .catch(() => {

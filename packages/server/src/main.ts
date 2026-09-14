@@ -420,7 +420,14 @@ if (db) {
 }
 const usage = new UsageTracker(limits);
 const authLimiter = new Limiter(config.authLimiter.perWindow, config.authLimiter.windowMs);
-const tickets = new InMemoryTicketStore(config.realtimeTicketTtlMs);
+// M3 follow-up (docs/20 P5): with Postgres configured and two instances
+// behind one balancer, a ticket minted on A must work when the upgrade lands
+// on B — the PgTicketStore makes mint/consume cross-instance while keeping
+// single-use (the DELETE ... RETURNING is the atomic claim). Single-process
+// and offline dev keep the in-memory store: no database, no table needed.
+const tickets: import("./realtimeTicket.js").TicketStore = db
+  ? new (await import("./realtimeTicket.js")).PgTicketStore(db, config.realtimeTicketTtlMs)
+  : new InMemoryTicketStore(config.realtimeTicketTtlMs);
 
 // M7 / M4 storage: the asset gateway. Stage B6 closes the deferred gap: the
 // metadata store is Postgres when a database is configured (the `assets` table
@@ -547,11 +554,13 @@ const liveRooms = metrics.gauge({
 metrics.collect(() => liveRooms.set(realtime.roomCount()));
 
 // Bound the usage and limiter maps on a long-running process. Tickets and
-// limiter entries are pruned on the same tick.
+// limiter entries are pruned on the same tick. The ticket prune is async
+// (the Postgres store's DELETE); it is fire-and-forget like the sweeps —
+// a failed tick retries on the next one, and expired rows are inert.
 const pruneTimer = setInterval(() => {
   usage.prune();
   authLimiter.prune();
-  tickets.prune();
+  void tickets.prune().catch(() => {});
 }, 10 * 60_000);
 pruneTimer.unref?.();
 
