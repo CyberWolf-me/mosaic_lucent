@@ -83,15 +83,21 @@ Because users may put sensitive company information into the canvas, security ma
 
 For enterprise customers, a major question will be: **"Is our data used to train the model?"** The answer should be clearly controlled (default: no).
 
-**Implementation status (audited 2026-08).** Not enforced in code, and the UI no
-longer claims it is. Lucent trains no models of its own, but a prompt's retention
-is governed entirely by whichever provider `LUCENT_AI_BASE_URL` points at — no
-no-training header is sent, because there is no cross-provider standard one to
-send. Until a per-workspace provider policy exists, the honest answer is "it
-depends on your configured provider's terms", which is what Settings → Account
-now says. Anything stronger needs a provider contract or a self-hosted model.
+**Implementation status (audited 2026-08; updated 2026-09, see docs/23).** Not
+enforced in code, and the UI no longer claims it is. Lucent trains no models
+of its own, but a prompt's retention is governed entirely by whichever
+provider `LUCENT_AI_BASE_URL` points at — no cross-provider no-training
+header exists to send. Until a per-org provider policy exists (docs/23 S3),
+the honest answer is "it depends on your configured provider's terms", which
+is what Settings → Account now says. Anything stronger needs a provider
+contract or a self-hosted model.
 
-Of the list above, what actually exists today: workspace isolation is
-owner-scoped on boards only; role-based access is enforced on the realtime path
-but not on REST; audit logs, encryption at rest, data-retention controls, and SSO
-are **not implemented**. Treat the list as a target, not a description.
+Since the 2026-08 audit, the list above has partially shipped — the
+authoritative, audited status lives in **docs/23** (the security coverage
+table). In short: role-based access is enforced on the realtime path and
+owner-scoped on REST; audit logs (+viewer with keyset pagination and CSV
+export), SAML SSO, SCIM provisioning, and TOTP two-factor are implemented
+and tested; per-board classification, org-level policy, data residency, and
+at-rest encryption beyond the platform's disk layer are **not implemented** —
+docs/23 phases S1–S5 are the gaps. Treat this section as the target; treat
+docs/23 as the description.
