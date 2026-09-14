@@ -7,6 +7,8 @@ import {
 } from "../src/billing/events.js";
 import { closeDb, createDb, type Db } from "../src/db/client.js";
 import { seedAnchors } from "./helpers/seedAnchors.js";
+import { stripeEvents } from "../src/db/schema.js";
+import { sql } from "drizzle-orm";
 import { migrate } from "../src/db/migrate.js";
 import { PostgresStripeEventStore } from "../src/store/pg-stripe-events.js";
 
@@ -178,6 +180,13 @@ describeIf("StripeEventStore contract: Postgres", () => {
     // the tests name (`org_1`) is seeded here — the reason it only ever passed
     // while it was not running against a real database.
     await seedAnchors(db, { orgId: "org_1", userId: "usr_billing", boardIds: [] });
+    // Clear this suite's own rows from any previous run. `pending()` is
+    // bounded and ordered OLDEST-FIRST, and this suite uses fixed low
+    // timestamps (1000/2000/3000), so residue from an earlier run sorts ahead
+    // of the current run's rows and consumes the whole window — the assertion
+    // then fails for a reason unrelated to the claim ladder. Scoped by the
+    // suite's own id prefix, so a concurrently running suite is untouched.
+    await db.db.delete(stripeEvents).where(sql`${stripeEvents.id} like 'evt\\_%'`);
   });
   afterAll(async () => {
     await closeDb(db);
