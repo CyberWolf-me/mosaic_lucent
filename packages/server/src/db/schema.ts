@@ -1371,3 +1371,51 @@ export const wsTickets = pgTable(
 
 export type DbWsTicket = typeof wsTickets.$inferSelect;
 export type DbNewWsTicket = typeof wsTickets.$inferInsert;
+
+/**
+ * The transactional outbox (docs/20 P2, advisory §18/§19).
+ *
+ * The problem it solves is the one the advisory states: "the DB transaction
+ * succeeds but the event publish fails, or vice versa." A row here is written
+ * INSIDE the same transaction that changed state, so a committed change and
+ * its announcement cannot disagree — either both are visible or neither is.
+ * A separate dispatcher later reads undispatched rows and delivers them
+ * at-least-once; consumers are idempotent by `id`.
+ *
+ * `payload` is deliberately small and notification-shaped — an id, a seq, a
+ * name — never op payloads or board content. This is the same rule the
+ * realtime fanout follows (`FANOUT_MAX_PAYLOAD_BYTES`): a queue row is a
+ * pointer to truth, not a second copy of it (ADR 0040: a projection never
+ * becomes a second database).
+ */
+export const outboxEvents = pgTable(
+  "outbox_events",
+  {
+    id: text("id").primaryKey(),
+    /** The event name, from the fixed OutboxEventType vocabulary. */
+    type: text("type").notNull(),
+    /** Scope, when the event concerns one: lets a consumer filter cheaply. */
+    boardId: text("board_id"),
+    orgId: text("org_id"),
+    /** Small, notification-shaped JSON. Never the op payload. */
+    payload: jsonb("payload").notNull().default({}),
+    createdAt: bigint("created_at", { mode: "number" }).notNull(),
+    dispatchedAt: bigint("dispatched_at", { mode: "number" }),
+    attempts: bigint("attempts", { mode: "number" }).notNull().default(0),
+    lastError: text("last_error"),
+  },
+  (t) => ({
+    /**
+     * The dispatcher's only hot query: undispatched rows, oldest first.
+     * A partial index keeps it proportional to the backlog rather than to
+     * every event ever written.
+     */
+    pendingIdx: index("outbox_events_pending_idx").on(t.createdAt),
+    // "what happened to this board?" — the operator's question.
+    boardIdx: index("outbox_events_board_idx").on(t.boardId, t.createdAt),
+    typeIdx: index("outbox_events_type_idx").on(t.type, t.createdAt),
+  }),
+);
+
+export type DbOutboxEvent = typeof outboxEvents.$inferSelect;
+export type DbNewOutboxEvent = typeof outboxEvents.$inferInsert;

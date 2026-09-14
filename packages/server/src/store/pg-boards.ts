@@ -1,7 +1,15 @@
 import { and, asc, desc, eq, exists, gt, isNull, or, sql } from "drizzle-orm";
+import { randomUUID } from "node:crypto";
 import { parseWorkspaceOrDefault, type Workspace, type Operation } from "@lucent/core";
 import type { Db } from "../db/client.js";
-import { boardMembers, boards, boardShareLinks, boardSnapshots, opLog } from "../db/schema.js";
+import {
+  boardMembers,
+  boards,
+  boardShareLinks,
+  boardSnapshots,
+  opLog,
+  outboxEvents,
+} from "../db/schema.js";
 import type {
   AppendResult,
   BoardMember,
@@ -265,6 +273,17 @@ export class PostgresBoardStore implements BoardStore {
     };
     const approvedBy = actor.approvedBy ?? null;
     const initiatedBy = actor.initiatedBy ?? null;
+    // P2 (docs/20): the committed batch announces itself in the SAME
+    // statement that makes it real. This is the transactional outbox at its
+    // strongest — not "a row written in the same transaction" but a row
+    // written by the same statement, so there is no window at all between
+    // the op log gaining a row and the outbox gaining its event. A rollback
+    // (or an `on conflict do nothing` that inserts nothing) takes both.
+    //
+    // The payload is `{boardId, seq}` — notification-shaped, exactly the
+    // shape the pg_notify fanout uses, and for the same reason: a subscriber
+    // resyncs from the op log rather than trusting a payload copy.
+    const outboxId = randomUUID();
     const result = await this.target.db.execute(sql`
       with prior as (
         select "seq", "operation_id" from ${opLog}
@@ -284,12 +303,21 @@ export class PostgresBoardStore implements BoardStore {
            and not exists (select 1 from prior)
          on conflict ("board_id", "seq") do nothing
          returning "seq", "operation_id"
+      ), evt as (
+        insert into ${outboxEvents} ("id", "type", "board_id", "org_id", "payload", "created_at")
+        select ${outboxId}, 'BoardOperationCommitted', ${entry.boardId},
+               ${entry.orgId ?? null}::text,
+               jsonb_build_object('boardId', ${entry.boardId}::text, 'seq', ins.seq),
+               ${entry.at}::bigint
+          from ins
+        returning "id"
       )
       select (select seq from ins) as seq,
              (select operation_id from ins) as operation_id,
              (select seq from head) as head,
              (select seq from prior) as prior_seq,
-             (select operation_id from prior) as prior_operation_id
+             (select operation_id from prior) as prior_operation_id,
+             (select id from evt) as outbox_id
     `);
     const row = result.rows[0] as
       | {

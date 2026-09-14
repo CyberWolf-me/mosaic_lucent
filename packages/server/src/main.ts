@@ -429,6 +429,20 @@ const tickets: import("./realtimeTicket.js").TicketStore = db
   ? new (await import("./realtimeTicket.js")).PgTicketStore(db, config.realtimeTicketTtlMs)
   : new InMemoryTicketStore(config.realtimeTicketTtlMs);
 
+// P2 (docs/20): the outbox and its dispatcher. Durable when Postgres is
+// configured — the whole point is that a committed change and its
+// announcement cannot disagree, which needs a table. Without a database there
+// is no transaction to join and nothing a crash could lose, so the in-memory
+// twin is the honest degradation (ADR 0006's optional-store rule).
+//
+// The dispatcher runs every second and drains a bounded batch. It is
+// deliberately in-process here; P3 moves it under the worker role, at which
+// point this becomes the `LUCENT_ROLE=all` fallback.
+const outbox: import("./outbox.js").OutboxStore = db
+  ? new (await import("./outbox.js")).PostgresOutbox(db)
+  : new (await import("./outbox.js")).InMemoryOutbox();
+const outboxDispatcher = new (await import("./outbox.js")).OutboxDispatcher({ store: outbox });
+
 // M7 / M4 storage: the asset gateway. Stage B6 closes the deferred gap: the
 // metadata store is Postgres when a database is configured (the `assets` table
 // was always there; every uploaded asset row previously evaporated with the
@@ -563,6 +577,11 @@ const pruneTimer = setInterval(() => {
   void tickets.prune();
 }, 10 * 60_000);
 pruneTimer.unref?.();
+
+// P2: start the outbox drain. Every second, a bounded batch; a no-op tick
+// costs one indexed SELECT of zero rows. Started here (not at construction)
+// so the store exists before anything can be queued against it.
+outboxDispatcher.start();
 
 // M4.3: the webhook sweep. Stripe redelivers for ~3 days; this is what picks
 // up the rows that outlive those retries, plus deliveries whose worker died
@@ -837,6 +856,11 @@ async function shutdown(signal: string): Promise<void> {
   shuttingDown = true;
   console.log(`[lucent] received ${signal}, shutting down…`);
   clearInterval(pruneTimer);
+  // Drain once before closing the pool: a committed event that has not been
+  // delivered is the one thing this process is holding that a restart would
+  // otherwise have to wait a full interval to pick up.
+  outboxDispatcher.stop();
+  await outboxDispatcher.tick().catch(() => undefined);
   realtime.close();
   await new Promise<void>((resolve) => server.close(() => resolve()));
   if (db) await closeDb(db);

@@ -134,6 +134,13 @@ export function aiActor(initiatedBy: string, approvedBy?: string): OperationActo
 export type OpAppend = Omit<LoggedOpEntry, "seq"> & {
   boardId: string;
   expectedSeq?: number;
+  /**
+   * The board's owning org, when known (P2). It rides the outbox event this
+   * append writes (`BoardOperationCommitted`), so a consumer that needs to
+   * scope by tenant — an email, a usage rollup — reads it from the event
+   * instead of looking the board up again.
+   */
+  orgId?: string;
 };
 
 /**
