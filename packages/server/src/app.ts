@@ -817,7 +817,12 @@ export function createApp(deps: AppDeps): App {
     const decision = usage.check(clientKey(req));
     if (decision.allowed) return true;
 
-    telemetry.record({ kind: "refused", route, reason: decision.reason ?? "rate" });
+    telemetry.record({
+      kind: "refused",
+      route,
+      reason: decision.reason ?? "rate",
+      requestId: traceOf(req),
+    });
     sendWithHeaders(
       res,
       429,
@@ -981,7 +986,7 @@ export function createApp(deps: AppDeps): App {
     const key = `${clientKey(req)}|${normalizeForKey(email)}`;
     const decision = authLimiter.check(key);
     if (decision.allowed) return true;
-    telemetry.record({ kind: "refused", route, reason: "rate" });
+    telemetry.record({ kind: "refused", route, reason: "rate", requestId: traceOf(req) });
     sendWithHeaders(
       res,
       429,
@@ -1003,7 +1008,7 @@ export function createApp(deps: AppDeps): App {
     const key = `account|${clientKey(req)}`;
     const decision = authLimiter.check(key);
     if (decision.allowed) return true;
-    telemetry.record({ kind: "refused", route, reason: "rate" });
+    telemetry.record({ kind: "refused", route, reason: "rate", requestId: traceOf(req) });
     sendWithHeaders(
       res,
       429,
@@ -1044,7 +1049,7 @@ export function createApp(deps: AppDeps): App {
     for (const key of [`mail|${ip}|${normalizeForKey(email)}`, `mail|${ip}`]) {
       const decision = authLimiter.check(key);
       if (decision.allowed) continue;
-      telemetry.record({ kind: "refused", route, reason: "rate" });
+      telemetry.record({ kind: "refused", route, reason: "rate", requestId: traceOf(req) });
       sendWithHeaders(
         res,
         429,
@@ -1088,7 +1093,7 @@ export function createApp(deps: AppDeps): App {
       hasSessionCookie,
     );
     if (result.ok) return true;
-    telemetry.record({ kind: "refused", route, reason: `csrf:${result.reason}` });
+    telemetry.record({ kind: "refused", route, reason: `csrf:${result.reason}`, requestId: traceOf(req) });
     send(res, 403, { error: "csrf rejected", reason: result.reason });
     return false;
   }
@@ -1167,9 +1172,19 @@ export function createApp(deps: AppDeps): App {
    * that will name the wrong tier or the wrong reset date, and those strings are
    * the upgrade prompt the whole tier system exists to produce.
    */
-  function refuseByPlan(res: ServerResponse, route: string, refusal: EntitlementRefusal): false {
+  function refuseByPlan(
+    req: IncomingMessage,
+    res: ServerResponse,
+    route: string,
+    refusal: EntitlementRefusal,
+  ): false {
     entitlementRefusals.inc({ key: refusal.body.key, plan: refusal.body.plan });
-    telemetry.record({ kind: "refused", route, reason: `plan:${refusal.body.key}` });
+    telemetry.record({
+      kind: "refused",
+      route,
+      reason: `plan:${refusal.body.key}`,
+      requestId: traceOf(req),
+    });
     send(res, refusal.status, refusal.body);
     return false;
   }
@@ -1186,6 +1201,7 @@ export function createApp(deps: AppDeps): App {
    * bill accurately, which the usage log does regardless.
    */
   async function gateMonthly(
+    req: IncomingMessage,
     res: ServerResponse,
     orgId: string,
     key: MeteredEntitlementKey,
@@ -1197,7 +1213,9 @@ export function createApp(deps: AppDeps): App {
     // proceed and nothing here is metered, so there is nothing to warn about.
     if (!entitlements) return null;
     const decision = await entitlements.checkMonthly(orgId, key, amount);
-    if (!decision.allowed && decision.refusal) return refuseByPlan(res, route, decision.refusal);
+    if (!decision.allowed && decision.refusal) {
+      return refuseByPlan(req, res, route, decision.refusal);
+    }
     return allowanceHint(decision, amount);
   }
 
@@ -1208,6 +1226,7 @@ export function createApp(deps: AppDeps): App {
    * rather than the current one.
    */
   async function gateStanding(
+    req: IncomingMessage,
     res: ServerResponse,
     orgId: string,
     key: NumericEntitlementKey,
@@ -1218,11 +1237,12 @@ export function createApp(deps: AppDeps): App {
     if (!entitlements) return true;
     const decision = await entitlements.decide(orgId, key, used, amount);
     if (decision.allowed || !decision.refusal) return true;
-    return refuseByPlan(res, route, decision.refusal);
+    return refuseByPlan(req, res, route, decision.refusal);
   }
 
   /** Set-valued: is this export format included in the org's tier? */
   async function gateFormat(
+    req: IncomingMessage,
     res: ServerResponse,
     orgId: string,
     format: ExportFormat,
@@ -1231,7 +1251,7 @@ export function createApp(deps: AppDeps): App {
     if (!entitlements) return true;
     const decision = await entitlements.checkFormat(orgId, format);
     if (decision.allowed || !decision.refusal) return true;
-    return refuseByPlan(res, route, decision.refusal);
+    return refuseByPlan(req, res, route, decision.refusal);
   }
 
   /**
@@ -1663,6 +1683,7 @@ export function createApp(deps: AppDeps): App {
         });
     },
     meter,
+    trace: traceOf,
     requireUserIfNeeded,
     requireUser,
     orgRoleFor,
@@ -2982,7 +3003,7 @@ export function createApp(deps: AppDeps): App {
         // above its new ceiling with boards it must still be able to save.
         if (!existing) {
           const boardCount = await boardStore.countForOrg(targetOrgId);
-          if (!(await gateStanding(res, targetOrgId, "boards", boardCount, "/api/boards"))) return;
+          if (!(await gateStanding(req, res, targetOrgId, "boards", boardCount, "/api/boards"))) return;
         }
         const now = Date.now();
         const stored = {
@@ -3503,7 +3524,7 @@ export function createApp(deps: AppDeps): App {
         // Billed to the board's org rather than the caller's: the board is the
         // thing being exported, and its org is the one paying for it. A guest
         // editor from another workspace does not spend their own allowance here.
-        if (!(await gateFormat(res, guard.board.orgId, format, "/api/boards/:id/export"))) return;
+        if (!(await gateFormat(req, res, guard.board.orgId, format, "/api/boards/:id/export"))) return;
         meterUsage(guard.board.orgId, "export", 1, { boardId: id, format, by: guard.user.id });
         send(res, 200, { ok: true, boardId: id, format });
       } catch (err) {
@@ -3542,7 +3563,7 @@ export function createApp(deps: AppDeps): App {
         // caller on a deployment with auth off has no org and no allowance to
         // spend; `meter` above is what bounds them.
         const allowance = aiCtx.orgId
-          ? await gateMonthly(res, aiCtx.orgId, "ai.generationsPerMonth", "/api/generate")
+          ? await gateMonthly(req, res, aiCtx.orgId, "ai.generationsPerMonth", "/api/generate")
           : null;
         if (allowance === false) return;
         const result = await handleGenerate(provider, parsed, auth.userId, authoritative);
@@ -3676,7 +3697,7 @@ export function createApp(deps: AppDeps): App {
             ? { boardId: storedBoard.id, store: boardStore }
             : undefined;
         const allowance = aiCtx.orgId
-          ? await gateMonthly(res, aiCtx.orgId, "ai.generationsPerMonth", "/api/generate/stream")
+          ? await gateMonthly(req, res, aiCtx.orgId, "ai.generationsPerMonth", "/api/generate/stream")
           : null;
         if (allowance === false) {
           // The gate answered with its own JSON; the stream never opened.
@@ -3769,7 +3790,7 @@ export function createApp(deps: AppDeps): App {
         // caller's first org rather than to any board's.
         const imageCtx = await resolveAiContext(auth.userId, undefined);
         const allowance = imageCtx.orgId
-          ? await gateMonthly(res, imageCtx.orgId, "ai.generationsPerMonth", "/api/image")
+          ? await gateMonthly(req, res, imageCtx.orgId, "ai.generationsPerMonth", "/api/image")
           : null;
         if (allowance === false) return;
         const result = await handleImage(imageProvider, parsed);

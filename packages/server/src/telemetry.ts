@@ -9,8 +9,21 @@
  * mirror events into the Prometheus registry.
  */
 
+/**
+ * P1 (docs/20): the correlation id of the HTTP request that caused this
+ * event. Optional because the vocabulary predates it and some events are
+ * timer-driven (prunes, product counters) with no request to name. A log
+ * field, never a metric label — the D10 cardinality rule holds: nothing
+ * here becomes a Prometheus label, so the request id cannot explode the
+ * series space. It travels with the event to every sink, so an access-log
+ * line and its outcome row can be joined by one id.
+ */
+export interface Correlated {
+  requestId?: string;
+}
+
 export type TelemetryEvent =
-  | {
+  | ({
       kind: "generate";
       ms: number;
       provider: string;
@@ -26,29 +39,29 @@ export type TelemetryEvent =
        */
       outcome: "success" | "provider" | "validation" | "other";
       repaired: boolean;
-    }
-  | { kind: "image"; ms: number; provider: string }
+    } & Correlated)
+  | ({ kind: "image"; ms: number; provider: string } & Correlated)
   /**
    * The answer path (Stage C1): a question about the board, answered with
    * citations. Its own kind rather than a generate row with operations: 0 —
    * answer latency and citation survival are the signals this surface needs
    * to watch, and folding them into generate would make both unreadable.
    */
-  | { kind: "ask"; ms: number; provider: string; citations: number }
+  | ({ kind: "ask"; ms: number; provider: string; citations: number } & Correlated)
   /**
    * The AI-propose path (Stage D9): a narrowing selection that became a
    * pending external proposal. Its own kind for the same reason as ask —
    * selection latency and the candidates→selected ratio are this surface's
    * signals, invisible inside a generate row.
    */
-  | {
+  | ({
       kind: "ai-propose";
       ms: number;
       provider: string;
       candidates: number;
       selected: number;
-    }
-  | { kind: "error"; route: string; status: number; message: string }
+    } & Correlated)
+  | ({ kind: "error"; route: string; status: number; message: string } & Correlated)
   /**
    * A request we turned away, tagged with why. `plan:<entitlement key>` is a
    * bucket of its own rather than part of `quota` because the two ask for
@@ -62,7 +75,7 @@ export type TelemetryEvent =
       kind: "refused";
       route: string;
       reason: "rate" | "quota" | `csrf:${string}` | `plan:${string}`;
-    }
+    } & Correlated
   /**
    * PRODUCT ANALYTICS (2026-09 review §10): "what do users actually do?" —
    * the behavioral counters, as distinct from the technical RED series. The
@@ -85,6 +98,8 @@ export interface ErrorRecord {
   route: string;
   status: number;
   message: string;
+  /** The request's correlation id, when the error rode a request (P1). */
+  requestId?: string;
 }
 
 export interface MetricsSnapshot {
@@ -243,6 +258,7 @@ export class Telemetry {
           status: event.status,
           // Truncated: an error detail can carry a whole provider response.
           message: event.message.slice(0, 300),
+          ...(event.requestId ? { requestId: event.requestId } : {}),
         });
         if (this.recentErrors.length > ERROR_BUFFER) this.recentErrors.shift();
         break;

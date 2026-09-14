@@ -81,6 +81,7 @@ export const registerAskRoutes: RegisterRoutes = (router, s) => {
     requireBoardRole,
     requireCsrf,
     meter,
+    trace,
     resolveAiContext,
     gateMonthly,
     meterUsage,
@@ -129,7 +130,7 @@ export const registerAskRoutes: RegisterRoutes = (router, s) => {
       send(res, 402, { error: "no organization to bill this question to" });
       return;
     }
-    const allowance = await gateMonthly(res, billTo, "ai.generationsPerMonth", route);
+    const allowance = await gateMonthly(req, res, billTo, "ai.generationsPerMonth", route);
     if (allowance === false) return;
 
     // The visible window — the same arithmetic the history route uses, so the
@@ -185,6 +186,7 @@ export const registerAskRoutes: RegisterRoutes = (router, s) => {
         route,
         status: 502,
         message: (err as Error).message,
+        requestId: trace(req),
       });
       send(res, 502, { error: "provider failed", detail: (err as Error).message });
       return;
@@ -256,6 +258,7 @@ export const registerAskRoutes: RegisterRoutes = (router, s) => {
       ms: Date.now() - started,
       provider: provider.name,
       citations: citations.length,
+      requestId: trace(req),
     });
 
     send(

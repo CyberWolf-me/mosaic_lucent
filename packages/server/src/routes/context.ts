@@ -152,6 +152,15 @@ export interface RouteServices {
   // that by returning false / `{ ok: false }` / undefined. A route's only
   // correct response to a refusal is to return.
   meter(req: IncomingMessage, res: ServerResponse, route: string): boolean;
+  /**
+   * P1 (docs/20): the correlation id of the request a route module is
+   * handling — the same id `observe` stamped into the access-log line, the
+   * `x-request-id` response header, and every telemetry event the request
+   * produced. Delivered as a function (not the WeakMap) so a route cannot
+   * outlive the request object it names; the id is undefined only if the
+   * route runs outside `observe`, which no registered route does.
+   */
+  trace(req: IncomingMessage): string | undefined;
   requireUserIfNeeded(
     req: IncomingMessage,
     res: ServerResponse,
@@ -191,6 +200,7 @@ export interface RouteServices {
   // --- Seams ----------------------------------------------------------------
   notifyUser<K extends NotificationKind>(event: NotifyEvent<K>): void;
   gateMonthly(
+    req: IncomingMessage,
     res: ServerResponse,
     orgId: string,
     key: MeteredEntitlementKey,
@@ -198,6 +208,7 @@ export interface RouteServices {
     amount?: number,
   ): Promise<AllowanceHint | null | false>;
   gateStanding(
+    req: IncomingMessage,
     res: ServerResponse,
     orgId: string,
     key: NumericEntitlementKey,
@@ -206,6 +217,7 @@ export interface RouteServices {
     amount?: number,
   ): Promise<boolean>;
   gateFormat(
+    req: IncomingMessage,
     res: ServerResponse,
     orgId: string,
     format: ExportFormat,

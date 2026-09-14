@@ -60,7 +60,7 @@ function resolveProvider(
 }
 
 export const registerIntegrationRoutes: RegisterRoutes = (router, s) => {
-  const { integrations, send, readBody, requireUser, requireOrgRole, requireBoardRole, requireCsrf, meter, commitForBoard, broadcastProposal, auditRow, provider: llmProvider, resolveAiContext, gateMonthly, meterUsage, telemetry, boardStore, usageStore } = s;
+  const { integrations, send, readBody, requireUser, requireOrgRole, requireBoardRole, requireCsrf, meter, trace, commitForBoard, broadcastProposal, auditRow, provider: llmProvider, resolveAiContext, gateMonthly, meterUsage, telemetry, boardStore, usageStore } = s;
 
   // ---- The org admin surface (owner floor — credentials live here) --------
   router.get("/api/orgs/:id/integrations", async (ctx) => {
@@ -1031,7 +1031,7 @@ router.post("/api/boards/:id/integrations/:provider/propose-ai", async (ctx) => 
   // it — the generate path's own rule). The monthly allowance runs just
   // before the model call; a parse error or a connection refusal above
   // never reaches it.
-  const allowance = await gateMonthly(res, guard.board.orgId, "ai.generationsPerMonth", route);
+  const allowance = await gateMonthly(req, res, guard.board.orgId, "ai.generationsPerMonth", route);
   if (allowance === false) return;
 
   // THE UPPER BOUND: the same shared builder the human route calls — the
@@ -1166,6 +1166,7 @@ router.post("/api/boards/:id/integrations/:provider/propose-ai", async (ctx) => 
     candidates: items.length,
     selected: narrowed.length,
     ...(body.nodeIds ? { mode: "plan-bridge" as const } : {}),
+    requestId: trace(req),
   });
 
   // THE PREVIEW: the same shape the human route answers, plus the AI

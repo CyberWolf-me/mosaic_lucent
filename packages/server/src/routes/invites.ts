@@ -58,7 +58,7 @@ export function registerInviteRoutes(router: AppRouter, s: RouteServices): void 
       // strangers being bounced from a workspace they were told to join.
       const pending = await inviteStore.listForOrg(orgId, now);
       const seatsUsed = (await userStore.countMembers(orgId)) + pending.length;
-      if (!(await gateStanding(res, orgId, "seats", seatsUsed, "/api/orgs/:id/invites"))) return;
+      if (!(await gateStanding(req, res, orgId, "seats", seatsUsed, "/api/orgs/:id/invites"))) return;
       // Imported here rather than at module scope because the surrounding try is
       // the whole point: nothing in this route may reach the client except a 204
       // or the catch's 400.
@@ -218,7 +218,7 @@ export function registerInviteRoutes(router: AppRouter, s: RouteServices): void 
       );
       if (!alreadyMember) {
         const seatsUsed = await userStore.countMembers(invite.orgId);
-        const ok = await gateStanding(res, invite.orgId, "seats", seatsUsed, "/api/invites/accept");
+        const ok = await gateStanding(req, res, invite.orgId, "seats", seatsUsed, "/api/invites/accept");
         if (!ok) return;
       }
       await userStore.setMembership({ userId: user.id, orgId: invite.orgId, role: invite.role });

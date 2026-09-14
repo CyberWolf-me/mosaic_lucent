@@ -141,9 +141,9 @@ runs.
 No behavior change. Makes the target explicit so later phases have something
 to diff against.
 
-- [ ] This document (§3, §4) — the two diagrams the advisory's closing point
+- [x] This document (§3, §4) — the two diagrams the advisory's closing point
       asks for.
-- [ ] **ADR 0040 — the state taxonomy.** Canonical: op log, snapshots,
+- [x] **ADR 0040 — the state taxonomy.** Canonical: op log, snapshots,
       meeting transcripts + provenance, execution ledger, integration links,
       identity/org state. Derived: search corpus, intelligence projections,
       plan/execution views, metrics, rollups. Ephemeral: presence, cursors,
@@ -151,11 +151,11 @@ to diff against.
       truth; a projection never becomes a second database; a provider link
       never enters workspace semantics. (All three rules are already followed
       in code — ADRs 0024/0026/0033 — this ADR states the class invariant.)
-- [ ] **ADR 0041 — one mutation path.** §38's invariant, pinned: user, AI,
+- [x] **ADR 0041 — one mutation path.** §38's invariant, pinned: user, AI,
       MCP, and inbound webhooks all converge on the same authenticate →
       authorize → validate → commit → persist → seq → broadcast path. The
       test that proves it already exists implicitly across suites; name it.
-- [ ] **Fix the Helm chart autoscaling defect.** `deployment.yaml:7` gates
+- [x] **Fix the Helm chart autoscaling defect.** `deployment.yaml:7` gates
       `replicas` on `.Values.autoscaling.enabled`, but `values.yaml` defines
       no `autoscaling` block and no HPA template exists. Setting
       `autoscaling.enabled=true` in an overlay silently drops the deployment
@@ -163,7 +163,7 @@ to diff against.
       `hpa.yaml` template, or remove the conditional. Acceptance:
       `helm template` with and without the flag renders the intended replica
       count; `helm lint` passes.
-- [ ] **Decide the WebSocket routing model** (decision recorded, code in
+- [x] **Decide the WebSocket routing model** (decision recorded, code in
       P5). `InMemoryTicketStore` is process-local **by design** —
       `two-instance.test.ts` pins that a ticket minted on A does not work on
       B. With two API instances behind the ingress (no session affinity
@@ -180,19 +180,19 @@ to diff against.
 `x-request-id` or generated, echoed back, in error bodies and access logs).
 It stops at the route.
 
-- [ ] Thread `requestId` into `telemetry.record` events (the fixed vocabulary
+- [x] Thread `requestId` into `telemetry.record` events (the fixed vocabulary
       in `telemetry.ts` gains an optional `requestId` field, keeping the
       cardinality rule — it is a log field, not a metric label).
-- [ ] Carry it through `handleGenerate`/`handleGenerateStream` so a
+- [x] Carry it through `handleGenerate`/`handleGenerateStream` so a
       generation outcome row names the request that caused it; same for
       `/api/image` and Ask.
-- [ ] Map the advisory's domain IDs onto what already exists rather than
+- [x] Map the advisory's domain IDs onto what already exists rather than
       inventing: `requestId` (everywhere), `boardId` + op `seq` (mutation
       path), meeting id (transcript rows), `lucentActionId` +
       `requestId` (execution ledger — already the idempotency key shape),
       `providerRequestId` (Stripe events). Gap: connect requestId → these
       records so one id follows browser → API → AI → op → PG → WS → provider.
-- [ ] **Acceptance:** a single `/api/generate` request's id appears in the
+- [x] **Acceptance:** a single `/api/generate` request's id appears in the
       access log line, the telemetry generate event, and — on failure — the
       error record. Test: capture the echoed `x-request-id`, read
       `/metrics`, assert the same id in the outcome event.
