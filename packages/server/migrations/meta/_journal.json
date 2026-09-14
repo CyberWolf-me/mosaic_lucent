@@ -169,6 +169,34 @@
       "when": 1789335377355,
       "tag": "0023_smiling_darkhawk",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1789377239858,
+      "tag": "0024_flawless_maximus",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1789378695000,
+      "tag": "0025_silly_pestilence",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1789379528911,
+      "tag": "0026_jazzy_stature",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1789382800376,
+      "tag": "0027_rich_silver_sable",
+      "breakpoints": true
     }
   ]
 }

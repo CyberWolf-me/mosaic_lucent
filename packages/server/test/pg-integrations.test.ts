@@ -1,7 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { closeDb, createDb, type Db } from "../src/db/client.js";
 import { migrate } from "../src/db/migrate.js";
-import { boards as boardsTable, organizations, users as usersTable } from "../src/db/schema.js";
+import { like } from "drizzle-orm";
+import { boards as boardsTable, integrationInboundChanges, integrationWebhookEvents, organizations, users as usersTable } from "../src/db/schema.js";
 import { InMemoryExecutionLedger } from "../src/integrations/ledger.js";
 import { InMemoryIntegrationActionStore, InMemoryIntegrationStore } from "../src/integrations/integrations.js";
 import {
@@ -425,6 +426,22 @@ describeIf("Postgres integration parity (needs LUCENT_TEST_DATABASE_URL)", () =>
         })
         .onConflictDoNothing();
     }
+
+    // Clear this suite's own rows from any previous run.
+    //
+    // The run `tag` stops ids COLLIDING, but it does not stop them
+    // ACCUMULATING — and `pending()` is bounded (`limit * 2`, then a slice),
+    // so a table carrying residue from earlier runs pushes the current run's
+    // fresh rows out of the window. The webhook sweep assertion then fails
+    // for a reason that has nothing to do with the sweep. Scoped deletes, not
+    // a blanket TRUNCATE: other suites share this database and may be running
+    // concurrently.
+    await target.db
+      .delete(integrationWebhookEvents)
+      .where(like(integrationWebhookEvents.id, `pgw%`));
+    await target.db
+      .delete(integrationInboundChanges)
+      .where(like(integrationInboundChanges.id, `pgi%`));
   });
   afterAll(async () => {
     await closeDb(target);

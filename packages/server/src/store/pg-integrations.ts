@@ -667,7 +667,13 @@ export class PostgresIntegrationWebhookEventStore implements IntegrationWebhookE
     if (record.status === "failed") {
       const reclaimed = await this.db
         .update(integrationWebhookEvents)
-        .set({ claimedAt: input.now, attempts: record.attempts + 1 })
+        // `status: "received"` is load-bearing, not cosmetic: a re-claimed
+        // FAILED row must leave the failed set. Leaving it failed with a
+        // fresh `claimedAt` made the row invisible to `pending()`, whose
+        // filter is `claimedAt <= staleAt` — a re-claimed row was therefore
+        // never fed back to the sweep, which is the opposite of what
+        // re-claiming it means.
+        .set({ status: "received", claimedAt: input.now, attempts: record.attempts + 1 })
         .where(
           and(
             eq(integrationWebhookEvents.id, input.id),

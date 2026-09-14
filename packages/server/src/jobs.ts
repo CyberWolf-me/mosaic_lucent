@@ -99,9 +99,9 @@ export interface JobQueue {
    * wait for it, so this is how the retry ladder is exercised without
    * mocking the clock. Not used by production paths.
    */
-  requeueNow?(id: string): Promise<void>;
+  requeueNow(id: string): Promise<void>;
   /** Test/debug hook: read one job's raw record, whatever its status. */
-  raw?(id: string): Promise<Job | undefined>;
+  raw(id: string): Promise<Job | undefined>;
 }
 
 /**

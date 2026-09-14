@@ -147,7 +147,7 @@ function contractBody(make: () => JobQueue, reset: () => Promise<void>) {
       for (let i = 0; i < 10; i += 1) {
         // `runAfter` is pushed forward by the backoff; jump it back so the
         // next pass can claim it, which is what a real clock would do.
-        await q.requeueNow?.(job.id);
+        await q.requeueNow(job.id);
         const [claimed] = await q.claim(["ai"], "w", 10);
         if (!claimed) break;
         await q.fail(job.id, `failure ${i}`);
@@ -156,7 +156,7 @@ function contractBody(make: () => JobQueue, reset: () => Promise<void>) {
       const rows = await q.raw(job.id);
       expect(rows?.status).toBe("failed");
       // Terminal: never claimed again, no matter how long we wait.
-      await q.requeueNow?.(job.id);
+      await q.requeueNow(job.id);
       expect(await q.claim(["ai"], "w", 10)).toHaveLength(0);
     });
 

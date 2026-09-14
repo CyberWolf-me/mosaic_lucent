@@ -34,6 +34,7 @@ describe intent; 9 is the original build plan and is explicitly superseded.
 | 18  | [18-structured-visual-engine.md](./18-structured-visual-engine.md)             | The structured visual engine: phases, gates, the ELK comparison, the BPMN lens                                   |
 | 19  | [19-bpmn-subset.md](./19-bpmn-subset.md)                             | The BPMN subset: the license decision (no bpmn-js — XML interchange only), supported elements |
 | 20  | [20-production-architecture.md](./20-production-architecture.md)             | Production architecture: the advisory audited, logical/runtime diagrams, phases P0–P7 |
+| 21  | [21-p7-trigger-ledger.md](./21-p7-trigger-ledger.md)                         | P7's evidence gates: what measurement would justify pgvector, replicas, archival, Redis — and which of them are collectable today |
 | —   | [checklist.md](./checklist.md)                                                 | **Audited current status**, feature by feature. The source of truth. |
 
 ### Decisions and operations

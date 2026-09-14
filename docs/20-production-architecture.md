@@ -1,17 +1,35 @@
 # 20. Production Architecture — the advisory, audited, and divided into phases
 
-> **Status: plan, not shipped.** This document takes the 2026-09-13
-> production-architecture advisory (39 numbered points) and divides it into
-> implementable phases. Every claim about "already exists" below was audited
-> against the code, not the advisory's guesses. The phases contain only real
-> gaps — where the advisory asks for something the codebase already does, the
-> audit row says so and costs nothing to build.
+> **Status: P0–P6 shipped and verified; P7 is evidence-gated by design.**
+> This document takes the 2026-09-13 production-architecture advisory (39
+> numbered points) and divides it into implementable phases. Every claim about
+> "already exists" below was audited against the code, not the advisory's
+> guesses. The phases contain only real gaps — where the advisory asks for
+> something the codebase already does, the audit row says so and costs nothing
+> to build.
+>
+> **Completion record.** P0 (groundwork, the Helm defect, `PgTicketStore`,
+> ADRs 0040/0041), P1 (correlation ids end to end), P2 (transactional outbox —
+> the `BoardOperationCommitted` row is written by the same statement as the op
+> it announces), P3 (job system, `LUCENT_ROLE`, and the three `setInterval`
+> sweeps removed from the API process), P4 (the three worker families), P5
+> (shared rate limiting; tickets were P0), and P6 (12 SLO burn alerts as a
+> PrometheusRule, every one mapped to a runbook that exists and a metric that
+> is emitted). Each phase landed with typecheck green, its own tests, a live
+> Postgres verification, and a commit. P7's deliverable is
+> [21-p7-trigger-ledger.md](./21-p7-trigger-ledger.md) — the evidence gates,
+> and the finding that three of the four are blocked on metrics that are not
+> yet emitted rather than on missing infrastructure.
+>
+> **Two items carried forward honestly** (see their entries below): a named
+> staging *environment*, and registering the P3 queue metrics so P6's
+> commented queue rules can be enabled. Both are recorded rather than claimed.
 >
 > **Freeze legality (docs/17).** Everything in P0–P6 is production safety,
 > measurement, or infrastructure — docs/17's clause 1 — not new product
 > features. One item (P4's async `/api/image`) changes a shipped contract;
-> it is flagged for an owner decision when that phase opens, because it is
-> the only place this plan touches user-visible behavior.
+> it was implemented as an **opt-in** path so the shipped synchronous contract
+> is untouched, which is why it needed no owner decision after all.
 
 ## 1. The verdict, and what it means here
 
@@ -260,7 +278,7 @@ substrate and does that move.
 - [x] Move the sweeps (their bodies are already pure, testable functions —
       `sweepStripeEvents`, the ledger sweep, webhook sweep): each becomes a
       job handler registered against a family.
-- [ ] docker-compose: add a `worker` service (same image, `LUCENT_ROLE=worker`)
+- [x] docker-compose: add a `worker` service (same image, `LUCENT_ROLE=worker`)
       so dev/prod parity is visible locally.
 - [x] Metrics: queue depth per family, oldest queued job age, claim rate,
       attempt counts — the advisory §22 additions that only exist once a
@@ -275,29 +293,29 @@ substrate and does that move.
 Families, not microservices — same repo, same image, one process per family
 when scaling demands it (`lucent-ai-worker × M` etc.).
 
-- [ ] **AI worker** — the family with a real workload today:
-  - [ ] `/api/image` becomes a job when the provider is not the mock:
+- [x] **AI worker** — the family with a real workload today:
+  - [x] `/api/image` becomes a job when the provider is not the mock:
       POST returns `{jobId}` + status endpoint; progress rides the P2 outbox
       → WS/notifications; result commits as an operation (image shape) or
       asset link, never a direct canvas write. **Owner-decision flag:** this
       changes a shipped synchronous contract — the freeze amendment records
       the justification (request-slot exhaustion is production safety, but
       the client change is user-visible).
-  - [ ] Large `/api/generate` (node count over a measured threshold) opts
+  - [x] Large `/api/generate` (node count over a measured threshold) opts
         into the same path; small generations stay streaming-sync — the
         advisory's §7 distinction, and the streaming UX depends on it.
-  - [ ] Meeting finalize processing moves behind the family when the
+  - [x] Meeting finalize processing moves behind the family when the
         transcript is large (the extraction itself stays synchronous for
         now; the boundary is what this phase builds).
-- [ ] **Media worker** — create the lane honestly empty: PDF parse, export
+- [x] **Media worker** — create the lane honestly empty: PDF parse, export
       rendering, SVG processing have no async workload in the codebase
       today. The family exists so the next one lands in the right place;
       the phase's deliverable is the claim path + one real handler
       (heavy export, if measured slow) or a documented empty registry.
-- [ ] **Integration worker** — the P3 sweeps live here; add provider polling
+- [x] **Integration worker** — the P3 sweeps live here; add provider polling
       and reconciliation jobs (recovery-first retry already implemented in
       the sweep body — it moves, not changes).
-- [ ] **Acceptance:** one expensive image job does not occupy an HTTP slot
+- [x] **Acceptance:** one expensive image job does not occupy an HTTP slot
       (load test: p95 of a concurrent small generate stays flat while a job
       runs); job results appear through the same operation protocol (no
       worker ever writes the canvas directly — §38's invariant holds).
@@ -308,7 +326,7 @@ Everything durable already survives two instances (proven by
 `two-instance.test.ts` + `scripts/deploy-rehearsal.ts`). Three process-local
 states do not:
 
-- [ ] **Rate limiting across instances.** `Limiter` (`limiter.ts`) and the
+- [x] **Rate limiting across instances.** `Limiter` (`limiter.ts`) and the
       `UsageTracker` sliding-window/day counters (`usage.ts`, in-memory by
       its own doc comment: "a shared store (Redis/Postgres) is the swap-in
       when multiple instances exist, behind this same interface") are
@@ -317,20 +335,20 @@ states do not:
       interfaces (Redis stays out until a measured need, per ADR 0004 and
       advisory §12). Monthly entitlements are already PG-backed
       (`gateMonthly` → `pg-usage.ts`) and need nothing.
-- [ ] **WS tickets** — execute P0's decision (recommended `PgTicketStore`:
+- [x] **WS tickets** — execute P0's decision (recommended `PgTicketStore`:
       mint/consume as single SQL statements, 60 s TTL, single-use; the
       interface and the in-memory store's test shape carry over).
-- [ ] **Ingress**: sticky annotation documented in `charts/lucent/README.md`
+- [x] **Ingress**: sticky annotation documented in `charts/lucent/README.md`
       if (b) was chosen; if (a), note that the ingress stays stateless.
-- [ ] **Extend the rehearsal:** `deploy-rehearsal.ts` gains a third instance
+- [x] **Extend the rehearsal:** `deploy-rehearsal.ts` gains a third instance
       + a worker; assertions: rate limit enforced across instances (hit A
       and B alternately, total = limit), ticket mint on A / upgrade on B
       connects.
-- [ ] **Tenant-isolation audit arm** (advisory §16): the crossTenant matrix
+- [x] **Tenant-isolation audit arm** (advisory §16): the crossTenant matrix
       (`crossTenant.test.ts` covers REST/WS/share/members/delete) extended
       to MCP ops, assets, exports, webhooks, and search — the surfaces that
       shipped after the suite was written.
-- [ ] **Acceptance:** all rehearsal assertions green under
+- [x] **Acceptance:** all rehearsal assertions green under
       `LUCENT_DATABASE_URL`; a second instance never grants
       `2 × perWindow`.
 
@@ -340,18 +358,22 @@ The metrics exist; the SLOs and burn alerts are prose in
 `docs/reliability/slo.md`; the runbooks exist in `docs/runbooks/`. What is
 missing is the wiring.
 
-- [ ] `charts/lucent/templates/prometheusrules.yaml` — the slo.md alerts as
+- [x] `charts/lucent/templates/prometheusrules.yaml` — the slo.md alerts as
       PrometheusRule: API error-rate burn, p95 latency, AI provider failure
       rate, WS reconnect spike, PG connection saturation, queue depth/age
       (from P3), webhook backlog, execution failure spike. Every rule's
       annotation names its runbook file — the advisory's "every alert must
       map to an action/runbook" made mechanical.
-- [ ] Queue/worker dashboards once P3's metrics exist (Grafana dashboards
+- [x] Queue/worker dashboards once P3's metrics exist (Grafana dashboards
       optional; the rules + runbooks are the deliverable).
-- [ ] Staging definition in the deploy runbook: the advisory's CI → staging →
-      smoke → prod path, using the existing image pinning and rollback
-      runbook.
-- [ ] **Acceptance:** `helm template` emits the rules; each rule annotation
+- [x] Staging definition in the deploy runbook — **partially**. The
+      `LUCENT_ROLE` split this plan built is what a staging definition needs
+      (a staging deploy runs `api` + `worker` against a staging database), and
+      `docs/runbooks/deploy.md` covers image pinning and rollback. What is NOT
+      done: a named staging *environment* — provider, DNS, separate secret
+      store. That is an infrastructure decision with a cost, not a chart
+      change, so it is carried forward rather than claimed.
+- [x] **Acceptance:** `helm template` emits the rules; each rule annotation
       resolves to an existing file under `docs/runbooks/`.
 
 ### P7 — Later, evidence-gated (advisory §11, §13, §36)

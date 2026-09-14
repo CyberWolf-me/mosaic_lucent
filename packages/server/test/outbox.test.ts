@@ -2,8 +2,9 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createWorkspace } from "@lucent/core";
 import { closeDb, createDb, type Db } from "../src/db/client.js";
 import { migrate } from "../src/db/migrate.js";
-import { boards, organizations, outboxEvents, users } from "../src/db/schema.js";
+import { outboxEvents } from "../src/db/schema.js";
 import { PostgresBoardStore } from "../src/store/pg-boards.js";
+import { seedAnchors } from "./helpers/seedAnchors.js";
 import {
   InMemoryOutbox,
   OUTBOX_MAX_ATTEMPTS,
@@ -339,36 +340,12 @@ describe.skipIf(!TEST_URL)("BoardOperationCommitted rides the op-log commit", ()
    * user, reused by every board this suite writes.
    */
   async function seedBoard(boardId: string): Promise<void> {
-    const now = Date.now();
-    const orgId = "org-outbox";
-    await target.db
-      .insert(organizations)
-      .values({ id: orgId, name: "Outbox Org", createdAt: now })
-      .onConflictDoNothing();
-    await target.db
-      .insert(users)
-      .values({
-        id: "user-outbox",
-        email: "outbox@example.com",
-        name: "Outbox",
-        passwordHash: "x",
-        tokenVersion: 0,
-        createdAt: now,
-        updatedAt: now,
-      })
-      .onConflictDoNothing();
-    await target.db
-      .insert(boards)
-      .values({
-        id: boardId,
-        orgId,
-        ownerId: "user-outbox",
-        name: "Outbox board",
-        workspace: createWorkspace(),
-        createdAt: now,
-        updatedAt: now,
-      })
-      .onConflictDoNothing();
+    await seedAnchors(target, {
+      orgId: "org-outbox",
+      userId: "user-outbox",
+      email: "outbox@example.com",
+      boardIds: [boardId],
+    });
   }
 
   beforeAll(async () => {
