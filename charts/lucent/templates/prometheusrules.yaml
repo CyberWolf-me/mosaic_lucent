@@ -1,0 +1,160 @@
+{{- if .Values.prometheusRules.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "lucent.fullname" . }}
+  labels: {{- include "lucent.labels" . | nindent 4 }}
+spec:
+  groups:
+    - name: lucent.slo.availability
+      rules:
+        - alert: LucentApiErrorRateHigh
+          expr: |
+            sum(rate(lucent_http_requests_total{status=~"5.."}[5m]))
+              /
+            clamp_min(sum(rate(lucent_http_requests_total[5m])), 0.001)
+              > 0.02
+          for: 5m
+          labels:
+            severity: critical
+            slo: api-availability
+          annotations:
+            summary: "API 5xx rate above 2% for 5 minutes"
+            description: "The 30-day availability budget is burning faster than it accrues."
+            runbook: docs/runbooks/incident.md
+        - alert: LucentUnhandledErrors
+          expr: increase(lucent_http_unhandled_errors_total[10m]) > 0
+          for: 0m
+          labels:
+            severity: warning
+            slo: api-availability
+          annotations:
+            summary: "Unhandled request errors in the last 10 minutes"
+            description: "A rejection escaped a route's own catch, so each one is a 500 the route did not intend to emit."
+            runbook: docs/runbooks/incident.md
+    - name: lucent.slo.latency
+      rules:
+        - alert: LucentGenerateLatencyP95High
+          expr: |
+            histogram_quantile(
+              0.95,
+              sum(rate(lucent_ai_call_duration_seconds_bucket{kind="generate"}[1h])) by (le)
+            ) > 30
+          for: 15m
+          labels:
+            severity: warning
+            slo: ai-latency
+          annotations:
+            summary: "P95 generate latency above 30s"
+            description: "The user-facing promise is talk to editable diagram. Past 30s it is a different product."
+            runbook: docs/runbooks/incident.md
+        - alert: LucentColdStartSlow
+          expr: |
+            histogram_quantile(
+              0.95,
+              sum(rate(lucent_http_request_duration_seconds_bucket{path="/health"}[5m])) by (le)
+            ) > 0.2
+          for: 10m
+          labels:
+            severity: info
+          annotations:
+            summary: "P95 /health latency above 200ms"
+            description: "Readiness is green but health answers slowly, so suspect a blocked event loop."
+            runbook: docs/runbooks/oncall.md
+    - name: lucent.slo.realtime
+      rules:
+        - alert: LucentRealtimeReconnectSpike
+          expr: |
+            sum(rate(lucent_realtime_connection_duration_seconds_count[5m]))
+              >
+            clamp_min(3 * sum(rate(lucent_realtime_connection_duration_seconds_count[1h] offset 5m)), 0.1)
+          for: 10m
+          labels:
+            severity: warning
+            slo: realtime-reachability
+          annotations:
+            summary: "WebSocket connection rate is 3x its hourly baseline"
+            description: "Clients are reconnecting far more than usual, the signature of an edge or proxy dropping long-lived connections."
+            runbook: docs/runbooks/incident.md
+    - name: lucent.slo.provider
+      rules:
+        - alert: LucentProviderFailureRateHigh
+          expr: |
+            sum(rate(lucent_generation_provider_failures_total[15m]))
+              /
+            clamp_min(sum(rate(lucent_generation_attempts_total[15m])), 0.001)
+              > 0.1
+          for: 10m
+          labels:
+            severity: warning
+            slo: ai-provider
+          annotations:
+            summary: "More than 10% of generations are failing at the provider"
+            description: "Upstream, not us. Check the provider status page before investigating Lucent."
+            runbook: docs/runbooks/incident.md
+        - alert: LucentValidationFailureRateHigh
+          expr: |
+            sum(rate(lucent_generation_validation_failures_total[30m]))
+              /
+            clamp_min(sum(rate(lucent_generation_attempts_total[30m])), 0.001)
+              > 0.2
+          for: 20m
+          labels:
+            severity: warning
+            slo: ai-provider
+          annotations:
+            summary: "More than 20% of generations fail validation"
+            description: "The model is answering but the batch is rejected, so suspect a prompt or tool-schema regression rather than a provider outage."
+            runbook: docs/runbooks/incident.md
+    - name: lucent.slo.tenancy
+      rules:
+        - alert: LucentAuthzDenialSpike
+          expr: increase(lucent_authz_denials_total[10m]) > 50
+          for: 0m
+          labels:
+            severity: warning
+            slo: tenant-isolation
+          annotations:
+            summary: "Authorization denial spike in the last 10 minutes"
+            description: "Either a client walking board ids it cannot read, or role resolution is returning the wrong answer."
+            runbook: docs/runbooks/incident.md
+        - alert: LucentEntitlementRefusalSpike
+          expr: increase(lucent_entitlement_refusals_total[1h]) > 100
+          for: 0m
+          labels:
+            severity: info
+          annotations:
+            summary: "Entitlement refusals climbed in the last hour"
+            description: "Customers are hitting plan ceilings, which is a provisioning or upgrade-prompt question rather than an outage."
+            runbook: docs/runbooks/oncall.md
+    - name: lucent.platform
+      rules:
+        - alert: LucentRestartLoop
+          expr: changes(lucent_process_start_time_seconds[30m]) > 2
+          for: 5m
+          labels:
+            severity: critical
+            slo: migration-safety
+          annotations:
+            summary: "Process is restarting repeatedly"
+            description: "More than two restarts in 30 minutes. Check the boot log for a migration failure before anything else."
+            runbook: docs/runbooks/rollback.md
+        - alert: LucentMemoryPressure
+          expr: lucent_nodejs_heap_used_bytes / clamp_min(lucent_nodejs_heap_total_bytes, 1) > 0.9
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Node heap above 90% of its total"
+            description: "Sustained pressure here precedes an OOM kill. The in-memory stores are bounded, so suspect a leak."
+            runbook: docs/runbooks/oncall.md
+        - alert: LucentUsageRecordFailures
+          expr: increase(lucent_usage_record_failures_total[10m]) > 0
+          for: 0m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Usage records are failing to write"
+            description: "Metering is silently lossy and revenue reconciliation will be short. Treat as a durability incident, not a metrics bug."
+            runbook: docs/runbooks/incident.md
+{{- end }}

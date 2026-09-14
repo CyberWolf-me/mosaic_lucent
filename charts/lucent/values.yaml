@@ -135,3 +135,10 @@ autoscaling:
 serviceMonitor:
   enabled: false
   interval: 30s
+
+# P6 (docs/20, advisory §23): the SLO burn alerts as a PrometheusRule, so
+# "every alert maps to a runbook" is checked by the cluster rather than by
+# prose. Needs the Prometheus Operator CRDs; off by default, like the
+# ServiceMonitor above.
+prometheusRules:
+  enabled: false
