@@ -399,7 +399,7 @@ describe.skipIf(!TEST_URL)("BoardOperationCommitted rides the op-log commit", ()
     if (!result.ok) return;
 
     const rows = await target.db.select().from(outboxEvents);
-    expect(rows).toHaveLength(1);
+    expect(rows.filter((r) => r.boardId === boardId)).toHaveLength(1);
     expect(rows[0]!.type).toBe("BoardOperationCommitted");
     expect(rows[0]!.boardId).toBe(boardId);
     expect(rows[0]!.orgId).toBe("org-outbox");
@@ -431,13 +431,14 @@ describe.skipIf(!TEST_URL)("BoardOperationCommitted rides the op-log commit", ()
     // One event, not two: the second statement's `evt` CTE read from an `ins`
     // that inserted nothing, so there was no row to announce.
     const rows = await target.db.select().from(outboxEvents);
-    expect(rows).toHaveLength(1);
+    // Scoped to this board: the table is shared with any other suite pointed
+    // at the same database, so a global count would be a flake, not a fact.
+    expect(rows.filter((r) => r.boardId === boardId)).toHaveLength(1);
   });
 
   it("a lost race writes NO event: no seq, nothing to announce", async () => {
     const boardId = `b-outbox-lost-${Date.now()}`;
     await seedBoard(boardId);
-    await target.db.delete(outboxEvents);
     const base = {
       boardId,
       ops: [{ op: "CREATE_NODE", id: "n1", nodeType: "default", label: "A" } as never],
@@ -452,6 +453,6 @@ describe.skipIf(!TEST_URL)("BoardOperationCommitted rides the op-log commit", ()
     expect(second.ok).toBe(false);
 
     const rows = await target.db.select().from(outboxEvents);
-    expect(rows).toHaveLength(1);
+    expect(rows.filter((r) => r.boardId === boardId)).toHaveLength(1);
   });
 });

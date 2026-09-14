@@ -1419,3 +1419,79 @@ export const outboxEvents = pgTable(
 
 export type DbOutboxEvent = typeof outboxEvents.$inferSelect;
 export type DbNewOutboxEvent = typeof outboxEvents.$inferInsert;
+
+/**
+ * The job queue (docs/20 P3, advisory §7/§9).
+ *
+ * WHY. The advisory's §9 names the problem: `setInterval` in the API process
+ * means N instances run N sweeps. A scheduled sweep that re-claims a stuck
+ * execution-ledger row is idempotent per row, so N sweeps are merely
+ * wasteful — but a sweep that sends an email or reconciles a provider is
+ * N-fold work against a rate-limited third party. More fundamentally, the
+ * expensive AI work (§7) has nowhere to go: it runs on the request path and
+ * occupies a connection slot a user is waiting on.
+ *
+ * The claim is deliberately NOT a new concurrency model. It is the
+ * execution ledger's proven triad, generalized (docs/20: "do not invent a new
+ * concurrency model"): first-INSERT-wins on a unique key, a status-guarded
+ * re-claim whose WHERE restates the stale rule, and a stale window that makes
+ * a dead worker's job claimable again. See `integrations/ledger.ts`.
+ *
+ * `family` is the worker-family split from advisory §8: a worker claims only
+ * the families it serves, so `lucent-ai-worker` never picks up a maintenance
+ * sweep.
+ */
+export const jobs = pgTable(
+  "jobs",
+  {
+    id: text("id").primaryKey(),
+    /** Which worker family serves this: ai | media | integration | maintenance. */
+    family: text("family").notNull(),
+    /** The handler name, from the registered job-type vocabulary. */
+    type: text("type").notNull(),
+    /** Handler input. Small: an id to look up, not the record itself. */
+    payload: jsonb("payload").notNull().default({}),
+    status: text("status").notNull().default("queued"),
+    attempts: bigint("attempts", { mode: "number" }).notNull().default(0),
+    /** Earliest time this may run (retry backoff, or a scheduled sweep). */
+    runAfter: bigint("run_after", { mode: "number" }).notNull(),
+    /** Which worker holds it, and since when — the stale-window anchor. */
+    claimedBy: text("claimed_by"),
+    claimedAt: bigint("claimed_at", { mode: "number" }),
+    result: jsonb("result"),
+    lastError: text("last_error"),
+    createdAt: bigint("created_at", { mode: "number" }).notNull(),
+    finishedAt: bigint("finished_at", { mode: "number" }),
+    /**
+     * Dedupe key for recurring jobs: `sweep-stripe` may only have one live
+     * job at a time, so the scheduler enqueuing it on every tick while a
+     * previous one is still queued is a no-op rather than a pile-up. Null for
+     * one-shot jobs, which are always distinct work.
+     */
+    dedupeKey: text("dedupe_key"),
+  },
+  (t) => ({
+    /**
+     * The claim query's index: queued work ready to run, oldest first.
+     * Partial, so its size tracks the backlog rather than the table.
+     */
+    claimIdx: index("jobs_claim_idx").on(t.family, t.status, t.runAfter),
+    /**
+     * The recurring-job dedupe, scoped to LIVE jobs only.
+     *
+     * Partial on purpose, and this is load-bearing: a plain unique index on
+     * `dedupe_key` would let a completed `sweep-stripe` block every future
+     * occurrence forever — the sweep would run exactly once and never again.
+     * The key exists to stop a PILE-UP, not to make a name single-use, so
+     * only `queued`/`claimed` rows participate.
+     */
+    dedupeIdx: uniqueIndex("jobs_dedupe_idx")
+      .on(t.dedupeKey)
+      .where(sql`${t.status} in ('queued', 'claimed')`),
+    // "what is this worker doing?" and queue-age metrics.
+    workerIdx: index("jobs_worker_idx").on(t.claimedBy, t.status),
+  }),
+);
+
+export type DbJob = typeof jobs.$inferSelect;
+export type DbNewJob = typeof jobs.$inferInsert;

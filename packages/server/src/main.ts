@@ -14,6 +14,8 @@ import { PostgresUserStore } from "./store/pg-users.js";
 import { PostgresBoardStore } from "./store/pg-boards.js";
 import { Limiter } from "./limiter.js";
 import { InMemoryTicketStore } from "./realtimeTicket.js";
+import { InMemoryJobQueue, JobRunner, PostgresJobQueue, type JobQueue } from "./jobs.js";
+import { enqueueRecurring, familiesFor, parseRole, runsJobs, runsScheduler, servesHttp, workerId } from "./roles.js";
 import { createStaticHandler } from "./static.js";
 import { resolve as resolvePath } from "node:path";
 import { InMemorySessionStore, PostgresSessionStore, type SessionStore } from "./sessions.js";
@@ -590,22 +592,19 @@ outboxDispatcher.start();
 // same tick — Stripe stops serving the event after ~30 days, so an older
 // failed row can never be replayed and is kept only by `failed`-preservation
 // in `prune` beyond that (events.ts), which this call does not touch.
-if (billing) {
-  const sweep = setInterval(() => {
-    void sweepStripeEvents({
-      store: billing.events,
-      dispatcher: billing.dispatcher,
-      events: stripeEventLookup(billing.client),
-      logger,
-      limit: 50,
-    }).catch((err: Error) => {
-      logger.error("billing.sweep.failed", { error: err.message });
-    });
-    void billing.events.prune(Date.now() - 30 * 24 * 60 * 60 * 1000).catch(() => {
-      // A failed prune leaves correct rows, just stale ones; the next tick retries.
-    });
-  }, 5 * 60_000);
-  sweep.unref?.();
+//
+// P3 (docs/20): this body is now a named function driven by the job queue
+// rather than a `setInterval` arm, so N API replicas no longer run N sweeps.
+async function sweepStripe(): Promise<void> {
+  if (!billing) return;
+  await sweepStripeEvents({
+    store: billing.events,
+    dispatcher: billing.dispatcher,
+    events: stripeEventLookup(billing.client),
+    logger,
+    limit: 50,
+  });
+  await billing.events.prune(Date.now() - 30 * 24 * 60 * 60 * 1000);
 }
 
 // Stage D6 (ADR 0032): the execution-ledger sweeper — the stuck-row
@@ -624,8 +623,12 @@ if (billing) {
 // bounded by actions-per-board, not events. Revisit trigger (its own ADR
 // if it ever fires): a measured storage problem, with the applied rows'
 // externalId preserved as the link of record.
-const integrationSweep = setInterval(() => {
-  void (async () => {
+//
+// P3 (docs/20): named, and driven by the job queue. The three arms (execution
+// recovery, webhook retry + link-GC, terminal prune) stay in one function
+// because they shared one timer and one family.
+async function sweepIntegration(): Promise<void> {
+  try {
     const stale = Date.now() - 60_000;
     const pending = await stores.integrations.ledger.pending(stale, Date.now(), 50);
     for (const row of pending) {
@@ -711,16 +714,16 @@ const integrationSweep = setInterval(() => {
         });
       }
     }
-  })().catch((err: Error) => {
-    logger.error("integrations.sweep.failed", { error: err.message });
-  });
+  } catch (err) {
+    logger.error("integrations.sweep.failed", { error: (err as Error).message });
+  }
 
   // The D7 arm: pending webhook deliveries. The Stripe-refetch doctrine,
   // adapted — Linear has no fetch-by-event-id API, so a stale delivery is
   // recovered by REFETCHING the current truth: resolve the provider, getTask
   // the external id, and ingest what it says NOW. A replayed stale event can
   // never resurrect an old value this way; the current state supersedes it.
-  void (async () => {
+  try {
     const staleAt = Date.now() - 60_000;
     const pending = await stores.integrations.webhookEvents!.pending(staleAt, Date.now(), 20);
     for (const row of pending) {
@@ -768,9 +771,9 @@ const integrationSweep = setInterval(() => {
         });
       }
     }
-  })().catch((err: Error) => {
-    logger.error("integrations.sweep.webhooks.failed", { error: err.message });
-  });
+  } catch (err) {
+    logger.error("integrations.sweep.webhooks.failed", { error: (err as Error).message });
+  }
 
   // THE LINK-GC ARM (D10, ADR 0036 — the decision the sweep has "owned"
   // since D5): a dead link is one whose BOARD is missing or whose NODE is
@@ -780,7 +783,7 @@ const integrationSweep = setInterval(() => {
   // never orphans an external task. Bounded: linksForOrg caps the feed;
   // the org set comes from the connection store (only orgs WITH
   // integrations can have links).
-  void (async () => {
+  try {
     for (const providerName of stores.integrations.providers.keys()) {
       const connections = await stores.integrations.store.connectionsFor(providerName);
       const orgIds = new Set(connections.map((c) => c.orgId));
@@ -812,42 +815,114 @@ const integrationSweep = setInterval(() => {
         }
       }
     }
-  })().catch((err: Error) => {
-    logger.error("integrations.sweep.gc.failed", { error: err.message });
-  });
+  } catch (err) {
+    logger.error("integrations.sweep.gc.failed", { error: (err as Error).message });
+  }
 
   // THE TERMINAL-ROW PRUNE (D10, ADR 0036): webhook events and inbound
   // changes accumulate forever without it. Terminal rows older than 30
   // days are deleted — the complete terminal sets (failed is retryable and
   // NEVER pruned); the cutoff is the TERMINAL timestamp, so pending rows
   // are structurally safe. Bounded per run.
-  void (async () => {
+  try {
     const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
     const prunedEvents = await stores.integrations.webhookEvents!.pruneTerminal(cutoff, 1000);
     const prunedChanges = await stores.integrations.inbound!.pruneTerminal(cutoff, 1000);
     if (prunedEvents > 0 || prunedChanges > 0) {
       logger.info("integrations.prune", { prunedEvents, prunedChanges });
     }
-  })().catch((err: Error) => {
-    logger.error("integrations.sweep.prune.failed", { error: err.message });
-  });
-}, 5 * 60_000);
-integrationSweep.unref?.();
+  } catch (err) {
+    logger.error("integrations.sweep.prune.failed", { error: (err as Error).message });
+  }
+}
 
-server.listen(config.port, config.host, () => {
-  const assetBackend = assetService.describe().blobs;
+// P3 (docs/20, advisory §8/§9): roles. `LUCENT_ROLE=api` serves traffic and
+// runs no sweeps; `worker` claims jobs and serves nothing; `scheduler`
+// enqueues the recurring work; `all` (the default, and single-process dev)
+// does everything in-process, which is what keeps the compose file's
+// one-server mode working exactly as it did before this phase.
+//
+// The scheduler is leaderless: it enqueues with a dedupe key, and the queue's
+// partial unique index makes a second scheduler's enqueue a no-op. That is
+// why there is no leader election here — the claim already provides it.
+const role = parseRole(process.env.LUCENT_ROLE);
+const jobQueue: JobQueue = db ? new PostgresJobQueue(db) : new InMemoryJobQueue();
+
+async function runSchedulerTick(): Promise<void> {
+  try {
+    await enqueueRecurring(jobQueue);
+  } catch (err) {
+    logger.error("scheduler.enqueue.failed", { error: (err as Error).message });
+  }
+}
+
+if (runsScheduler(role)) {
+  const schedulerTimer = setInterval(() => {
+    void runSchedulerTick();
+  }, 30_000);
+  schedulerTimer.unref?.();
+  // One immediate pass so a fresh deploy does not wait a full interval.
+  void runSchedulerTick();
+}
+
+const jobRunner = runsJobs(role)
+  ? new JobRunner({
+      queue: jobQueue,
+      workerId: workerId(role === "all" ? "inproc" : "worker"),
+      handlers: {
+        // The sweeps, now named jobs instead of anonymous timers.
+        "sweep-stripe": async () => void (await sweepStripe()),
+        "sweep-execution": async () => void (await sweepIntegration()),
+        "sweep-webhooks": async () => void (await sweepIntegration()),
+        "prune-jobs": async () => {
+          if (jobQueue instanceof PostgresJobQueue) {
+            await jobQueue.prune(30 * 24 * 60 * 60 * 1000);
+          }
+        },
+        "prune-outbox": async () => {
+          if (outbox instanceof (await import("./outbox.js")).PostgresOutbox) {
+            await outbox.prune(7 * 24 * 60 * 60 * 1000);
+          }
+        },
+        "prune-usage": () => {
+          usage.prune();
+          authLimiter.prune();
+          void tickets.prune();
+        },
+      },
+      ...(familiesFor(role, process.env.LUCENT_JOB_FAMILIES)
+        ? { families: familiesFor(role, process.env.LUCENT_JOB_FAMILIES)! }
+        : {}),
+    })
+  : null;
+jobRunner?.start();
+
+// P3: a worker or scheduler process serves NO traffic. Opening the port anyway
+// would make it a second API instance the load balancer can route to — and it
+// has no session store wiring for that, so the failure would be mysterious
+// rather than loud.
+if (servesHttp(role)) {
+  server.listen(config.port, config.host, () => {
+    const assetBackend = assetService.describe().blobs;
+    console.log(
+      `[lucent] server on http://${config.host}:${config.port} ` +
+        `(role: ${role}, ` +
+        `provider: ${provider.name}, ` +
+        `limits: ${limits.perWindow}/${Math.round(limits.windowMs / 1000)}s, ${limits.perDay}/day, ` +
+        `auth: ${config.requireAuth ? "required" : "optional"}, ` +
+        `storage: ${db ? "postgres" : "in-memory"}, ` +
+        `billing: ${billing ? "stripe" : "off"}, ` +
+        `assets: ${assetBackend}, ` +
+        `trustProxy: ${config.trustProxy ? "on" : "off"}, ` +
+        `realtime: /ws)`,
+    );
+  });
+} else {
   console.log(
-    `[lucent] server on http://${config.host}:${config.port} ` +
-      `(provider: ${provider.name}, ` +
-      `limits: ${limits.perWindow}/${Math.round(limits.windowMs / 1000)}s, ${limits.perDay}/day, ` +
-      `auth: ${config.requireAuth ? "required" : "optional"}, ` +
-      `storage: ${db ? "postgres" : "in-memory"}, ` +
-      `billing: ${billing ? "stripe" : "off"}, ` +
-      `assets: ${assetBackend}, ` +
-      `trustProxy: ${config.trustProxy ? "on" : "off"}, ` +
-      `realtime: /ws)`,
+    `[lucent] ${role} process started (no HTTP listener; ` +
+      `storage: ${db ? "postgres" : "in-memory"}, jobs: ${jobRunner ? "on" : "off"})`,
   );
-});
+}
 
 let shuttingDown = false;
 /** Close listeners, the WebSocketServer, and the connection pool so a restart doesn't leak sockets. */
