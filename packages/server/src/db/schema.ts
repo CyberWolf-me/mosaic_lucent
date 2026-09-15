@@ -55,6 +55,17 @@ export const users = pgTable(
 export const organizations = pgTable("organizations", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
+  /**
+   * The org policy plane (docs/23 S2, docs/24 Phase B): the classification
+   * floor plus the AI/sharing/agent/recording denials, validated on write,
+   * read through `effectiveSettings` (classification.ts) — which treats
+   * absence as the permissive default and an uninterpretable value as
+   * restrictive, fail closed. jsonb, not a column per field: every gate
+   * resolves the whole object at once, no field is ever queried in SQL, and
+   * the shape lives in exactly one TypeScript interface the store cannot
+   * drift from.
+   */
+  settings: jsonb("settings"),
   createdAt: bigint("created_at", { mode: "number" }).notNull(),
 });
 

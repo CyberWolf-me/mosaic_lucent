@@ -10,7 +10,6 @@ import {
   validateOperations,
 } from "@lucent/core";
 import type { RegisterRoutes } from "./context.js";
-import { checkOutbound, classificationOf } from "../classification.js";
 
 /**
  * The agent/MCP op-apply endpoint (E3): `POST /api/boards/:id/ops`.
@@ -49,6 +48,7 @@ export const registerBoardOpsRoutes: RegisterRoutes = (router, s) => {
     requestOrigin,
     orgStore,
     meter,
+    outboundRefusal,
   } = s;
 
   router.post("/api/boards/:id/ops", async (ctx) => {
@@ -62,12 +62,14 @@ export const registerBoardOpsRoutes: RegisterRoutes = (router, s) => {
     const boardId = ctx.param("id");
     const guard = await requireBoardRole(req, res, boardId, "editor", "/api/boards/:id/ops", user);
     if (!guard.ok) return;
-    // docs/23 S1: the agent boundary. This route is the agent surface — MCP
-    // sessions and scripts land here, and an agent's model is a third party
-    // the org never chose. A `restricted` board refuses it. The role guard
-    // above already ran, so the refusal reaches only callers who could see the
-    // board in the first place — classification never becomes an oracle.
-    const refusal = checkOutbound(classificationOf(guard.board), "agent");
+    // docs/23 S1/S2: the agent boundary. This route is the agent surface —
+    // MCP sessions and scripts land here, and an agent's model is a third
+    // party the org never chose. A `restricted` board (or its org's floor)
+    // refuses it, and an org with `agentDisabled` refuses every board's. The
+    // role guard above already ran, so the refusal reaches only callers who
+    // could see the board in the first place — classification never becomes
+    // an oracle.
+    const refusal = await outboundRefusal(guard.board, "agent");
     if (refusal) {
       send(res, 403, {
         error: refusal.error,

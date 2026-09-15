@@ -2075,6 +2075,32 @@ The nine-phase plan, executed against the benchmark:
       one test, run against real Postgres (unset is absence on both twins,
       garbage fails closed identically); crossTenant classification row —
       outsiders get 404 at every gated route, never a tier-revealing 403.
-      Suite with `LUCENT_TEST_DATABASE_URL`: 736 passed / 64 files / 0 skipped.
+      Suite with `LUCENT_TEST_DATABASE_URL`: all six workspaces green — 2,886 / 243
+      files, 0 skipped (the earlier "736" was one workspace, not the suite).
 - [ ] Not this phase: the org policy floor (Phase B), per-org provider
       allowlist (Phase C), the Settings UI picker (ships with B's admin API).
+
+## S2 / docs/24 Phase B shipped: the org policy plane (2026-09-16, docs/17 amendment)
+
+- [x] `organizations.settings` (jsonb, migration 0029) + `OrgSettings`: the
+      classification floor (`stricterOf`), `ai: "disabled"` (the only switch
+      that outranks the in-process-mock exemption — "no AI in the workspace",
+      not "no AI leaving it"), `sharingDisabled`, `agentDisabled`,
+      `recordingDisabled`. `effectiveSettings` resolves absence → permissive
+      (zero change for untouched orgs), garbage → restrictive (fail closed).
+- [x] Enforcement rewired through the SAME gates (no parallel permission
+      system): `checkOutboundFor` at generate/stream/ask, all seven
+      integration routes, share minting, op-apply + MCP-marked reads;
+      `orgPolicy.recordingDisabled` at the meeting save/append writes (END
+      and reads stay legal — no stranded captures). Floor refusals name the
+      floor as the source; inheritance is a read at decision time (uncached),
+      so old boards obey new policy with nothing rewritten.
+- [x] `GET/PATCH /api/orgs/:id/settings`: owner floor, CSRF, strict validation
+      (unknown key = 400, never stored), `changed` from→to map in the
+      response, one audit row per write naming actor + changed keys.
+- [x] `org-policy.test.ts` (14): the acceptance three (inheritance /
+      policy-beats-board / audit) + fail-closed unit + recording lifecycle +
+      strict-400 + cross-tenant 404 + store parity in ONE test run against
+      real Postgres. Suite with PG: 2,886 passed / 243 files / 0 skips.
+- [ ] Not this phase: per-org provider allowlist (Phase C), retention (S5),
+      residency (S4), and the web admin UI (ships whole with C).

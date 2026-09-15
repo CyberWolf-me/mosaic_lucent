@@ -1,10 +1,13 @@
 import * as z from "zod/v4";
 import { actionNodes } from "@lucent/core";
 import type { RegisterRoutes } from "./context.js";
-import { connectionView, extractProposalItems, MAX_CREDENTIAL_REF_CHARS } from "../integrations/integrations.js";
+import {
+  connectionView,
+  extractProposalItems,
+  MAX_CREDENTIAL_REF_CHARS,
+} from "../integrations/integrations.js";
 import { webhookSchemes } from "../integrations/webhook.js";
 import { MAX_AI_SELECTED_ACTIONS } from "@lucent/ai";
-import { integrationBoundary } from "../classification.js";
 import type { IntegrationProviderName } from "../integrations/integrations.js";
 
 /**
@@ -48,7 +51,10 @@ function resolveProvider(
   | { ok: false; error: string } {
   const factory = integrations.providers.get(providerName);
   if (!factory) {
-    return { ok: false as const, error: `no provider implementation named "${providerName}" is loaded` };
+    return {
+      ok: false as const,
+      error: `no provider implementation named "${providerName}" is loaded`,
+    };
   }
   try {
     return { ok: true as const, provider: factory(connection) };
@@ -61,7 +67,28 @@ function resolveProvider(
 }
 
 export const registerIntegrationRoutes: RegisterRoutes = (router, s) => {
-  const { integrations, send, readBody, requireUser, requireOrgRole, requireBoardRole, requireCsrf, meter, trace, commitForBoard, broadcastProposal, auditRow, provider: llmProvider, resolveAiContext, gateMonthly, meterUsage, telemetry, boardStore, usageStore } = s;
+  const {
+    integrations,
+    send,
+    readBody,
+    requireUser,
+    requireOrgRole,
+    requireBoardRole,
+    requireCsrf,
+    meter,
+    trace,
+    commitForBoard,
+    broadcastProposal,
+    auditRow,
+    provider: llmProvider,
+    resolveAiContext,
+    gateMonthly,
+    meterUsage,
+    telemetry,
+    boardStore,
+    usageStore,
+    outboundRefusal,
+  } = s;
 
   // ---- The org admin surface (owner floor — credentials live here) --------
   router.get("/api/orgs/:id/integrations", async (ctx) => {
@@ -153,7 +180,12 @@ export const registerIntegrationRoutes: RegisterRoutes = (router, s) => {
     if (!guard.ok) return;
     if (!integrations) return send(res, 503, { error: "integrations are not configured" });
     const provider = ctx.param("provider");
-    const ok = await integrations.store.setConnectionStatus(orgId, provider, "disabled", Date.now());
+    const ok = await integrations.store.setConnectionStatus(
+      orgId,
+      provider,
+      "disabled",
+      Date.now(),
+    );
     if (!ok) {
       send(res, 404, { error: "no such integration connection" });
       return;
@@ -165,7 +197,13 @@ export const registerIntegrationRoutes: RegisterRoutes = (router, s) => {
   router.get("/api/boards/:id/integrations/links", async (ctx) => {
     const { req, res } = ctx;
     const boardId = ctx.param("id");
-    const guard = await requireBoardRole(req, res, boardId, "viewer", "/api/boards/:id/integrations/links");
+    const guard = await requireBoardRole(
+      req,
+      res,
+      boardId,
+      "viewer",
+      "/api/boards/:id/integrations/links",
+    );
     if (!guard.ok) return;
     if (!integrations) return send(res, 503, { error: "integrations are not configured" });
     const links = await integrations.store.linksForBoard(boardId);
@@ -180,7 +218,6 @@ export const registerIntegrationRoutes: RegisterRoutes = (router, s) => {
       })),
     });
   });
-
 
   // ---- The sync route (the D4 acceptance path) -----------------------------
   //
@@ -202,10 +239,11 @@ export const registerIntegrationRoutes: RegisterRoutes = (router, s) => {
     const boardId = ctx.param("id");
     const guard = await requireBoardRole(req, res, boardId, "editor", route);
     if (!guard.ok) return;
-    // docs/23 S1: a confidential/restricted board does not allow external
-    // content to leave or enter through integrations.
+    // docs/23 S1/S2: a confidential/restricted board — or one whose org
+    // floor raises it to those tiers — does not allow external content to
+    // leave or enter through integrations.
     if (guard.board) {
-      const boundary = integrationBoundary(guard.board);
+      const boundary = await outboundRefusal(guard.board, "integration");
       if (boundary) {
         send(res, 403, {
           error: boundary.error,
@@ -297,7 +335,12 @@ export const registerIntegrationRoutes: RegisterRoutes = (router, s) => {
               },
               Date.now(),
             );
-            results.push({ nodeId: node.id, action: "relinked", externalId: stored.externalId, url: stored.url });
+            results.push({
+              nodeId: node.id,
+              action: "relinked",
+              externalId: stored.externalId,
+              url: stored.url,
+            });
             continue;
           }
           // CREATE: the action has no external task and none was recovered.
@@ -315,7 +358,12 @@ export const registerIntegrationRoutes: RegisterRoutes = (router, s) => {
             Date.now(),
           );
           created += 1;
-          results.push({ nodeId: node.id, action: "created", externalId: stored.externalId, url: stored.url });
+          results.push({
+            nodeId: node.id,
+            action: "created",
+            externalId: stored.externalId,
+            url: stored.url,
+          });
         } else {
           // UPDATE only on drift: the external status moved from what we
           // last synced (mapStatus both ways through the provider), or the
@@ -336,7 +384,12 @@ export const registerIntegrationRoutes: RegisterRoutes = (router, s) => {
               Date.now(),
             );
             updated += 1;
-            results.push({ nodeId: node.id, action: "updated", externalId: link.externalId, status: task.status });
+            results.push({
+              nodeId: node.id,
+              action: "updated",
+              externalId: link.externalId,
+              status: task.status,
+            });
           } else {
             skipped += 1;
             results.push({ nodeId: node.id, action: "skipped", externalId: link.externalId });
@@ -365,943 +418,1007 @@ export const registerIntegrationRoutes: RegisterRoutes = (router, s) => {
         )
       : 0;
 
-    send(res, 200, { provider: providerName, created, updated, skipped, supersededInbound, results });
-  });
-// ---- The D5 approval flow: propose → preview → approve → execute ------
-//
-// The external-action safety routes (Stage D5, ADR 0031). The D4 sync
-// route above remains the DIRECT path (scripts/tests; the pre-approval
-// skeleton); these routes are the HUMAN path: an editor proposes, the
-// preview is returned for review, an editor approves, the executor runs
-// each item through the ledger (attempt idempotency) + the provider's
-// idempotency key (effect idempotency) — exactly once externally.
-
-router.post("/api/boards/:id/integrations/:provider/propose", async (ctx) => {
-  const { req, res } = ctx;
-  const route = "/api/boards/:id/integrations/:provider/propose";
-  if (!requireCsrf(req, res, route)) return;
-  const user = await requireUser(req, res);
-  if (!user) return;
-  if (!meter(req, res, route)) return;
-  const boardId = ctx.param("id");
-  const guard = await requireBoardRole(req, res, boardId, "editor", route);
-  if (!guard.ok) return;
-  // docs/23 S1: a confidential/restricted board does not allow external
-  // content to leave or enter through integrations.
-  if (guard.board) {
-    const boundary = integrationBoundary(guard.board);
-    if (boundary) {
-      send(res, 403, {
-        error: boundary.error,
-        classification: boundary.classification,
-        boundary: boundary.boundary,
-      });
-      return;
-    }
-  }
-  if (!integrations) return send(res, 503, { error: "integrations are not configured" });
-  const { actions } = integrations;
-  if (!actions) return send(res, 503, { error: "external actions are not configured" });
-  const providerName = ctx.param("provider");
-  const connection = await integrations.store.connection(guard.board.orgId, providerName);
-  if (!connection) {
-    send(res, 404, { error: `no ${providerName} connection is configured for this org` });
-    return;
-  }
-  if (connection.status !== "active") {
-    send(res, 409, { error: `the ${providerName} connection is ${connection.status}` });
-    return;
-  }
-  const resolved = resolveProvider(integrations, providerName, connection);
-  if (!resolved.ok) {
-    send(res, 400, { error: resolved.error });
-    return;
-  }
-  const provider = resolved.provider;
-
-  // Compute the per-node plan: creates for unlinked action nodes, updates
-  // for linked ones (the same split the sync route applies), each carrying
-  // its exactly-once key. The shared builder (extracted in D9) — the AI
-  // propose route calls the same function, so the item computation can
-  // never diverge between the two origins.
-  const existingLinks = new Map(
-    (await integrations.store.linksForBoard(boardId))
-      .filter((l) => l.provider === providerName)
-      .map((l) => [l.nodeId, l] as const),
-  );
-  const items = extractProposalItems(
-    guard.board.workspace,
-    existingLinks,
-    provider.capabilityWarnings?.bind(provider),
-  );
-
-  if (items.length === 0) {
-    send(res, 422, { error: "no executable actions on this board" });
-    return;
-  }
-
-  const { record, supersededId } = await actions.propose({
-    orgId: guard.board.orgId,
-    boardId,
-    provider: providerName as never,
-    connectionId: connection.id,
-    items,
-    createdBy: user.id,
-    now: Date.now(),
-  });
-
-  // THE PREVIEW: what will happen, what will NOT (the honest statement),
-  // never a surprise — and, since D8, what the provider cannot represent
-  // faithfully (per item, the stored warnings verbatim).
-  const creates = items.filter((i) => i.action === "create");
-  const updates = items.filter((i) => i.action === "update");
-  send(res, 201, {
-    action: {
-      id: record.id,
+    send(res, 200, {
       provider: providerName,
-      status: record.status,
-      createdAt: record.createdAt,
-      ...(supersededId ? { supersededId } : {}),
-    },
-    preview: {
-      creates: creates.map((i) => ({
-        nodeId: i.nodeId,
-        title: i.title,
-        ...(i.assignee ? { assignee: i.assignee } : {}),
-        ...(i.dueDate ? { dueDate: i.dueDate } : {}),
-        status: i.status,
-        ...(i.warnings ? { warnings: i.warnings } : {}),
-      })),
-      updates: updates.map((i) => ({
-        nodeId: i.nodeId,
-        externalId: i.externalId,
-        title: i.title,
-        status: i.status,
-        ...(i.warnings ? { warnings: i.warnings } : {}),
-      })),
-      statement:
-        `Will create ${creates.length} task(s) and update ${updates.length} in ${providerName}. Nothing will be deleted. Existing external tasks will only be modified in the fields explicitly shown in the update rows.`,
-    },
-  });
-});
-
-router.post("/api/boards/:id/integrations/actions/:actionId/approve", async (ctx) => {
-  const { req, res } = ctx;
-  const route = "/api/boards/:id/integrations/actions/:actionId/approve";
-  if (!requireCsrf(req, res, route)) return;
-  const user = await requireUser(req, res);
-  if (!user) return;
-  if (!meter(req, res, route)) return;
-  const boardId = ctx.param("id");
-  const actionId = ctx.param("actionId");
-  const guard = await requireBoardRole(req, res, boardId, "editor", route);
-  if (!guard.ok) return;
-  // docs/23 S1: a confidential/restricted board does not allow external
-  // content to leave or enter through integrations.
-  if (guard.board) {
-    const boundary = integrationBoundary(guard.board);
-    if (boundary) {
-      send(res, 403, {
-        error: boundary.error,
-        classification: boundary.classification,
-        boundary: boundary.boundary,
-      });
-      return;
-    }
-  }
-  if (!integrations) return send(res, 503, { error: "integrations are not configured" });
-  const { actions, ledger } = integrations;
-  if (!actions || !ledger) return send(res, 503, { error: "external actions are not configured" });
-
-  const record = await actions.action(boardId, actionId);
-  if (!record) {
-    send(res, 404, { error: "no such action" });
-    return;
-  }
-  const connection = await integrations.store.connection(guard.board.orgId, record.provider);
-  if (!connection || connection.status !== "active") {
-    send(res, 409, { error: `the ${record.provider} connection is unavailable` });
-    return;
-  }
-  // Stage D6, the review's safety check: the proposal executes through the
-  // EXACT connection it previewed — a disabled/replaced connection between
-  // propose and approve is a 409, never a silent execution through the new
-  // one.
-  if (connection.id !== record.connectionId) {
-    send(res, 409, { error: "Integration connection changed; please create a new preview" });
-    return;
-  }
-  const resolved = resolveProvider(integrations, record.provider, connection);
-  if (!resolved.ok) {
-    send(res, 400, { error: resolved.error });
-    return;
-  }
-  const provider = resolved.provider;
-
-  // Stage D8, ADR 0034's honesty gate: a warning-carrying record executes
-  // only when the caller EXPLICITLY acknowledged the capability loss —
-  // the human gate covers what the provider will drop, not just what it
-  // will touch. The warnings are echoed back so the caller never has to
-  // remember what they are acknowledging.
-  const warnings = record.items.flatMap((item) =>
-    (item.warnings ?? []).map((w) => ({ nodeId: item.nodeId, ...w })),
-  );
-  if (warnings.length > 0) {
-    let acknowledged = false;
-    try {
-      const raw = await readBody(req);
-      const body = raw ? (JSON.parse(raw) as { acknowledgeWarnings?: unknown }) : {};
-      acknowledged = body.acknowledgeWarnings === true;
-    } catch {
-      acknowledged = false;
-    }
-    if (!acknowledged) {
-      send(res, 409, {
-        error: "the provider cannot represent some fields faithfully",
-        warnings,
-        acknowledgeWarnings: true,
-      });
-      return;
-    }
-  }
-
-  // The decided-once transition guard: a second approve answers the
-  // ORIGINAL outcome, never a second effect.
-  const decided = await actions.decide(boardId, actionId, "approved", user.id, Date.now());
-  if (!decided) {
-    send(res, 404, { error: "no such action" });
-    return;
-  }
-  if (record.status !== "pending") {
-    send(res, 200, { action: decided, duplicate: true });
-    return;
-  }
-
-  // THE EXECUTOR: per item, the ledger claims the attempt (keyed by the
-  // owner's triplet) and the provider call carries the item's idempotency
-  // key — attempts deduped by the ledger, effects deduped by the key.
-  // One item's failure fails that item, never the batch.
-  const TIMEOUT_MS = integrations.executionTimeoutMs ?? 15_000;
-  const results: Array<Record<string, unknown>> = [];
-  let appliedCount = 0;
-  let failedCount = 0;
-  let inFlight = 0;
-  for (const item of decided.items) {
-    // The ledger key is the composite (boardId, provider, requestId) and
-    // one batch contains MANY items — so the requestId must name the ITEM:
-    // the owner triplet (lucentActionId, requestId, provider) resolved per
-    // node. The provider idempotency key stays item.idempotencyKey.
-    const requestId = `ext_${decided.id}_${user.id}_${item.nodeId}`;
-    const claim = await ledger.claim({
-      boardId,
-      provider: record.provider,
-      requestId,
-      lucentActionId: decided.id,
-      nodeId: item.nodeId,
+      created,
+      updated,
+      skipped,
+      supersededInbound,
+      results,
     });
-    if (claim.outcome === "duplicate") {
-      results.push({ nodeId: item.nodeId, action: "duplicate", externalId: claim.record.externalId });
-      appliedCount += 1;
-      continue;
-    }
-    if (claim.outcome === "exhausted") {
-      results.push({ nodeId: item.nodeId, action: "exhausted", error: claim.record.error });
-      failedCount += 1;
-      continue;
-    }
-    if (claim.outcome === "in_flight") {
-      inFlight += 1;
-      results.push({ nodeId: item.nodeId, action: "in_flight" });
-      continue;
-    }
-    try {
-      const input = {
-        title: item.title,
-        ...(item.assignee ? { assignee: item.assignee } : {}),
-        ...(item.dueDate ? { dueDate: item.dueDate } : {}),
-        status: item.status,
-        idempotencyKey: item.idempotencyKey,
-      };
-      // THE LINK-GC RECOVERY CONTRACT (D10, ADR 0036): on a CREATE, recover
-      // before creating — the item's node may be a re-created action whose
-      // collected link left an existing external task. The marker is the
-      // FULL ANCHORED comment (the closing delimiter prevents the prefix
-      // collision ext_task-1 ⊃ ext_task-10); the D6 recovery seam is the
-      // same one the timeout retry rides. Recovered → relink, zero new
-      // wire mutations.
-      if (item.action === "create" && provider.recoverCreate) {
-        // The recovery is an OPTIMIZATION toward the no-duplicate invariant:
-        // when the search itself errors (a provider whose search surface is
-        // unavailable), fall through to the create — the D6 contract's own
-        // semantics (not-found → create), never a failed item because the
-        // LOOKUP failed.
-        const recovered = await provider
-          .recoverCreate(`<!-- lucent-action:${item.idempotencyKey} -->`)
-          .catch(() => undefined);
-        if (recovered) {
-          await integrations.store.linkTask(
-            {
-              orgId: guard.board.orgId,
-              boardId,
-              nodeId: item.nodeId,
-              provider: record.provider,
-              externalId: recovered.externalId,
-              ...(recovered.url ? { url: recovered.url } : {}),
-              lastSyncedStatus: recovered.status,
-            },
-            Date.now(),
-          );
-          await ledger.applied(boardId, record.provider, requestId, recovered.externalId, Date.now());
-          appliedCount += 1;
-          results.push({ nodeId: item.nodeId, action: "relinked", externalId: recovered.externalId, url: recovered.url });
-          continue;
-        }
+  });
+  // ---- The D5 approval flow: propose → preview → approve → execute ------
+  //
+  // The external-action safety routes (Stage D5, ADR 0031). The D4 sync
+  // route above remains the DIRECT path (scripts/tests; the pre-approval
+  // skeleton); these routes are the HUMAN path: an editor proposes, the
+  // preview is returned for review, an editor approves, the executor runs
+  // each item through the ledger (attempt idempotency) + the provider's
+  // idempotency key (effect idempotency) — exactly once externally.
+
+  router.post("/api/boards/:id/integrations/:provider/propose", async (ctx) => {
+    const { req, res } = ctx;
+    const route = "/api/boards/:id/integrations/:provider/propose";
+    if (!requireCsrf(req, res, route)) return;
+    const user = await requireUser(req, res);
+    if (!user) return;
+    if (!meter(req, res, route)) return;
+    const boardId = ctx.param("id");
+    const guard = await requireBoardRole(req, res, boardId, "editor", route);
+    if (!guard.ok) return;
+    // docs/23 S1/S2: a confidential/restricted board — or one whose org
+    // floor raises it to those tiers — does not allow external content to
+    // leave or enter through integrations.
+    if (guard.board) {
+      const boundary = await outboundRefusal(guard.board, "integration");
+      if (boundary) {
+        send(res, 403, {
+          error: boundary.error,
+          classification: boundary.classification,
+          boundary: boundary.boundary,
+        });
+        return;
       }
-      const task =
-        item.action === "create"
-          ? await Promise.race([
-              provider.createTask(input),
-              new Promise<never>((_, reject) =>
-                setTimeout(() => reject(new Error("provider timeout")), TIMEOUT_MS),
-              ),
-            ])
-          : await Promise.race([
-              provider.updateTask(item.externalId!, input),
-              new Promise<never>((_, reject) =>
-                setTimeout(() => reject(new Error("provider timeout")), TIMEOUT_MS),
-              ),
-            ]);
+    }
+    if (!integrations) return send(res, 503, { error: "integrations are not configured" });
+    const { actions } = integrations;
+    if (!actions) return send(res, 503, { error: "external actions are not configured" });
+    const providerName = ctx.param("provider");
+    const connection = await integrations.store.connection(guard.board.orgId, providerName);
+    if (!connection) {
+      send(res, 404, { error: `no ${providerName} connection is configured for this org` });
+      return;
+    }
+    if (connection.status !== "active") {
+      send(res, 409, { error: `the ${providerName} connection is ${connection.status}` });
+      return;
+    }
+    const resolved = resolveProvider(integrations, providerName, connection);
+    if (!resolved.ok) {
+      send(res, 400, { error: resolved.error });
+      return;
+    }
+    const provider = resolved.provider;
+
+    // Compute the per-node plan: creates for unlinked action nodes, updates
+    // for linked ones (the same split the sync route applies), each carrying
+    // its exactly-once key. The shared builder (extracted in D9) — the AI
+    // propose route calls the same function, so the item computation can
+    // never diverge between the two origins.
+    const existingLinks = new Map(
+      (await integrations.store.linksForBoard(boardId))
+        .filter((l) => l.provider === providerName)
+        .map((l) => [l.nodeId, l] as const),
+    );
+    const items = extractProposalItems(
+      guard.board.workspace,
+      existingLinks,
+      provider.capabilityWarnings?.bind(provider),
+    );
+
+    if (items.length === 0) {
+      send(res, 422, { error: "no executable actions on this board" });
+      return;
+    }
+
+    const { record, supersededId } = await actions.propose({
+      orgId: guard.board.orgId,
+      boardId,
+      provider: providerName as never,
+      connectionId: connection.id,
+      items,
+      createdBy: user.id,
+      now: Date.now(),
+    });
+
+    // THE PREVIEW: what will happen, what will NOT (the honest statement),
+    // never a surprise — and, since D8, what the provider cannot represent
+    // faithfully (per item, the stored warnings verbatim).
+    const creates = items.filter((i) => i.action === "create");
+    const updates = items.filter((i) => i.action === "update");
+    send(res, 201, {
+      action: {
+        id: record.id,
+        provider: providerName,
+        status: record.status,
+        createdAt: record.createdAt,
+        ...(supersededId ? { supersededId } : {}),
+      },
+      preview: {
+        creates: creates.map((i) => ({
+          nodeId: i.nodeId,
+          title: i.title,
+          ...(i.assignee ? { assignee: i.assignee } : {}),
+          ...(i.dueDate ? { dueDate: i.dueDate } : {}),
+          status: i.status,
+          ...(i.warnings ? { warnings: i.warnings } : {}),
+        })),
+        updates: updates.map((i) => ({
+          nodeId: i.nodeId,
+          externalId: i.externalId,
+          title: i.title,
+          status: i.status,
+          ...(i.warnings ? { warnings: i.warnings } : {}),
+        })),
+        statement: `Will create ${creates.length} task(s) and update ${updates.length} in ${providerName}. Nothing will be deleted. Existing external tasks will only be modified in the fields explicitly shown in the update rows.`,
+      },
+    });
+  });
+
+  router.post("/api/boards/:id/integrations/actions/:actionId/approve", async (ctx) => {
+    const { req, res } = ctx;
+    const route = "/api/boards/:id/integrations/actions/:actionId/approve";
+    if (!requireCsrf(req, res, route)) return;
+    const user = await requireUser(req, res);
+    if (!user) return;
+    if (!meter(req, res, route)) return;
+    const boardId = ctx.param("id");
+    const actionId = ctx.param("actionId");
+    const guard = await requireBoardRole(req, res, boardId, "editor", route);
+    if (!guard.ok) return;
+    // docs/23 S1/S2: a confidential/restricted board — or one whose org
+    // floor raises it to those tiers — does not allow external content to
+    // leave or enter through integrations.
+    if (guard.board) {
+      const boundary = await outboundRefusal(guard.board, "integration");
+      if (boundary) {
+        send(res, 403, {
+          error: boundary.error,
+          classification: boundary.classification,
+          boundary: boundary.boundary,
+        });
+        return;
+      }
+    }
+    if (!integrations) return send(res, 503, { error: "integrations are not configured" });
+    const { actions, ledger } = integrations;
+    if (!actions || !ledger)
+      return send(res, 503, { error: "external actions are not configured" });
+
+    const record = await actions.action(boardId, actionId);
+    if (!record) {
+      send(res, 404, { error: "no such action" });
+      return;
+    }
+    const connection = await integrations.store.connection(guard.board.orgId, record.provider);
+    if (!connection || connection.status !== "active") {
+      send(res, 409, { error: `the ${record.provider} connection is unavailable` });
+      return;
+    }
+    // Stage D6, the review's safety check: the proposal executes through the
+    // EXACT connection it previewed — a disabled/replaced connection between
+    // propose and approve is a 409, never a silent execution through the new
+    // one.
+    if (connection.id !== record.connectionId) {
+      send(res, 409, { error: "Integration connection changed; please create a new preview" });
+      return;
+    }
+    const resolved = resolveProvider(integrations, record.provider, connection);
+    if (!resolved.ok) {
+      send(res, 400, { error: resolved.error });
+      return;
+    }
+    const provider = resolved.provider;
+
+    // Stage D8, ADR 0034's honesty gate: a warning-carrying record executes
+    // only when the caller EXPLICITLY acknowledged the capability loss —
+    // the human gate covers what the provider will drop, not just what it
+    // will touch. The warnings are echoed back so the caller never has to
+    // remember what they are acknowledging.
+    const warnings = record.items.flatMap((item) =>
+      (item.warnings ?? []).map((w) => ({ nodeId: item.nodeId, ...w })),
+    );
+    if (warnings.length > 0) {
+      let acknowledged = false;
+      try {
+        const raw = await readBody(req);
+        const body = raw ? (JSON.parse(raw) as { acknowledgeWarnings?: unknown }) : {};
+        acknowledged = body.acknowledgeWarnings === true;
+      } catch {
+        acknowledged = false;
+      }
+      if (!acknowledged) {
+        send(res, 409, {
+          error: "the provider cannot represent some fields faithfully",
+          warnings,
+          acknowledgeWarnings: true,
+        });
+        return;
+      }
+    }
+
+    // The decided-once transition guard: a second approve answers the
+    // ORIGINAL outcome, never a second effect.
+    const decided = await actions.decide(boardId, actionId, "approved", user.id, Date.now());
+    if (!decided) {
+      send(res, 404, { error: "no such action" });
+      return;
+    }
+    if (record.status !== "pending") {
+      send(res, 200, { action: decided, duplicate: true });
+      return;
+    }
+
+    // THE EXECUTOR: per item, the ledger claims the attempt (keyed by the
+    // owner's triplet) and the provider call carries the item's idempotency
+    // key — attempts deduped by the ledger, effects deduped by the key.
+    // One item's failure fails that item, never the batch.
+    const TIMEOUT_MS = integrations.executionTimeoutMs ?? 15_000;
+    const results: Array<Record<string, unknown>> = [];
+    let appliedCount = 0;
+    let failedCount = 0;
+    let inFlight = 0;
+    for (const item of decided.items) {
+      // The ledger key is the composite (boardId, provider, requestId) and
+      // one batch contains MANY items — so the requestId must name the ITEM:
+      // the owner triplet (lucentActionId, requestId, provider) resolved per
+      // node. The provider idempotency key stays item.idempotencyKey.
+      const requestId = `ext_${decided.id}_${user.id}_${item.nodeId}`;
+      const claim = await ledger.claim({
+        boardId,
+        provider: record.provider,
+        requestId,
+        lucentActionId: decided.id,
+        nodeId: item.nodeId,
+      });
+      if (claim.outcome === "duplicate") {
+        results.push({
+          nodeId: item.nodeId,
+          action: "duplicate",
+          externalId: claim.record.externalId,
+        });
+        appliedCount += 1;
+        continue;
+      }
+      if (claim.outcome === "exhausted") {
+        results.push({ nodeId: item.nodeId, action: "exhausted", error: claim.record.error });
+        failedCount += 1;
+        continue;
+      }
+      if (claim.outcome === "in_flight") {
+        inFlight += 1;
+        results.push({ nodeId: item.nodeId, action: "in_flight" });
+        continue;
+      }
+      try {
+        const input = {
+          title: item.title,
+          ...(item.assignee ? { assignee: item.assignee } : {}),
+          ...(item.dueDate ? { dueDate: item.dueDate } : {}),
+          status: item.status,
+          idempotencyKey: item.idempotencyKey,
+        };
+        // THE LINK-GC RECOVERY CONTRACT (D10, ADR 0036): on a CREATE, recover
+        // before creating — the item's node may be a re-created action whose
+        // collected link left an existing external task. The marker is the
+        // FULL ANCHORED comment (the closing delimiter prevents the prefix
+        // collision ext_task-1 ⊃ ext_task-10); the D6 recovery seam is the
+        // same one the timeout retry rides. Recovered → relink, zero new
+        // wire mutations.
+        if (item.action === "create" && provider.recoverCreate) {
+          // The recovery is an OPTIMIZATION toward the no-duplicate invariant:
+          // when the search itself errors (a provider whose search surface is
+          // unavailable), fall through to the create — the D6 contract's own
+          // semantics (not-found → create), never a failed item because the
+          // LOOKUP failed.
+          const recovered = await provider
+            .recoverCreate(`<!-- lucent-action:${item.idempotencyKey} -->`)
+            .catch(() => undefined);
+          if (recovered) {
+            await integrations.store.linkTask(
+              {
+                orgId: guard.board.orgId,
+                boardId,
+                nodeId: item.nodeId,
+                provider: record.provider,
+                externalId: recovered.externalId,
+                ...(recovered.url ? { url: recovered.url } : {}),
+                lastSyncedStatus: recovered.status,
+              },
+              Date.now(),
+            );
+            await ledger.applied(
+              boardId,
+              record.provider,
+              requestId,
+              recovered.externalId,
+              Date.now(),
+            );
+            appliedCount += 1;
+            results.push({
+              nodeId: item.nodeId,
+              action: "relinked",
+              externalId: recovered.externalId,
+              url: recovered.url,
+            });
+            continue;
+          }
+        }
+        const task =
+          item.action === "create"
+            ? await Promise.race([
+                provider.createTask(input),
+                new Promise<never>((_, reject) =>
+                  setTimeout(() => reject(new Error("provider timeout")), TIMEOUT_MS),
+                ),
+              ])
+            : await Promise.race([
+                provider.updateTask(item.externalId!, input),
+                new Promise<never>((_, reject) =>
+                  setTimeout(() => reject(new Error("provider timeout")), TIMEOUT_MS),
+                ),
+              ]);
+        await integrations.store.linkTask(
+          {
+            orgId: guard.board.orgId,
+            boardId,
+            nodeId: item.nodeId,
+            provider: record.provider,
+            externalId: task.externalId,
+            ...(task.url ? { url: task.url } : {}),
+            lastSyncedStatus: task.status,
+          },
+          Date.now(),
+        );
+        await ledger.applied(boardId, record.provider, requestId, task.externalId, Date.now());
+        appliedCount += 1;
+        results.push({
+          nodeId: item.nodeId,
+          action: item.action,
+          externalId: task.externalId,
+          url: task.url,
+        });
+      } catch (err) {
+        await ledger.failed(
+          boardId,
+          record.provider,
+          requestId,
+          (err as Error).message,
+          Date.now(),
+        );
+        failedCount += 1;
+        results.push({ nodeId: item.nodeId, action: "failed", reason: (err as Error).message });
+      }
+    }
+    if (appliedCount > 0) await actions.applied(boardId, actionId, Date.now());
+    send(res, 200, {
+      action: decided,
+      applied: appliedCount,
+      failed: failedCount,
+      inFlight,
+      results,
+    });
+  });
+
+  router.post("/api/boards/:id/integrations/actions/:actionId/reject", async (ctx) => {
+    const { req, res } = ctx;
+    const route = "/api/boards/:id/integrations/actions/:actionId/reject";
+    if (!requireCsrf(req, res, route)) return;
+    const user = await requireUser(req, res);
+    if (!user) return;
+    if (!meter(req, res, route)) return;
+    const boardId = ctx.param("id");
+    const guard = await requireBoardRole(req, res, boardId, "editor", route);
+    if (!guard.ok) return;
+    // docs/23 S1/S2: a confidential/restricted board — or one whose org
+    // floor raises it to those tiers — does not allow external content to
+    // leave or enter through integrations.
+    if (guard.board) {
+      const boundary = await outboundRefusal(guard.board, "integration");
+      if (boundary) {
+        send(res, 403, {
+          error: boundary.error,
+          classification: boundary.classification,
+          boundary: boundary.boundary,
+        });
+        return;
+      }
+    }
+    if (!integrations) return send(res, 503, { error: "integrations are not configured" });
+    const { actions, ledger } = integrations;
+    if (!actions || !ledger)
+      return send(res, 503, { error: "external actions are not configured" });
+    const actionId = ctx.param("actionId");
+    const decided = await actions.decide(boardId, actionId, "rejected", user.id, Date.now());
+    if (!decided) {
+      send(res, 404, { error: "no such action" });
+      return;
+    }
+    // Zero external effects on a rejection — guaranteed by never calling the
+    // provider on this path (pinned by test).
+    send(res, 200, { action: decided });
+  });
+
+  router.get("/api/boards/:id/integrations/actions", async (ctx) => {
+    const { req, res } = ctx;
+    const boardId = ctx.param("id");
+    const guard = await requireBoardRole(
+      req,
+      res,
+      boardId,
+      "viewer",
+      "/api/boards/:id/integrations/actions",
+    );
+    if (!guard.ok) return;
+    if (!integrations) return send(res, 503, { error: "integrations are not configured" });
+    const { actions } = integrations;
+    if (!actions) return send(res, 503, { error: "external actions are not configured" });
+    const rows = await actions.actionsForBoard(boardId);
+    send(res, 200, {
+      actions: rows.map((r) => ({
+        id: r.id,
+        provider: r.provider,
+        status: r.status,
+        itemCount: r.items.length,
+        createdBy: r.createdBy,
+        createdAt: r.createdAt,
+        decidedBy: r.decidedBy,
+        decidedAt: r.decidedAt,
+        appliedAt: r.appliedAt,
+      })),
+    });
+  });
+
+  // ---- The D7 inbound queue: the human-gated mirror of the approval flow ----
+  //
+  //   GET   /api/boards/:id/integrations/inbound            — the queue (viewer)
+  //   POST  /api/boards/:id/integrations/inbound/:cid/accept — apply (editor)
+  //   POST  /api/boards/:id/integrations/inbound/:cid/dismiss — keep ours (editor)
+  //
+  // The symmetric human gate: D5/D6 made every outbound effect human-
+  // approved; here every inbound change queues for accept — nothing
+  // auto-applies. Accept applies the REVIEWED SNAPSHOT (the record's
+  // externalValue through mapStatus), never a re-fetch; if the provider
+  // moved again, its webhook produced a newer pending row. Both accept and
+  // dismiss update the link's lastSyncedStatus — the provider's word is a
+  // fact about the provider, and only accept changes the board.
+
+  router.get("/api/boards/:id/integrations/inbound", async (ctx) => {
+    const { req, res } = ctx;
+    const boardId = ctx.param("id");
+    const guard = await requireBoardRole(
+      req,
+      res,
+      boardId,
+      "viewer",
+      "/api/boards/:id/integrations/inbound",
+    );
+    if (!guard.ok) return;
+    if (!integrations) return send(res, 503, { error: "integrations are not configured" });
+    const { inbound } = integrations;
+    if (!inbound) return send(res, 503, { error: "inbound changes are not configured" });
+    const rows = await inbound.forBoard(boardId);
+    // The join the UI renders from: the live board value beside the record,
+    // so "Linear says Done — the board says todo" is one row, and a record
+    // whose board value already matches renders resolved.
+    const links = new Map(
+      (await integrations.store.linksForBoard(boardId)).map((l) => [
+        `${l.provider}:${l.nodeId}`,
+        l,
+      ]),
+    );
+    send(res, 200, {
+      inbound: rows.map((r) => {
+        const link = links.get(`${r.provider}:${r.nodeId}`);
+        const node = guard.board.workspace.nodes[r.nodeId];
+        const boardValue = node?.issue?.status ?? null;
+        return {
+          id: r.id,
+          provider: r.provider,
+          nodeId: r.nodeId,
+          nodeLabel: node?.label ?? r.nodeId,
+          externalId: r.externalId,
+          ...(link?.url ? { url: link.url } : {}),
+          field: r.field,
+          externalValue: r.externalValue,
+          mappedValue: r.mappedValue ?? null,
+          /** mappedValue === null AND status pending = the never-guesses
+           * warning row: dismiss-only, the UI must not offer Accept. */
+          status: r.status,
+          source: r.source,
+          detectedAt: r.detectedAt,
+          boardValue,
+          resolved:
+            r.status === "pending" && r.mappedValue !== undefined && r.mappedValue === boardValue,
+          decidedBy: r.decidedBy,
+          decidedAt: r.decidedAt,
+          appliedSeq: r.appliedSeq,
+          reason: r.reason,
+        };
+      }),
+    });
+  });
+
+  router.post("/api/boards/:id/integrations/inbound/:changeId/accept", async (ctx) => {
+    const { req, res } = ctx;
+    const route = "/api/boards/:id/integrations/inbound/:changeId/accept";
+    if (!requireCsrf(req, res, route)) return;
+    const user = await requireUser(req, res);
+    if (!user) return;
+    if (!meter(req, res, route)) return;
+    const boardId = ctx.param("id");
+    const changeId = ctx.param("changeId");
+    const guard = await requireBoardRole(req, res, boardId, "editor", route);
+    if (!guard.ok) return;
+    // docs/23 S1/S2: a confidential/restricted board — or one whose org
+    // floor raises it to those tiers — does not allow external content to
+    // leave or enter through integrations.
+    if (guard.board) {
+      const boundary = await outboundRefusal(guard.board, "integration");
+      if (boundary) {
+        send(res, 403, {
+          error: boundary.error,
+          classification: boundary.classification,
+          boundary: boundary.boundary,
+        });
+        return;
+      }
+    }
+    if (!integrations) return send(res, 503, { error: "integrations are not configured" });
+    const { inbound } = integrations;
+    if (!inbound) return send(res, 503, { error: "inbound changes are not configured" });
+
+    const record = await inbound.change(boardId, changeId);
+    if (!record) {
+      send(res, 404, { error: "no such inbound change on this board" });
+      return;
+    }
+    if (record.status !== "pending") {
+      send(res, 200, { change: record, duplicate: true });
+      return;
+    }
+    // THE NEVER-GUESSES REFUSAL (ADR 0032's rule, inbound): an untranslatable
+    // word cannot be accepted — Lucent would have to guess a status to
+    // write. The row is dismiss-only; the honest 409 says why.
+    if (record.mappedValue === undefined) {
+      send(res, 409, {
+        error: `Lucent has no translation for "${record.externalValue}"; the board keeps its state`,
+      });
+      return;
+    }
+
+    // Apply the REVIEWED SNAPSHOT: a SET_ISSUE carrying the mapped value on
+    // the record's fields. The system actor's first use — the timeline
+    // honestly shows "Lucent ← the provider, accepted by <user>".
+    const node = guard.board.workspace.nodes[record.nodeId];
+    const currentIssue = node?.issue;
+    const ops: import("@lucent/core").Operation[] = [
+      {
+        op: "SET_ISSUE",
+        id: record.nodeId,
+        issue: currentIssue
+          ? { ...currentIssue, status: record.mappedValue }
+          : { type: "task", status: record.mappedValue },
+      },
+    ];
+    const { validateOperations, applyOperations } = await import("@lucent/core");
+    const errors = validateOperations(guard.board.workspace, ops);
+    if (errors.length > 0) {
+      send(res, 422, {
+        error: "the inbound change no longer applies to this board",
+        detail: errors.map((e) => `${e.op}: ${e.message}`).join("; "),
+      });
+      return;
+    }
+
+    const requestId = `inb_${record.id}`;
+    const actor: import("../boards.js").OperationActor = {
+      actorType: "system",
+      actorId: record.provider,
+      initiatedBy: user.id,
+    };
+    let seq: number;
+    let persistedByRoom = false;
+    const roomResult = await commitForBoard(boardId, user.id, ops, `sync from ${record.provider}`, {
+      requestId,
+      actor,
+    });
+    if (roomResult?.ok && roomResult.entry) {
+      seq = roomResult.entry.seq;
+      persistedByRoom = true;
+      for (const absorbed of roomResult.absorbed ?? []) {
+        broadcastProposal(boardId, { type: "op", entry: absorbed });
+      }
+      broadcastProposal(boardId, { type: "op", entry: roomResult.entry });
+    } else {
+      const append = await s.boardStore.appendOp({
+        boardId,
+        ops,
+        by: user.id,
+        label: `sync from ${record.provider}`,
+        at: Date.now(),
+        requestId,
+        actor,
+      });
+      if (!append.ok) {
+        send(res, 409, { error: "stale board", reason: append.reason, head: append.head });
+        return;
+      }
+      seq = append.seq;
+      persistedByRoom = append.duplicate === true;
+      if (!persistedByRoom) {
+        const updated = applyOperations(guard.board.workspace, ops);
+        await s.boardStore.put({ ...guard.board, workspace: updated, updatedAt: Date.now() });
+      }
+    }
+
+    // The link's lastSyncedStatus is a fact about the provider: accept
+    // records it (the board now agrees with the provider).
+    const link = (await integrations.store.linksForNode(boardId, record.nodeId)).find(
+      (l) => l.provider === record.provider,
+    );
+    if (link) {
       await integrations.store.linkTask(
         {
           orgId: guard.board.orgId,
           boardId,
-          nodeId: item.nodeId,
+          nodeId: record.nodeId,
           provider: record.provider,
-          externalId: task.externalId,
-          ...(task.url ? { url: task.url } : {}),
-          lastSyncedStatus: task.status,
+          externalId: link.externalId,
+          ...(link.url !== undefined ? { url: link.url } : {}),
+          lastSyncedStatus: record.externalValue,
         },
         Date.now(),
       );
-      await ledger.applied(boardId, record.provider, requestId, task.externalId, Date.now());
-      appliedCount += 1;
-      results.push({ nodeId: item.nodeId, action: item.action, externalId: task.externalId, url: task.url });
-    } catch (err) {
-      await ledger.failed(boardId, record.provider, requestId, (err as Error).message, Date.now());
-      failedCount += 1;
-      results.push({ nodeId: item.nodeId, action: "failed", reason: (err as Error).message });
     }
-  }
-  if (appliedCount > 0) await actions.applied(boardId, actionId, Date.now());
-  send(res, 200, { action: decided, applied: appliedCount, failed: failedCount, inFlight, results });
-});
 
-router.post("/api/boards/:id/integrations/actions/:actionId/reject", async (ctx) => {
-  const { req, res } = ctx;
-  const route = "/api/boards/:id/integrations/actions/:actionId/reject";
-  if (!requireCsrf(req, res, route)) return;
-  const user = await requireUser(req, res);
-  if (!user) return;
-  if (!meter(req, res, route)) return;
-  const boardId = ctx.param("id");
-  const guard = await requireBoardRole(req, res, boardId, "editor", route);
-  if (!guard.ok) return;
-  // docs/23 S1: a confidential/restricted board does not allow external
-  // content to leave or enter through integrations.
-  if (guard.board) {
-    const boundary = integrationBoundary(guard.board);
-    if (boundary) {
-      send(res, 403, {
-        error: boundary.error,
-        classification: boundary.classification,
-        boundary: boundary.boundary,
-      });
-      return;
-    }
-  }
-  if (!integrations) return send(res, 503, { error: "integrations are not configured" });
-  const { actions, ledger } = integrations;
-  if (!actions || !ledger) return send(res, 503, { error: "external actions are not configured" });
-  const actionId = ctx.param("actionId");
-  const decided = await actions.decide(boardId, actionId, "rejected", user.id, Date.now());
-  if (!decided) {
-    send(res, 404, { error: "no such action" });
-    return;
-  }
-  // Zero external effects on a rejection — guaranteed by never calling the
-  // provider on this path (pinned by test).
-  send(res, 200, { action: decided });
-});
-
-router.get("/api/boards/:id/integrations/actions", async (ctx) => {
-  const { req, res } = ctx;
-  const boardId = ctx.param("id");
-  const guard = await requireBoardRole(req, res, boardId, "viewer", "/api/boards/:id/integrations/actions");
-  if (!guard.ok) return;
-  if (!integrations) return send(res, 503, { error: "integrations are not configured" });
-  const { actions } = integrations;
-  if (!actions) return send(res, 503, { error: "external actions are not configured" });
-  const rows = await actions.actionsForBoard(boardId);
-  send(res, 200, {
-    actions: rows.map((r) => ({
-      id: r.id,
-      provider: r.provider,
-      status: r.status,
-      itemCount: r.items.length,
-      createdBy: r.createdBy,
-      createdAt: r.createdAt,
-      decidedBy: r.decidedBy,
-      decidedAt: r.decidedAt,
-      appliedAt: r.appliedAt,
-    })),
-  });
-});
-
-// ---- The D7 inbound queue: the human-gated mirror of the approval flow ----
-//
-//   GET   /api/boards/:id/integrations/inbound            — the queue (viewer)
-//   POST  /api/boards/:id/integrations/inbound/:cid/accept — apply (editor)
-//   POST  /api/boards/:id/integrations/inbound/:cid/dismiss — keep ours (editor)
-//
-// The symmetric human gate: D5/D6 made every outbound effect human-
-// approved; here every inbound change queues for accept — nothing
-// auto-applies. Accept applies the REVIEWED SNAPSHOT (the record's
-// externalValue through mapStatus), never a re-fetch; if the provider
-// moved again, its webhook produced a newer pending row. Both accept and
-// dismiss update the link's lastSyncedStatus — the provider's word is a
-// fact about the provider, and only accept changes the board.
-
-router.get("/api/boards/:id/integrations/inbound", async (ctx) => {
-  const { req, res } = ctx;
-  const boardId = ctx.param("id");
-  const guard = await requireBoardRole(req, res, boardId, "viewer", "/api/boards/:id/integrations/inbound");
-  if (!guard.ok) return;
-  if (!integrations) return send(res, 503, { error: "integrations are not configured" });
-  const { inbound } = integrations;
-  if (!inbound) return send(res, 503, { error: "inbound changes are not configured" });
-  const rows = await inbound.forBoard(boardId);
-  // The join the UI renders from: the live board value beside the record,
-  // so "Linear says Done — the board says todo" is one row, and a record
-  // whose board value already matches renders resolved.
-  const links = new Map(
-    (await integrations.store.linksForBoard(boardId)).map((l) => [`${l.provider}:${l.nodeId}`, l]),
-  );
-  send(res, 200, {
-    inbound: rows.map((r) => {
-      const link = links.get(`${r.provider}:${r.nodeId}`);
-      const node = guard.board.workspace.nodes[r.nodeId];
-      const boardValue = node?.issue?.status ?? null;
-      return {
-        id: r.id,
-        provider: r.provider,
-        nodeId: r.nodeId,
-        nodeLabel: node?.label ?? r.nodeId,
-        externalId: r.externalId,
-        ...(link?.url ? { url: link.url } : {}),
-        field: r.field,
-        externalValue: r.externalValue,
-        mappedValue: r.mappedValue ?? null,
-        /** mappedValue === null AND status pending = the never-guesses
-         * warning row: dismiss-only, the UI must not offer Accept. */
-        status: r.status,
-        source: r.source,
-        detectedAt: r.detectedAt,
-        boardValue,
-        resolved: r.status === "pending" && r.mappedValue !== undefined && r.mappedValue === boardValue,
-        decidedBy: r.decidedBy,
-        decidedAt: r.decidedAt,
-        appliedSeq: r.appliedSeq,
-        reason: r.reason,
-      };
-    }),
-  });
-});
-
-router.post("/api/boards/:id/integrations/inbound/:changeId/accept", async (ctx) => {
-  const { req, res } = ctx;
-  const route = "/api/boards/:id/integrations/inbound/:changeId/accept";
-  if (!requireCsrf(req, res, route)) return;
-  const user = await requireUser(req, res);
-  if (!user) return;
-  if (!meter(req, res, route)) return;
-  const boardId = ctx.param("id");
-  const changeId = ctx.param("changeId");
-  const guard = await requireBoardRole(req, res, boardId, "editor", route);
-  if (!guard.ok) return;
-  // docs/23 S1: a confidential/restricted board does not allow external
-  // content to leave or enter through integrations.
-  if (guard.board) {
-    const boundary = integrationBoundary(guard.board);
-    if (boundary) {
-      send(res, 403, {
-        error: boundary.error,
-        classification: boundary.classification,
-        boundary: boundary.boundary,
-      });
-      return;
-    }
-  }
-  if (!integrations) return send(res, 503, { error: "integrations are not configured" });
-  const { inbound } = integrations;
-  if (!inbound) return send(res, 503, { error: "inbound changes are not configured" });
-
-  const record = await inbound.change(boardId, changeId);
-  if (!record) {
-    send(res, 404, { error: "no such inbound change on this board" });
-    return;
-  }
-  if (record.status !== "pending") {
-    send(res, 200, { change: record, duplicate: true });
-    return;
-  }
-  // THE NEVER-GUESSES REFUSAL (ADR 0032's rule, inbound): an untranslatable
-  // word cannot be accepted — Lucent would have to guess a status to
-  // write. The row is dismiss-only; the honest 409 says why.
-  if (record.mappedValue === undefined) {
-    send(res, 409, {
-      error: `Lucent has no translation for "${record.externalValue}"; the board keeps its state`,
+    const decided = await inbound.decide(boardId, changeId, "applied", user.id, Date.now(), {
+      appliedSeq: seq,
     });
-    return;
-  }
-
-  // Apply the REVIEWED SNAPSHOT: a SET_ISSUE carrying the mapped value on
-  // the record's fields. The system actor's first use — the timeline
-  // honestly shows "Lucent ← the provider, accepted by <user>".
-  const node = guard.board.workspace.nodes[record.nodeId];
-  const currentIssue = node?.issue;
-  const ops: import("@lucent/core").Operation[] = [
-    {
-      op: "SET_ISSUE",
-      id: record.nodeId,
-      issue: currentIssue
-        ? { ...currentIssue, status: record.mappedValue }
-        : { type: "task", status: record.mappedValue },
-    },
-  ];
-  const { validateOperations, applyOperations } = await import("@lucent/core");
-  const errors = validateOperations(guard.board.workspace, ops);
-  if (errors.length > 0) {
-    send(res, 422, {
-      error: "the inbound change no longer applies to this board",
-      detail: errors.map((e) => `${e.op}: ${e.message}`).join("; "),
-    });
-    return;
-  }
-
-  const requestId = `inb_${record.id}`;
-  const actor: import("../boards.js").OperationActor = {
-    actorType: "system",
-    actorId: record.provider,
-    initiatedBy: user.id,
-  };
-  let seq: number;
-  let persistedByRoom = false;
-  const roomResult = await commitForBoard(boardId, user.id, ops, `sync from ${record.provider}`, {
-    requestId,
-    actor,
-  });
-  if (roomResult?.ok && roomResult.entry) {
-    seq = roomResult.entry.seq;
-    persistedByRoom = true;
-    for (const absorbed of roomResult.absorbed ?? []) {
-      broadcastProposal(boardId, { type: "op", entry: absorbed });
-    }
-    broadcastProposal(boardId, { type: "op", entry: roomResult.entry });
-  } else {
-    const append = await s.boardStore.appendOp({
-      boardId,
-      ops,
+    broadcastProposal(boardId, {
+      type: "integrations-inbound",
+      id: changeId,
+      status: "applied",
       by: user.id,
-      label: `sync from ${record.provider}`,
-      at: Date.now(),
-      requestId,
-      actor,
     });
-    if (!append.ok) {
-      send(res, 409, { error: "stale board", reason: append.reason, head: append.head });
+    void auditRow(req, user.id, guard.board.orgId, "integration.inbound.accept", changeId);
+    send(res, 200, { change: decided, applied: ops.length, seq, persistedByRoom });
+  });
+
+  router.post("/api/boards/:id/integrations/inbound/:changeId/dismiss", async (ctx) => {
+    const { req, res } = ctx;
+    const route = "/api/boards/:id/integrations/inbound/:changeId/dismiss";
+    if (!requireCsrf(req, res, route)) return;
+    const user = await requireUser(req, res);
+    if (!user) return;
+    if (!meter(req, res, route)) return;
+    const boardId = ctx.param("id");
+    const changeId = ctx.param("changeId");
+    const guard = await requireBoardRole(req, res, boardId, "editor", route);
+    if (!guard.ok) return;
+    // docs/23 S1/S2: a confidential/restricted board — or one whose org
+    // floor raises it to those tiers — does not allow external content to
+    // leave or enter through integrations.
+    if (guard.board) {
+      const boundary = await outboundRefusal(guard.board, "integration");
+      if (boundary) {
+        send(res, 403, {
+          error: boundary.error,
+          classification: boundary.classification,
+          boundary: boundary.boundary,
+        });
+        return;
+      }
+    }
+    if (!integrations) return send(res, 503, { error: "integrations are not configured" });
+    const { inbound } = integrations;
+    if (!inbound) return send(res, 503, { error: "inbound changes are not configured" });
+
+    const record = await inbound.change(boardId, changeId);
+    if (!record) {
+      send(res, 404, { error: "no such inbound change on this board" });
       return;
     }
-    seq = append.seq;
-    persistedByRoom = append.duplicate === true;
-    if (!persistedByRoom) {
-      const updated = applyOperations(guard.board.workspace, ops);
-      await s.boardStore.put({ ...guard.board, workspace: updated, updatedAt: Date.now() });
+    if (record.status !== "pending") {
+      send(res, 200, { change: record, duplicate: true });
+      return;
     }
-  }
 
-  // The link's lastSyncedStatus is a fact about the provider: accept
-  // records it (the board now agrees with the provider).
-  const link = (await integrations.store.linksForNode(boardId, record.nodeId)).find(
-    (l) => l.provider === record.provider,
-  );
-  if (link) {
-    await integrations.store.linkTask(
-      {
-        orgId: guard.board.orgId,
-        boardId,
-        nodeId: record.nodeId,
-        provider: record.provider,
-        externalId: link.externalId,
-        ...(link.url !== undefined ? { url: link.url } : {}),
-        lastSyncedStatus: record.externalValue,
-      },
-      Date.now(),
+    // Dismiss keeps the board — but the link still records the provider's
+    // word: lastSyncedStatus is the honest "what the provider says now",
+    // not "what the board agreed to". A later sync pushes the board's value
+    // back (outbound-authoritative), and a later webhook re-queues if the
+    // provider moves again.
+    const link = (await integrations.store.linksForNode(boardId, record.nodeId)).find(
+      (l) => l.provider === record.provider,
     );
-  }
+    if (link) {
+      await integrations.store.linkTask(
+        {
+          orgId: guard.board.orgId,
+          boardId,
+          nodeId: record.nodeId,
+          provider: record.provider,
+          externalId: link.externalId,
+          ...(link.url !== undefined ? { url: link.url } : {}),
+          lastSyncedStatus: record.externalValue,
+        },
+        Date.now(),
+      );
+    }
 
-  const decided = await inbound.decide(boardId, changeId, "applied", user.id, Date.now(), {
-    appliedSeq: seq,
+    const decided = await inbound.decide(boardId, changeId, "dismissed", user.id, Date.now(), {
+      reason: "kept the board's value",
+    });
+    broadcastProposal(boardId, {
+      type: "integrations-inbound",
+      id: changeId,
+      status: "dismissed",
+      by: user.id,
+    });
+    void auditRow(req, user.id, guard.board.orgId, "integration.inbound.dismiss", changeId);
+    send(res, 200, { change: decided });
   });
-  broadcastProposal(boardId, {
-    type: "integrations-inbound",
-    id: changeId,
-    status: "applied",
-    by: user.id,
-  });
-  void auditRow(req, user.id, guard.board.orgId, "integration.inbound.accept", changeId);
-  send(res, 200, { change: decided, applied: ops.length, seq, persistedByRoom });
-});
 
-router.post("/api/boards/:id/integrations/inbound/:changeId/dismiss", async (ctx) => {
-  const { req, res } = ctx;
-  const route = "/api/boards/:id/integrations/inbound/:changeId/dismiss";
-  if (!requireCsrf(req, res, route)) return;
-  const user = await requireUser(req, res);
-  if (!user) return;
-  if (!meter(req, res, route)) return;
-  const boardId = ctx.param("id");
-  const changeId = ctx.param("changeId");
-  const guard = await requireBoardRole(req, res, boardId, "editor", route);
-  if (!guard.ok) return;
-  // docs/23 S1: a confidential/restricted board does not allow external
-  // content to leave or enter through integrations.
-  if (guard.board) {
-    const boundary = integrationBoundary(guard.board);
-    if (boundary) {
-      send(res, 403, {
-        error: boundary.error,
-        classification: boundary.classification,
-        boundary: boundary.boundary,
+  // ---- The D9 AI-initiated proposal: the narrowing agent --------------------
+  //
+  //   POST /api/boards/:id/integrations/:provider/propose-ai
+  //
+  // The model is a SELECTOR, never an author (ADR 0035). The server builds
+  // the FULL item set through the same shared builder the human route uses,
+  // calls the provider's generateExternalPlan with a SEMANTIC-ONLY context,
+  // then INTERSECTS the model's nodeIds with the real items. The record lands
+  // as a normal pending proposal (origin "ai" + provenance + sourceSeq) that
+  // ONLY the human approve route can decide — no route from here to the
+  // executor exists. The ladder order is deliberate: connection and factory
+  // checks FIRST, so a refused request costs no allowance (the review's
+  // no-spend-on-refusal rule); the monthly gate runs just before the model
+  // call, and the usage meters on success only.
+
+  const proposeAiBodySchema = z.object({
+    request: z.string().min(1).max(600),
+    /**
+     * Stage E3 (ADR 0037): the create-the-work bridge — the client may name
+     * the node ids itself (a plan region's derived actions, selected by a
+     * human surface) instead of asking the model to narrow. When present,
+     * the selector LLM is SKIPPED entirely (no spend, no candidate draft);
+     * the ids flow through the SAME dedupe → intersect → cap → warn path a
+     * model selection takes, so the narrowing is structural either way.
+     */
+    nodeIds: z.array(z.string().min(1)).max(200).optional(),
+  });
+
+  router.post("/api/boards/:id/integrations/:provider/propose-ai", async (ctx) => {
+    const { req, res } = ctx;
+    const route = "/api/boards/:id/integrations/:provider/propose-ai";
+    if (!requireCsrf(req, res, route)) return;
+    const user = await requireUser(req, res);
+    if (!user) return;
+    if (!meter(req, res, route)) return;
+    const boardId = ctx.param("id");
+    const guard = await requireBoardRole(req, res, boardId, "editor", route);
+    if (!guard.ok) return;
+    // docs/23 S1/S2: a confidential/restricted board — or one whose org
+    // floor raises it to those tiers — does not allow external content to
+    // leave or enter through integrations.
+    if (guard.board) {
+      const boundary = await outboundRefusal(guard.board, "integration");
+      if (boundary) {
+        send(res, 403, {
+          error: boundary.error,
+          classification: boundary.classification,
+          boundary: boundary.boundary,
+        });
+        return;
+      }
+    }
+    if (!integrations) return send(res, 503, { error: "integrations are not configured" });
+    const { actions } = integrations;
+    if (!actions) return send(res, 503, { error: "external actions are not configured" });
+
+    const providerName = ctx.param("provider");
+    // CONNECTION BEFORE MODEL: a 404/409 here costs no allowance — the
+    // review's no-spend-on-refusal rule, pinned by test.
+    const connection = await integrations.store.connection(guard.board.orgId, providerName);
+    if (!connection) {
+      send(res, 404, { error: `no ${providerName} connection is configured for this org` });
+      return;
+    }
+    if (connection.status !== "active") {
+      send(res, 409, { error: `the ${providerName} connection is ${connection.status}` });
+      return;
+    }
+    const resolved = resolveProvider(integrations, providerName, connection);
+    if (!resolved.ok) {
+      send(res, 400, { error: resolved.error });
+      return;
+    }
+    const provider = resolved.provider;
+
+    let body: z.infer<typeof proposeAiBodySchema>;
+    try {
+      const raw = await readBody(req);
+      body = proposeAiBodySchema.parse(raw ? JSON.parse(raw) : {});
+    } catch (err) {
+      send(res, 400, { error: "bad request", detail: (err as Error).message });
+      return;
+    }
+
+    // Billing: the board's org (the editor floor guarantees membership in
+    // it — the generate path's own rule). The monthly allowance runs just
+    // before the model call; a parse error or a connection refusal above
+    // never reaches it.
+    const allowance = await gateMonthly(
+      req,
+      res,
+      guard.board.orgId,
+      "ai.generationsPerMonth",
+      route,
+    );
+    if (allowance === false) return;
+
+    // THE UPPER BOUND: the same shared builder the human route calls — the
+    // narrowing is structural, not conventional. The candidates the model
+    // sees are exactly the items the human route would propose.
+    const existingLinks = new Map(
+      (await integrations.store.linksForBoard(boardId))
+        .filter((l) => l.provider === providerName)
+        .map((l) => [l.nodeId, l] as const),
+    );
+    const items = extractProposalItems(
+      guard.board.workspace,
+      existingLinks,
+      provider.capabilityWarnings?.bind(provider),
+    );
+    if (items.length === 0) {
+      send(res, 422, { error: "no executable actions on this board" });
+      return;
+    }
+
+    // The SEMANTIC-ONLY context: node id, label, statement, issue fields.
+    // No credentials, no external ids, no connection internals (pinned in
+    // the ai package's suite; the boundary is the request type's shape).
+    // Stage E3: skipped entirely when the caller named the ids — the
+    // bridge path spends no model call.
+    const started = Date.now();
+    let selectedIds: string[];
+    let explanation: string;
+    if (body.nodeIds) {
+      selectedIds = body.nodeIds;
+      explanation = `Selected ${body.nodeIds.length} action(s) from the plan surface.`;
+    } else {
+      const candidates = actionNodes(guard.board.workspace).map((node) => ({
+        nodeId: node.id,
+        label: node.label,
+        ...(node.statement ? { statementKind: node.statement.kind } : {}),
+        ...(node.statement?.topic ? { statementTopic: node.statement.topic } : {}),
+        ...(node.issue?.status ? { status: node.issue.status } : {}),
+        ...(node.issue?.assignee ? { assignee: node.issue.assignee } : {}),
+        ...(node.issue?.dueDate ? { dueDate: node.issue.dueDate } : {}),
+      }));
+
+      const plan = await llmProvider.generateExternalPlan({
+        request: body.request,
+        boardName: guard.board.name,
+        // The provider's DISPLAY name — a label, never a connection detail.
+        providerName: provider.name,
+        candidates,
+        totalCandidates: candidates.length,
+      });
+      selectedIds = plan.nodeIds;
+      explanation = plan.explanation;
+    }
+
+    // DEDUP (first-occurrence order — deterministic, honest counts).
+    const seen = new Set<string>();
+    const deduped: string[] = [];
+    for (const id of selectedIds) {
+      if (!seen.has(id)) {
+        seen.add(id);
+        deduped.push(id);
+      }
+    }
+
+    // INTERSECT: the only path from a selection to a proposal item — model
+    // draft or human-named ids, the same gate. Unknown ids drop with a
+    // visible warning (the citation discipline).
+    const byNodeId = new Map(items.map((item) => [item.nodeId, item] as const));
+    const warnings: string[] = [];
+    const selected = deduped.filter((id) => {
+      if (byNodeId.has(id)) return true;
+      warnings.push(`"${id}" is not an executable action on this board — dropped`);
+      return false;
+    });
+
+    // THE CAP: a selection larger than MAX_AI_SELECTED_ACTIONS is REFUSED
+    // with the honest error — never silently truncated, never silently
+    // reinterpreted (the review's rule, pinned).
+    if (selected.length > MAX_AI_SELECTED_ACTIONS) {
+      send(res, 422, {
+        error: `Lucent selected ${selected.length} actions, but external proposals are limited to ${MAX_AI_SELECTED_ACTIONS}`,
+        selectedCount: selected.length,
+        max: MAX_AI_SELECTED_ACTIONS,
       });
       return;
     }
-  }
-  if (!integrations) return send(res, 503, { error: "integrations are not configured" });
-  const { inbound } = integrations;
-  if (!inbound) return send(res, 503, { error: "inbound changes are not configured" });
 
-  const record = await inbound.change(boardId, changeId);
-  if (!record) {
-    send(res, 404, { error: "no such inbound change on this board" });
-    return;
-  }
-  if (record.status !== "pending") {
-    send(res, 200, { change: record, duplicate: true });
-    return;
-  }
-
-  // Dismiss keeps the board — but the link still records the provider's
-  // word: lastSyncedStatus is the honest "what the provider says now",
-  // not "what the board agreed to". A later sync pushes the board's value
-  // back (outbound-authoritative), and a later webhook re-queues if the
-  // provider moves again.
-  const link = (await integrations.store.linksForNode(boardId, record.nodeId)).find(
-    (l) => l.provider === record.provider,
-  );
-  if (link) {
-    await integrations.store.linkTask(
-      {
-        orgId: guard.board.orgId,
-        boardId,
-        nodeId: record.nodeId,
-        provider: record.provider,
-        externalId: link.externalId,
-        ...(link.url !== undefined ? { url: link.url } : {}),
-        lastSyncedStatus: record.externalValue,
-      },
-      Date.now(),
-    );
-  }
-
-  const decided = await inbound.decide(boardId, changeId, "dismissed", user.id, Date.now(), {
-    reason: "kept the board's value",
-  });
-  broadcastProposal(boardId, {
-    type: "integrations-inbound",
-    id: changeId,
-    status: "dismissed",
-    by: user.id,
-  });
-  void auditRow(req, user.id, guard.board.orgId, "integration.inbound.dismiss", changeId);
-  send(res, 200, { change: decided });
-});
-
-// ---- The D9 AI-initiated proposal: the narrowing agent --------------------
-//
-//   POST /api/boards/:id/integrations/:provider/propose-ai
-//
-// The model is a SELECTOR, never an author (ADR 0035). The server builds
-// the FULL item set through the same shared builder the human route uses,
-// calls the provider's generateExternalPlan with a SEMANTIC-ONLY context,
-// then INTERSECTS the model's nodeIds with the real items. The record lands
-// as a normal pending proposal (origin "ai" + provenance + sourceSeq) that
-// ONLY the human approve route can decide — no route from here to the
-// executor exists. The ladder order is deliberate: connection and factory
-// checks FIRST, so a refused request costs no allowance (the review's
-// no-spend-on-refusal rule); the monthly gate runs just before the model
-// call, and the usage meters on success only.
-
-const proposeAiBodySchema = z.object({
-  request: z.string().min(1).max(600),
-  /**
-   * Stage E3 (ADR 0037): the create-the-work bridge — the client may name
-   * the node ids itself (a plan region's derived actions, selected by a
-   * human surface) instead of asking the model to narrow. When present,
-   * the selector LLM is SKIPPED entirely (no spend, no candidate draft);
-   * the ids flow through the SAME dedupe → intersect → cap → warn path a
-   * model selection takes, so the narrowing is structural either way.
-   */
-  nodeIds: z.array(z.string().min(1)).max(200).optional(),
-});
-
-router.post("/api/boards/:id/integrations/:provider/propose-ai", async (ctx) => {
-  const { req, res } = ctx;
-  const route = "/api/boards/:id/integrations/:provider/propose-ai";
-  if (!requireCsrf(req, res, route)) return;
-  const user = await requireUser(req, res);
-  if (!user) return;
-  if (!meter(req, res, route)) return;
-  const boardId = ctx.param("id");
-  const guard = await requireBoardRole(req, res, boardId, "editor", route);
-  if (!guard.ok) return;
-  // docs/23 S1: a confidential/restricted board does not allow external
-  // content to leave or enter through integrations.
-  if (guard.board) {
-    const boundary = integrationBoundary(guard.board);
-    if (boundary) {
-      send(res, 403, {
-        error: boundary.error,
-        classification: boundary.classification,
-        boundary: boundary.boundary,
+    if (selected.length === 0) {
+      send(res, 422, {
+        error: "Lucent couldn't identify actions matching your request",
+        hint: 'Try: "Send the launch-related actions", "Send Sarah\'s actions", or use Propose to select everything.',
       });
       return;
     }
-  }
-  if (!integrations) return send(res, 503, { error: "integrations are not configured" });
-  const { actions } = integrations;
-  if (!actions) return send(res, 503, { error: "external actions are not configured" });
 
-  const providerName = ctx.param("provider");
-  // CONNECTION BEFORE MODEL: a 404/409 here costs no allowance — the
-  // review's no-spend-on-refusal rule, pinned by test.
-  const connection = await integrations.store.connection(guard.board.orgId, providerName);
-  if (!connection) {
-    send(res, 404, { error: `no ${providerName} connection is configured for this org` });
-    return;
-  }
-  if (connection.status !== "active") {
-    send(res, 409, { error: `the ${providerName} connection is ${connection.status}` });
-    return;
-  }
-  const resolved = resolveProvider(integrations, providerName, connection);
-  if (!resolved.ok) {
-    send(res, 400, { error: resolved.error });
-    return;
-  }
-  const provider = resolved.provider;
+    const narrowed = selected.map((id) => byNodeId.get(id)!);
+    // The board revision the selection was computed against — audit, not a
+    // gate (approval applies the record's item snapshot either way).
+    const sourceSeq = await boardStore.latestSeq(boardId);
 
-  let body: z.infer<typeof proposeAiBodySchema>;
-  try {
-    const raw = await readBody(req);
-    body = proposeAiBodySchema.parse(raw ? JSON.parse(raw) : {});
-  } catch (err) {
-    send(res, 400, { error: "bad request", detail: (err as Error).message });
-    return;
-  }
-
-  // Billing: the board's org (the editor floor guarantees membership in
-  // it — the generate path's own rule). The monthly allowance runs just
-  // before the model call; a parse error or a connection refusal above
-  // never reaches it.
-  const allowance = await gateMonthly(req, res, guard.board.orgId, "ai.generationsPerMonth", route);
-  if (allowance === false) return;
-
-  // THE UPPER BOUND: the same shared builder the human route calls — the
-  // narrowing is structural, not conventional. The candidates the model
-  // sees are exactly the items the human route would propose.
-  const existingLinks = new Map(
-    (await integrations.store.linksForBoard(boardId))
-      .filter((l) => l.provider === providerName)
-      .map((l) => [l.nodeId, l] as const),
-  );
-  const items = extractProposalItems(
-    guard.board.workspace,
-    existingLinks,
-    provider.capabilityWarnings?.bind(provider),
-  );
-  if (items.length === 0) {
-    send(res, 422, { error: "no executable actions on this board" });
-    return;
-  }
-
-  // The SEMANTIC-ONLY context: node id, label, statement, issue fields.
-  // No credentials, no external ids, no connection internals (pinned in
-  // the ai package's suite; the boundary is the request type's shape).
-  // Stage E3: skipped entirely when the caller named the ids — the
-  // bridge path spends no model call.
-  const started = Date.now();
-  let selectedIds: string[];
-  let explanation: string;
-  if (body.nodeIds) {
-    selectedIds = body.nodeIds;
-    explanation = `Selected ${body.nodeIds.length} action(s) from the plan surface.`;
-  } else {
-    const candidates = actionNodes(guard.board.workspace).map((node) => ({
-      nodeId: node.id,
-      label: node.label,
-      ...(node.statement ? { statementKind: node.statement.kind } : {}),
-      ...(node.statement?.topic ? { statementTopic: node.statement.topic } : {}),
-      ...(node.issue?.status ? { status: node.issue.status } : {}),
-      ...(node.issue?.assignee ? { assignee: node.issue.assignee } : {}),
-      ...(node.issue?.dueDate ? { dueDate: node.issue.dueDate } : {}),
-    }));
-
-    const plan = await llmProvider.generateExternalPlan({
-      request: body.request,
-      boardName: guard.board.name,
-      // The provider's DISPLAY name — a label, never a connection detail.
-      providerName: provider.name,
-      candidates,
-      totalCandidates: candidates.length,
-    });
-    selectedIds = plan.nodeIds;
-    explanation = plan.explanation;
-  }
-
-  // DEDUP (first-occurrence order — deterministic, honest counts).
-  const seen = new Set<string>();
-  const deduped: string[] = [];
-  for (const id of selectedIds) {
-    if (!seen.has(id)) {
-      seen.add(id);
-      deduped.push(id);
-    }
-  }
-
-  // INTERSECT: the only path from a selection to a proposal item — model
-  // draft or human-named ids, the same gate. Unknown ids drop with a
-  // visible warning (the citation discipline).
-  const byNodeId = new Map(items.map((item) => [item.nodeId, item] as const));
-  const warnings: string[] = [];
-  const selected = deduped.filter((id) => {
-    if (byNodeId.has(id)) return true;
-    warnings.push(
-      `"${id}" is not an executable action on this board — dropped`,
-    );
-    return false;
-  });
-
-  // THE CAP: a selection larger than MAX_AI_SELECTED_ACTIONS is REFUSED
-  // with the honest error — never silently truncated, never silently
-  // reinterpreted (the review's rule, pinned).
-  if (selected.length > MAX_AI_SELECTED_ACTIONS) {
-    send(res, 422, {
-      error: `Lucent selected ${selected.length} actions, but external proposals are limited to ${MAX_AI_SELECTED_ACTIONS}`,
-      selectedCount: selected.length,
-      max: MAX_AI_SELECTED_ACTIONS,
-    });
-    return;
-  }
-
-  if (selected.length === 0) {
-    send(res, 422, {
-      error: "Lucent couldn't identify actions matching your request",
-      hint: 'Try: "Send the launch-related actions", "Send Sarah\'s actions", or use Propose to select everything.',
-    });
-    return;
-  }
-
-  const narrowed = selected.map((id) => byNodeId.get(id)!);
-  // The board revision the selection was computed against — audit, not a
-  // gate (approval applies the record's item snapshot either way).
-  const sourceSeq = await boardStore.latestSeq(boardId);
-
-  const { record, supersededId } = await actions.propose({
-    orgId: guard.board.orgId,
-    boardId,
-    provider: providerName as never,
-    connectionId: connection.id,
-    items: narrowed,
-    createdBy: user.id,
-    now: Date.now(),
-    origin: "ai",
-    provenance: {
-      request: body.request,
-      explanation,
-      ...(body.nodeIds ? { nodeIds: body.nodeIds } : {}),
-    },
-    sourceSeq,
-  });
-
-  // Metered on success only (the ask/generate contract), the mode tag
-  // keeping the usage rows answerable by surface. The bridge path names
-  // no model — it spent none.
-  meterUsage(guard.board.orgId, "ai.generation", 1, {
-    boardId,
-    provider: llmProvider.name,
-    mode: body.nodeIds ? "plan-bridge" : "ai-propose",
-  });
-  telemetry.record({
-    kind: "ai-propose",
-    ms: Date.now() - started,
-    provider: llmProvider.name,
-    candidates: items.length,
-    selected: narrowed.length,
-    ...(body.nodeIds ? { mode: "plan-bridge" as const } : {}),
-    requestId: trace(req),
-  });
-
-  // THE PREVIEW: the same shape the human route answers, plus the AI
-  // origin's facts — the explanation is a RECOMMENDATION, rendered, never
-  // fed back as board truth.
-  const creates = narrowed.filter((i) => i.action === "create");
-  const updates = narrowed.filter((i) => i.action === "update");
-  send(res, 201, {
-    action: {
-      id: record.id,
-      provider: providerName,
-      status: record.status,
-      createdAt: record.createdAt,
+    const { record, supersededId } = await actions.propose({
+      orgId: guard.board.orgId,
+      boardId,
+      provider: providerName as never,
+      connectionId: connection.id,
+      items: narrowed,
+      createdBy: user.id,
+      now: Date.now(),
       origin: "ai",
-      provenance: record.provenance,
+      provenance: {
+        request: body.request,
+        explanation,
+        ...(body.nodeIds ? { nodeIds: body.nodeIds } : {}),
+      },
       sourceSeq,
-      ...(supersededId ? { supersededId } : {}),
-    },
-    preview: {
-      creates: creates.map((i) => ({
-        nodeId: i.nodeId,
-        title: i.title,
-        ...(i.assignee ? { assignee: i.assignee } : {}),
-        ...(i.dueDate ? { dueDate: i.dueDate } : {}),
-        status: i.status,
-        ...(i.warnings ? { warnings: i.warnings } : {}),
-      })),
-      updates: updates.map((i) => ({
-        nodeId: i.nodeId,
-        externalId: i.externalId,
-        title: i.title,
-        status: i.status,
-        ...(i.warnings ? { warnings: i.warnings } : {}),
-      })),
-      statement:
-        `Lucent proposes sending ${creates.length + updates.length} of the board's ${items.length} executable actions to ${providerName}. Nothing will be deleted. Existing external tasks will only be modified in the fields explicitly shown in the update rows.`,
-      // The selection ratio — the narrowing made explicit.
-      selectedCount: narrowed.length,
-      totalCandidates: items.length,
-      explanation,
-      ...(warnings.length > 0 ? { warnings } : {}),
-    },
-  });
-});
+    });
 
+    // Metered on success only (the ask/generate contract), the mode tag
+    // keeping the usage rows answerable by surface. The bridge path names
+    // no model — it spent none.
+    meterUsage(guard.board.orgId, "ai.generation", 1, {
+      boardId,
+      provider: llmProvider.name,
+      mode: body.nodeIds ? "plan-bridge" : "ai-propose",
+    });
+    telemetry.record({
+      kind: "ai-propose",
+      ms: Date.now() - started,
+      provider: llmProvider.name,
+      candidates: items.length,
+      selected: narrowed.length,
+      ...(body.nodeIds ? { mode: "plan-bridge" as const } : {}),
+      requestId: trace(req),
+    });
+
+    // THE PREVIEW: the same shape the human route answers, plus the AI
+    // origin's facts — the explanation is a RECOMMENDATION, rendered, never
+    // fed back as board truth.
+    const creates = narrowed.filter((i) => i.action === "create");
+    const updates = narrowed.filter((i) => i.action === "update");
+    send(res, 201, {
+      action: {
+        id: record.id,
+        provider: providerName,
+        status: record.status,
+        createdAt: record.createdAt,
+        origin: "ai",
+        provenance: record.provenance,
+        sourceSeq,
+        ...(supersededId ? { supersededId } : {}),
+      },
+      preview: {
+        creates: creates.map((i) => ({
+          nodeId: i.nodeId,
+          title: i.title,
+          ...(i.assignee ? { assignee: i.assignee } : {}),
+          ...(i.dueDate ? { dueDate: i.dueDate } : {}),
+          status: i.status,
+          ...(i.warnings ? { warnings: i.warnings } : {}),
+        })),
+        updates: updates.map((i) => ({
+          nodeId: i.nodeId,
+          externalId: i.externalId,
+          title: i.title,
+          status: i.status,
+          ...(i.warnings ? { warnings: i.warnings } : {}),
+        })),
+        statement: `Lucent proposes sending ${creates.length + updates.length} of the board's ${items.length} executable actions to ${providerName}. Nothing will be deleted. Existing external tasks will only be modified in the fields explicitly shown in the update rows.`,
+        // The selection ratio — the narrowing made explicit.
+        selectedCount: narrowed.length,
+        totalCandidates: items.length,
+        explanation,
+        ...(warnings.length > 0 ? { warnings } : {}),
+      },
+    });
+  });
 };

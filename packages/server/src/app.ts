@@ -4,11 +4,13 @@ import type { LLMProvider, ImageProvider } from "@lucent/ai";
 import { handleGenerate, handleGenerateStream } from "./generate.js";
 import { readByoHeaders, resolveProvider } from "./modelRouter.js";
 import {
-  checkOutbound,
+  checkOutboundFor,
   classificationOf,
+  effectiveSettings,
   isBoardClassification,
   BOARD_CLASSIFICATIONS,
 } from "./classification.js";
+import type { OutboundBoundary } from "./classification.js";
 import { handleImage } from "./image.js";
 import type { UsageTracker, UsageLimits } from "./usage.js";
 import type { Telemetry, TelemetryEvent } from "./telemetry.js";
@@ -110,6 +112,7 @@ import { registerNotificationRoutes } from "./routes/notifications.js";
 import { registerInviteRoutes } from "./routes/invites.js";
 import { registerBoardOpsRoutes } from "./routes/boardOps.js";
 import { registerMeetingRoutes } from "./routes/meetings.js";
+import { registerOrgSettingsRoutes } from "./routes/settings.js";
 import { registerProposalRoutes } from "./routes/proposals.js";
 import { registerSsoRoutes } from "./routes/sso.js";
 import { registerHistoryRoutes } from "./routes/history.js";
@@ -1665,6 +1668,52 @@ export function createApp(deps: AppDeps): App {
    * cannot produce a response missing the CORS block. Route modules still write
    * through `services.send`; see `routes/context.ts`.
    */
+  /**
+   * docs/24 Phase B: the two org-policy seams every gate reads through —
+   * defined once here, exposed on `RouteServices`, and the inline ladder uses
+   * the same closures. The org row is read PER DECISION, never cached: policy
+   * inheritance (a floor set today governs a board created last year) lives
+   * precisely in that choice, and a cache would turn an admin's "no" into a
+   * maybe. A failed org read fails closed like `effectiveSettings`' garbage
+   * rule: the strictest answer, with the refusal naming the cause.
+   */
+  async function outboundRefusal(
+    board: StoredBoard,
+    boundary: OutboundBoundary,
+    options: { provider?: { name: string } } = {},
+  ) {
+    let org = undefined;
+    try {
+      org = orgStore ? await orgStore.get(board.orgId) : undefined;
+    } catch {
+      // Fail-closed: an unreadable org row is governed as the strictest floor.
+      return checkOutboundFor(
+        board,
+        { settings: { classificationFloor: "restricted" } },
+        boundary,
+        options,
+      );
+    }
+    return checkOutboundFor(board, org, boundary, options);
+  }
+
+  async function orgPolicy(orgId: string) {
+    try {
+      const org = orgStore ? await orgStore.get(orgId) : undefined;
+      return effectiveSettings(org);
+    } catch {
+      return effectiveSettings({
+        settings: {
+          classificationFloor: "restricted",
+          ai: "disabled",
+          sharingDisabled: true,
+          agentDisabled: true,
+          recordingDisabled: true,
+        },
+      });
+    }
+  }
+
   const services: RouteServices = {
     config,
     logger,
@@ -1721,6 +1770,8 @@ export function createApp(deps: AppDeps): App {
     requireOrgRole,
     requireBoardRole,
     requireCsrf,
+    outboundRefusal,
+    orgPolicy,
     applyAuthLimiter,
     applyAccountLimiter,
     applyMailLimiter,
@@ -1760,6 +1811,7 @@ export function createApp(deps: AppDeps): App {
   registerAskRoutes(router, services);
   registerSearchRoutes(router, services);
   registerIntegrationRoutes(router, services);
+  registerOrgSettingsRoutes(router, services);
   /**
    * Asset gateway (M7 / M4 storage): `/api/assets/*`. The handler is built
    * here, not registered through the router, because it consumes a body-cap
@@ -3295,11 +3347,12 @@ export function createApp(deps: AppDeps): App {
       // resolved it.
       const guard = await requireBoardRole(req, res, id, "owner", "/api/boards/:id/share", user);
       if (!guard.ok) return;
-      // docs/23 S1: a share link is a capability that hands board content to
-      // anyone who holds the token, including people outside the org.
-      // Confidential and restricted boards do not allow that.
+      // docs/23 S1 / S2: a share link is a capability that hands board content
+      // to whoever holds the token, including people outside the org.
+      // Confidential and restricted boards do not allow that, and neither does
+      // an org policy with `sharingDisabled` — one gate reads both.
       if (guard.board) {
-        const refusal = checkOutbound(classificationOf(guard.board), "sharing");
+        const refusal = await outboundRefusal(guard.board, "sharing");
         if (refusal) {
           send(res, 403, {
             error: refusal.error,
@@ -3584,7 +3637,7 @@ export function createApp(deps: AppDeps): App {
       // still gets 404: the refusal only reaches callers who could see the
       // board anyway.
       if (req.headers["x-lucent-client"] === "mcp") {
-        const refusal = checkOutbound(classificationOf(guard.board), "agent");
+        const refusal = await outboundRefusal(guard.board, "agent");
         if (refusal) {
           send(res, 403, {
             error: refusal.error,
@@ -3685,7 +3738,7 @@ export function createApp(deps: AppDeps): App {
         // provider (the offline mock) is not an outbound boundary, so local dev
         // and the deterministic diagram path keep working — classification.ts.
         if (storedBoard) {
-          const refusal = checkOutbound(classificationOf(storedBoard), "ai", { provider });
+          const refusal = await outboundRefusal(storedBoard, "ai", { provider });
           if (refusal) {
             send(res, 403, {
               error: refusal.error,
@@ -3825,7 +3878,7 @@ export function createApp(deps: AppDeps): App {
         // provider — a BYO key is exactly the external provider a restricted
         // board must refuse. Before the headers, so this is a real 403.
         if (storedBoard) {
-          const refusal = checkOutbound(classificationOf(storedBoard), "ai", {
+          const refusal = await outboundRefusal(storedBoard, "ai", {
             provider: requestProvider,
           });
           if (refusal) {

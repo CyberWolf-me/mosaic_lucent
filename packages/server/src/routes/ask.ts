@@ -6,7 +6,6 @@ import { actorNamesFor, loadVisibleLog } from "../historyView.js";
 import { buildAnswerRequest } from "../askContext.js";
 import { visibleMeetings } from "../meetingsWindow.js";
 import type { MeetingStore } from "../meetings.js";
-import { checkOutbound, classificationOf } from "../classification.js";
 
 /**
  * The ask route (Stage C1):
@@ -80,6 +79,7 @@ export const registerAskRoutes: RegisterRoutes = (router, s) => {
     readBody,
     requireUser,
     requireBoardRole,
+    outboundRefusal,
     requireCsrf,
     meter,
     trace,
@@ -113,14 +113,14 @@ export const registerAskRoutes: RegisterRoutes = (router, s) => {
     const guard = await requireBoardRole(req, res, boardId, "viewer", route, user);
     if (!guard.ok) return;
 
-    // docs/23 S1: the ask route reads board content into a model prompt. A
-    // `restricted` board forbids that, and the refusal costs no token because
-    // it is before the provider call. Same `ai` boundary as /api/generate,
-    // including its in-process exception: an answer generated against the
-    // offline mock never leaves the machine, so the advisory's §24 fallback
-    // ("no approved provider → deterministic path") covers Ask too.
+    // docs/23 S1/S2: the ask route reads board content into a model prompt.
+    // A `restricted` board (or its org's floor) forbids that; `ai: disabled`
+    // at the org level forbids every generation, mock included. The refusal
+    // costs no token — it is before the provider call — and keeps the
+    // in-process-mock exception that makes the advisory's §24 fallback
+    // ("no approved provider → deterministic path") work for Ask offline.
     if (guard.board) {
-      const refusal = checkOutbound(classificationOf(guard.board), "ai", { provider });
+      const refusal = await outboundRefusal(guard.board, "ai", { provider });
       if (refusal) {
         send(res, 403, {
           error: refusal.error,

@@ -1,6 +1,6 @@
 # 24. Structural Change Plan — implementing the docs/22 and docs/23 audits
 
-> **Status: Phase A shipped (2026-09-16); B and C next in order.** This is the
+> **Status: Phases A and B shipped (2026-09-16); C next in order.** This is the
 > implementation plan for the two structural change sets the 2026-09 advisories
 > produced and docs/22 / docs/23 audited: the **meeting platform** (M-series)
 > and the **enterprise security model** (S-series). The audits established what
@@ -31,11 +31,12 @@ The freeze rule (docs/17) governs the ordering below. A phase is one of:
 
 ```text
 DONE ──► S0 (doc corrections)                    this commit's predecessor
-     └─► A (classification + outbound gating)    2026-09-16, docs/17 amendment
+     ├─► A (classification + outbound gating)    2026-09-16, docs/17 amendment
+     └─► B (org policy plane)                    2026-09-16, docs/17 amendment
 
 LEGAL NOW (correctness / safety)
   A  Classification field + outbound gating      S1   ─┬─ AI boundary   DONE
-  B  Org policy plane (admin settings)           S2   ─┤─ sharing/MCP/retention
+  B  Org policy plane (admin settings)           S2   ─┤─ sharing/MCP/retention  DONE
   C  Per-org provider policy                     S3   ─┘─ honest no-training
 
 EVIDENCE-GATED (Gate C/D)
@@ -102,7 +103,12 @@ is a governance hole in a shipped surface.
 - Prettier/typecheck/full suite green; PG-gated suites run with
   `LUCENT_TEST_DATABASE_URL` set.
 
-## 4. Phase B — The org policy plane (S2)
+## 4. Phase B — The org policy plane (S2) — **SHIPPED 2026-09-16**
+
+> Executed as the docs/17 amendment of the same date. `providerPolicy` is
+> deliberately absent from the shape until Phase C adds it as its own field,
+> and the web admin UI ships with C's Settings surface so the admin sees the
+> plane and the provider policy together, not twice.
 
 **Why second.** Policy is what makes classification useful at scale: an admin
 sets the default once, boards inherit it, and the board-level field is an

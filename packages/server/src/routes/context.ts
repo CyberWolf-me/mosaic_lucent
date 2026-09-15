@@ -184,6 +184,27 @@ export interface RouteServices {
   ): Promise<{ ok: true; user: StoredUser; role: Role; board: StoredBoard } | { ok: false }>;
   requireCsrf(req: IncomingMessage, res: ServerResponse, route: string): boolean;
   /**
+   * docs/24 Phase A+B: the single outbound gate a route may use. It reads the
+   * board's classification AND the org's policy (the floor via `stricterOf`,
+   * the org-wide boundary denials) through one call — the routes must never
+   * compose the two checks themselves, so a forgotten org lookup cannot
+   * silently reopen a disabled boundary. `null` means the crossing is
+   * allowed; a returned refusal is ready to send (403 + named body).
+   */
+  outboundRefusal(
+    board: StoredBoard,
+    boundary: import("../classification.js").OutboundBoundary,
+    options?: { provider?: { name: string } },
+  ): Promise<import("../classification.js").ClassificationRefusal | null>;
+  /**
+   * The org's effective policy plane for a board (docs/24 Phase B). Routes
+   * that gate a non-outbound policy — meeting capture reads
+   * `recordingDisabled` — call this instead of touching `orgStore.get`
+   * themselves: the fail-closed defaults live in `effectiveSettings`, and
+   * duplicating that read in a route is how two stores drift.
+   */
+  orgPolicy(orgId: string): Promise<import("../classification.js").EffectiveOrgSettings>;
+  /**
    * P5: these are awaited because the limit may be enforced by a shared
    * Postgres counter rather than an in-process Map. A boolean return is
    * awaitable, so the in-memory path costs nothing for the change.

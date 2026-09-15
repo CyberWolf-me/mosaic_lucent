@@ -204,6 +204,13 @@
       "when": 1789457449977,
       "tag": "0028_classification",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1789504370701,
+      "tag": "0029_lazy_rumiko_fujikawa",
+      "breakpoints": true
     }
   ]
 }

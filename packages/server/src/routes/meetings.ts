@@ -18,7 +18,7 @@ import type { RegisterRoutes } from "./context.js";
  * through it by design, as everywhere else.
  */
 export const registerMeetingRoutes: RegisterRoutes = (router, s) => {
-  const { send, requireBoardRole, readBody, meetings } = s;
+  const { send, requireBoardRole, readBody, meetings, orgPolicy } = s;
 
   router.post("/api/boards/:id/meetings", async (ctx) => {
     const { req, res } = ctx;
@@ -27,6 +27,18 @@ export const registerMeetingRoutes: RegisterRoutes = (router, s) => {
     // become an oracle over which boards exist.
     const guard = await requireBoardRole(req, res, boardId, "editor", "/api/boards/:id/meetings");
     if (!guard.ok) return;
+    // docs/23 S2: "recording disabled" is an admin call above the board. The
+    // refusal creates no capture; END and the reads stay allowed — a policy
+    // turned on mid-meeting must let the running capture finalize rather than
+    // strand it in-progress (a policy that strands records is a lie about
+    // them), and an already-saved transcript is board state a member may read.
+    if ((await orgPolicy(guard.board.orgId)).recordingDisabled) {
+      send(res, 403, {
+        error: "this organization's policy disables meeting capture for every board",
+        recordingDisabled: true,
+      });
+      return;
+    }
     if (!meetings) return send(res, 503, { error: "meeting transcripts are not configured" });
 
     let body: {
@@ -97,6 +109,15 @@ export const registerMeetingRoutes: RegisterRoutes = (router, s) => {
       "/api/boards/:id/meetings/:mid/turns",
     );
     if (!guard.ok) return;
+    // docs/23 S2: the capture append is a new write of capture, so the org's
+    // recording policy governs it (see the save route for the full reasoning).
+    if ((await orgPolicy(guard.board.orgId)).recordingDisabled) {
+      send(res, 403, {
+        error: "this organization's policy disables meeting capture for every board",
+        recordingDisabled: true,
+      });
+      return;
+    }
     if (!meetings) return send(res, 503, { error: "meeting transcripts are not configured" });
 
     let body: { turns?: unknown };

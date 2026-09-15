@@ -1329,12 +1329,73 @@ way to say no.
   not a value; a garbage row fails closed identically), run against real
   Postgres; the crossTenant matrix gains its classification row — an outsider
   is answered 404 at every gated route (the guards run before the gates, so
-  classification never becomes an existence oracle). Full workspace suite
-  with `LUCENT_TEST_DATABASE_URL` set (local `postgres:16`): 736 tests,
-  64 files, zero failures, zero skips. Typecheck green across workspaces.
+  classification never becomes an existence oracle). Full six-workspace suite
+  with `LUCENT_TEST_DATABASE_URL` set (local `postgres:16`): 2,886 tests across
+  243 files, zero failures, zero skips — server alone 1,313 / 118 with the
+  PG-gated suites running. Typecheck green across workspaces.
 - **What deliberately waits**: the org policy floor (Phase B) — today the
   tier is board-level only and `stricterOf` sits unused by intent; the
   per-org provider allowlist (Phase C); the Settings UI classification picker,
   which ships with Phase B's admin API so the surface shows inheritance
   honestly on day one. `GET /api/boards/:id` and the listing already carry
   the resolved tier; the web client ignores it until then.
+
+## Amendment (2026-09-16): docs/24 Phase B executed — the org policy plane (clause 1)
+
+The second legal-now phase ships on Phase A's keystone: the admin policy above
+the board (docs/23 S2). Same clause-1 rationale — an org today cannot say no
+for all of its boards, which is the governance hole the advisory's §2 names.
+
+- **The plane**: `organizations.settings` (jsonb, migration 0029) as the
+  `OrgSettings` interface — a classification floor plus four denials
+  (`ai: "disabled"`, `sharingDisabled`, `agentDisabled`, `recordingDisabled`).
+  `effectiveSettings` resolves it with Phase A's fail-closed discipline:
+  absence is the permissive default (zero behavior change for orgs that never
+  touched the surface); a present-but-unintelligible value is the restrictive
+  one. jsonb, not a column per field: no field is ever queried in SQL and the
+  shape lives in one interface the stores cannot drift from.
+- **Enforcement is the gates, not a new system** (docs/24 §10's one-shape
+  rule): every Phase A call site now reads through `checkOutboundFor` —
+  generate/stream/ask, the seven integration routes, share minting, the
+  op-apply route and MCP-marked reads — and the capture routes (meeting save
+  + checkpoint append) through `orgPolicy.recordingDisabled`. The floor
+  raises a board's tier via `stricterOf` and the refusal sentence names its
+  source ("governed as confidential (its organization's classification
+  floor)") so a user never hunts for a label they never set. `ai: "disabled"`
+  deliberately reaches past the in-process-mock exemption: it is the org
+  saying "no AI in this workspace", not "no AI leaving it". Recording refusal
+  covers capture WRITES only — a policy turned on mid-meeting lets the
+  running capture finalize rather than strand a record "in progress".
+- **The admin surface**: `GET/PATCH /api/orgs/:id/settings`, owner floor
+  (members see org identity, not the policy console), CSRF on write,
+  strict-validated — an unknown key or a bad value is a named 400, never a
+  silently ignored field — and a `changed` map of from→to in the response.
+  Every write audits exactly one row naming the actor and the changed keys
+  (docs/24 §4 acceptance: "actor, action, and the changed key").
+- **Inheritance is structural**: the gates read the org row at decision time
+  (never cached — a cached policy turns an admin's "no" into a maybe), so a
+  floor set today governs every board in the org including ones created
+  years ago, with nothing rewritten, and lifting the policy lifts the refusal
+  as a read, not a lock. `POST /api/boards` classification writes stay
+  owner-gated: a member's PATCH cannot loosen the org floor either way.
+- **The gate, verified** (`org-policy.test.ts`, 14 tests): defaults and the
+  garbage-fails-restrictive rule asserted as a unit; `stricterOf` refusal
+  wording proven (the floor named, not the board's own label); `ai: disabled`
+  refused against the MOCK (the one switch that outranks the §24 offline
+  exemption); inheritance round-trip through the real share route (open →
+  policy on → 403 → policy off → open); policy-beats-board against an
+  explicitly-`internal` label; the agent denial covering BOTH MCP surfaces
+  while the human's own read stands; the recording lifecycle (capture refused,
+  append refused, END allowed, reads allowed); strict 400s with nothing
+  stored; stranger PATCHes answered 404; store parity in ONE test against
+  real Postgres (NULL reads as absence on both twins, the full plane round-
+  trips identically, `effectiveSettings` agrees across twins). Phase A's
+  suites unchanged and green. Full six-workspace suite with
+  `LUCENT_TEST_DATABASE_URL`: 2,886 tests, 243 files, zero failures, zero
+  skips (server 1,313 / 118 — correcting Phase A's amendment, whose "736/64"
+  quoted one workspace's tail, not the suite). Typecheck green.
+- **What deliberately waits**: the per-org provider allowlist (Phase C —
+  `providerPolicy` is not in this shape yet, deliberately, so the AI switch
+  here stays one honest boolean); the retention field (S5, evidence-gated);
+  the web admin UI for this plane (ships with C's Settings surface so the
+  admin sees provider policy and the plane together, not twice).

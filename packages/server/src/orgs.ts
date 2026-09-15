@@ -3,6 +3,7 @@ import { and, desc, eq, lt, lte, or } from "drizzle-orm";
 import { auditLog, memberships, organizations, users } from "./db/schema.js";
 import type { Db } from "./db/client.js";
 import type { DbAuditEntry } from "./db/schema.js";
+import type { OrgSettings } from "./classification.js";
 
 /**
  * Org store (M2).
@@ -21,6 +22,14 @@ import type { DbAuditEntry } from "./db/schema.js";
 export interface StoredOrg {
   id: string;
   name: string;
+  /**
+   * The org's policy plane (docs/23 S2, docs/24 Phase B). Absent means the
+   * default `effectiveSettings` answer — no floor, nothing denied — so an
+   * org that never touched the surface behaves exactly as before. The field
+   * is governance, like a board's classification: the gates read it through
+   * `effectiveSettings` (classification.ts), never by touching the object.
+   */
+  settings?: OrgSettings;
   createdAt: number;
 }
 
@@ -123,6 +132,14 @@ export interface OrgStore {
   /** Personal-org id for a user, created lazily on first need. */
   ensurePersonal(userId: string, displayName: string, now: number): Promise<StoredOrg>;
   rename(orgId: string, name: string): Promise<void>;
+  /**
+   * Replace the org's policy settings wholesale (docs/24 Phase B). The PATCH
+   * route merges and validates, then hands the full object here: a store that
+   * merged would have to re-invent the "absent means default" reading in two
+   * places, and the last M2.6 lesson is that policy shape lives in exactly
+   * one function. Audit rides the route (the actor and IP live there).
+   */
+  setSettings(orgId: string, settings: OrgSettings): Promise<void>;
   /** Hard delete. Refuses if any non-personal board is in the org. */
   delete(orgId: string): Promise<void>;
   /** All orgs the user is a member of, with their role on each. */
@@ -318,6 +335,12 @@ export class InMemoryOrgStore implements OrgStore {
     this.orgs.set(orgId, { ...org, name });
   }
 
+  async setSettings(orgId: string, settings: OrgSettings): Promise<void> {
+    const org = this.orgs.get(orgId);
+    if (!org) return;
+    this.orgs.set(orgId, { ...org, settings });
+  }
+
   async delete(orgId: string): Promise<void> {
     this.orgs.delete(orgId);
     for (let i = this.memberships.length - 1; i >= 0; i -= 1) {
@@ -408,6 +431,24 @@ export class InMemoryOrgStore implements OrgStore {
   }
 }
 
+/**
+ * The organizations row → StoredOrg mapper, and the reason is parity, not
+ * style: a never-configured org has SQL NULL in `settings`, and the
+ * in-memory twin has the field ABSENT. Handing `settings: null` up would
+ * make `effectiveSettings`' "absent = permissive default" and "present but
+ * unintelligible = restrictive" read differently in the two stores — the
+ * exact class of quiet divergence the shared `normalizeAuditEntry` exists
+ * to kill (orgs.ts header, the M2.6 lesson). So NULL becomes absence, and
+ * only a real object rides through.
+ */
+function rowToStoredOrg(row: typeof organizations.$inferSelect): StoredOrg {
+  const org: StoredOrg = { id: row.id, name: row.name, createdAt: row.createdAt };
+  if (row.settings !== null && row.settings !== undefined) {
+    org.settings = row.settings as OrgSettings;
+  }
+  return org;
+}
+
 export class PostgresOrgStore implements OrgStore {
   constructor(private readonly target: Db) {}
 
@@ -415,6 +456,7 @@ export class PostgresOrgStore implements OrgStore {
     await this.target.db.insert(organizations).values({
       id: org.id,
       name: org.name,
+      settings: org.settings ?? null,
       createdAt: org.createdAt,
     });
   }
@@ -425,7 +467,7 @@ export class PostgresOrgStore implements OrgStore {
       .from(organizations)
       .where(eq(organizations.id, orgId))
       .limit(1);
-    return rows[0];
+    return rows[0] && rowToStoredOrg(rows[0]);
   }
 
   async ensurePersonal(userId: string, displayName: string, now: number): Promise<StoredOrg> {
@@ -443,11 +485,15 @@ export class PostgresOrgStore implements OrgStore {
       .from(organizations)
       .where(eq(organizations.id, id))
       .limit(1);
-    return rows[0]!;
+    return rowToStoredOrg(rows[0]!);
   }
 
   async rename(orgId: string, name: string): Promise<void> {
     await this.target.db.update(organizations).set({ name }).where(eq(organizations.id, orgId));
+  }
+
+  async setSettings(orgId: string, settings: OrgSettings): Promise<void> {
+    await this.target.db.update(organizations).set({ settings }).where(eq(organizations.id, orgId));
   }
 
   async delete(orgId: string): Promise<void> {
@@ -463,7 +509,7 @@ export class PostgresOrgStore implements OrgStore {
       .from(memberships)
       .innerJoin(organizations, eq(organizations.id, memberships.orgId))
       .where(eq(memberships.userId, userId));
-    return rows.map((r) => ({ org: r.org, role: r.role }));
+    return rows.map((r) => ({ org: rowToStoredOrg(r.org), role: r.role }));
   }
 
   async membershipsFor(userId: string): Promise<StoredMembership[]> {
