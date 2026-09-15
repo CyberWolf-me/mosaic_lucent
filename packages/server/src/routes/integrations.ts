@@ -4,6 +4,7 @@ import type { RegisterRoutes } from "./context.js";
 import { connectionView, extractProposalItems, MAX_CREDENTIAL_REF_CHARS } from "../integrations/integrations.js";
 import { webhookSchemes } from "../integrations/webhook.js";
 import { MAX_AI_SELECTED_ACTIONS } from "@lucent/ai";
+import { integrationBoundary } from "../classification.js";
 import type { IntegrationProviderName } from "../integrations/integrations.js";
 
 /**
@@ -201,6 +202,19 @@ export const registerIntegrationRoutes: RegisterRoutes = (router, s) => {
     const boardId = ctx.param("id");
     const guard = await requireBoardRole(req, res, boardId, "editor", route);
     if (!guard.ok) return;
+    // docs/23 S1: a confidential/restricted board does not allow external
+    // content to leave or enter through integrations.
+    if (guard.board) {
+      const boundary = integrationBoundary(guard.board);
+      if (boundary) {
+        send(res, 403, {
+          error: boundary.error,
+          classification: boundary.classification,
+          boundary: boundary.boundary,
+        });
+        return;
+      }
+    }
     if (!integrations) return send(res, 503, { error: "integrations are not configured" });
     const providerName = ctx.param("provider");
     // The connection must exist AND be active — syncing through a disabled
@@ -372,6 +386,19 @@ router.post("/api/boards/:id/integrations/:provider/propose", async (ctx) => {
   const boardId = ctx.param("id");
   const guard = await requireBoardRole(req, res, boardId, "editor", route);
   if (!guard.ok) return;
+  // docs/23 S1: a confidential/restricted board does not allow external
+  // content to leave or enter through integrations.
+  if (guard.board) {
+    const boundary = integrationBoundary(guard.board);
+    if (boundary) {
+      send(res, 403, {
+        error: boundary.error,
+        classification: boundary.classification,
+        boundary: boundary.boundary,
+      });
+      return;
+    }
+  }
   if (!integrations) return send(res, 503, { error: "integrations are not configured" });
   const { actions } = integrations;
   if (!actions) return send(res, 503, { error: "external actions are not configured" });
@@ -469,6 +496,19 @@ router.post("/api/boards/:id/integrations/actions/:actionId/approve", async (ctx
   const actionId = ctx.param("actionId");
   const guard = await requireBoardRole(req, res, boardId, "editor", route);
   if (!guard.ok) return;
+  // docs/23 S1: a confidential/restricted board does not allow external
+  // content to leave or enter through integrations.
+  if (guard.board) {
+    const boundary = integrationBoundary(guard.board);
+    if (boundary) {
+      send(res, 403, {
+        error: boundary.error,
+        classification: boundary.classification,
+        boundary: boundary.boundary,
+      });
+      return;
+    }
+  }
   if (!integrations) return send(res, 503, { error: "integrations are not configured" });
   const { actions, ledger } = integrations;
   if (!actions || !ledger) return send(res, 503, { error: "external actions are not configured" });
@@ -666,9 +706,22 @@ router.post("/api/boards/:id/integrations/actions/:actionId/reject", async (ctx)
   const boardId = ctx.param("id");
   const guard = await requireBoardRole(req, res, boardId, "editor", route);
   if (!guard.ok) return;
+  // docs/23 S1: a confidential/restricted board does not allow external
+  // content to leave or enter through integrations.
+  if (guard.board) {
+    const boundary = integrationBoundary(guard.board);
+    if (boundary) {
+      send(res, 403, {
+        error: boundary.error,
+        classification: boundary.classification,
+        boundary: boundary.boundary,
+      });
+      return;
+    }
+  }
   if (!integrations) return send(res, 503, { error: "integrations are not configured" });
-  const { actions } = integrations;
-  if (!actions) return send(res, 503, { error: "external actions are not configured" });
+  const { actions, ledger } = integrations;
+  if (!actions || !ledger) return send(res, 503, { error: "external actions are not configured" });
   const actionId = ctx.param("actionId");
   const decided = await actions.decide(boardId, actionId, "rejected", user.id, Date.now());
   if (!decided) {
@@ -775,6 +828,19 @@ router.post("/api/boards/:id/integrations/inbound/:changeId/accept", async (ctx)
   const changeId = ctx.param("changeId");
   const guard = await requireBoardRole(req, res, boardId, "editor", route);
   if (!guard.ok) return;
+  // docs/23 S1: a confidential/restricted board does not allow external
+  // content to leave or enter through integrations.
+  if (guard.board) {
+    const boundary = integrationBoundary(guard.board);
+    if (boundary) {
+      send(res, 403, {
+        error: boundary.error,
+        classification: boundary.classification,
+        boundary: boundary.boundary,
+      });
+      return;
+    }
+  }
   if (!integrations) return send(res, 503, { error: "integrations are not configured" });
   const { inbound } = integrations;
   if (!inbound) return send(res, 503, { error: "inbound changes are not configured" });
@@ -907,6 +973,19 @@ router.post("/api/boards/:id/integrations/inbound/:changeId/dismiss", async (ctx
   const changeId = ctx.param("changeId");
   const guard = await requireBoardRole(req, res, boardId, "editor", route);
   if (!guard.ok) return;
+  // docs/23 S1: a confidential/restricted board does not allow external
+  // content to leave or enter through integrations.
+  if (guard.board) {
+    const boundary = integrationBoundary(guard.board);
+    if (boundary) {
+      send(res, 403, {
+        error: boundary.error,
+        classification: boundary.classification,
+        boundary: boundary.boundary,
+      });
+      return;
+    }
+  }
   if (!integrations) return send(res, 503, { error: "integrations are not configured" });
   const { inbound } = integrations;
   if (!inbound) return send(res, 503, { error: "inbound changes are not configured" });
@@ -995,6 +1074,19 @@ router.post("/api/boards/:id/integrations/:provider/propose-ai", async (ctx) => 
   const boardId = ctx.param("id");
   const guard = await requireBoardRole(req, res, boardId, "editor", route);
   if (!guard.ok) return;
+  // docs/23 S1: a confidential/restricted board does not allow external
+  // content to leave or enter through integrations.
+  if (guard.board) {
+    const boundary = integrationBoundary(guard.board);
+    if (boundary) {
+      send(res, 403, {
+        error: boundary.error,
+        classification: boundary.classification,
+        boundary: boundary.boundary,
+      });
+      return;
+    }
+  }
   if (!integrations) return send(res, 503, { error: "integrations are not configured" });
   const { actions } = integrations;
   if (!actions) return send(res, 503, { error: "external actions are not configured" });

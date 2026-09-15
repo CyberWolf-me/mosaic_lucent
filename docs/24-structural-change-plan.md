@@ -1,6 +1,6 @@
 # 24. Structural Change Plan — implementing the docs/22 and docs/23 audits
 
-> **Status: plan approved by the owner; nothing implemented yet.** This is the
+> **Status: Phase A shipped (2026-09-16); B and C next in order.** This is the
 > implementation plan for the two structural change sets the 2026-09 advisories
 > produced and docs/22 / docs/23 audited: the **meeting platform** (M-series)
 > and the **enterprise security model** (S-series). The audits established what
@@ -31,9 +31,10 @@ The freeze rule (docs/17) governs the ordering below. A phase is one of:
 
 ```text
 DONE ──► S0 (doc corrections)                    this commit's predecessor
+     └─► A (classification + outbound gating)    2026-09-16, docs/17 amendment
 
 LEGAL NOW (correctness / safety)
-  A  Classification field + outbound gating      S1   ─┬─ AI boundary
+  A  Classification field + outbound gating      S1   ─┬─ AI boundary   DONE
   B  Org policy plane (admin settings)           S2   ─┤─ sharing/MCP/retention
   C  Per-org provider policy                     S3   ─┘─ honest no-training
 
@@ -56,7 +57,13 @@ provider policy (C)**, because policy needs something to key on and the
 provider gate is one of policy's outputs. Meeting work (D–F) is independent of
 the security chain and can proceed in parallel once its gates open.
 
-## 3. Phase A — Classification and outbound gating (S1)
+## 3. Phase A — Classification and outbound gating (S1) — **SHIPPED 2026-09-16**
+
+> Executed as the docs/17 amendment of the same date. `PUBLIC` was dropped (a
+> label that gates nothing is a lie), the `agent` boundary is enforced on both
+> MCP surfaces (op-apply + `x-lucent-client: mcp` reads), and `stricterOf` is
+> deliberately unwired — it is Phase B's org floor, not an unused helper. The
+> web picker ships with B's admin API. Full suite green against real Postgres.
 
 **Why first.** It is the keystone of the advisory's model: every "may this
 leave the org" decision reads a classification. It is also the one phase with

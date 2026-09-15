@@ -501,6 +501,56 @@ describe("M2 cross-tenant leakage: board routes", () => {
     expect(Object.keys(read.body.workspace.nodes)).toHaveLength(0);
     expect(h.realtime.roomCount()).toBe(0);
   });
+
+  /**
+   * docs/24 Phase A: the classification matrix gains its cross-tenant row.
+   * Every gated route (AI, sharing, integration, agent) refuses with a named
+   * 403 — for a MEMBER. For an outsider the role guard must answer first, so
+   * classification never becomes an existence oracle: the probe that got 404
+   * before the feature ships still gets exactly 404 after it.
+   */
+  it("an outsider of a classified board is answered 404 at every gated route, never 403", async () => {
+    const h = (open = await harness());
+    const alice = await signup(h, "alice.clsx@example.com");
+    const eve = await signup(h, "eve.clsx@example.com");
+    const boardId = await newBoard(h, alice, "Vault");
+    const classified = await api(h, "/api/boards", {
+      method: "POST",
+      token: alice.token,
+      body: JSON.stringify({ id: boardId, classification: "restricted" }),
+    });
+    expect(classified.status).toBe(201);
+
+    const probes: Array<["GET" | "POST", string]> = [
+      ["GET", `/api/boards/${boardId}`],
+      ["POST", `/api/boards/${boardId}/ops`],
+      ["POST", `/api/boards/${boardId}/ask`],
+      ["POST", `/api/boards/${boardId}/share`],
+      ["POST", `/api/boards/${boardId}/integrations/linear/propose`],
+    ];
+    for (const [method, path] of probes) {
+      const probe = await api(h, path, {
+        method,
+        token: eve.token,
+        ...(method === "GET" ? {} : { body: JSON.stringify({}) }),
+      });
+      expect(probe.status, `${method} ${path} as an outsider`).toBe(404);
+      // 403 with a boundary would confirm the board exists AND its tier.
+      expect(probe.body.boundary).toBeUndefined();
+    }
+
+    // The gate is real, it just sits behind the guard: the same routes answer
+    // the member who could already see the board with the named refusal.
+    const memberOps = await api(h, `/api/boards/${boardId}/ops`, {
+      method: "POST",
+      token: alice.token,
+      body: JSON.stringify({
+        ops: [{ op: "CREATE_NODE", id: "n-clsx", nodeType: "step", label: "x" }],
+      }),
+    });
+    expect(memberOps.status).toBe(403);
+    expect(memberOps.body.boundary).toBe("agent");
+  });
 });
 
 describe("M2.2 effective roles: an org grant reaches the org's boards", () => {

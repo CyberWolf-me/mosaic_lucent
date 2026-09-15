@@ -105,6 +105,7 @@ export class PostgresBoardStore implements BoardStore {
         orgId: board.orgId,
         ownerId: board.ownerId,
         name: board.name,
+        classification: board.classification ?? null,
         workspace: board.workspace,
         createdAt: board.createdAt,
         updatedAt: board.updatedAt,
@@ -115,6 +116,7 @@ export class PostgresBoardStore implements BoardStore {
           orgId: board.orgId,
           ownerId: board.ownerId,
           name: board.name,
+          classification: board.classification ?? null,
           workspace: board.workspace,
           updatedAt: board.updatedAt,
         },
@@ -497,6 +499,10 @@ function rowToStoredBoard(row: typeof boards.$inferSelect): StoredBoard {
     orgId: row.orgId,
     ownerId: row.ownerId,
     name: row.name,
+    // NULL (a board from before the column) means internal: the field is
+    // omitted rather than written as a value, so `classificationOf`'s default
+    // stays the single source of the answer.
+    ...(row.classification ? { classification: row.classification } : {}),
     workspace: ws,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,

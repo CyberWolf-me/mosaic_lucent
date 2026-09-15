@@ -104,6 +104,14 @@ export class RemoteBoardSession {
   private async getBoard(): Promise<ToolResult> {
     const res = await this.request("GET", `/api/boards/${this.opts.boardId}`);
     if (res.status === 401 || res.status === 403) {
+      // A 403 here can be a governance refusal (the board is `restricted` and
+      // forbids agent reads), not a bad token. Surface the server's reason so
+      // the human learns the real answer instead of rotating credentials
+      // against a policy that will not move.
+      const detail = (await res.json().catch(() => null)) as { error?: string } | null;
+      if (res.status === 403 && detail?.error) {
+        return this.failure(`Board read refused (403): ${detail.error}`);
+      }
       return this.failure(
         `Authentication for board ${this.opts.boardId} was refused (${res.status}). Check LUCENT_MCP_TOKEN.`,
       );
@@ -148,9 +156,7 @@ export class RemoteBoardSession {
     const inboundBody = (await inbound.json()) as {
       inbound?: Array<Record<string, unknown>>;
     };
-    const pendingOnly = (inboundBody.inbound ?? []).filter(
-      (r) => r["status"] === "pending",
-    );
+    const pendingOnly = (inboundBody.inbound ?? []).filter((r) => r["status"] === "pending");
     return {
       content: [
         {
@@ -159,8 +165,7 @@ export class RemoteBoardSession {
             {
               links: linksBody.links ?? [],
               pendingInboundChanges: pendingOnly,
-              note:
-                "inbound changes are decided by a human in the Lucent UI; this projection is read-only",
+              note: "inbound changes are decided by a human in the Lucent UI; this projection is read-only",
             },
             null,
             2,
@@ -232,6 +237,11 @@ export class RemoteBoardSession {
       );
     }
     if (res.status === 401 || res.status === 403) {
+      // Same reasoning as `getBoard`: a 403 may be a classification refusal.
+      const detail = (await res.json().catch(() => null)) as { error?: string } | null;
+      if (res.status === 403 && detail?.error) {
+        return this.failure(`Apply refused (403): ${detail.error}`);
+      }
       return this.failure(`Authentication refused (${res.status}). Check LUCENT_MCP_TOKEN.`);
     }
     if (!res.ok) {
@@ -257,6 +267,12 @@ export class RemoteBoardSession {
       method,
       headers: {
         authorization: `Bearer ${this.opts.token}`,
+        // The agent marker the server's classification `agent` boundary reads
+        // (docs/23 S1): MCP traffic is a third-party model touching the board,
+        // which is exactly what a `restricted` board refuses. The header is
+        // cooperative, not cryptographic — the boundary governs the agent
+        // surface the org chose to install, not a human's own reads.
+        "x-lucent-client": "mcp",
         ...(body !== undefined ? { "content-type": "application/json" } : {}),
       },
       ...(body !== undefined ? { body: JSON.stringify(body) } : {}),

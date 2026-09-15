@@ -3,6 +3,12 @@ import { createServer } from "node:http";
 import type { LLMProvider, ImageProvider } from "@lucent/ai";
 import { handleGenerate, handleGenerateStream } from "./generate.js";
 import { readByoHeaders, resolveProvider } from "./modelRouter.js";
+import {
+  checkOutbound,
+  classificationOf,
+  isBoardClassification,
+  BOARD_CLASSIFICATIONS,
+} from "./classification.js";
 import { handleImage } from "./image.js";
 import type { UsageTracker, UsageLimits } from "./usage.js";
 import type { Telemetry, TelemetryEvent } from "./telemetry.js";
@@ -116,7 +122,11 @@ import { registerScimRoutes } from "./routes/scim.js";
 import { PUBLIC_TEMPLATES } from "./publicTemplates.js";
 import type { ScimUserAccess } from "./scim.js";
 import { createStripeWebhookReceiver, type StripeWebhookReceiver } from "./billing/webhook.js";
-import { createIntegrationWebhookReceiver, MAX_WEBHOOK_BYTES, webhookSchemes } from "./integrations/webhook.js";
+import {
+  createIntegrationWebhookReceiver,
+  MAX_WEBHOOK_BYTES,
+  webhookSchemes,
+} from "./integrations/webhook.js";
 import { ingestInboundChange } from "./integrations/inbound.js";
 import { openPortal, startCheckout, type BillingIntegration } from "./billing/service.js";
 
@@ -1008,9 +1018,7 @@ export function createApp(deps: AppDeps): App {
     key: string,
     route: string,
   ): Promise<boolean> {
-    const decision = sharedLimiter
-      ? await sharedLimiter.check(key)
-      : authLimiter.check(key);
+    const decision = sharedLimiter ? await sharedLimiter.check(key) : authLimiter.check(key);
     if (decision.allowed) return true;
     telemetry.record({ kind: "refused", route, reason: "rate", requestId: traceOf(req) });
     sendWithHeaders(
@@ -1030,7 +1038,11 @@ export function createApp(deps: AppDeps): App {
    * The cap is the limiter's per-window; the key only depends on the IP so
    * the same IP cannot schedule and cancel deletion rapidly in alternation.
    */
-  async function applyAccountLimiter(req: IncomingMessage, res: ServerResponse, route: string): Promise<boolean> {
+  async function applyAccountLimiter(
+    req: IncomingMessage,
+    res: ServerResponse,
+    route: string,
+  ): Promise<boolean> {
     const key = `account|${clientKey(req)}`;
     return applyLimiterDecision(req, res, key, route);
   }
@@ -1098,10 +1110,7 @@ export function createApp(deps: AppDeps): App {
     const result = verifyCsrf(
       {
         secret,
-        allowedOrigins: [
-          ...config.webOrigins,
-          `http://${req.headers.host ?? ""}`,
-        ].filter(Boolean),
+        allowedOrigins: [...config.webOrigins, `http://${req.headers.host ?? ""}`].filter(Boolean),
       },
       req.method ?? "GET",
       typeof req.headers.origin === "string" ? req.headers.origin : undefined,
@@ -1110,7 +1119,12 @@ export function createApp(deps: AppDeps): App {
       hasSessionCookie,
     );
     if (result.ok) return true;
-    telemetry.record({ kind: "refused", route, reason: `csrf:${result.reason}`, requestId: traceOf(req) });
+    telemetry.record({
+      kind: "refused",
+      route,
+      reason: `csrf:${result.reason}`,
+      requestId: traceOf(req),
+    });
     send(res, 403, { error: "csrf rejected", reason: result.reason });
     return false;
   }
@@ -1819,7 +1833,8 @@ export function createApp(deps: AppDeps): App {
       req.method === "POST" &&
       /^\/api\/integrations\/[a-z]+\/webhook$/.test(req.url?.split("?")[0] ?? "")
     ) {
-      const provider = (req.url!.split("?")[0]!.match(/^\/api\/integrations\/([a-z]+)\/webhook$/) ?? [])[1]!;
+      const provider = (req.url!.split("?")[0]!.match(/^\/api\/integrations\/([a-z]+)\/webhook$/) ??
+        [])[1]!;
       if (!deps.integrations?.webhookEvents || !deps.integrations?.inbound || !deps.integrations) {
         send(res, 503, { error: "integrations are not configured" });
         return;
@@ -1853,9 +1868,7 @@ export function createApp(deps: AppDeps): App {
       const candidates = connections.flatMap((connection) => {
         const ref = connection.config?.webhookSecretRef;
         const secret = ref ? process.env[ref] : undefined;
-        return secret
-          ? [{ connectionId: connection.id, orgId: connection.orgId, secret }]
-          : [];
+        return secret ? [{ connectionId: connection.id, orgId: connection.orgId, secret }] : [];
       });
       const receiver = createIntegrationWebhookReceiver({
         provider,
@@ -2983,7 +2996,13 @@ export function createApp(deps: AppDeps): App {
       try {
         const raw = await readBody(req);
         const body = raw
-          ? (JSON.parse(raw) as { id?: string; orgId?: string; name?: string; workspace?: unknown })
+          ? (JSON.parse(raw) as {
+              id?: string;
+              orgId?: string;
+              name?: string;
+              workspace?: unknown;
+              classification?: unknown;
+            })
           : {};
         // M2.1: every board lives in an org the user is a member of. The
         // personal org is the default when none is supplied, so a brand-new
@@ -3014,13 +3033,35 @@ export function createApp(deps: AppDeps): App {
           send(res, 400, { error: "cannot move board to a different org" });
           return;
         }
+        // docs/23 S1 / docs/24 Phase A: the governance label. Validated against
+        // the declared tiers rather than stored verbatim, so a typo cannot
+        // create a fourth tier that no gate understands. Only an OWNER may
+        // raise or lower it -- a classification change is a policy decision
+        // about the whole board, the same class of action as minting a share
+        // link. Creating a board with a label the creator owns is allowed, so
+        // a template can start life confidential.
+        if (body.classification !== undefined) {
+          if (!isBoardClassification(body.classification)) {
+            send(res, 400, {
+              error: "invalid classification",
+              detail: `classification must be one of: ${BOARD_CLASSIFICATIONS.join(", ")}`,
+            });
+            return;
+          }
+          if (existing && existing.ownerId !== user.id) {
+            // 404, matching the guard above: an outsider learns nothing.
+            send(res, 404, { error: "board not found" });
+            return;
+          }
+        }
         // M4: the `boards` ceiling, on creation only. An update must never be
         // refused for a limit the org is already over -- that would strand
         // existing work behind a paywall, and a downgrade routinely leaves an org
         // above its new ceiling with boards it must still be able to save.
         if (!existing) {
           const boardCount = await boardStore.countForOrg(targetOrgId);
-          if (!(await gateStanding(req, res, targetOrgId, "boards", boardCount, "/api/boards"))) return;
+          if (!(await gateStanding(req, res, targetOrgId, "boards", boardCount, "/api/boards")))
+            return;
         }
         const now = Date.now();
         const stored = {
@@ -3031,7 +3072,21 @@ export function createApp(deps: AppDeps): App {
             typeof body.name === "string" && body.name.trim()
               ? body.name.trim()
               : (existing?.name ?? "Untitled"),
-          workspace: emptyWorkspace(""),
+          // An update that omits the workspace must not silently wipe the
+          // board — this route is an upsert, and a governance write (a
+          // re-classification naming only {id, classification}) has to leave
+          // content alone. Found by the Phase A suite: the classify helper
+          // lost an applied node here exactly like the label would have been
+          // reset to `internal` by the same missing-spread bug.
+          workspace: existing?.workspace ?? emptyWorkspace(""),
+          // The label rides the create when given, and only replaces an
+          // existing one when the caller actually sent it -- an update that
+          // omits the field must not silently reset a board to `internal`.
+          ...(body.classification !== undefined
+            ? { classification: body.classification }
+            : existing?.classification
+              ? { classification: existing.classification }
+              : {}),
           createdAt: existing?.createdAt ?? now,
           updatedAt: now,
         };
@@ -3055,7 +3110,11 @@ export function createApp(deps: AppDeps): App {
         await boardStore.put(stored);
         // §10 product analytics: the activation counters ride the create.
         telemetry.record({ kind: "product", event: "board_created" });
-        if (!existing && (await boardStore.countForOrg(targetOrgId)) === 1 && typeof user.createdAt === "number") {
+        if (
+          !existing &&
+          (await boardStore.countForOrg(targetOrgId)) === 1 &&
+          typeof user.createdAt === "number"
+        ) {
           // The org's FIRST board (count AFTER this create is exactly 1 and
           // the board is new): signup → first board, the activation metric
           // the review named first. Observed once per org by construction.
@@ -3124,6 +3183,9 @@ export function createApp(deps: AppDeps): App {
           orgId: b.orgId,
           updatedAt: b.updatedAt,
           nodes: Object.keys(b.workspace.nodes).length,
+          // The resolved tier rides the listing so the board picker can show a
+          // governance badge without a second request per row.
+          classification: classificationOf(b),
         })),
       });
       return;
@@ -3233,6 +3295,20 @@ export function createApp(deps: AppDeps): App {
       // resolved it.
       const guard = await requireBoardRole(req, res, id, "owner", "/api/boards/:id/share", user);
       if (!guard.ok) return;
+      // docs/23 S1: a share link is a capability that hands board content to
+      // anyone who holds the token, including people outside the org.
+      // Confidential and restricted boards do not allow that.
+      if (guard.board) {
+        const refusal = checkOutbound(classificationOf(guard.board), "sharing");
+        if (refusal) {
+          send(res, 403, {
+            error: refusal.error,
+            classification: refusal.classification,
+            boundary: refusal.boundary,
+          });
+          return;
+        }
+      }
       try {
         const raw = await readBody(req);
         const body = raw ? (JSON.parse(raw) as { role?: unknown; expiresInHours?: unknown }) : {};
@@ -3498,11 +3574,39 @@ export function createApp(deps: AppDeps): App {
       // non-member gets 404, not 403, so board ids stay unguessable.
       const guard = await requireBoardRole(req, res, id, "viewer", "/api/boards/:id", user);
       if (!guard.ok) return;
+      // docs/23 S1: the agent boundary on the READ path. MCP clients mark
+      // themselves with `x-lucent-client: mcp` (packages/mcp/src/remote.ts);
+      // a `restricted` board refuses having its content read into a
+      // third-party model the org never chose. The marker is cooperative, not
+      // cryptographic — the boundary governs the agent surface the org chose
+      // to install, not a human's own read, which crosses no outbound
+      // boundary by definition. The role guard above ran first, so a stranger
+      // still gets 404: the refusal only reaches callers who could see the
+      // board anyway.
+      if (req.headers["x-lucent-client"] === "mcp") {
+        const refusal = checkOutbound(classificationOf(guard.board), "agent");
+        if (refusal) {
+          send(res, 403, {
+            error: refusal.error,
+            classification: refusal.classification,
+            boundary: refusal.boundary,
+          });
+          return;
+        }
+      }
       // Stage B4: the board's durable revision rides the snapshot, so a first
       // join knows where it already is before the socket opens — the
       // handshake the store's `latestSeq` contract promised all along.
       const seq = await boardStore.latestSeq(id);
-      send(res, 200, { ...guard.board, role: guard.role, latestSeq: seq });
+      // The resolved classification rides the snapshot so a client never has to
+      // know the default: an unset field means `internal`, and the UI shows the
+      // tier it is actually governed by rather than an empty label.
+      send(res, 200, {
+        ...guard.board,
+        classification: classificationOf(guard.board),
+        role: guard.role,
+        latestSeq: seq,
+      });
       return;
     }
 
@@ -3541,7 +3645,8 @@ export function createApp(deps: AppDeps): App {
         // Billed to the board's org rather than the caller's: the board is the
         // thing being exported, and its org is the one paying for it. A guest
         // editor from another workspace does not spend their own allowance here.
-        if (!(await gateFormat(req, res, guard.board.orgId, format, "/api/boards/:id/export"))) return;
+        if (!(await gateFormat(req, res, guard.board.orgId, format, "/api/boards/:id/export")))
+          return;
         meterUsage(guard.board.orgId, "export", 1, { boardId: id, format, by: guard.user.id });
         send(res, 200, { ok: true, boardId: id, format });
       } catch (err) {
@@ -3575,6 +3680,21 @@ export function createApp(deps: AppDeps): App {
           storedBoard && aiCtx.authoritative
             ? { boardId: storedBoard.id, store: boardStore }
             : undefined;
+        // docs/23 S1: the classification gate, checked before any provider
+        // spend so a refusal costs no token and no latency. An in-process
+        // provider (the offline mock) is not an outbound boundary, so local dev
+        // and the deterministic diagram path keep working — classification.ts.
+        if (storedBoard) {
+          const refusal = checkOutbound(classificationOf(storedBoard), "ai", { provider });
+          if (refusal) {
+            send(res, 403, {
+              error: refusal.error,
+              classification: refusal.classification,
+              boundary: refusal.boundary,
+            });
+            return;
+          }
+        }
         // M4: the monthly AI allowance, checked before the provider is called so a
         // refusal costs neither a token nor a second of latency. An anonymous
         // caller on a deployment with auth off has no org and no allowance to
@@ -3678,18 +3798,6 @@ export function createApp(deps: AppDeps): App {
       }
       const requestProvider = router.provider;
 
-      // SSE headers are set once; frames are written as they happen. A client
-      // that disconnects mid-stream makes res.write throw asynchronously —
-      // swallowed by the write guard inside handleGenerateStream's send.
-      res.writeHead(200, {
-        "content-type": "text/event-stream",
-        "cache-control": "no-cache, no-transform",
-        connection: "keep-alive",
-        "x-accel-buffering": "no",
-        "access-control-allow-origin": config.webOrigin,
-        "access-control-allow-credentials": "true",
-      });
-
       let closed = false;
       res.on("close", () => {
         closed = true;
@@ -3713,13 +3821,53 @@ export function createApp(deps: AppDeps): App {
           storedBoard && aiCtx.authoritative
             ? { boardId: storedBoard.id, store: boardStore }
             : undefined;
+        // docs/23 S1: the classification gate, checked against the RESOLVED
+        // provider — a BYO key is exactly the external provider a restricted
+        // board must refuse. Before the headers, so this is a real 403.
+        if (storedBoard) {
+          const refusal = checkOutbound(classificationOf(storedBoard), "ai", {
+            provider: requestProvider,
+          });
+          if (refusal) {
+            send(res, 403, {
+              error: refusal.error,
+              classification: refusal.classification,
+              boundary: refusal.boundary,
+            });
+            return;
+          }
+        }
         const allowance = aiCtx.orgId
-          ? await gateMonthly(req, res, aiCtx.orgId, "ai.generationsPerMonth", "/api/generate/stream")
+          ? await gateMonthly(
+              req,
+              res,
+              aiCtx.orgId,
+              "ai.generationsPerMonth",
+              "/api/generate/stream",
+            )
           : null;
         if (allowance === false) {
           // The gate answered with its own JSON; the stream never opened.
           return;
         }
+
+        // SSE headers are set once, AFTER every pre-flight gate. They used to
+        // go out before the body was even read, which made the refusals above
+        // unreachable as status codes: `writeHead` threw ERR_HTTP_HEADERS_SENT
+        // inside `gateMonthly`, the catch below reported it as a 400 "bad
+        // request", and the client got a Node error code instead of the plan
+        // refusal it needed to show. Frames are only written from here on, so
+        // nothing about the streaming contract changes — the client simply
+        // starts reading a few milliseconds later, and a refusal now arrives as
+        // the status it is.
+        res.writeHead(200, {
+          "content-type": "text/event-stream",
+          "cache-control": "no-cache, no-transform",
+          connection: "keep-alive",
+          "x-accel-buffering": "no",
+          "access-control-allow-origin": config.webOrigin,
+          "access-control-allow-credentials": "true",
+        });
 
         const outcome = await handleGenerateStream(
           requestProvider,

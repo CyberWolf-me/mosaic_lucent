@@ -1279,3 +1279,62 @@ the wire → duplicate guard → the empty-selection 422), the mock tree tests
 the no-derived-work case), the D2 acceptance e2e's tree assertions, and
 the plan-gate request-text pin. The era regression re-run green after the
 reducer change.
+
+## Amendment (2026-09-16): docs/24 Phase A executed — classification and the outbound boundaries (clause 1)
+
+The first legal-now phase of the structural change plan ships: the governance
+label the security advisory called the keystone (docs/23 S1), and the four
+outbound boundaries it gates. Shipped under freeze clause 1 — the governance
+hole was in a shipped surface: board content could reach third parties with no
+way to say no.
+
+- **The model**: `boards.classification` (migration 0028) — three tiers, not
+  four: PUBLIC dropped because a label that gates nothing is a lie (docs/24
+  §3). `src/classification.ts` owns the matrix (`internal` gates nothing;
+  `confidential` forbids integration + sharing; `restricted` adds ai + agent),
+  the in-process-mock exception on the `ai` boundary (the advisory's §24
+  fallback: offline dev and the deterministic path keep working), the
+  fail-closed reads (unrecognized provider = external; an uninterpretable
+  stored tier = the strictest tier), and `stricterOf`, reserved for Phase B's
+  org floor. The label rides the board RECORD, never the workspace document —
+  an operation must not be able to move policy.
+- **The boundaries**, all server-side, all refusing with a named
+  `{error, classification, boundary}` body: the `ai` boundary on
+  `/api/generate`, `/api/generate/stream`, and the ask route — checked
+  against the RESOLVED provider (a BYO key is exactly what a restricted board
+  must refuse), before any spend, and on the stream route before the SSE
+  headers; the `integration` boundary on all seven outbound/inbound
+  integration routes, placed before the 503-config check so a confidential
+  board cannot even begin the flow; the `sharing` boundary at link minting;
+  and the `agent` boundary on the op-apply route plus board reads marked
+  `x-lucent-client: mcp` — packages/mcp marks its own traffic, so the boundary
+  governs egress to a model the org never chose, not the owner's own eyes.
+  MCP's 403 rendering now surfaces the server's reason instead of blaming the
+  token.
+- **Found live while pinning**: (1) the stream route wrote its SSE 200 headers
+  before the gates, so a refusal landed as a parse failure instead of a
+  status — headers moved behind every pre-flight; (2) `POST /api/boards` wrote
+  `workspace: emptyWorkspace(...)` unconditionally, so a classification-only
+  update silently WIPED the board — the same-missing-spread defect class as
+  the label reset the phase already guarded; fixed and pinned; (3) the ask
+  gate lacked the mock exemption generate has — unified; (4) the uncommitted
+  `classification.test.ts` had never been typechecked (its scratch sibling
+  `diag.test.ts` is removed) — the harness and the route's `stored` literal
+  are typed now, and the suite runs under `tsc`.
+- **The gate (docs/24 §3), verified**: the tier×boundary matrix asserted as
+  written; every boundary refused at the ROUTE level, the `ai` refusals
+  against a provider stub whose `generate` throws — so "refused before the
+  provider call" is proven, not asserted; store parity in ONE test (both
+  twins resolve identically through `classificationOf`; unset is an absence,
+  not a value; a garbage row fails closed identically), run against real
+  Postgres; the crossTenant matrix gains its classification row — an outsider
+  is answered 404 at every gated route (the guards run before the gates, so
+  classification never becomes an existence oracle). Full workspace suite
+  with `LUCENT_TEST_DATABASE_URL` set (local `postgres:16`): 736 tests,
+  64 files, zero failures, zero skips. Typecheck green across workspaces.
+- **What deliberately waits**: the org policy floor (Phase B) — today the
+  tier is board-level only and `stricterOf` sits unused by intent; the
+  per-org provider allowlist (Phase C); the Settings UI classification picker,
+  which ships with Phase B's admin API so the surface shows inheritance
+  honestly on day one. `GET /api/boards/:id` and the listing already carry
+  the resolved tier; the web client ignores it until then.

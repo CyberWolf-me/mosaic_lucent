@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import type { Workspace } from "@lucent/core";
 import { createWorkspace } from "@lucent/core";
 import { effectiveBoardRole, type Role } from "./identity.js";
+import type { BoardClassification } from "./classification.js";
 
 /**
  * Server-side board storage (docs/06, docs/07 -- PostgreSQL/S3 are the
@@ -28,6 +29,18 @@ export interface StoredBoard {
   orgId: string;
   ownerId: string;
   name: string;
+  /**
+   * Governance tier (docs/23 S1, docs/24 Phase A). Absent means `internal` —
+   * every board written before this field existed, and every board whose owner
+   * never touched the setting, behaves exactly as it did. The gates read it
+   * through `classificationOf` so the default lives in one place.
+   *
+   * Deliberately NOT part of `workspace`: classification is a governance
+   * attribute of the board RECORD, and the workspace is the projection the
+   * op log mutates. An operation must never be able to change it — that is
+   * the difference between a policy and a suggestion.
+   */
+  classification?: BoardClassification;
   workspace: Workspace;
   createdAt: number;
   updatedAt: number;

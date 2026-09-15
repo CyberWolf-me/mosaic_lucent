@@ -88,6 +88,15 @@ export const boards = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
+    /**
+     * Governance tier (docs/23 S1, docs/24 Phase A). Nullable on purpose: a
+     * NULL row is a board that predates the field and means `internal`, so the
+     * migration needs no backfill and no board's behavior changes on deploy.
+     * The gates read through `classificationOf`, which supplies the default.
+     */
+    classification: text("classification", {
+      enum: ["internal", "confidential", "restricted"],
+    }),
     /** The full Workspace object, as emitted by `createWorkspace()` in core. */
     workspace: jsonb("workspace").notNull(),
     createdAt: bigint("created_at", { mode: "number" }).notNull(),
@@ -1238,11 +1247,7 @@ export const integrationActions = pgTable(
     error: text("error"),
   },
   (t) => ({
-    pendingIdx: index("integration_actions_pending_idx").on(
-      t.boardId,
-      t.provider,
-      t.status,
-    ),
+    pendingIdx: index("integration_actions_pending_idx").on(t.boardId, t.provider, t.status),
     boardIdx: index("integration_actions_board_idx").on(t.boardId, t.createdAt),
   }),
 );

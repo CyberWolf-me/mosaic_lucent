@@ -2046,3 +2046,35 @@ The nine-phase plan, executed against the benchmark:
 - [ ] The human-half pass — batched at the end of the run; it carries
       ADR 0039's verdict (the fallback becomes permanent if ELK's output
       loses on comprehension/cleanup/preference).
+
+## S1 / docs/24 Phase A shipped: board classification and the outbound boundaries (2026-09-16, docs/17 amendment)
+
+- [x] `boards.classification` (migration 0028, nullable; NULL = `internal` so
+      no backfill and zero behavior change on deploy) + `StoredBoard` field +
+      `src/classification.ts`: three tiers (PUBLIC dropped as a no-op), the
+      four-boundary matrix (`ai` / `integration` / `sharing` / `agent`), the
+      in-process-mock exemption on `ai`, fail-closed reads both ways
+      (unknown provider = external; uninterpretable stored tier = strictest),
+      `stricterOf` reserved for Phase B. The label is governance on the board
+      record — no operation touches it; writes are owner-only and validated
+      (400 on a fourth tier).
+- [x] Every boundary enforced at its route with a named refusal body
+      `{error, classification, boundary}`: generate + stream + ask (against
+      the RESOLVED provider, before spend and before the SSE headers — found
+      live: the stream route's headers used to precede the gates), all seven
+      integration routes, share minting, and the agent surfaces (op-apply
+      route + MCP-marked `GET /api/boards/:id`; packages/mcp now sends
+      `x-lucent-client: mcp` and renders the server's 403 reason instead of
+      blaming the token).
+- [x] The route's upsert defect found by the gate: a classification-only
+      `POST /api/boards` silently wiped the workspace (`emptyWorkspace`
+      unconditional). Fixed — an update that omits a field preserves it.
+- [x] Acceptance per docs/24 §3: matrix asserted as data; every boundary
+      reached by a route test (the `ai` refusals against a throwing provider
+      stub — refusal-before-spend is proven, not asserted); store parity in
+      one test, run against real Postgres (unset is absence on both twins,
+      garbage fails closed identically); crossTenant classification row —
+      outsiders get 404 at every gated route, never a tier-revealing 403.
+      Suite with `LUCENT_TEST_DATABASE_URL`: 736 passed / 64 files / 0 skipped.
+- [ ] Not this phase: the org policy floor (Phase B), per-org provider
+      allowlist (Phase C), the Settings UI picker (ships with B's admin API).

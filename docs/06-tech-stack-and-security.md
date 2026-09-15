@@ -97,7 +97,9 @@ authoritative, audited status lives in **docs/23** (the security coverage
 table). In short: role-based access is enforced on the realtime path and
 owner-scoped on REST; audit logs (+viewer with keyset pagination and CSV
 export), SAML SSO, SCIM provisioning, and TOTP two-factor are implemented
-and tested; per-board classification, org-level policy, data residency, and
-at-rest encryption beyond the platform's disk layer are **not implemented** —
-docs/23 phases S1–S5 are the gaps. Treat this section as the target; treat
-docs/23 as the description.
+and tested, and so is **per-board classification** (docs/23 S1 / docs/24
+Phase A, shipped 2026-09-16: three tiers gating the AI, integration, sharing,
+and agent outbound boundaries server-side); org-level policy, data residency,
+and at-rest encryption beyond the platform's disk layer are **not
+implemented** — docs/23 phases S2–S5 are the gaps. Treat this section as the
+target; treat docs/23 as the description.
