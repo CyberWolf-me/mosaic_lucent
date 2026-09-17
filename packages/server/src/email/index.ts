@@ -112,6 +112,11 @@ export function selectMailer(config: MailerConfig, env: MailerEnv = process.env)
       from,
     });
   }
+  if (process.env.NODE_ENV === "production") {
+    console.warn(
+      "[mail] WARNING: Running in production without a configured mail transport. Outgoing emails (verifications, invites, password resets) will only be logged to console.",
+    );
+  }
   return new ConsoleMailer();
 }
 

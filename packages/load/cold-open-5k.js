@@ -29,18 +29,10 @@ const listWithHeavyMs = new Trend("board_list_with_heavy_ms", true);
 
 export const options = {
   scenarios: {
-    setup: {
-      executor: "shared-iterations",
-      vus: 1,
-      iterations: 1,
-      exec: "seed",
-      maxDuration: "2m",
-    },
     open: {
       executor: "constant-vus",
       vus: READERS,
       duration: DURATION,
-      startTime: "5s",
       exec: "openBoards",
       gracefulStop: "10s",
     },
@@ -51,12 +43,9 @@ export const options = {
   },
 };
 
-const runId = `${Date.now().toString(36)}`;
-let heavy = null; // { id }
-let small = null;
-
 function workspaceWithNodes(count) {
   const workspace = {
+    id: `ws-${count}-${Date.now().toString(36)}`,
     name: `load-${count}`,
     diagramKind: "flowchart",
     nodes: {},
@@ -90,33 +79,35 @@ function workspaceWithNodes(count) {
   return workspace;
 }
 
-export function seed() {
+export function setup() {
+  const runId = `${Date.now().toString(36)}`;
   const session = signIn(emailFor(runId, 0), PASSWORD, "cold-open");
   const orgId = createOrg(session, `cold-open-${runId}`);
-  heavy = createBoard(session, orgId, `heavy-${runId}`, workspaceWithNodes(NODES));
+  const heavy = createBoard(session, orgId, `heavy-${runId}`, workspaceWithNodes(NODES));
   if (!heavy) fail("heavy board create was plan-gated; seed must run on a fresh org");
-  small = createBoard(session, orgId, `small-${runId}`, workspaceWithNodes(5));
+  const small = createBoard(session, orgId, `small-${runId}`, workspaceWithNodes(5));
   if (!small) fail("small board create failed");
+  return { heavy, small, orgId, runId, session };
 }
 
-export function openBoards() {
-  const session = signIn(emailFor(runId, 1000 + __VU), PASSWORD, "cold-open-reader");
+export function openBoards(data) {
+  const session = data.session;
 
-  const cold = http.get(`${BASE}/api/boards/${heavy.id}`, {
+  const cold = http.get(`${BASE}/api/boards/${data.heavy.id}`, {
     headers: auth(session),
     tags: { name: "board-cold-open" },
   });
   check(cold, { "cold open ok": (r) => r.status === 200 });
   coldOpenMs.add(cold.timings.duration);
 
-  const smallGet = http.get(`${BASE}/api/boards/${small.id}`, {
+  const smallGet = http.get(`${BASE}/api/boards/${data.small.id}`, {
     headers: auth(session),
     tags: { name: "board-small-open" },
   });
   check(smallGet, { "small open ok": (r) => r.status === 200 });
   smallOpenMs.add(smallGet.timings.duration);
 
-  const list = http.get(`${BASE}/api/boards?orgId=${cold.json("orgId")}`, {
+  const list = http.get(`${BASE}/api/boards?orgId=${data.orgId}`, {
     headers: auth(session),
     tags: { name: "board-list-heavy" },
   });
