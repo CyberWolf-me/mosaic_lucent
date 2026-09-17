@@ -515,6 +515,9 @@ const { server, realtime } = createApp({
   config,
   provider,
   imageProvider,
+  // docs/25 V1: server-hosted diarizing STT. Key + URL mean a live sidecar;
+  // anything less is the standby mock and the STT routes answer 503.
+  stt: (await import("./stt.js")).selectSttService(process.env),
   userStore: stores.userStore,
   boardStore: stores.boardStore,
   // M1: wire the session store alongside the user/board stores. Tests can

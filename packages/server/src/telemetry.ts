@@ -71,11 +71,25 @@ export type TelemetryEvent =
    * week of undersized limits, and gets answered by provisioning instead of by
    * an upgrade prompt.
    */
-  | {
+  | ({
       kind: "refused";
       route: string;
-      reason: "rate" | "quota" | `csrf:${string}` | `plan:${string}`;
-    } & Correlated
+      reason:
+        | "rate"
+        | "quota"
+        | `csrf:${string}`
+        | `plan:${string}`
+        /**
+         * docs/24 Phase C: an org's policy plane turned the request away —
+         * distinct from `rate`/`quota` (deployment capacity) and `plan`
+         * (revenue). `policy:provider` is the provider-policy gate (S3);
+         * `policy:boundary` is the classification/org-boundary gate (S1/S2).
+         * Each is a refusal an admin caused deliberately, so it must be
+         * observable separately — an alert that pages a human on `rate` must
+         * not fire on a customer exercising their own policy.
+         */
+        | `policy:${string}`;
+    } & Correlated)
   /**
    * PRODUCT ANALYTICS (2026-09 review §10): "what do users actually do?" —
    * the behavioral counters, as distinct from the technical RED series. The
@@ -107,7 +121,7 @@ export interface MetricsSnapshot {
   uptimeSeconds: number;
   requests: { generate: number; image: number; ask: number; aiPropose: number };
   errors: { total: number; byStatus: Record<string, number> };
-  refusals: { rate: number; quota: number; plan: number };
+  refusals: { rate: number; quota: number; plan: number; policy: number };
   latencyMs: {
     generateP50: number;
     generateP95: number;
@@ -182,6 +196,8 @@ export class Telemetry {
   private refusedRate = 0;
   private refusedQuota = 0;
   private refusedPlan = 0;
+  /** docs/24 Phase C: refusals an ORG policy caused (S1/S2/S3 gates). */
+  private refusedPolicy = 0;
   private readonly latencies: number[] = [];
   /** The selector's own samples: a selection round-trip is a different
    * latency budget than a full generation, and folding it into the shared
@@ -247,7 +263,8 @@ export class Telemetry {
       }
       case "timeToFirstBoard":
         this.timeToFirstBoardSamples.push(event.seconds);
-        if (this.timeToFirstBoardSamples.length > LATENCY_SAMPLES) this.timeToFirstBoardSamples.shift();
+        if (this.timeToFirstBoardSamples.length > LATENCY_SAMPLES)
+          this.timeToFirstBoardSamples.shift();
         break;
       case "error":
         this.errorTotal += 1;
@@ -268,6 +285,7 @@ export class Telemetry {
         // gating existed, so the two long-standing series keep their meaning.
         if (event.reason === "rate") this.refusedRate += 1;
         else if (event.reason.startsWith("plan:")) this.refusedPlan += 1;
+        else if (event.reason.startsWith("policy:")) this.refusedPolicy += 1;
         else this.refusedQuota += 1;
         break;
     }
@@ -292,12 +310,22 @@ export class Telemetry {
     return {
       startedAt: this.startedAt,
       uptimeSeconds: Math.round((Date.now() - this.startedAt) / 1000),
-      requests: { generate: this.generateCount, image: this.imageCount, ask: this.askCount, aiPropose: this.aiProposeCount },
+      requests: {
+        generate: this.generateCount,
+        image: this.imageCount,
+        ask: this.askCount,
+        aiPropose: this.aiProposeCount,
+      },
       errors: {
         total: this.errorTotal,
         byStatus: Object.fromEntries([...this.byStatus].map(([k, v]) => [String(k), v])),
       },
-      refusals: { rate: this.refusedRate, quota: this.refusedQuota, plan: this.refusedPlan },
+      refusals: {
+        rate: this.refusedRate,
+        quota: this.refusedQuota,
+        plan: this.refusedPlan,
+        policy: this.refusedPolicy,
+      },
       latencyMs: {
         generateP50: percentile(sorted, 50),
         generateP95: percentile(sorted, 95),
@@ -325,8 +353,14 @@ export class Telemetry {
           {} as Record<ProductEvent, number>,
         ),
         timeToFirstBoard: {
-          p50: percentile([...this.timeToFirstBoardSamples].sort((a, b) => a - b), 50),
-          p95: percentile([...this.timeToFirstBoardSamples].sort((a, b) => a - b), 95),
+          p50: percentile(
+            [...this.timeToFirstBoardSamples].sort((a, b) => a - b),
+            50,
+          ),
+          p95: percentile(
+            [...this.timeToFirstBoardSamples].sort((a, b) => a - b),
+            95,
+          ),
           samples: this.timeToFirstBoardSamples.length,
         },
       },

@@ -3,6 +3,7 @@ import {
   exportFormatChips,
   fetchBilling,
   fetchOrgs,
+  fetchOrgPolicy,
   formatBytes,
   formatCount,
   formatDay,
@@ -11,8 +12,10 @@ import {
   limitTitle,
   meterFor,
   parseBilling,
+  patchOrgProviderMode,
   planState,
   preferredOrg,
+  providerPolicySentence,
   resetLabel,
 } from "../src/billing.js";
 import type { BillingPlan, LimitRow } from "../src/billing.js";
@@ -576,5 +579,141 @@ describe("formatting", () => {
     });
     expect(chips.map((c) => c.format)).toEqual(["png", "dxf"]);
     expect(chips.every((c) => c.allowed)).toBe(true);
+  });
+});
+
+/**
+ * docs/24 Phase C: the provider policy on the web side.
+ *
+ * Two surfaces, two floors: `/policy` answers EVERY member (the admin sets
+ * the policy, every member sees it) and carries exactly the provider policy;
+ * `/settings` is the owner's full plane and its absence must never be read
+ * as "policy is any". The parsing rule under test throughout: a missing or
+ * unreadable surface degrades to null — the deployment-level sentence — and
+ * never to a fabricated permissive policy.
+ */
+describe("org provider policy (web)", () => {
+  /** Dispatch on URL, so one stub serves the two-surface read. */
+  function stubRoutes(routes: Record<string, { status: number; body: unknown }>) {
+    const mock = vi.fn((url: string, _init?: RequestInit) => {
+      const hit = Object.entries(routes).find(([path]) => String(url).startsWith(path));
+      if (!hit) throw new Error(`unexpected fetch: ${url}`);
+      return Promise.resolve(jsonResponse(hit[1].status, hit[1].body));
+    });
+    vi.stubGlobal("fetch", mock);
+    return mock;
+  }
+
+  const plane = {
+    classificationFloor: "internal",
+    aiDisabled: false,
+    sharingDisabled: false,
+    agentDisabled: false,
+    recordingDisabled: false,
+    providerPolicy: { mode: "byo-forbidden", allow: ["anthropic"] },
+  };
+
+  it("an owner reads both surfaces and gets the plane; a member reads only the policy", async () => {
+    signedIn();
+    const mock = stubRoutes({
+      "/api/orgs/org%201/policy": {
+        status: 200,
+        body: { providerPolicy: { mode: "byo-forbidden", allow: ["anthropic"] } },
+      },
+      "/api/orgs/org%201/settings": { status: 200, body: { settings: {}, effective: plane } },
+    });
+
+    const owner = await fetchOrgPolicy("org 1", "owner");
+    expect(owner).not.toBeNull();
+    expect(owner!.canEdit).toBe(true);
+    expect(owner!.providerPolicy).toEqual({ mode: "byo-forbidden", allow: ["anthropic"] });
+    expect(owner!.plane?.providerPolicy).toEqual({ mode: "byo-forbidden", allow: ["anthropic"] });
+    expect(mock.mock.calls.map((c) => c[0])).toEqual([
+      "/api/orgs/org%201/policy",
+      "/api/orgs/org%201/settings",
+    ]);
+
+    // A member: the provider policy still renders (that is the acceptance),
+    // and the full plane is simply absent — NOT a second request that 404s.
+    mock.mockClear();
+    const member = await fetchOrgPolicy("org 1", "editor");
+    expect(member!.canEdit).toBe(false);
+    expect(member!.plane).toBeNull();
+    expect(member!.providerPolicy.mode).toBe("byo-forbidden");
+    expect(mock.mock.calls.map((c) => c[0])).toEqual(["/api/orgs/org%201/policy"]);
+  });
+
+  it("degrades to null — never to a fake 'any' — when the policy surface is unreadable", async () => {
+    signedIn();
+    stubRoutes({ "/api/orgs/org1/policy": { status: 404, body: { error: "not found" } } });
+    expect(await fetchOrgPolicy("org1", "editor")).toBeNull();
+
+    // Signed out: no request at all.
+    delete store["lucent.token"];
+    const mock = vi.fn();
+    vi.stubGlobal("fetch", mock);
+    expect(await fetchOrgPolicy("org1", "owner")).toBeNull();
+    expect(mock).not.toHaveBeenCalled();
+  });
+
+  it("a garbled allow list reads as 'no filter' — the sentence must not frighten members", async () => {
+    signedIn();
+    stubRoutes({
+      "/api/orgs/org1/policy": {
+        status: 200,
+        // Present but not an array: the server fails CLOSED on this, the
+        // member-facing sentence must not claim their content is blocked.
+        body: { providerPolicy: { mode: "any", allow: "anthropic" } },
+      },
+    });
+    const res = await fetchOrgPolicy("org1", "editor");
+    expect(res!.providerPolicy).toEqual({ mode: "any", allow: null });
+  });
+
+  it("the write adopts the server's answer, preserving a filter the admin set", async () => {
+    signedIn();
+    const mock = stubRoutes({
+      "/api/orgs/org1/settings": {
+        status: 200,
+        // The server preserved `allow` through a mode-only PATCH — the web
+        // layer must not guess "no filter" and erase it on screen.
+        body: {
+          settings: {},
+          effective: {
+            ...plane,
+            providerPolicy: { mode: "self-hosted-only", allow: ["anthropic"] },
+          },
+        },
+      },
+    });
+    const updated = await patchOrgProviderMode("org1", "self-hosted-only");
+    expect(updated?.providerPolicy).toEqual({ mode: "self-hosted-only", allow: ["anthropic"] });
+    const [url, init] = mock.mock.calls[0]!;
+    expect(url).toBe("/api/orgs/org1/settings");
+    expect(init?.method).toBe("PATCH");
+    expect(JSON.parse(String(init?.body))).toEqual({
+      providerPolicy: { mode: "self-hosted-only" },
+    });
+  });
+
+  it("a refused write is null, so the UI keeps the last true state", async () => {
+    signedIn();
+    stubRoutes({ "/api/orgs/org1/settings": { status: 404, body: { error: "not found" } } });
+    expect(await patchOrgProviderMode("org1", "any")).toBeNull();
+  });
+
+  it("phrases each mode for a member, and names the pinned providers when set", () => {
+    expect(providerPolicySentence({ mode: "any", allow: null })).toContain("personal API keys");
+    expect(providerPolicySentence({ mode: "byo-forbidden", allow: null })).toContain(
+      "personal API keys are refused",
+    );
+    expect(providerPolicySentence({ mode: "self-hosted-only", allow: null })).toContain(
+      "only self-hosted",
+    );
+    expect(
+      providerPolicySentence({ mode: "byo-forbidden", allow: ["anthropic", "self-hosted"] }),
+    ).toBe(
+      "personal API keys are refused and only this deployment's configured provider may process this workspace's content; allowed providers: anthropic, self-hosted",
+    );
   });
 });

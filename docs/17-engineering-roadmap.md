@@ -441,7 +441,7 @@ search, a dedicated search page.
 The owner's two decisions, plus the refinement that became the stage's
 philosophy: teach + deterministic fold (no LLM resolver — another model call
 per generation to fix "pricing" vs "pricing-model" is the wrong
-architecture), and universal normalization *of machine-authored ops* at
+architecture), and universal normalization _of machine-authored ops_ at
 every boundary. The owner's challenge refined "never rewrite the human"
 into the four-rule C5 contract: safe normalization is automatic;
 human-authored text is never silently rewritten (the precise invariant:
@@ -510,7 +510,7 @@ open prominent and settled dimmed. The recommendation inbox with
 Merge/Keep — C5's loop closes — with a change-aware ephemeral Keep (an
 unchanged pair doesn't re-nag within the session; any change re-arms) and
 a previewed Merge (exactly what will update, nothing deleted, then
-confirm). The time lens explicitly out, with the spec sentence: 
+confirm). The time lens explicitly out, with the spec sentence:
 Intelligence is a projection of the current semantic workspace; it does
 not create new truth, mutate state without approval, or replace History
 as the source for temporal analysis.
@@ -771,7 +771,7 @@ What Stage D5 shipped (commits and the acceptance in
   list (viewer). One real defect caught by the route test: the first
   draft keyed the ledger per-BATCH (ten items shared one composite key →
   the first item's claim made nine answer duplicate) — the requestId now
-  names the ITEM (ext_<record>_<user>_<node>). 5 route tests.
+  names the ITEM (ext*<record>*<user>\_<node>). 5 route tests.
 - **The acceptance** (`3560ef1`): four continuous tests — the failure arm
   (10 proposed; first approve → 9 applied, 1 failed; the retry through a
   FRESH record with STABLE per-node keys → taskCount 10 not 11, 10
@@ -1011,13 +1011,13 @@ packages/server/test/stageD9.definition.e2e.test.ts):
   aiPreview helpers (node-tested); i18n en+hu.
 - **The acceptance** (this commit): the full story in one test —
   select 4 of 10 (a ghost id dropped + warned), origin ai + provenance
-  + sourceSeq, the meter (one ai-propose event), THE HUMAN GATE (the
-  409 without the ack — the D8 warnings over the narrowed set, zero
-  wire mutations — then the ack → exactly 4 on the wire, state open,
-  no dueDate: the consented loss), the stale-board arm (the board
-  changes; the snapshot holds; the wire count does not move), the
-  never-spend arm (an unconnected provider → 404, zero model calls),
-  the list's origin surface, duplicate approval.
+  - sourceSeq, the meter (one ai-propose event), THE HUMAN GATE (the
+    409 without the ack — the D8 warnings over the narrowed set, zero
+    wire mutations — then the ack → exactly 4 on the wire, state open,
+    no dueDate: the consented loss), the stale-board arm (the board
+    changes; the snapshot holds; the wire count does not move), the
+    never-spend arm (an unconnected provider → 404, zero model calls),
+    the list's origin surface, duplicate approval.
 
 Explicitly NOT built, per ADR 0035: the execution dashboard / plan
 view (the OTHER D9 thread from the D1/D2 deferrals — a different
@@ -1098,45 +1098,45 @@ unchanged by anything D1–D10 built. The loop it names still holds:
 TALK → LUCENT UNDERSTANDS → VISUALIZES → REMEMBERS → CREATES WORK →
 TRACKS WORK → LATTICE → ACTUAL CODE.
 
-D1–D10 built the *plumbing* under CREATES WORK and TRACKS WORK. The remaining
-strategic features are the *visible product capabilities* that plumbing now
+D1–D10 built the _plumbing_ under CREATES WORK and TRACKS WORK. The remaining
+strategic features are the _visible product capabilities_ that plumbing now
 makes possible — which is why they were correctly sequenced second.
 
 ### The strategic labels, reconciled
 
 **Absorbed into the engineering D1–D10 (done, with the mechanism):**
 
-| Strategic | Engineering home | The mechanism |
-| --- | --- | --- |
-| D1 actions as executable objects | D1 | the action nodeType + issue fields |
-| D2 action state | D1 + D7 | statements + inbound status sync |
-| D3 Linear | D6 | LinearProvider + ambiguous-create recovery |
-| D4 "don't become another PM tool" | D1–D9 principle | Lucent drafts; humans decide; execution stays external |
-| D5 external state sync | D7 | signed webhooks → queue → human-gated accept |
-| D6/D21 execution provenance | C3 + D7/D9 | provenance + sourceSeq + the actor record |
-| D8 dependency-aware execution | D3 | depends_on/blocks cycle rejection + propagation |
-| D9 integration framework | D4 | ExecutionProvider seam + capability warnings (D8) |
-| D11 GitHub | D8 | GithubProvider + the honesty layer |
-| D14 external action approval | D5 | the claim ladder + the approve gate + ack consent |
-| D15 idempotency | D5/D6/D10 | ledger + idempotency keys + the recovery contract |
-| D16 webhooks | D7/D8 | the scheme registry (linear/github/jira/fake) |
-| D19 Lattice connection | the final Lattice milestone (named, not built) | — |
-| D22 execution feedback | D7 | inbound is the feedback direction |
-| D24 permissioned external actions | D5/D6 | board-role guards + owner-only connections |
-| D25 full acceptance | D10 | the era regression walks all nine spines |
+| Strategic                         | Engineering home                               | The mechanism                                          |
+| --------------------------------- | ---------------------------------------------- | ------------------------------------------------------ |
+| D1 actions as executable objects  | D1                                             | the action nodeType + issue fields                     |
+| D2 action state                   | D1 + D7                                        | statements + inbound status sync                       |
+| D3 Linear                         | D6                                             | LinearProvider + ambiguous-create recovery             |
+| D4 "don't become another PM tool" | D1–D9 principle                                | Lucent drafts; humans decide; execution stays external |
+| D5 external state sync            | D7                                             | signed webhooks → queue → human-gated accept           |
+| D6/D21 execution provenance       | C3 + D7/D9                                     | provenance + sourceSeq + the actor record              |
+| D8 dependency-aware execution     | D3                                             | depends_on/blocks cycle rejection + propagation        |
+| D9 integration framework          | D4                                             | ExecutionProvider seam + capability warnings (D8)      |
+| D11 GitHub                        | D8                                             | GithubProvider + the honesty layer                     |
+| D14 external action approval      | D5                                             | the claim ladder + the approve gate + ack consent      |
+| D15 idempotency                   | D5/D6/D10                                      | ledger + idempotency keys + the recovery contract      |
+| D16 webhooks                      | D7/D8                                          | the scheme registry (linear/github/jira/fake)          |
+| D19 Lattice connection            | the final Lattice milestone (named, not built) | —                                                      |
+| D22 execution feedback            | D7                                             | inbound is the feedback direction                      |
+| D24 permissioned external actions | D5/D6                                          | board-role guards + owner-only connections             |
+| D25 full acceptance               | D10                                            | the era regression walks all nine spines               |
 
 **Genuinely remaining from the strategic roadmap — the future-milestone ledger:**
 
-| Strategic | Capability | Why it is not built yet / what it needs |
-| --- | --- | --- |
-| D7 | **Decision → Action linkage** | The ingredients exist (decisions, actions, provenance, statements) but decision→action causality is not a first-class execution relationship. Needs a link type + both query directions ("what actions came from this decision" / "what decisions caused this work"). Belongs with execution intelligence, not standalone. |
-| D13 | **Create the work** | semantic state → structured implementation plan → tasks. C2/C6/D1/D3/D5 give the pieces; the plan *generator* is the missing product capability. A top candidate for the next major feature. |
-| D17 | **Execution dashboard** | deliberately excluded from engineering D numbering; a major user-facing surface, its own milestone. |
-| D18 | **Decision impact analysis** | reasoning over the execution graph D3 now provides — natural later feature. |
-| D20 | **Decision → implementation plan** | requirement → current architecture → gap → implementation plan → tasks → code. The Lucent↔Lattice differentiator; final milestone territory. |
-| D10 | **Slack / Teams** | NOT an ExecutionProvider (the D8 discovery): a **CommunicationProvider** family — actions that *post*, not tasks that *track*. |
-| D12 | **Figma** | NOT an ExecutionProvider either: an **ArtifactProvider** family — design actions that produce files/frames. |
-| D23 | **Automation** | event → rule → action. Deliberately last: automate only after actions, dependencies, providers, approval, and sync are trustworthy — otherwise we'd be automating unreliable workflows. |
+| Strategic | Capability                         | Why it is not built yet / what it needs                                                                                                                                                                                                                                                                                    |
+| --------- | ---------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| D7        | **Decision → Action linkage**      | The ingredients exist (decisions, actions, provenance, statements) but decision→action causality is not a first-class execution relationship. Needs a link type + both query directions ("what actions came from this decision" / "what decisions caused this work"). Belongs with execution intelligence, not standalone. |
+| D13       | **Create the work**                | semantic state → structured implementation plan → tasks. C2/C6/D1/D3/D5 give the pieces; the plan _generator_ is the missing product capability. A top candidate for the next major feature.                                                                                                                               |
+| D17       | **Execution dashboard**            | deliberately excluded from engineering D numbering; a major user-facing surface, its own milestone.                                                                                                                                                                                                                        |
+| D18       | **Decision impact analysis**       | reasoning over the execution graph D3 now provides — natural later feature.                                                                                                                                                                                                                                                |
+| D20       | **Decision → implementation plan** | requirement → current architecture → gap → implementation plan → tasks → code. The Lucent↔Lattice differentiator; final milestone territory.                                                                                                                                                                              |
+| D10       | **Slack / Teams**                  | NOT an ExecutionProvider (the D8 discovery): a **CommunicationProvider** family — actions that _post_, not tasks that _track_.                                                                                                                                                                                             |
+| D12       | **Figma**                          | NOT an ExecutionProvider either: an **ArtifactProvider** family — design actions that produce files/frames.                                                                                                                                                                                                                |
+| D23       | **Automation**                     | event → rule → action. Deliberately last: automate only after actions, dependencies, providers, approval, and sync are trustworthy — otherwise we'd be automating unreliable workflows.                                                                                                                                    |
 
 ### The provider-family rule (recorded as doctrine)
 
@@ -1358,14 +1358,14 @@ for all of its boards, which is the governance hole the advisory's §2 names.
   rule): every Phase A call site now reads through `checkOutboundFor` —
   generate/stream/ask, the seven integration routes, share minting, the
   op-apply route and MCP-marked reads — and the capture routes (meeting save
-  + checkpoint append) through `orgPolicy.recordingDisabled`. The floor
-  raises a board's tier via `stricterOf` and the refusal sentence names its
-  source ("governed as confidential (its organization's classification
-  floor)") so a user never hunts for a label they never set. `ai: "disabled"`
-  deliberately reaches past the in-process-mock exemption: it is the org
-  saying "no AI in this workspace", not "no AI leaving it". Recording refusal
-  covers capture WRITES only — a policy turned on mid-meeting lets the
-  running capture finalize rather than strand a record "in progress".
+  - checkpoint append) through `orgPolicy.recordingDisabled`. The floor
+    raises a board's tier via `stricterOf` and the refusal sentence names its
+    source ("governed as confidential (its organization's classification
+    floor)") so a user never hunts for a label they never set. `ai: "disabled"`
+    deliberately reaches past the in-process-mock exemption: it is the org
+    saying "no AI in this workspace", not "no AI leaving it". Recording refusal
+    covers capture WRITES only — a policy turned on mid-meeting lets the
+    running capture finalize rather than strand a record "in progress".
 - **The admin surface**: `GET/PATCH /api/orgs/:id/settings`, owner floor
   (members see org identity, not the policy console), CSRF on write,
   strict-validated — an unknown key or a bad value is a named 400, never a
@@ -1399,3 +1399,70 @@ for all of its boards, which is the governance hole the advisory's §2 names.
   here stays one honest boolean); the retention field (S5, evidence-gated);
   the web admin UI for this plane (ships with C's Settings surface so the
   admin sees provider policy and the plane together, not twice).
+
+## Amendment (2026-09-16): docs/24 Phase C executed — the per-org provider policy (clause 1)
+
+The third legal-now phase closes the S3 gap on Phase B's plane: an org today
+cannot say WHICH provider may process its content — classification refusals
+notwithstanding, any permitted generation still routes to the deployment's
+configured provider (or a caller-supplied key where BYO is on) with no
+org-level way to say no. Same clause-1 rationale — a governance hole in a
+shipped surface.
+
+- **The fifth answer**: `OrgSettings.providerPolicy` — `mode` (`any` /
+  `byo-forbidden` / `self-hosted-only`) plus an optional name `allow` list
+  with the `self-hosted` token. No new table or migration: it rides the
+  `organizations.settings` jsonb Phase B added. `effectiveSettings` resolves
+  it with the established fail-closed discipline (absent is `any` — zero
+  behavior change for untouched orgs; a present-but-unintelligible mode is
+  `self-hosted-only`, a garbled list allows nothing). The direction rule is
+  the deliberate OPPOSITE of Phase B's floor and is stated in code: ORG
+  POLICY MAY RESTRICT, NEVER WIDEN — the deployment's
+  `LUCENT_ALLOW_BYO_KEYS` is the ceiling the org can only tighten.
+- **Enforcement is the resolved provider, not the request**:
+  `providerGate` (on `RouteServices`, beside every other refusal shape)
+  answers the request itself — 403 naming `policy`/`boundary`, before any
+  spend — at generate, stream (the only BYO path, before the SSE headers,
+  like the Phase A header fix), ask, and the propose-ai arm that actually
+  calls the model (the zero-egress plan-bridge arm is ungated). BYO resolves
+  FIRST at the deployment level, then the org is consulted, so `any` never
+  unlocks BYO where the deployment turned it off. `self-hosted-only` reads
+  the operator's `LUCENT_AI_SELF_HOSTED=1` declaration — self-hosting is an
+  attestation, documented as such in `.env.example`, because the server
+  cannot probe an endpoint; BYO is never self-hosted by construction; the
+  in-process mock passes every mode (the §24 fallback). `POST /api/image`
+  carries no board id and was never in the S1/S2 boundary model, so it stays
+  outside this gate — docs/06 says so explicitly rather than overclaiming.
+- **The surfaces**: owner-only `GET/PATCH /api/orgs/:id/settings` with the
+  nested merge (a mode-only PATCH preserves a stored name filter;
+  `allow: null` clears it; an emptied policy is removed, never stored as
+  `{}`), strict 400s, and the audit comparing RESOLVED objects so a no-op
+  write audits an empty change set; member-readable
+  `GET /api/orgs/:id/policy` answering exactly the resolved shape the gates
+  enforce, never the raw record. The web Settings shows the owner the
+  segmented control and every member the one-sentence policy — degrading to
+  the deployment-level wording when the surface is unreadable, never to a
+  fabricated `any`.
+- **Observable separately**: `policy:provider` (and `policy:boundary`) is a
+  fourth refusal class in telemetry and Prometheus — an org refusing its own
+  content must never page an on-call nor read as revenue. CSRF stays folded
+  into `quota` in the snapshot where the usage test locks it.
+- **The gate, verified** (`org-policy.test.ts` now 26, `usage.test.ts`,
+  `obs.test.ts`, web `billing.test.ts` now 49): the mode×fact unit matrix +
+  fail-closed unknowns + strict-parse cases; the acceptance route tests (a
+  self-hosted-only org refuses a BYO cloud key at the stream route even with
+  the deployment flag on — named `policy`/`boundary`, no SSE headers, one
+  `policy` refusal and zero `rate`; the same org on an undeclared cloud
+  default is refused outright; on a declared self-hosted deployment it
+  generates normally; `any` never widens a no-BYO deployment); the
+  member/policy floors plus the merge/clear round-trips; PG parity carrying
+  the nested policy. Typecheck green across all six workspaces; full suite
+  local (no `LUCENT_TEST_DATABASE_URL`, so the PG-gated suites skip as
+  designed): 2,774 passed / 239 files, 131 skipped, zero failures (server
+  1,195 + 131 skipped / 118, web 742 / 64).
+- **What deliberately waits**: S4/S5 (residency, at-rest encryption beyond
+  the platform disk, retention-as-policy) — evidence/infra-gated, unchanged;
+  and, still open since Phase A, the board-tier picker in the web client
+  (boards are classified through the owner-gated API; the client still
+  ignores the tier — what shipped here is the provider-policy control and
+  the member-visible sentence, not that picker).

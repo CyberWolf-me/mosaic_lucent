@@ -141,8 +141,22 @@ describe("limitsFromEnv", () => {
 describe("telemetry", () => {
   it("counts requests and totals operations emitted", () => {
     const t = new Telemetry();
-    t.record({ kind: "generate", ms: 100, provider: "mock", operations: 3, outcome: "success", repaired: false });
-    t.record({ kind: "generate", ms: 200, provider: "mock", operations: 2, outcome: "success", repaired: false });
+    t.record({
+      kind: "generate",
+      ms: 100,
+      provider: "mock",
+      operations: 3,
+      outcome: "success",
+      repaired: false,
+    });
+    t.record({
+      kind: "generate",
+      ms: 200,
+      provider: "mock",
+      operations: 2,
+      outcome: "success",
+      repaired: false,
+    });
     t.record({ kind: "image", ms: 50, provider: "mock-image" });
     const snap = t.snapshot();
     expect(snap.requests).toEqual({ generate: 2, image: 1, ask: 0, aiPropose: 0 });
@@ -152,7 +166,14 @@ describe("telemetry", () => {
   it("reports latency percentiles", () => {
     const t = new Telemetry();
     for (const ms of [10, 20, 30, 40, 100]) {
-      t.record({ kind: "generate", ms, provider: "mock", operations: 1, outcome: "success", repaired: false });
+      t.record({
+        kind: "generate",
+        ms,
+        provider: "mock",
+        operations: 1,
+        outcome: "success",
+        repaired: false,
+      });
     }
     const snap = t.snapshot();
     expect(snap.latencyMs.generateMax).toBe(100);
@@ -197,7 +218,7 @@ describe("telemetry", () => {
     t.record({ kind: "refused", route: "/api/generate", reason: "rate" });
     t.record({ kind: "refused", route: "/api/generate", reason: "quota" });
     t.record({ kind: "refused", route: "/api/generate", reason: "quota" });
-    expect(t.snapshot().refusals).toEqual({ rate: 1, quota: 2, plan: 0 });
+    expect(t.snapshot().refusals).toEqual({ rate: 1, quota: 2, plan: 0, policy: 0 });
   });
 
   it("counts a plan refusal apart from a quota refusal", () => {
@@ -208,7 +229,7 @@ describe("telemetry", () => {
     t.record({ kind: "refused", route: "/api/generate", reason: "plan:ai.generationsPerMonth" });
     t.record({ kind: "refused", route: "/api/boards", reason: "plan:boards" });
     t.record({ kind: "refused", route: "/api/generate", reason: "quota" });
-    expect(t.snapshot().refusals).toEqual({ rate: 0, quota: 1, plan: 2 });
+    expect(t.snapshot().refusals).toEqual({ rate: 0, quota: 1, plan: 2, policy: 0 });
   });
 
   it("keeps a csrf refusal in the quota bucket", () => {
@@ -216,13 +237,30 @@ describe("telemetry", () => {
     // must not have moved `csrf:*` out from under it.
     const t = new Telemetry();
     t.record({ kind: "refused", route: "/api/boards", reason: "csrf:missing" });
-    expect(t.snapshot().refusals).toEqual({ rate: 0, quota: 1, plan: 0 });
+    expect(t.snapshot().refusals).toEqual({ rate: 0, quota: 1, plan: 0, policy: 0 });
+  });
+
+  it("counts a policy refusal apart from every capacity bucket", () => {
+    // docs/24 Phase C: an org refusing its OWN content (the provider gate or a
+    // boundary) is never a capacity or revenue signal — it must not pollute
+    // `quota`/`rate` (which page an on-call) nor `plan` (which means revenue).
+    const t = new Telemetry();
+    t.record({ kind: "refused", route: "/api/generate", reason: "policy:provider" });
+    t.record({ kind: "refused", route: "/api/generate", reason: "policy:boundary" });
+    expect(t.snapshot().refusals).toEqual({ rate: 0, quota: 0, plan: 0, policy: 2 });
   });
 
   it("forwards events to an optional external sink", () => {
     const seen: string[] = [];
     const t = new Telemetry((e) => seen.push(e.kind));
-    t.record({ kind: "generate", ms: 1, provider: "mock", operations: 0, outcome: "success", repaired: false });
+    t.record({
+      kind: "generate",
+      ms: 1,
+      provider: "mock",
+      operations: 0,
+      outcome: "success",
+      repaired: false,
+    });
     t.record({ kind: "refused", route: "/x", reason: "rate" });
     expect(seen).toEqual(["generate", "refused"]);
   });

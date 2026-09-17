@@ -2,6 +2,7 @@ import * as z from "zod/v4";
 import type { AnswerCitation } from "@lucent/ai";
 import { REQUEST_LIMITS, type AnswerRequest } from "@lucent/ai";
 import type { RegisterRoutes } from "./context.js";
+import { providerFact } from "../modelRouter.js";
 import { actorNamesFor, loadVisibleLog } from "../historyView.js";
 import { buildAnswerRequest } from "../askContext.js";
 import { visibleMeetings } from "../meetingsWindow.js";
@@ -69,6 +70,7 @@ interface CitationView {
 
 export const registerAskRoutes: RegisterRoutes = (router, s) => {
   const {
+    config,
     boardStore,
     userStore,
     meetings,
@@ -80,6 +82,7 @@ export const registerAskRoutes: RegisterRoutes = (router, s) => {
     requireUser,
     requireBoardRole,
     outboundRefusal,
+    providerGate,
     requireCsrf,
     meter,
     trace,
@@ -130,6 +133,20 @@ export const registerAskRoutes: RegisterRoutes = (router, s) => {
         return;
       }
     }
+    // docs/24 Phase C: the ask provider is always the deployment's (no BYO
+    // path here), so the org's provider policy still decides whether THIS
+    // provider may serve them — a self-hosted-only org on a cloud
+    // deployment is refused here, exactly as generate is.
+    if (
+      !(await providerGate(
+        req,
+        res,
+        guard.board.orgId,
+        providerFact({ provider, byok: false }, config.aiSelfHosted),
+        route,
+      ))
+    )
+      return;
 
     let body: z.infer<typeof askBodySchema>;
     try {

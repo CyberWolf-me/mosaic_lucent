@@ -1,4 +1,7 @@
 import { useEffect, useState } from "react";
+import type { SttProviderId } from "./stt/index.js";
+
+export type { SttProviderId };
 
 /**
  * Global settings store persisted to localStorage, ported from the reference
@@ -10,7 +13,6 @@ export type Theme = "dark" | "light" | "system";
 export type Accent = "amber" | "violet" | "cyan" | "rose" | "mono";
 export type GridStyle = "dots" | "lines" | "off";
 export type Motion = "full" | "reduced";
-export type SttProviderId = "browser" | "whisper" | "livekit";
 export type BoardStyle = "clean" | "sketch";
 export type ApprovalThreshold = "always" | "large" | "never";
 

@@ -3,18 +3,19 @@ import { configureLiveKit } from "../src/stt/livekit.js";
 import { getSttProvider, isAnyVoiceSupported, sttProviderStatus } from "../src/stt/index.js";
 
 /**
- * The provider registry gained a third member (LiveKit). The old fallback was a
- * binary flip between browser and whisper, which with three providers could land
- * on another unsupported one.
+ * The provider registry gained a third member (LiveKit), then a fourth
+ * (hosted diarizing STT, docs/25 V1). The old fallback was a binary flip
+ * between browser and whisper, which with more providers could land on
+ * another unsupported one.
  */
 describe("stt registry", () => {
   beforeEach(() => {
     configureLiveKit({ url: "", tokenUrl: "", room: "" });
   });
 
-  it("lists all three providers with a supported flag", () => {
+  it("lists all four providers with a supported flag", () => {
     const ids = sttProviderStatus().map((p) => p.id);
-    expect(ids).toEqual(["browser", "whisper", "livekit"]);
+    expect(ids).toEqual(["browser", "whisper", "livekit", "hosted"]);
   });
 
   it("reports LiveKit unavailable, with a reason, until it is configured", () => {

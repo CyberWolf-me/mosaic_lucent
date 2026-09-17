@@ -1,25 +1,28 @@
 import { browserSttProvider } from "./browser.js";
 import { whisperSttProvider } from "./whisper.js";
 import { livekitSttProvider } from "./livekit.js";
+import { hostedSttProvider } from "./hosted.js";
 import type { SttProvider, SttProviderId } from "./types.js";
 
 export * from "./types.js";
 export { configureLiveKit } from "./livekit.js";
+export { hostedSttProvider } from "./hosted.js";
 
 const PROVIDERS: Record<SttProviderId, SttProvider> = {
   browser: browserSttProvider,
   whisper: whisperSttProvider,
   livekit: livekitSttProvider,
+  hosted: hostedSttProvider,
 };
 
 /** Order used when the requested provider can't run here. */
-const FALLBACK_ORDER: SttProviderId[] = ["browser", "whisper", "livekit"];
+const FALLBACK_ORDER: SttProviderId[] = ["browser", "whisper", "livekit", "hosted"];
 
 /** Resolve the requested STT provider, falling back to whichever is supported. */
 export function getSttProvider(id: SttProviderId): SttProvider {
   const chosen = PROVIDERS[id];
   if (chosen.isSupported()) return chosen;
-  // Scan the rest rather than flipping between two: with three providers a
+  // Scan the rest rather than flipping between two: with four providers a
   // binary fallback could land on another unsupported one.
   for (const candidate of FALLBACK_ORDER) {
     if (candidate === id) continue;

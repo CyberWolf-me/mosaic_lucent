@@ -10,12 +10,16 @@
  *  - "livekit"  — realtime STT through a LiveKit room, for shared/meeting audio.
  *                 Needs a room URL and a server endpoint that mints tokens; the
  *                 browser never holds a LiveKit secret.
+ *  - "hosted"   — server-hosted diarizing STT (docs/25 V1). The mic stays
+ *                 here; chunks ride authed POSTs to /api/stt/sessions and
+ *                 finals come back with speaker labels for shared-mic audio.
+ *                 503s honestly when the server has no STT configured.
  *
  * All satisfy the same VoiceSession contract so CanvasView never depends on
  * which one is active.
  */
 
-export type SttProviderId = "browser" | "whisper" | "livekit";
+export type SttProviderId = "browser" | "whisper" | "livekit" | "hosted";
 
 export interface VoiceSession {
   stop(): void;

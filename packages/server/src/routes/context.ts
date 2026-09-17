@@ -15,6 +15,7 @@ import type { ExportFormat, NumericEntitlementKey } from "../plans.js";
 import type { MeetingStore } from "../meetings.js";
 import type { Operation } from "@lucent/core";
 import type { TicketStore } from "../realtimeTicket.js";
+import type { SttService, SttSessionRegistry } from "../stt.js";
 import type { Telemetry } from "../telemetry.js";
 import type { UsageLimits, UsageTracker } from "../usage.js";
 import type { UsageKind, UsageStore } from "../usageStore.js";
@@ -63,6 +64,18 @@ export interface RouteServices {
 
   readonly provider: LLMProvider;
   readonly imageProvider: ImageProvider;
+  /**
+   * docs/25 V1: server-hosted diarizing STT. Always present — unconfigured
+   * deployments get the standby mock and the routes answer 503 (never a
+   * silent void), tests inject a seeded mock.
+   */
+  readonly stt: SttService;
+  /**
+   * The process-local STT session table (ephemeral like presence — audio
+   * never reaches Postgres). Owned by `createApp`, shared by the STT
+   * routes only.
+   */
+  readonly sttSessions: SttSessionRegistry;
 
   /**
    * The shared auth context: stores, the session-cookie shape, the mailer and
@@ -143,6 +156,12 @@ export interface RouteServices {
    * message into the 400 body a client already sees.
    */
   readBody(req: IncomingMessage): Promise<string>;
+  /**
+   * Read the raw bytes under a caller-supplied cap (audio chunks, webhook
+   * payloads). Rejects with `new Error("request body too large")` past it —
+   * the route turns that into 413, the way the assets route already does.
+   */
+  readRawBody(req: IncomingMessage, maxBytes?: number): Promise<Buffer>;
   /** `{ ip, userAgent }` for an audit row or a session record. */
   requestOrigin(req: IncomingMessage): { ip: string; userAgent: string | null };
 
@@ -204,6 +223,36 @@ export interface RouteServices {
    * duplicating that read in a route is how two stores drift.
    */
   orgPolicy(orgId: string): Promise<import("../classification.js").EffectiveOrgSettings>;
+  /**
+   * docs/24 Phase C: the provider-policy gate. Answers the request itself
+   * (403 + a `refused` telemetry event tagged `policy:provider`) and returns
+   * false when the org's provider policy refuses the resolved provider —
+   * the same guard shape every other refusal in this codebase uses, so the
+   * refusal is one call and cannot half-wire (the BYO cloud key a
+   * self-hosted-only org forbids, the unmarked operator provider that same
+   * org must not be served by, the name outside an allowlist). `orgId` may
+   * be undefined (auth-off deployments): no org, no org policy, allowed.
+   */
+  providerGate(
+    req: IncomingMessage,
+    res: ServerResponse,
+    orgId: string | undefined,
+    fact: import("../classification.js").ProviderFact,
+    route: string,
+  ): Promise<boolean>;
+  /**
+   * docs/25 V1 (§3.1): the server-STT gate. Answers the request itself
+   * (403 + a `refused` telemetry event tagged `policy:stt`) and returns
+   * false when the org forbids server-hosted transcription — the same guard
+   * shape as `providerGate`, so the new egress path cannot half-wire.
+   * `orgId` may be undefined (auth-off deployments): no org, no org policy.
+   */
+  sttGate(
+    req: IncomingMessage,
+    res: ServerResponse,
+    orgId: string | undefined,
+    route: string,
+  ): Promise<boolean>;
   /**
    * P5: these are awaited because the limit may be enforced by a shared
    * Postgres counter rather than an in-process Map. A boolean return is

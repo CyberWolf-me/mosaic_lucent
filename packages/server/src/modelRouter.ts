@@ -48,6 +48,24 @@ export type ProviderResolution =
   | { ok: false; status: 400 | 403; error: string };
 
 /**
+ * The provider's facts for an org's provider policy (docs/24 Phase C), given
+ * the resolution and the deployment's self-hosted declaration. BYO is never
+ * self-hosted: the BYO path targets fixed public cloud endpoints (see
+ * `DEFAULT_OPENAI_URL` and the Anthropic default), so an org's
+ * `self-hosted-only` policy refuses it without trusting anyone's word.
+ */
+export function providerFact(
+  resolution: { provider: LLMProvider; byok: boolean },
+  aiSelfHosted: boolean,
+): { name: string; byok: boolean; selfHosted: boolean } {
+  return {
+    name: resolution.provider.name,
+    byok: resolution.byok,
+    selfHosted: !resolution.byok && aiSelfHosted,
+  };
+}
+
+/**
  * Resolve the provider for one request. The default provider answers unless a
  * BYO key is present and the deployment allows BYO. A named provider/model is
  * honoured only inside the BYO path — routing between operator-funded

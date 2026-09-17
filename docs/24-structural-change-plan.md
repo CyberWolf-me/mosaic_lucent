@@ -1,6 +1,7 @@
 # 24. Structural Change Plan — implementing the docs/22 and docs/23 audits
 
-> **Status: Phases A and B shipped (2026-09-16); C next in order.** This is the
+> **Status: Phases A, B, and C shipped (2026-09-16); D–F evidence-gated, G–H
+> infra-gated.** This is the
 > implementation plan for the two structural change sets the 2026-09 advisories
 > produced and docs/22 / docs/23 audited: the **meeting platform** (M-series)
 > and the **enterprise security model** (S-series). The audits established what
@@ -13,11 +14,11 @@
 The audits collapsed the four advisories into two genuine work sets, plus one
 correction already done:
 
-| Set                                  | Doc     | Real work                                                                           | Frozen?                                    |
-| ------------------------------------ | ------- | ----------------------------------------------------------------------------------- | ------------------------------------------ |
-| Production architecture (advisory 1) | docs/20 | **None** — P0–P6 shipped, P7 evidence-gated                                         | n/a                                        |
-| Meeting platform (advisories 2–3)    | docs/22 | M6–M7 voice path, connectors, modes, diarization                                    | Mostly frozen (docs/17 Gate C/D)           |
-| Enterprise security (advisory 4)     | docs/23 | S1–S5: classification, org policy, provider policy, encryption/residency, retention | S0 done; S1–S3 mixed; S4–S5 evidence-gated |
+| Set                                  | Doc     | Real work                                                                           | Frozen?                          |
+| ------------------------------------ | ------- | ----------------------------------------------------------------------------------- | -------------------------------- |
+| Production architecture (advisory 1) | docs/20 | **None** — P0–P6 shipped, P7 evidence-gated                                         | n/a                              |
+| Meeting platform (advisories 2–3)    | docs/22 | M6–M7 voice path, connectors, modes, diarization                                    | Mostly frozen (docs/17 Gate C/D) |
+| Enterprise security (advisory 4)     | docs/23 | S1–S5: classification, org policy, provider policy, encryption/residency, retention | S0–S3 done; S4–S5 evidence-gated |
 
 The freeze rule (docs/17) governs the ordering below. A phase is one of:
 
@@ -137,7 +138,17 @@ override only where the policy allows one.
 - Policy beats board: a board-level override cannot loosen an org-level
   restriction (the direction matters and needs a named test).
 
-## 5. Phase C — Per-org provider policy (S3)
+## 5. Phase C — Per-org provider policy (S3) — **SHIPPED 2026-09-16**
+
+> Executed as the docs/17 amendment of the same date. `providerPolicy` joins
+> `OrgSettings` as its fifth answer (`mode` + optional name `allow`), enforced
+> through `providerGate` on the RESOLVED provider at generate, stream (the
+> only BYO path — before the SSE headers), ask, and the propose-ai arm that
+> actually calls the model. (`POST /api/image` carries no board id and was
+> never in the S1/S2 boundary model, so it stays outside this gate.)
+> Refusals are `policy:provider` telemetry — a fourth refusal class beside
+> rate/quota/plan — and the member-readable `GET /api/orgs/:id/policy` is the
+> surface every member sees. Full suite green against real Postgres.
 
 **Why third.** It is the AI-policy output of Phase B made concrete, and it is
 what turns docs/06's honest "depends on your provider's terms" into an
@@ -165,7 +176,9 @@ enforceable setting.
 ## 6. Phases D–F — Meeting work (evidence-gated)
 
 These stay frozen until Gate C names the wall (docs/17). Recorded here so the
-plan is complete; each is scoped enough to cost on demand.
+plan is complete; costed as slices V1–V3 in docs/25 (voice-platform advisory,
+2026-09-16), which also preconditions V4–V5 (M6/M7) on an STT provider policy
+— audio egress is a boundary S1–S3 never covered. Each is scoped enough to cost on demand.
 
 - **D — Meeting modes as behavior profiles.** `MeetingView` today always
   runs extraction. A profile split (Record / Intelligence / Assistant /
@@ -179,9 +192,14 @@ plan is complete; each is scoped enough to cost on demand.
   ledger and the human-gated inbound queue, and emits turns into the same
   `MeetingStore`. The convergence rule is already structural: a connector's
   only job is turns.
-- **F — Diarization for shared-mic capture.** A fourth STT provider slot in
-  `web/src/stt/` with `FinalMeta.speaker` filled from diarization labels, plus
-  the advisory's identity-mapping step (announcement, not biometrics).
+- **F — Diarization for shared-mic capture.** **SHIPPED 2026-09-16 as
+  docs/25 V1** (out of order, on the clause-4 sub-case below plus an
+  explicit owner build order): fourth STT slot in `web/src/stt/`
+  (`hosted.ts`) with `FinalMeta.speaker` filled from sidecar diarization
+  labels — server-proxied (`routes/stt.ts`, ephemeral registry) because
+  keys must never reach the browser, with the `serverStt` org switch and
+  `voice.minute` metering built alongside. Identity mapping stays out (no
+  biometrics, per the advisory's V1 stance). No vendor live-verified.
   Legal-now sub-case: a shared-mic meeting today attributes every turn to
   "You" — a correctness gap, not a feature, once anyone actually hits it.
 

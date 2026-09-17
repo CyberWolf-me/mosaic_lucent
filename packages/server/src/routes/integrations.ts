@@ -7,6 +7,7 @@ import {
   MAX_CREDENTIAL_REF_CHARS,
 } from "../integrations/integrations.js";
 import { webhookSchemes } from "../integrations/webhook.js";
+import { providerFact } from "../modelRouter.js";
 import { MAX_AI_SELECTED_ACTIONS } from "@lucent/ai";
 import type { IntegrationProviderName } from "../integrations/integrations.js";
 
@@ -68,6 +69,7 @@ function resolveProvider(
 
 export const registerIntegrationRoutes: RegisterRoutes = (router, s) => {
   const {
+    config,
     integrations,
     send,
     readBody,
@@ -81,13 +83,12 @@ export const registerIntegrationRoutes: RegisterRoutes = (router, s) => {
     broadcastProposal,
     auditRow,
     provider: llmProvider,
-    resolveAiContext,
     gateMonthly,
     meterUsage,
     telemetry,
     boardStore,
-    usageStore,
     outboundRefusal,
+    providerGate,
   } = s;
 
   // ---- The org admin surface (owner floor — credentials live here) --------
@@ -1238,6 +1239,23 @@ export const registerIntegrationRoutes: RegisterRoutes = (router, s) => {
     // it — the generate path's own rule). The monthly allowance runs just
     // before the model call; a parse error or a connection refusal above
     // never reaches it.
+    // docs/24 Phase C: the provider policy is checked BEFORE the allowance,
+    // but only on the arm that actually calls the model — the Stage E3 bridge
+    // (`body.nodeIds`) spends no model call and sends nothing out, so gating
+    // it would refuse a zero-egress path. A self-hosted-only org on a cloud
+    // deployment is refused here with no spend.
+    if (!body.nodeIds) {
+      if (
+        !(await providerGate(
+          req,
+          res,
+          guard.board.orgId,
+          providerFact({ provider: llmProvider, byok: false }, config.aiSelfHosted),
+          route,
+        ))
+      )
+        return;
+    }
     const allowance = await gateMonthly(
       req,
       res,

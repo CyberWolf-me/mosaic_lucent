@@ -20,7 +20,9 @@ import {
   effectiveSettings,
   parseOrgSettings,
   checkOutboundFor,
+  providerPolicyRefusal,
   type OrgSettings,
+  type ProviderFact,
 } from "../src/classification.js";
 
 /**
@@ -64,6 +66,8 @@ describe("org settings policy (unit)", () => {
       sharingDisabled: false,
       agentDisabled: false,
       recordingDisabled: false,
+      serverSttDisabled: false,
+      providerPolicy: { mode: "any", allow: null },
     });
     expect(effectiveSettings({}).classificationFloor).toBe("internal");
   });
@@ -79,6 +83,12 @@ describe("org settings policy (unit)", () => {
     expect(garbage.sharingDisabled).toBe(true);
     // An unknown `ai` value refuses generation (the restrictive answer).
     expect(effectiveSettings({ settings: { ai: "maybe" as never } }).aiDisabled).toBe(true);
+    // docs/25 V1: the server-STT switch fails the same way — absent is
+    // allowed, present-but-unintelligible is disabled.
+    expect(effectiveSettings({}).serverSttDisabled).toBe(false);
+    expect(
+      effectiveSettings({ settings: { serverStt: "sometimes" as never } }).serverSttDisabled,
+    ).toBe(true);
   });
 
   it("checkOutboundFor raises the tier by the floor and says so honestly", () => {
@@ -134,6 +144,7 @@ describe("org settings policy (unit)", () => {
       { sharingDisabled: "yes" },
       { classificationFloor: "PUBLIC" },
       { ai: "sometimes" },
+      { serverStt: "sometimes" },
       { typoInKey: true },
       { ai: 1 },
     ]) {
@@ -148,23 +159,32 @@ interface Harness {
   base: string;
   userStore: InMemoryUserStore;
   orgStore: InMemoryOrgStore;
+  telemetry: Telemetry;
   close: () => Promise<void>;
 }
 
-async function harness(provider: LLMProvider = new MockProvider()): Promise<Harness> {
+async function harness(
+  opts: { provider?: LLMProvider; allowByoKeys?: boolean; aiSelfHosted?: boolean } = {},
+): Promise<Harness> {
   const limits = limitsFromEnv();
   const userStore = new InMemoryUserStore();
   const orgStore = new InMemoryOrgStore();
+  const telemetry = new Telemetry();
   const { server, close } = createApp({
-    config: { ...readConfig({ LUCENT_REQUIRE_AUTH: "1" }), requireAuth: true },
-    provider,
+    config: {
+      ...readConfig({ LUCENT_REQUIRE_AUTH: "1" }),
+      requireAuth: true,
+      allowByoKeys: opts.allowByoKeys ?? false,
+      aiSelfHosted: opts.aiSelfHosted ?? false,
+    },
+    provider: opts.provider ?? new MockProvider(),
     imageProvider: new MockImageProvider(),
     userStore,
     boardStore: new InMemoryBoardStore(),
     secret: SECRET,
     usage: new UsageTracker(limits),
     limits,
-    telemetry: new Telemetry(),
+    telemetry,
     authLimiter: new Limiter(1000, 60_000),
     tickets: new InMemoryTicketStore(60_000),
     sessionStore: new InMemorySessionStore(),
@@ -173,7 +193,7 @@ async function harness(provider: LLMProvider = new MockProvider()): Promise<Harn
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const { port } = server.address() as AddressInfo;
-  return { base: `http://127.0.0.1:${port}`, userStore, orgStore, close };
+  return { base: `http://127.0.0.1:${port}`, userStore, orgStore, telemetry, close };
 }
 
 let open: Harness | null = null;
@@ -351,7 +371,7 @@ describe("org policy plane: inheritance and the boundaries", () => {
   });
 
   it("POLICY BEATS BOARD: an explicit `internal` label cannot loosen a restricted floor", async () => {
-    const h = (open = await harness(EXTERNAL_STUB));
+    const h = (open = await harness({ provider: EXTERNAL_STUB }));
     const alice = await signup(h, "alice.beats@example.com");
     const boardId = await newBoard(h, alice, "Labelled internal");
     // Write the board's own label to internal explicitly: it still means
@@ -491,6 +511,261 @@ describe("org policy plane: inheritance and the boundaries", () => {
 });
 
 /**
+ * docs/24 Phase C: the per-org provider policy (docs/23 S3). The unit matrix
+ * first (the resolver's answer to every mode × provider fact), then the route
+ * the acceptance names: a self-hosted-only org refuses a BYO cloud key even
+ * with the deployment flag ON — policy restricts, never widens.
+ */
+describe("provider policy (unit)", () => {
+  const fact = (over: Partial<ProviderFact>): ProviderFact => ({
+    name: "anthropic",
+    byok: false,
+    selfHosted: false,
+    ...over,
+  });
+  const any = effectiveSettings({}).providerPolicy;
+
+  it("any is today's behavior — every provider serves", () => {
+    expect(providerPolicyRefusal(any, fact({ byok: true }))).toBeNull();
+    expect(providerPolicyRefusal(any, fact({ name: "mock" }))).toBeNull();
+  });
+
+  it("byo-forbidden refuses the caller key and only the caller key", () => {
+    const p = effectiveSettings({
+      settings: { providerPolicy: { mode: "byo-forbidden" } },
+    }).providerPolicy;
+    expect(providerPolicyRefusal(p, fact({ byok: true }))?.mode).toBe("byo-forbidden");
+    expect(providerPolicyRefusal(p, fact({}))).toBeNull();
+    // The in-process mock serves regardless (nothing to refuse).
+    expect(providerPolicyRefusal(p, fact({ name: "mock" }))).toBeNull();
+  });
+
+  it("self-hosted-only refuses a BYO cloud key and an undeclared cloud default", () => {
+    const p = effectiveSettings({
+      settings: { providerPolicy: { mode: "self-hosted-only" } },
+    }).providerPolicy;
+    // BYO never self-hosted, whatever the deployment declares.
+    expect(providerPolicyRefusal(p, fact({ byok: true, selfHosted: true }))?.mode).toBe(
+      "self-hosted-only",
+    );
+    // A cloud operator provider not marked self-hosted is refused.
+    expect(providerPolicyRefusal(p, fact({}))).not.toBeNull();
+    // The operator's DECLARATION (config) lets the default through...
+    expect(providerPolicyRefusal(p, fact({ selfHosted: true }))).toBeNull();
+    // ...and the offline mock always passes (the §24 fallback).
+    expect(providerPolicyRefusal(p, fact({ name: "mock" }))).toBeNull();
+  });
+
+  it("the allowlist layers under every mode; mock is exempt", () => {
+    const p = effectiveSettings({
+      settings: { providerPolicy: { mode: "byo-forbidden", allow: ["anthropic", "self-hosted"] } },
+    }).providerPolicy;
+    expect(providerPolicyRefusal(p, fact({ name: "anthropic" }))).toBeNull();
+    expect(providerPolicyRefusal(p, fact({ name: "gorouter" }))!.error).toContain("allows only");
+    // byo-forbidden still refuses the key even though "anthropic" is listed.
+    expect(providerPolicyRefusal(p, fact({ name: "anthropic", byok: true }))).not.toBeNull();
+    expect(providerPolicyRefusal(p, fact({ name: "mock", byok: false }))).toBeNull();
+    // The "self-hosted" token matches a declared-self-hosted default.
+    expect(providerPolicyRefusal(p, fact({ name: "vllm", selfHosted: true }))).toBeNull();
+  });
+
+  it("fails CLOSED: an unknown mode string is the strictest mode", () => {
+    const p = effectiveSettings({
+      settings: { providerPolicy: { mode: "trust-me" as never } },
+    }).providerPolicy;
+    expect(p.mode).toBe("self-hosted-only");
+    expect(providerPolicyRefusal(p, fact({ name: "anthropic" }))).not.toBeNull();
+  });
+
+  it("parseOrgSettings validates providerPolicy strictly", () => {
+    expect(parseOrgSettings({ providerPolicy: { mode: "any" } }).ok).toBe(true);
+    expect(parseOrgSettings({ providerPolicy: { allow: ["anthropic"] } }).ok).toBe(true);
+    for (const bad of [
+      { providerPolicy: "self-hosted" },
+      { providerPolicy: { mode: "everything" } },
+      { providerPolicy: { allow: [] } },
+      { providerPolicy: { allow: [1, 2] } },
+      { providerPolicy: { typo: true } },
+    ]) {
+      const res = parseOrgSettings(bad);
+      expect(res.ok, JSON.stringify(bad)).toBe(false);
+    }
+  });
+});
+
+describe("provider policy: enforced at the AI routes", () => {
+  it("a self-hosted-only org refuses a BYO cloud key even with LUCENT_ALLOW_BYO_KEYS=1, and spends nothing", async () => {
+    const h = (open = await harness({ allowByoKeys: true }));
+    const alice = await signup(h, "alice.byo@example.com");
+    const boardId = await newBoard(h, alice, "Plain");
+    const patched = await setPolicy(h, alice, { providerPolicy: { mode: "self-hosted-only" } });
+    expect(patched.status).toBe(200);
+
+    // The stream route is the ONLY BYO path; a cloud key must die there.
+    const res = await api(h, "/api/generate/stream", {
+      method: "POST",
+      token: alice.token,
+      headers: {
+        "x-lucent-provider-key": "sk-ant-supersecret",
+        "x-lucent-provider": "anthropic",
+      },
+      body: JSON.stringify({
+        boardId,
+        message: "make a flowchart",
+        summary: { diagramKind: "flowchart", nodes: [], edges: [] },
+      }),
+    });
+    expect(res.status).toBe(403);
+    expect(res.body.policy).toBe("self-hosted-only");
+    expect(res.body.boundary).toBe("provider");
+    // The refusal never opened the SSE stream (real 403, not an error frame).
+    // And it is a POLICY refusal, not a capacity one, in the metrics:
+    expect(h.telemetry.snapshot().refusals.policy).toBe(1);
+    expect(h.telemetry.snapshot().refusals.rate).toBe(0);
+  });
+
+  it("a self-hosted-only org on an undeclared cloud deployment is refused generation outright", async () => {
+    const h = (open = await harness({ provider: EXTERNAL_STUB, aiSelfHosted: false }));
+    const alice = await signup(h, "alice.cloud@example.com");
+    const boardId = await newBoard(h, alice, "Plain");
+    await setPolicy(h, alice, { providerPolicy: { mode: "self-hosted-only" } });
+
+    const res = await api(h, "/api/generate", {
+      method: "POST",
+      token: alice.token,
+      body: JSON.stringify({
+        boardId,
+        message: "make a flowchart",
+        summary: { diagramKind: "flowchart", nodes: [], edges: [] },
+      }),
+    });
+    // EXTERNAL_STUB.generate THROWS, so reaching the provider would fail the
+    // test loudly — a clean 403 here proves "before any spend".
+    expect(res.status).toBe(403);
+    expect(res.body.boundary).toBe("provider");
+    expect(res.body.policy).toBe("self-hosted-only");
+  });
+
+  it("the same org on a DECLARED self-hosted deployment generates normally", async () => {
+    // Mock provider = in-process, passes self-hosted-only; and a cloud default
+    // marked self-hosted (config) also passes. Both must NOT get a provider
+    // refusal, proving the operator declaration is what gates it.
+    const h = (open = await harness({ provider: new MockProvider(), aiSelfHosted: true }));
+    const alice = await signup(h, "alice.selfhost@example.com");
+    const boardId = await newBoard(h, alice, "Plain");
+    await setPolicy(h, alice, { providerPolicy: { mode: "self-hosted-only" } });
+    const res = await api(h, "/api/generate", {
+      method: "POST",
+      token: alice.token,
+      body: JSON.stringify({
+        boardId,
+        message: "make a flowchart",
+        summary: { diagramKind: "flowchart", nodes: [], edges: [] },
+      }),
+    });
+    expect(res.body.policy).toBeUndefined();
+    expect(res.body.boundary).toBeUndefined();
+  });
+
+  it("no-byo at the deployment is never widened by an org saying 'any'", async () => {
+    // LUCENT_ALLOW_BYO_KEYS is OFF; the org cannot unlock it — the deployment
+    // refusal happens in the resolver before the org is even consulted.
+    const h = (open = await harness({ allowByoKeys: false }));
+    const alice = await signup(h, "alice.nowiden@example.com");
+    await setPolicy(h, alice, { providerPolicy: { mode: "any" } });
+    const res = await api(h, "/api/generate/stream", {
+      method: "POST",
+      token: alice.token,
+      headers: { "x-lucent-provider-key": "sk-x", "x-lucent-provider": "anthropic" },
+      body: JSON.stringify({
+        message: "hi",
+        summary: { diagramKind: "flowchart", nodes: [], edges: [] },
+      }),
+    });
+    expect(res.status).toBe(403);
+    expect(res.body.policy).toBeUndefined(); // the DEPLOYMENT refusal, not org policy
+  });
+});
+
+/**
+ * docs/24 Phase C: the admin + member SURFACES for the provider policy.
+ * The plan's web line — "the admin sets it and every member sees it" — is
+ * two routes, and this is where each one's floor is locked: the full plane
+ * stays the owner's (Phase B's shape, unchanged), and the provider policy
+ * gets the one member-readable surface, answering exactly the shape the
+ * gates enforce (`effectiveSettings(org).providerPolicy`), never the raw
+ * record.
+ */
+describe("provider policy: the surfaces", () => {
+  it("every member reads the provider policy; the full plane stays owner-only", async () => {
+    const h = (open = await harness());
+    const alice = await signup(h, "alice.surf@example.com");
+    await setPolicy(h, alice, {
+      providerPolicy: { mode: "self-hosted-only" },
+      sharingDisabled: true,
+    });
+    const bob = await signup(h, "bob.surf@example.com");
+    await h.userStore.setMembership({ userId: bob.id, orgId: alice.orgId, role: "editor" });
+
+    // The member-visible provider-policy surface.
+    const read = await api(h, `/api/orgs/${alice.orgId}/policy`, { token: bob.token });
+    expect(read.status).toBe(200);
+    expect(read.body).toEqual({
+      providerPolicy: { mode: "self-hosted-only", allow: null },
+      serverStt: "allowed",
+    });
+    // ...and the FULL plane does not ride it: no floor, no denials. The
+    // provider policy is a transparency fact; the rest is the console's.
+    expect(JSON.stringify(read.body)).not.toContain("sharingDisabled");
+    // The owner's richer surface still refuses the member — the same
+    // 404-on-denial shape the whole codebase uses.
+    expect((await api(h, `/api/orgs/${alice.orgId}/settings`, { token: bob.token })).status).toBe(
+      404,
+    );
+    // A non-member cannot tell the org exists.
+    const carol = await signup(h, "carol.surf@example.com");
+    expect((await api(h, `/api/orgs/${alice.orgId}/policy`, { token: carol.token })).status).toBe(
+      404,
+    );
+  });
+
+  it("a mode-only PATCH preserves the stored name filter; `allow: null` clears it", async () => {
+    const h = (open = await harness());
+    const alice = await signup(h, "alice.merge@example.com");
+    const pinned = await setPolicy(h, alice, { providerPolicy: { allow: ["self-hosted"] } });
+    expect(pinned.status).toBe(200);
+    expect(pinned.body.settings.providerPolicy).toEqual({ allow: ["self-hosted"] });
+    // The web control's exact write: mode only. "Absent means unchanged"
+    // holds INSIDE the nested policy — the filter must survive.
+    const second = await setPolicy(h, alice, { providerPolicy: { mode: "byo-forbidden" } });
+    expect(second.status).toBe(200);
+    expect(second.body.settings.providerPolicy).toEqual({
+      mode: "byo-forbidden",
+      allow: ["self-hosted"],
+    });
+    // The member-visible surface answers what the gates enforce: both halves.
+    const surf = await api(h, `/api/orgs/${alice.orgId}/policy`, { token: alice.token });
+    expect(surf.body.providerPolicy).toEqual({ mode: "byo-forbidden", allow: ["self-hosted"] });
+    // The audit compared RESOLVED objects and named providerPolicy with its
+    // mode moved and the filter intact on both sides.
+    expect(second.body.changed.providerPolicy).toEqual({
+      from: { mode: "any", allow: ["self-hosted"] },
+      to: { mode: "byo-forbidden", allow: ["self-hosted"] },
+    });
+    // An explicit clear removes the filter, leaving the mode.
+    const cleared = await setPolicy(h, alice, { providerPolicy: { allow: null } });
+    expect(cleared.body.settings.providerPolicy).toEqual({ mode: "byo-forbidden" });
+    // Clearing against an absent filter stores NOTHING — no `{}` husk — so
+    // the raw record keeps "absent means no policy written here" true.
+    const fresh = await signup(h, "fresh.merge@example.com");
+    const noopClear = await setPolicy(h, fresh, { providerPolicy: { allow: null } });
+    expect("providerPolicy" in (noopClear.body.settings as object)).toBe(false);
+    expect(noopClear.body.effective.providerPolicy).toEqual({ mode: "any", allow: null });
+    expect(noopClear.body.changed).toEqual({});
+  });
+});
+
+/**
  * Store parity (docs/24 §3's rule, now for org settings): the same
  * `effectiveSettings` resolution in both twins, PG's NULL behaving exactly
  * like the in-memory field-absence, and the value surviving the round trip.
@@ -541,6 +816,11 @@ describeIf("PostgresOrgStore persists settings like the in-memory twin", () => {
       sharingDisabled: true,
       agentDisabled: false,
       recordingDisabled: true,
+      // docs/25 V1 rides the same jsonb, so parity carries it too.
+      serverStt: "disabled",
+      // Phase C's nested object is the one shape PG's jsonb could mangle in
+      // transit (an inner NULL vs a missing key), so parity carries it too.
+      providerPolicy: { mode: "self-hosted-only", allow: ["self-hosted"] },
     };
     await pg.setSettings(orgB, plane);
     await mem.setSettings(orgB, plane);
@@ -551,5 +831,10 @@ describeIf("PostgresOrgStore persists settings like the in-memory twin", () => {
     expect(effectiveSettings(pgRow).classificationFloor).toBe("restricted");
     expect(effectiveSettings(pgRow).aiDisabled).toBe(true);
     expect(effectiveSettings(pgRow).agentDisabled).toBe(false);
+    expect(effectiveSettings(pgRow).serverSttDisabled).toBe(true);
+    expect(effectiveSettings(pgRow).providerPolicy).toEqual({
+      mode: "self-hosted-only",
+      allow: ["self-hosted"],
+    });
   });
 });

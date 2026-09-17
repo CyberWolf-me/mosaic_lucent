@@ -7,12 +7,16 @@ import {
   exportFormatChips,
   fetchBilling,
   fetchOrgs,
+  fetchOrgPolicy,
   formatMonth,
   limitNote,
   limitTitle,
   meterFor,
+  ORG_PROVIDER_MODES,
+  patchOrgProviderMode,
   planState,
   preferredOrg,
+  providerPolicySentence,
   resetLabel,
 } from "../billing.js";
 import type {
@@ -20,12 +24,28 @@ import type {
   BillingResult,
   BillingSnapshot,
   LimitRow,
+  OrgPolicyResult,
+  OrgProviderMode,
   OrgSummary,
 } from "../billing.js";
 import { buildSupportReport, formatSupportReport } from "../support.js";
 import { useWorkspaceOptional } from "../workspace.js";
 
 /** Profile menu, preferences modal, and shape toolbar. Ported from settings.jsx. */
+
+/** Segmented-control copy for the owner's provider-policy modes (docs/24 C). */
+const PROVIDER_MODE_LABELS: Record<OrgProviderMode, string> = {
+  any: "Any",
+  "byo-forbidden": "No BYO keys",
+  "self-hosted-only": "Self-hosted",
+};
+const PROVIDER_MODE_HINTS: Record<OrgProviderMode, string> = {
+  any: "Any provider the deployment allows, including personal API keys",
+  "byo-forbidden":
+    "Personal API keys are refused; only the configured provider serves this workspace",
+  "self-hosted-only":
+    "Only an in-process model or a provider the operator declares self-hosted may serve this workspace",
+};
 
 /** Up to two initials from a display name, falling back to the email's first letter. */
 function initialsFor(label: string): string {
@@ -340,6 +360,45 @@ export function SettingsModal({
   // Recomputed on each render so editing the LiveKit fields updates the hint.
   const livekitStatus = sttProviderStatus().find((p) => p.id === "livekit");
 
+  // docs/23 S3 / docs/24 Phase C: the workspace's provider policy — a fact
+  // that lives server-side (the org's settings), not a client preference. It
+  // decides what the "where your board content goes" text says and, for an
+  // owner, what the segmented control below can set. A null policy means we
+  // could not read it (offline, signed out, or a server that predates the
+  // setting), and the text falls back to the honest deployment-level answer.
+  const [orgPolicy, setOrgPolicy] = useState<OrgPolicyResult | null>(null);
+  const [orgIdForPolicy, setOrgIdForPolicy] = useState<string | null>(null);
+  const [orgNameForPolicy, setOrgNameForPolicy] = useState<string | null>(null);
+  useEffect(() => {
+    if (!account) return;
+    let live = true;
+    void fetchOrgs().then(async (r) => {
+      if (!live || r.kind !== "ok") return;
+      const org = preferredOrg(r.orgs);
+      if (!org) return;
+      const policy = await fetchOrgPolicy(org.id, org.role);
+      if (!live) return;
+      setOrgIdForPolicy(org.id);
+      setOrgNameForPolicy(org.name);
+      setOrgPolicy(policy);
+    });
+    return () => {
+      live = false;
+    };
+  }, [account]);
+
+  const applyProviderMode = (mode: OrgProviderMode) => {
+    if (orgIdForPolicy === null || orgPolicy === null) return;
+    // No optimistic write: a mode-only PATCH PRESERVES the stored name filter
+    // on the server (the nested merge), so only the response can say what the
+    // policy now is. A failed write (only an owner can write, and the guard
+    // hides non-owners as 404) leaves the last truth on screen.
+    void patchOrgProviderMode(orgIdForPolicy, mode).then((plane) => {
+      if (plane === null) return;
+      setOrgPolicy({ ...orgPolicy, providerPolicy: plane.providerPolicy, plane });
+    });
+  };
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
@@ -612,6 +671,12 @@ export function SettingsModal({
                   >
                     LiveKit
                   </button>
+                  <button
+                    className={s.sttProvider === "hosted" ? "active" : ""}
+                    onClick={() => setS({ sttProvider: "hosted" })}
+                  >
+                    Hosted (speakers)
+                  </button>
                 </div>
                 <div className="desc" style={{ marginTop: 8, marginBottom: 0 }}>
                   {s.sttProvider === "browser" && (
@@ -630,6 +695,14 @@ export function SettingsModal({
                     <>
                       Realtime transcription through a LiveKit room, for shared or meeting audio.
                       Audio goes to your LiveKit server and its transcription agent.
+                    </>
+                  )}
+                  {s.sttProvider === "hosted" && (
+                    <>
+                      <strong>Audio leaves your device.</strong> The mic streams to this
+                      deployment's configured speech service, which returns speaker-labelled turns
+                      for shared-mic meetings. Refused honestly (never silently empty) when the
+                      server has none configured or your org forbids it.
                     </>
                   )}
                 </div>
@@ -781,11 +854,57 @@ export function SettingsModal({
                       Boards are stored by this Lucent server, not by us, and are never sold or used
                       to train our own models — we don't train any. What a prompt does at the AI
                       provider is governed by whichever provider this deployment is configured to
-                      use: set <span className="mono">LUCENT_AI_BASE_URL</span> to one whose terms
-                      match your policy. Lucent does not add a no-training guarantee on top of the
-                      provider's own.
+                      use
+                      {orgPolicy === null ? (
+                        <>
+                          : set <span className="mono">LUCENT_AI_BASE_URL</span> to one whose terms
+                          match your policy. Lucent does not add a no-training guarantee on top of
+                          the provider's own.
+                        </>
+                      ) : (
+                        <>
+                          , and — for this workspace — by the AI-provider policy your administrator
+                          set: {providerPolicySentence(orgPolicy.providerPolicy)}.
+                        </>
+                      )}
                     </div>
                   </div>
+                  {orgPolicy !== null && orgPolicy.canEdit && (
+                    <div className="setting-row">
+                      <div className="label">AI provider policy</div>
+                      <div className="desc">
+                        {orgNameForPolicy
+                          ? `Applies to every board in ${orgNameForPolicy}, including boards created before the change. `
+                          : "Applies to every board in this workspace, including boards created before the change. "}
+                        A workspace policy can restrict which AI providers process its content, but
+                        it can never widen what this deployment itself allows.
+                        {orgPolicy.providerPolicy.allow !== null && (
+                          <>
+                            {" "}
+                            Provider names are pinned to{" "}
+                            <span className="mono">
+                              {orgPolicy.providerPolicy.allow.join(", ")}
+                            </span>{" "}
+                            (set by the operator's API).
+                          </>
+                        )}
+                      </div>
+                      <div className="segmented" role="radiogroup" aria-label="AI provider policy">
+                        {ORG_PROVIDER_MODES.map((mode) => (
+                          <button
+                            key={mode}
+                            className={orgPolicy.providerPolicy.mode === mode ? "active" : ""}
+                            aria-pressed={orgPolicy.providerPolicy.mode === mode}
+                            title={PROVIDER_MODE_HINTS[mode]}
+                            aria-label={PROVIDER_MODE_LABELS[mode]}
+                            onClick={() => applyProviderMode(mode)}
+                          >
+                            {PROVIDER_MODE_LABELS[mode]}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </>
               ) : (
                 <div className="setting-row">

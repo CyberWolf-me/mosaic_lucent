@@ -171,6 +171,16 @@ export function integrationBoundary(
 /** Where the org stands on AI generation. */
 export type OrgAiPolicy = "allowed" | "disabled";
 
+/**
+ * Where the org stands on the server STT route (docs/25 V1, §3.1). The
+ * parallel of `OrgAiPolicy` for audio: `disabled` refuses session creation
+ * for every caller in the org. It governs the SERVER route only — the
+ * client-side providers (browser, on-device Whisper, LiveKit room) are the
+ * user's own choice, and an org that needs those governed too has a client
+ * deployment decision, not a setting this server can enforce.
+ */
+export type OrgServerStt = "allowed" | "disabled";
+
 export interface OrgSettings {
   /**
    * The floor every board's tier is raised to (`stricterOf`): a board in a
@@ -190,8 +200,27 @@ export interface OrgSettings {
   sharingDisabled?: boolean;
   /** Agent/MCP access (op-apply route and MCP-marked reads) disabled. */
   agentDisabled?: boolean;
+  /**
+   * Server-hosted transcription (`POST /api/stt/sessions`) for every caller
+   * in the org. `disabled` refuses session creation before any audio is
+   * accepted — the audio-egress answer docs/25 §3.1 requires ahead of the
+   * voice work: an org that keeps speech on-device says so here. Absent
+   * means `allowed` (zero behavior change for untouched orgs).
+   */
+  serverStt?: OrgServerStt;
   /** Meeting capture disabled: the POST routes refuse for every board. */
   recordingDisabled?: boolean;
+  /**
+   * Which providers may process this org's content (docs/23 S3, docs/24
+   * Phase C). This is the field that turns docs/06's honest "depends on
+   * your provider's terms" into an enforceable setting: an org that
+   * self-hosts, or that forbids caller-supplied keys, says so here and the
+   * provider resolver obeys — ORG POLICY MAY RESTRICT, NEVER WIDEN: the
+   * deployment flag (`LUCENT_ALLOW_BYO_KEYS`) is the ceiling an org can
+   * only tighten, which is the deliberate opposite direction from Phase B's
+   * floor rule, and stated so nobody "fixes" it.
+   */
+  providerPolicy?: OrgProviderPolicy;
 }
 
 /** Anything a gate can read an org's settings through (undefined = no policy). */
@@ -204,6 +233,8 @@ export interface EffectiveOrgSettings {
   sharingDisabled: boolean;
   agentDisabled: boolean;
   recordingDisabled: boolean;
+  serverSttDisabled: boolean;
+  providerPolicy: EffectiveProviderPolicy;
 }
 
 /**
@@ -229,6 +260,15 @@ export function effectiveSettings(org: OrgPolicySource): EffectiveOrgSettings {
     sharingDisabled: coerceFlag(raw.sharingDisabled),
     agentDisabled: coerceFlag(raw.agentDisabled),
     recordingDisabled: coerceFlag(raw.recordingDisabled),
+    // One honest boolean like `ai`: absent is allowed (today's behavior),
+    // present-and-unintelligible is disabled (fail closed, same rule).
+    serverSttDisabled:
+      raw.serverStt === "disabled"
+        ? true
+        : raw.serverStt === undefined
+          ? false
+          : raw.serverStt !== "allowed",
+    providerPolicy: effectiveProviderPolicy(raw.providerPolicy),
   };
 }
 
@@ -243,10 +283,8 @@ export function parseOrgSettings(
   body: Record<string, unknown>,
 ): { ok: true; settings: OrgSettings } | { ok: false; error: string } {
   const settings: OrgSettings = {};
-  const seen = new Set<string>();
   for (const [key, value] of Object.entries(body)) {
     if (value === undefined) continue;
-    seen.add(key);
     switch (key) {
       case "classificationFloor":
         if (!isBoardClassification(value)) {
@@ -263,6 +301,12 @@ export function parseOrgSettings(
         }
         settings.ai = value;
         break;
+      case "serverStt":
+        if (value !== "allowed" && value !== "disabled") {
+          return { ok: false, error: "serverStt must be 'allowed' or 'disabled'" };
+        }
+        settings.serverStt = value;
+        break;
       case "sharingDisabled":
       case "agentDisabled":
       case "recordingDisabled":
@@ -271,6 +315,49 @@ export function parseOrgSettings(
         }
         (settings as Record<string, unknown>)[key] = value;
         break;
+      case "providerPolicy": {
+        if (typeof value !== "object" || value === null || Array.isArray(value)) {
+          return { ok: false, error: "providerPolicy must be an object" };
+        }
+        const policy: Record<string, unknown> = {};
+        const raw = value as Record<string, unknown>;
+        for (const sub of Object.keys(raw)) {
+          if (sub !== "mode" && sub !== "allow") {
+            return { ok: false, error: `unknown providerPolicy field "${sub}"` };
+          }
+        }
+        if (raw.mode !== undefined) {
+          if (!(ORG_PROVIDER_MODES as readonly string[]).includes(String(raw.mode))) {
+            return {
+              ok: false,
+              error: `providerPolicy.mode must be one of: ${ORG_PROVIDER_MODES.join(", ")}`,
+            };
+          }
+          policy.mode = raw.mode;
+        }
+        if (raw.allow !== undefined) {
+          if (raw.allow === null) {
+            // Explicit clear (see `OrgProviderPolicy.allow`): the route's
+            // nested merge deletes the stored filter with it.
+            policy.allow = null;
+          } else if (
+            !Array.isArray(raw.allow) ||
+            raw.allow.length === 0 ||
+            raw.allow.length > 50 ||
+            !raw.allow.every((n) => typeof n === "string" && n.length > 0 && n.length <= 64)
+          ) {
+            return {
+              ok: false,
+              error:
+                "providerPolicy.allow must be null or a non-empty array of provider names (≤64 chars each, ≤50 names)",
+            };
+          } else {
+            policy.allow = raw.allow;
+          }
+        }
+        settings.providerPolicy = policy as OrgProviderPolicy;
+        break;
+      }
       default:
         return { ok: false, error: `unknown org setting "${key}"` };
     }
@@ -319,6 +406,19 @@ export function checkOutboundFor(
 }
 
 /**
+ * docs/25 V1 (§3.1): the server-STT refusal for an org's effective settings,
+ * or null when the route may proceed. Deliberately NOT another
+ * OutboundBoundary: STT audio is not board content crossing a tier gate — it
+ * is a service the org allows or forbids wholesale, the same shape as the
+ * org's `ai: "disabled"` switch.
+ */
+export function serverSttRefusal(settings: EffectiveOrgSettings): string | null {
+  return settings.serverSttDisabled
+    ? "this organization's policy disables server-hosted transcription — use on-device speech-to-text"
+    : null;
+}
+
+/**
  * The org's denial for the boundary, or null. The three booleans are plain;
  * `ai` is the org's strictest switch — `disabled` refuses every generation,
  * the in-process mock included, because the org said no to AI in the
@@ -344,4 +444,147 @@ function orgDenialFor(settings: EffectiveOrgSettings, boundary: OutboundBoundary
         ? "this organization's policy disables agent (MCP) access for every board"
         : null;
   }
+}
+
+/* ---------------------------------- Phase C --------------------------------
+ * The per-org provider policy (docs/23 S3, docs/24 Phase C). Phase B gave
+ * the org a floor and four denials; this is the fifth answer — WHICH
+ * PROVIDER may process the org's content — and it is the field that turns
+ * docs/06's honest "depends on your provider's terms" into something an
+ * admin can set and the resolver must obey.
+ *
+ * The direction rule, stated because it is the OPPOSITE of Phase B's and
+ * somebody will try to "fix" it: ORG POLICY MAY RESTRICT, NEVER WIDEN. The
+ * deployment's `LUCENT_ALLOW_BYO_KEYS` is the ceiling; an org saying "any"
+ * does not unlock BYO on a deployment that turned it off (that refusal
+ * happens in the resolver before any org is even known). An org saying
+ * "byo-forbidden" locks the key out even on a BYO-enabled deployment.
+ *
+ * What "self-hosted" means here, honestly: the server cannot probe a
+ * provider's infrastructure, so SELF-HOSTING IS AN OPERATOR DECLARATION —
+ * `LUCENT_AI_SELF_HOSTED=1` marks the deployment's configured provider as
+ * running on infrastructure the org controls. A BYO key is NEVER self-hosted
+ * by construction: the BYO path targets fixed public endpoints (the OpenAI
+ * URL is a constant in modelRouter.ts), so it is cloud by definition, and a
+ * self-hosted-only org refuses it without needing to trust anyone's word.
+ * The in-process mock passes every mode (it leaves nothing to trust — the
+ * advisory's §24 fallback again).
+ * -------------------------------------------------------------------------- */
+
+export const ORG_PROVIDER_MODES = ["any", "byo-forbidden", "self-hosted-only"] as const;
+
+export type OrgProviderMode = (typeof ORG_PROVIDER_MODES)[number];
+
+export interface OrgProviderPolicy {
+  /**
+   * "any" — today's behavior, the deployment decides.
+   * "byo-forbidden" — the org never uses a caller-supplied key, even on a
+   *   BYO-enabled deployment.
+   * "self-hosted-only" — only an in-process provider or the deployment's
+   *   declared-self-hosted provider answers; BYO cloud keys are refused, and
+   *   so is an ordinary cloud operator provider (the org's content does not
+   *   leave its infrastructure at all).
+   */
+  mode?: OrgProviderMode;
+  /**
+   * An optional name filter layered UNDER every mode: when present, only a
+   * provider whose name is listed may process the org's content. The token
+   * "self-hosted" matches the deployment's declared-self-hosted provider,
+   * so an org can pin the class of endpoint without naming a model. The
+   * in-process mock always passes (refusing it punishes only offline dev).
+   *
+   * `null` is accepted ONLY in a PATCH body and means "clear the filter";
+   * it never reaches storage — the route deletes the key on merge (see
+   * routes/settings.ts). A `null` found in storage is garbage like any other
+   * unintelligible value, and `effectiveProviderPolicy` fails it closed.
+   */
+  allow?: string[] | null;
+}
+
+/** What the resolver reports about the provider it picked, for the policy. */
+export interface ProviderFact {
+  name: string;
+  /** True when the call rides a caller-supplied (cloud) key. */
+  byok: boolean;
+  /** The operator's declaration that the configured provider is self-hosted. */
+  selfHosted: boolean;
+}
+
+/** A provider-policy refusal, ready for the route's 403 body. */
+export interface ProviderPolicyRefusal {
+  mode: OrgProviderMode;
+  error: string;
+}
+
+/** The providerPolicy with every default resolved (see `effectiveSettings`). */
+export interface EffectiveProviderPolicy {
+  mode: OrgProviderMode;
+  allow: string[] | null;
+}
+
+function effectiveProviderPolicy(raw: OrgProviderPolicy | undefined): EffectiveProviderPolicy {
+  if (raw === undefined) return { mode: "any", allow: null };
+  const mode = (ORG_PROVIDER_MODES as readonly string[]).includes(String(raw.mode ?? "any"))
+    ? (raw.mode ?? "any")
+    : // Fail closed: a present-but-unintelligible mode is the strictest answer.
+      "self-hosted-only";
+  let allow: string[] | null = null;
+  if (raw.allow !== undefined) {
+    allow = Array.isArray(raw.allow)
+      ? raw.allow.filter((n): n is string => typeof n === "string")
+      : // Present-and-unintelligible list: nothing is allowed.
+        [];
+  }
+  return { mode, allow };
+}
+
+/**
+ * May this provider serve under this org's policy? Null when yes; the refusal
+ * names the mode so the client (and the audit of the answer) can say why.
+ */
+export function providerPolicyRefusal(
+  policy: EffectiveProviderPolicy,
+  fact: ProviderFact,
+): ProviderPolicyRefusal | null {
+  const inProcess = !providerLeavesProcess({ name: fact.name });
+  switch (policy.mode) {
+    case "any":
+      break;
+    case "byo-forbidden":
+      if (fact.byok) {
+        return {
+          mode: policy.mode,
+          error:
+            "this organization's provider policy forbids bring-your-own keys; only the configured provider may process its content",
+        };
+      }
+      break;
+    case "self-hosted-only":
+      if (fact.byok) {
+        return {
+          mode: policy.mode,
+          error:
+            "this organization's provider policy allows only self-hosted processing; a bring-your-own cloud key leaves the org's infrastructure",
+        };
+      }
+      if (!inProcess && !fact.selfHosted) {
+        return {
+          mode: policy.mode,
+          error:
+            "this organization's provider policy allows only self-hosted processing; this deployment's configured provider is not marked self-hosted (LUCENT_AI_SELF_HOSTED)",
+        };
+      }
+      break;
+  }
+  if (policy.allow !== null && !inProcess) {
+    const named =
+      policy.allow.includes(fact.name) || (fact.selfHosted && policy.allow.includes("self-hosted"));
+    if (!named) {
+      return {
+        mode: policy.mode,
+        error: `this organization's provider policy allows only: ${policy.allow.join(", ")}`,
+      };
+    }
+  }
+  return null;
 }

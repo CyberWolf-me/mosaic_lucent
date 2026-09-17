@@ -2,15 +2,18 @@ import type { IncomingMessage, Server, ServerResponse } from "node:http";
 import { createServer } from "node:http";
 import type { LLMProvider, ImageProvider } from "@lucent/ai";
 import { handleGenerate, handleGenerateStream } from "./generate.js";
-import { readByoHeaders, resolveProvider } from "./modelRouter.js";
+import { readByoHeaders, resolveProvider, providerFact } from "./modelRouter.js";
 import {
   checkOutboundFor,
   classificationOf,
   effectiveSettings,
   isBoardClassification,
+  providerPolicyRefusal,
+  serverSttRefusal,
   BOARD_CLASSIFICATIONS,
 } from "./classification.js";
-import type { OutboundBoundary } from "./classification.js";
+import type { OutboundBoundary, ProviderFact } from "./classification.js";
+import { MockSttService, createSttSessionRegistry } from "./stt.js";
 import { handleImage } from "./image.js";
 import type { UsageTracker, UsageLimits } from "./usage.js";
 import type { Telemetry, TelemetryEvent } from "./telemetry.js";
@@ -119,6 +122,7 @@ import { registerHistoryRoutes } from "./routes/history.js";
 import { registerAskRoutes } from "./routes/ask.js";
 import { registerSearchRoutes } from "./routes/search.js";
 import { registerIntegrationRoutes } from "./routes/integrations.js";
+import { registerSttRoutes } from "./routes/stt.js";
 import { mintLiveKitToken } from "./livekit.js";
 import { registerAssetRoutes } from "./routes/assets.js";
 import { registerScimRoutes } from "./routes/scim.js";
@@ -150,6 +154,13 @@ export interface AppDeps {
   config: Config;
   provider: LLMProvider;
   imageProvider: ImageProvider;
+  /**
+   * docs/25 V1: server-hosted diarizing STT. Optional the way `provider`
+   * is not — omitted means the standby mock, so every existing harness
+   * keeps working and the STT routes answer 503 until a test or main.ts
+   * injects a live service.
+   */
+  stt?: import("./stt.js").SttService;
   userStore: UserStore;
   boardStore: BoardStore;
   secret: string;
@@ -484,6 +495,15 @@ export function createApp(deps: AppDeps): App {
 
   const logger = deps.logger ?? silentLogger;
   const metrics = deps.metrics ?? new MetricsRegistry();
+
+  /**
+   * docs/25 V1: the server STT service + its session table. Omitted deps
+   * mean the standby mock (every existing harness, offline dev): the routes
+   * answer 503 until a live service is injected. Sessions are process-local
+   * and ephemeral — audio never reaches Postgres.
+   */
+  const sttService = deps.stt ?? new MockSttService();
+  const sttSessions = createSttSessionRegistry();
 
   /**
    * The Stripe webhook receiver, built once. Signature verification, ledger
@@ -1411,13 +1431,15 @@ export function createApp(deps: AppDeps): App {
   //
   // `reason` is narrowed to a class rather than passed through. The raw values
   // carry an entitlement key or a CSRF failure code, so as a label they would be
-  // unbounded by design; four classes times the route templates is a shape that
+  // unbounded by design; five classes times the route templates is a shape that
   // stays inside the registry's series cap.
   //
   // CSRF gets a class of its own here, which is the one place it does. In the
   // JSON snapshot it is folded into `quota` and has to stay there -- that
-  // fall-through predates plan gating and test/usage.test.ts locks the three
-  // buckets -- so Prometheus is where the distinction lives.
+  // fall-through predates plan gating and the snapshot test locks those buckets
+  // -- so Prometheus is where the CSRF distinction lives. `policy:` (docs/24
+  // Phase C) is its own class in BOTH, because an org refusing its own content
+  // is never something an on-call should page on.
   const refusals = metrics.counter({
     name: "lucent_refusals_total",
     help: "Requests turned away, by route template and refusal class.",
@@ -1513,8 +1535,9 @@ export function createApp(deps: AppDeps): App {
   });
 
   type RefusalReason = Extract<TelemetryEvent, { kind: "refused" }>["reason"];
-  function refusalClass(reason: RefusalReason): "rate" | "quota" | "csrf" | "plan" {
+  function refusalClass(reason: RefusalReason): "rate" | "quota" | "csrf" | "plan" | "policy" {
     if (reason === "rate" || reason === "quota") return reason;
+    if (reason.startsWith("policy:")) return "policy";
     return reason.startsWith("csrf:") ? "csrf" : "plan";
   }
 
@@ -1714,6 +1737,61 @@ export function createApp(deps: AppDeps): App {
     }
   }
 
+  /**
+   * docs/24 Phase C: the provider-policy gate. Answers the request itself on
+   * refusal (403 + a `policy:provider` telemetry refusal, tagged distinct
+   * from the capacity buckets), and returns false so the route returns. The
+   * caller resolves the provider FIRST (BYO or default) and hands the facts;
+   * `aiSelfHosted` is the deployment's declaration, and BYO is never
+   * self-hosted. A null orgId (auth-off, no org) has no org policy and passes.
+   */
+  async function providerGate(
+    req: IncomingMessage,
+    res: ServerResponse,
+    orgId: string | undefined,
+    fact: ProviderFact,
+    route: string,
+  ): Promise<boolean> {
+    if (!orgId) return true;
+    const settings = await orgPolicy(orgId);
+    const refusal = providerPolicyRefusal(settings.providerPolicy, fact);
+    if (!refusal) return true;
+    telemetry.record({
+      kind: "refused",
+      route,
+      reason: "policy:provider",
+      requestId: traceOf(req),
+    });
+    send(res, 403, { error: refusal.error, policy: refusal.mode, boundary: "provider" });
+    return false;
+  }
+
+  /**
+   * docs/25 V1 (§3.1): the server-STT gate. Answers the request itself on
+   * refusal (403 + a `policy:stt` telemetry refusal in the policy bucket,
+   * never a capacity one), and returns false so the route returns. A null
+   * orgId (auth-off, no org) has no org policy and passes.
+   */
+  async function sttGate(
+    req: IncomingMessage,
+    res: ServerResponse,
+    orgId: string | undefined,
+    route: string,
+  ): Promise<boolean> {
+    if (!orgId) return true;
+    const settings = await orgPolicy(orgId);
+    const refusal = serverSttRefusal(settings);
+    if (!refusal) return true;
+    telemetry.record({
+      kind: "refused",
+      route,
+      reason: "policy:stt",
+      requestId: traceOf(req),
+    });
+    send(res, 403, { error: refusal, boundary: "stt" });
+    return false;
+  }
+
   const services: RouteServices = {
     config,
     logger,
@@ -1722,6 +1800,8 @@ export function createApp(deps: AppDeps): App {
     secret,
     provider,
     imageProvider,
+    stt: sttService,
+    sttSessions,
     authCtx,
     userStore,
     boardStore,
@@ -1743,6 +1823,7 @@ export function createApp(deps: AppDeps): App {
     sendWithHeaders,
     writeHandleResult,
     readBody,
+    readRawBody,
     requestOrigin,
     // The audit seam route modules use: the OrgStore's warn-and-continue
     // contract (a failed audit write never 500s a succeeded mutation),
@@ -1772,6 +1853,8 @@ export function createApp(deps: AppDeps): App {
     requireCsrf,
     outboundRefusal,
     orgPolicy,
+    providerGate,
+    sttGate,
     applyAuthLimiter,
     applyAccountLimiter,
     applyMailLimiter,
@@ -1812,6 +1895,7 @@ export function createApp(deps: AppDeps): App {
   registerSearchRoutes(router, services);
   registerIntegrationRoutes(router, services);
   registerOrgSettingsRoutes(router, services);
+  registerSttRoutes(router, services);
   /**
    * Asset gateway (M7 / M4 storage): `/api/assets/*`. The handler is built
    * here, not registered through the router, because it consumes a body-cap
@@ -3748,6 +3832,21 @@ export function createApp(deps: AppDeps): App {
             return;
           }
         }
+        // docs/23 S3 / docs/24 Phase C: the org's provider policy, keyed on
+        // the billed org (not the board, which may be absent). This route has
+        // no BYO path — the provider is the deployment's — so the fact is
+        // "byok: false" with the deployment's self-hosted declaration; a
+        // self-hosted-only org on a cloud deployment is refused here.
+        if (
+          !(await providerGate(
+            req,
+            res,
+            aiCtx.orgId,
+            providerFact({ provider, byok: false }, config.aiSelfHosted),
+            "/api/generate",
+          ))
+        )
+          return;
         // M4: the monthly AI allowance, checked before the provider is called so a
         // refusal costs neither a token nor a second of latency. An anonymous
         // caller on a deployment with auth off has no org and no allowance to
@@ -3890,6 +3989,21 @@ export function createApp(deps: AppDeps): App {
             return;
           }
         }
+        // docs/24 Phase C: the org's provider policy on the RESOLVED provider
+        // — a BYO cloud key is refused by a `byo-forbidden` or
+        // `self-hosted-only` org even though `LUCENT_ALLOW_BYO_KEYS=1` let it
+        // resolve (policy restricts, never widens). Before the SSE headers,
+        // which every pre-flight now precedes — so this arrives as a 403.
+        if (
+          !(await providerGate(
+            req,
+            res,
+            aiCtx.orgId,
+            providerFact({ provider: requestProvider, byok: router.byok }, config.aiSelfHosted),
+            "/api/generate/stream",
+          ))
+        )
+          return;
         const allowance = aiCtx.orgId
           ? await gateMonthly(
               req,

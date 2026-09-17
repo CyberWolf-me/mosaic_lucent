@@ -670,3 +670,151 @@ export function exportFormatChips(row: ExportFormatsRow): FormatChip[] {
     allowed: allowed.has(format),
   }));
 }
+
+/* ------------------------- org data policy (S1–S3) ------------------------ */
+
+/** The provider-policy modes the admin may set, mirroring classification.ts. */
+export const ORG_PROVIDER_MODES = ["any", "byo-forbidden", "self-hosted-only"] as const;
+export type OrgProviderMode = (typeof ORG_PROVIDER_MODES)[number];
+
+/**
+ * The provider policy, resolved server-side. `allow: null` means "no name
+ * filter"; a mode restricts WHICH key may serve, the list restricts WHICH
+ * provider, and both are the org admin's declaration, not a client preference.
+ */
+export interface ProviderPolicyView {
+  mode: OrgProviderMode;
+  allow: string[] | null;
+}
+
+/** The server's resolved full policy plane — the shape the admin console reads. */
+export interface EffectiveOrgPolicy {
+  classificationFloor: string;
+  aiDisabled: boolean;
+  sharingDisabled: boolean;
+  agentDisabled: boolean;
+  recordingDisabled: boolean;
+  providerPolicy: ProviderPolicyView;
+}
+
+/**
+ * What the Settings surface knows about the workspace's data policy.
+ * `providerPolicy` is member-readable (docs/24 Phase C: the admin sets it,
+ * EVERY member sees it), so the privacy sentence renders for any org member.
+ * `plane` is the full policy, owner-readable only (the admin-console surface,
+ * Phase B); it is `null` for a member, and every owner control reads it.
+ */
+export interface OrgPolicyResult {
+  providerPolicy: ProviderPolicyView;
+  plane: EffectiveOrgPolicy | null;
+  /** Whether the caller is the org owner (the write floor). */
+  canEdit: boolean;
+}
+
+function parseProviderMode(value: unknown): OrgProviderMode {
+  return (ORG_PROVIDER_MODES as readonly string[]).includes(String(value))
+    ? (value as OrgProviderMode)
+    : "any";
+}
+
+/**
+ * Parse a `providerPolicy` object. A present-but-unintelligible `allow` (not
+ * an array) reads as `null` — NO filter — deliberately the permissive direction
+ * HERE, opposite the server's fail-closed: this is a member's privacy SENTENCE,
+ * and a garbled list must not frighten a user into thinking their data is
+ * blocked everywhere. Enforcement never reads this parse; it reads the server.
+ */
+function parseProviderPolicy(raw: Record<string, unknown> | null): ProviderPolicyView {
+  if (raw === null) return { mode: "any", allow: null };
+  return {
+    mode: parseProviderMode(raw.mode),
+    allow: Array.isArray(raw.allow) ? readStringArray(raw.allow) : null,
+  };
+}
+
+function parseEffective(raw: Record<string, unknown>): EffectiveOrgPolicy {
+  return {
+    classificationFloor: readString(raw, "classificationFloor") ?? "internal",
+    aiDisabled: raw.aiDisabled === true,
+    sharingDisabled: raw.sharingDisabled === true,
+    agentDisabled: raw.agentDisabled === true,
+    recordingDisabled: raw.recordingDisabled === true,
+    providerPolicy: parseProviderPolicy(asRecord(raw.providerPolicy)),
+  };
+}
+
+/** GET a JSON object, or null on any failure (offline, non-2xx, non-JSON). */
+async function getJsonObject(path: string): Promise<Record<string, unknown> | null> {
+  try {
+    const res = await apiFetch(path);
+    if (!res.ok) return null; // 401/403/404/5xx all degrade to "unknown"
+    return asRecord((await res.json().catch(() => null)) as unknown);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The workspace's data policy (docs/24 Phases A–C). The provider policy reads
+ * the member-readable `/policy` surface, so EVERY member — not only the owner —
+ * sees the honest "here is which provider processes your content" sentence;
+ * the full plane reads the owner-only `/settings` surface, and `plane` is null
+ * for anyone below owner. A total miss (signed out, offline, a non-member, or
+ * a server predating the setting) returns null so the caller falls back to the
+ * deployment-level wording — a hidden control is honest where a fake "any"
+ * would be a lie about an org we never learned. `role` is the caller's own
+ * membership on the org (from the org list), deciding whether to read the plane.
+ */
+export async function fetchOrgPolicy(orgId: string, role: string): Promise<OrgPolicyResult | null> {
+  if (!hasSession()) return null;
+  const id = encodeURIComponent(orgId);
+  const policyBody = await getJsonObject(`/api/orgs/${id}/policy`);
+  if (policyBody === null) return null; // not even a member (or offline): fall back
+  const providerPolicy = parseProviderPolicy(asRecord(policyBody.providerPolicy));
+  let plane: EffectiveOrgPolicy | null = null;
+  if (role === "owner") {
+    const settingsBody = await getJsonObject(`/api/orgs/${id}/settings`);
+    const effective = settingsBody === null ? null : asRecord(settingsBody.effective);
+    if (effective !== null) plane = parseEffective(effective);
+  }
+  return { providerPolicy, plane, canEdit: role === "owner" };
+}
+
+/**
+ * Set the provider-policy mode (owner-only). Returns the fresh full plane from
+ * the server's `effective` on a 200 — the caller adopts it rather than
+ * optimistically patching, because a mode-only write PRESERVES the stored
+ * `allow` list (the route's nested merge), so guessing "no filter" client-side
+ * would erase a name filter the admin had set. Null on any failure.
+ */
+export async function patchOrgProviderMode(
+  orgId: string,
+  mode: OrgProviderMode,
+): Promise<EffectiveOrgPolicy | null> {
+  const res = await apiFetch(`/api/orgs/${encodeURIComponent(orgId)}/settings`, {
+    method: "PATCH",
+    body: JSON.stringify({ providerPolicy: { mode } }),
+  });
+  if (!res.ok) return null;
+  const body = asRecord((await res.json().catch(() => null)) as unknown);
+  const effective = body === null ? null : asRecord(body.effective);
+  return effective === null ? null : parseEffective(effective);
+}
+
+/**
+ * One plain-English clause for the privacy text: what the org's provider policy
+ * permits, phrased for a member who did not set it. `allow` names the class of
+ * endpoint when the admin pinned one; a BYO-forbidden org with no allow list
+ * still says the configured provider answers.
+ */
+export function providerPolicySentence(pp: ProviderPolicyView): string {
+  const mode =
+    pp.mode === "self-hosted-only"
+      ? "only self-hosted or in-process models may process this workspace's content"
+      : pp.mode === "byo-forbidden"
+        ? "personal API keys are refused and only this deployment's configured provider may process this workspace's content"
+        : "any provider this deployment allows may process this workspace's content, including personal API keys";
+  if (pp.allow === null) return mode;
+  const named = pp.allow.length === 0 ? "none" : pp.allow.join(", ");
+  return `${mode}; allowed providers: ${named}`;
+}

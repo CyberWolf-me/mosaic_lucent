@@ -600,7 +600,7 @@ describe("telemetry bridged into Prometheus", () => {
       sampleValue(app.metrics, "lucent_refusals_total", { route: "/api/boards", reason: "csrf" }),
     ).toBe(1);
     // Unmoved: the scrape is where `csrf` separates from `quota`, not here.
-    expect(telemetry.snapshot().refusals).toEqual({ rate: 0, quota: 1, plan: 0 });
+    expect(telemetry.snapshot().refusals).toEqual({ rate: 0, quota: 1, plan: 0, policy: 0 });
   });
 
   it("times the provider call, not the request around it", async () => {

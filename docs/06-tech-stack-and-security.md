@@ -23,15 +23,15 @@ Don't introduce Rust everywhere initially.
 
 ## Reasonable MVP stack
 
-| Layer    | Choice                                               | Status                                      |
-| -------- | ---------------------------------------------------- | ------------------------------------------- |
-| Frontend | React + TypeScript                                   | shipped                                     |
-| Backend  | Node.js + TypeScript                                 | shipped                                     |
-| Database | PostgreSQL (Drizzle ORM, committed SQL migrations)   | shipped — `LUCENT_DATABASE_URL`             |
-| Realtime | WebSockets (server-authoritative op log, not a CRDT) | shipped                                     |
-| AI       | LLM API                                              | shipped                                     |
-| Speech   | Realtime STT provider                                | shipped (browser / Whisper / LiveKit)       |
-| Storage  | S3-compatible object storage                         | **not built** — no durable home for uploads |
+| Layer    | Choice                                               | Status                                                   |
+| -------- | ---------------------------------------------------- | -------------------------------------------------------- |
+| Frontend | React + TypeScript                                   | shipped                                                  |
+| Backend  | Node.js + TypeScript                                 | shipped                                                  |
+| Database | PostgreSQL (Drizzle ORM, committed SQL migrations)   | shipped — `LUCENT_DATABASE_URL`                          |
+| Realtime | WebSockets (server-authoritative op log, not a CRDT) | shipped                                                  |
+| AI       | LLM API                                              | shipped                                                  |
+| Speech   | Realtime STT provider                                | shipped (browser / Whisper / LiveKit / hosted diarizing) |
+| Storage  | S3-compatible object storage                         | **not built** — no durable home for uploads              |
 
 ### Persistence
 
@@ -83,23 +83,34 @@ Because users may put sensitive company information into the canvas, security ma
 
 For enterprise customers, a major question will be: **"Is our data used to train the model?"** The answer should be clearly controlled (default: no).
 
-**Implementation status (audited 2026-08; updated 2026-09, see docs/23).** Not
-enforced in code, and the UI no longer claims it is. Lucent trains no models
-of its own, but a prompt's retention is governed entirely by whichever
-provider `LUCENT_AI_BASE_URL` points at — no cross-provider no-training
-header exists to send. Until a per-org provider policy exists (docs/23 S3),
-the honest answer is "it depends on your configured provider's terms", which
-is what Settings → Account now says. Anything stronger needs a provider
-contract or a self-hosted model.
+**Implementation status (audited 2026-08; updated 2026-09-16, see docs/23).**
+Not enforced by a cross-provider no-training header — none exists to send.
+Lucent trains no models of its own, but a prompt's retention is governed
+entirely by whichever provider answers. What shipped in its place is the
+per-org provider policy (docs/23 S3 / docs/24 Phase C, 2026-09-16): an admin
+sets the workspace's provider mode — `any`, `byo-forbidden` (no personal API
+keys), or `self-hosted-only` — with an optional name allowlist, the server
+enforces it at every board-content LLM call site (generate, stream, ask, and
+the integration propose-ai arm that actually calls the model), and every
+member sees it in Settings → Account. (`POST /api/image` carries no board id
+and was never in the S1/S2 boundary model, so it stays outside this gate —
+same as the classification floor and the org AI switch.) An org that needs the stronger guarantee self-hosts and says so; the
+deployment marks that with `LUCENT_AI_SELF_HOSTED=1`. For a deployment with
+no org policy set, the honest answer remains "it depends on your configured
+provider's terms", which is what the Settings text falls back to. Anything
+stronger than an operator declaration still needs a provider contract.
 
 Since the 2026-08 audit, the list above has partially shipped — the
 authoritative, audited status lives in **docs/23** (the security coverage
 table). In short: role-based access is enforced on the realtime path and
 owner-scoped on REST; audit logs (+viewer with keyset pagination and CSV
 export), SAML SSO, SCIM provisioning, and TOTP two-factor are implemented
-and tested, and so is **per-board classification** (docs/23 S1 / docs/24
+and tested, and so are **per-board classification** (docs/23 S1 / docs/24
 Phase A, shipped 2026-09-16: three tiers gating the AI, integration, sharing,
-and agent outbound boundaries server-side); org-level policy, data residency,
-and at-rest encryption beyond the platform's disk layer are **not
-implemented** — docs/23 phases S2–S5 are the gaps. Treat this section as the
-target; treat docs/23 as the description.
+and agent outbound boundaries server-side), the **org policy plane** (Phase B:
+a classification floor and four org-wide denials, policy restricting but never
+widening a board's own label), and the **per-org provider policy** (Phase C:
+the allowlist / BYO-forbidden / self-hosted-only modes enforced on the
+resolved provider); data residency and at-rest encryption beyond the
+platform's disk layer are **not implemented** — docs/23 phases S4–S5 are the
+gaps. Treat this section as the target; treat docs/23 as the description.

@@ -234,9 +234,12 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
         lastFinalAtRef.current = Date.now();
         appendTurn({
           // The provider tells us who spoke when it can (LiveKit segments
-          // carry the room identity; the browser provider has no concept
-          // and "You" is the honest fallback rather than a fake guess).
-          speaker: meta?.speaker ?? (provider.id === "livekit" ? "Speaker" : "You"),
+          // carry the room identity, the hosted provider the sidecar's
+          // speaker labels; the browser provider has no concept and "You"
+          // is the honest fallback rather than a fake guess).
+          speaker:
+            meta?.speaker ??
+            (provider.id === "livekit" || provider.id === "hosted" ? "Speaker" : "You"),
           at: Date.now(),
           text: t,
           kind: classifyTurn(t),
@@ -390,9 +393,7 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
       const n = batch.length;
       switch (result.outcome) {
         case "applied":
-          setLastExtractStatus(
-            `Applied ${n === 1 ? "1 new turn" : `${n} new turns`} to the board`,
-          );
+          setLastExtractStatus(`Applied ${n === 1 ? "1 new turn" : `${n} new turns`} to the board`);
           break;
         case "proposed":
           setLastExtractStatus(
@@ -400,10 +401,14 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
           );
           break;
         case "answered":
-          setLastExtractStatus(`Extracted ${n === 1 ? "1 turn" : `${n} turns`} — no board changes were needed`);
+          setLastExtractStatus(
+            `Extracted ${n === 1 ? "1 turn" : `${n} turns`} — no board changes were needed`,
+          );
           break;
         case "rejected":
-          setLastExtractStatus(`Extraction refused — ${n} turn${n === 1 ? "" : "s"} left in the transcript, nothing was changed`);
+          setLastExtractStatus(
+            `Extraction refused — ${n} turn${n === 1 ? "" : "s"} left in the transcript, nothing was changed`,
+          );
           break;
         case "busy":
           // Another generation holds the pipeline; the turns stay queued.
@@ -698,7 +703,7 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
           {!livekitConfigured && !recording && (
             <p className="mono small" style={{ color: "var(--ink-3)", margin: "8px 0 0" }}>
               Local STT labels every line "You". Configure LiveKit in Settings for per-speaker
-              diarisation.
+              identity, or Hosted for server-side diarisation.
             </p>
           )}
 
@@ -724,9 +729,7 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
                     <button
                       className="mono small"
                       title="Remove topic break"
-                      onClick={() =>
-                        setTopicBreaks((prev) => prev.filter((b) => b !== i))
-                      }
+                      onClick={() => setTopicBreaks((prev) => prev.filter((b) => b !== i))}
                       style={{
                         alignSelf: "stretch",
                         textAlign: "center",
@@ -802,8 +805,8 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
                           }}
                           title={`View on board: ${produced.join(", ")}`}
                         >
-                          ✦ {produced.length} object{produced.length === 1 ? "" : "s"} on
-                          the board{provisional ? " · provisional" : ""}
+                          ✦ {produced.length} object{produced.length === 1 ? "" : "s"} on the board
+                          {provisional ? " · provisional" : ""}
                         </span>
                       )}
                       {produced?.map((id) => (

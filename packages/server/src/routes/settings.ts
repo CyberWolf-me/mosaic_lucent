@@ -1,17 +1,20 @@
 import type { RegisterRoutes } from "./context.js";
 import { parseOrgSettings, effectiveSettings } from "../classification.js";
-import type { OrgSettings } from "../classification.js";
+import type { OrgProviderPolicy, OrgSettings } from "../classification.js";
 
 /**
  * The org policy plane (docs/23 S2, docs/24 Phase B):
  *
  *   GET   /api/orgs/:id/settings   read the org's policy (owner)
  *   PATCH /api/orgs/:id/settings   set it (owner, CSRF, audited)
+ *   GET   /api/orgs/:id/policy     the provider policy, member-readable (S3)
  *
- * Owner-floor on both reads and writes, and deliberately NOT on the generic
- * `/api/orgs/:id` read: members see the org's identity (name, roles) but the
- * policy surface is the admin console's, and Phase C's "every member sees
- * the setting" rides the provider-policy surface, not this one.
+ * Owner-floor on the settings pair; the provider policy is a transparency
+ * fact, not an admin secret, so Phase C adds the one member-readable route
+ * the acceptance names ("the admin sets and every member sees"). It answers
+ * exactly `{ providerPolicy }` — the gates' inputs beyond that (floors,
+ * denials) stay the admin console's, and refusing members the full plane is
+ * what keeps one authorization shape instead of two opinions about it.
  *
  * The route writes NO new enforcement logic — enforcement lives in the
  * Phase A gates, which now read the org through `checkOutboundFor` /
@@ -74,6 +77,21 @@ export const registerOrgSettingsRoutes: RegisterRoutes = (router, s) => {
 
     const before = org.settings ?? {};
     const merged: OrgSettings = { ...before, ...parsed.settings };
+    // `providerPolicy` is an object, and the top-level spread above would
+    // replace the WHOLE policy on a nested write — a mode-only PATCH (the
+    // web control's shape) must not silently drop a stored name filter.
+    // "Absent means unchanged" holds INSIDE the policy too; clearing the
+    // filter is the explicit `allow: null` (parseOrgSettings), and a policy
+    // emptied by such a clear is removed as a field, not stored as `{}`.
+    if (parsed.settings.providerPolicy) {
+      const sub: OrgProviderPolicy = {
+        ...before.providerPolicy,
+        ...parsed.settings.providerPolicy,
+      };
+      if (sub.allow === null) delete sub.allow;
+      if (sub.mode === undefined && sub.allow === undefined) delete merged.providerPolicy;
+      else merged.providerPolicy = sub;
+    }
     await orgStore.setSettings(id, merged);
 
     // Audit names the CHANGED KEYS with from→to (docs/24 §4 acceptance):
@@ -84,7 +102,11 @@ export const registerOrgSettingsRoutes: RegisterRoutes = (router, s) => {
     const effAfter = effectiveSettings({ settings: merged });
     const changed: Record<string, { from: unknown; to: unknown }> = {};
     for (const key of Object.keys(effAfter) as Array<keyof typeof effAfter>) {
-      if (effBefore[key] !== effAfter[key]) {
+      // Compare on RESOLVED values, and structurally: `providerPolicy` is an
+      // object (docs/24 Phase C), so `!==` would report a change on every
+      // write (fresh instance each resolve). JSON is exact here — the shape
+      // is plain data — and it keeps a no-op write auditing as no change.
+      if (JSON.stringify(effBefore[key]) !== JSON.stringify(effAfter[key])) {
         changed[key] = { from: effBefore[key], to: effAfter[key] };
       }
     }
@@ -104,5 +126,32 @@ export const registerOrgSettingsRoutes: RegisterRoutes = (router, s) => {
       });
 
     send(res, 200, { settings: merged, effective: effAfter, changed });
+  });
+
+  // docs/24 Phase C: the member-readable provider-policy surface. Every field
+  // the gates enforce from here answers the org's provider, not a user's
+  // secret, and the acceptance names member visibility explicitly. Viewer
+  // floor — any member, and a non-member gets the same 404 as every other
+  // org-denial shape (the id stays unguessable). The resolved form, not the
+  // raw record: a member reading `{}` from an admin-edited NULL would learn
+  // less than the gates actually enforce.
+  //
+  // docs/25 V1 extends the same surface with the resolved server-STT switch:
+  // it is the same class of transparency fact (what may process this org's
+  // speech), and a second member-readable route for one boolean would be
+  // ceremony, not a boundary.
+  router.get("/api/orgs/:id/policy", async (ctx) => {
+    const { req, res } = ctx;
+    const id = ctx.param("id");
+    const guard = await requireOrgRole(req, res, id, "viewer", "/api/orgs/:id/policy");
+    if (!guard.ok) return;
+    if (!orgStore) return send(res, 503, { error: "org store not configured" });
+    const org = await orgStore.get(id);
+    if (!org) return send(res, 404, { error: "org not found" });
+    const effective = effectiveSettings(org);
+    send(res, 200, {
+      providerPolicy: effective.providerPolicy,
+      serverStt: effective.serverSttDisabled ? "disabled" : "allowed",
+    });
   });
 };

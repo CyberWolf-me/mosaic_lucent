@@ -73,6 +73,16 @@ export interface Config {
    */
   allowByoKeys: boolean;
   /**
+   * docs/23 S3 / docs/24 Phase C: the operator's DECLARATION that the
+   * configured provider runs on infrastructure the customer controls
+   * (`LUCENT_AI_SELF_HOSTED=1`). The server cannot probe a provider's
+   * endpoint, so self-hostedness is only ever this operator attestation plus
+   * the in-process mock; an org's `self-hosted-only` provider policy reads
+   * it. Off by default, and a BYO key is never self-hosted regardless — the
+   * BYO path targets fixed public cloud endpoints.
+   */
+  aiSelfHosted: boolean;
+  /**
    * M1.8: federated sign-in. A provider is on only when BOTH its client id
    * and secret are set; the routes 503 for anything else. Unset here means
    * the AuthView hides the button entirely — an enabled-but-unconfigured
@@ -90,6 +100,18 @@ export interface Config {
     apiKey: string | undefined;
     apiSecret: string | undefined;
     url: string | undefined;
+  };
+  /**
+   * docs/25 V1: server-hosted diarizing STT (the fourth STT slot). Key + URL
+   * configured means `POST /api/stt/sessions` serves real transcription
+   * through the sidecar contract (`stt.ts`); anything less is the standby
+   * mock and the route answers 503 — the same fail-open shape as LiveKit, so
+   * a half-configured deployment never swallows speech silently.
+   */
+  stt: {
+    apiKey: string | undefined;
+    url: string | undefined;
+    name: string | undefined;
   };
 }
 
@@ -112,6 +134,9 @@ export interface ConfigEnv {
   LUCENT_LIVEKIT_API_KEY?: string;
   LUCENT_LIVEKIT_API_SECRET?: string;
   LUCENT_LIVEKIT_URL?: string;
+  LUCENT_STT_KEY?: string;
+  LUCENT_STT_URL?: string;
+  LUCENT_STT_NAME?: string;
   LUCENT_MAIL_TRANSPORT?: string;
   LUCENT_MAIL_ENDPOINT?: string;
   LUCENT_MAIL_API_KEY?: string;
@@ -129,6 +154,7 @@ export interface ConfigEnv {
   LUCENT_OAUTH_GITHUB_CLIENT_ID?: string;
   LUCENT_OAUTH_GITHUB_CLIENT_SECRET?: string;
   LUCENT_ALLOW_BYO_KEYS?: string;
+  LUCENT_AI_SELF_HOSTED?: string;
   NODE_ENV?: string;
 }
 
@@ -216,11 +242,17 @@ export function readConfig(env: ConfigEnv = process.env): Config {
       stripeWebhookSecret: env.LUCENT_STRIPE_WEBHOOK_SECRET || undefined,
     },
     allowByoKeys: env.LUCENT_ALLOW_BYO_KEYS === "1",
+    aiSelfHosted: env.LUCENT_AI_SELF_HOSTED === "1",
     oauth: oauthFromEnv(env),
     livekit: {
       apiKey: env.LUCENT_LIVEKIT_API_KEY || undefined,
       apiSecret: env.LUCENT_LIVEKIT_API_SECRET || undefined,
       url: env.LUCENT_LIVEKIT_URL || undefined,
+    },
+    stt: {
+      apiKey: env.LUCENT_STT_KEY || undefined,
+      url: env.LUCENT_STT_URL || undefined,
+      name: env.LUCENT_STT_NAME || undefined,
     },
   };
 }
