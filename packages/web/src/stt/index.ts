@@ -5,6 +5,7 @@ import { hostedSttProvider } from "./hosted.js";
 import type { SttProvider, SttProviderId } from "./types.js";
 
 export * from "./types.js";
+export * from "./events.js";
 export { configureLiveKit } from "./livekit.js";
 export { hostedSttProvider } from "./hosted.js";
 

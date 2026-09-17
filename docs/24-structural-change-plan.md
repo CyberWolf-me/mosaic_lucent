@@ -14,11 +14,11 @@
 The audits collapsed the four advisories into two genuine work sets, plus one
 correction already done:
 
-| Set                                  | Doc     | Real work                                                                           | Frozen?                          |
-| ------------------------------------ | ------- | ----------------------------------------------------------------------------------- | -------------------------------- |
-| Production architecture (advisory 1) | docs/20 | **None** — P0–P6 shipped, P7 evidence-gated                                         | n/a                              |
-| Meeting platform (advisories 2–3)    | docs/22 | M6–M7 voice path, connectors, modes, diarization                                    | Mostly frozen (docs/17 Gate C/D) |
-| Enterprise security (advisory 4)     | docs/23 | S1–S5: classification, org policy, provider policy, encryption/residency, retention | S0–S3 done; S4–S5 evidence-gated |
+| Set                                  | Doc     | Real work                                                                           | Frozen?                                                                        |
+| ------------------------------------ | ------- | ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| Production architecture (advisory 1) | docs/20 | **None** — P0–P6 shipped, P7 evidence-gated                                         | n/a                                                                            |
+| Meeting platform (advisories 2–3)    | docs/22 | M6–M7 voice path, connectors, modes, diarization                                    | Shipped honest form 2026-09-16 (owner order); proactive speech + vendors gated |
+| Enterprise security (advisory 4)     | docs/23 | S1–S5: classification, org policy, provider policy, encryption/residency, retention | S0–S3 done; S4–S5 evidence-gated                                               |
 
 The freeze rule (docs/17) governs the ordering below. A phase is one of:
 
@@ -40,18 +40,25 @@ LEGAL NOW (correctness / safety)
   B  Org policy plane (admin settings)           S2   ─┤─ sharing/MCP/retention  DONE
   C  Per-org provider policy                     S3   ─┘─ honest no-training
 
-EVIDENCE-GATED (Gate C/D)
-  D  Meeting modes as behavior profiles          M-modes
-  E  External meeting connectors                 M-ext
-  F  Diarization for shared-mic capture          M-diar
+EVIDENCE-GATED (Gate C/D) — lifted 2026-09-16 by owner order
+  D  Meeting modes as behavior profiles          M-modes  ─┬─ SHIPPED (D/V2)
+  E  External meeting connectors                 M-ext    ─┤─ SHIPPED seam+mock (E/V3)
+  F  Diarization for shared-mic capture          M-diar   ─┘─ SHIPPED (V1)
 
-INFRASTRUCTURE-GATED
+INFRASTRUCTURE-GATED — closed 2026-09-16 by owner order (G as decisions, H as policy+sweep)
   G  Encryption at rest / data residency         S4
-  H  Retention-as-policy                         S5   (only once a class outlives its board)
+  H  Retention-as-policy                         S5
 
-NOT IN SCOPE
+VOICE (docs/25 V1–V9, owner-ordered after A–H)
+  V1 diarizing STT · V1b events · V2 modes · V3 connectors · V4 engine ·
+  V5 VAD-1 · V6 text loop · V7 TTS · V8/V9 turn-taking + proactive panel —
+  all shipped honest form; proactive speech, vendors, transport stay gated.
+
+NOT IN SCOPE (originally)
   Voice assistant (M6) / proactive participant (M7) — the largest new
   subsystem; needs its own advisory + owner decision, not this plan.
+  (Superseded in honest form: advisory = docs/25, decision = the 2026-09-16
+  owner build orders; full proactive speech still gated as stated.)
 ```
 
 The ordering is deliberate: **classification (A) before policy (B) before
@@ -180,18 +187,28 @@ plan is complete; costed as slices V1–V3 in docs/25 (voice-platform advisory,
 2026-09-16), which also preconditions V4–V5 (M6/M7) on an STT provider policy
 — audio egress is a boundary S1–S3 never covered. Each is scoped enough to cost on demand.
 
-- **D — Meeting modes as behavior profiles.** `MeetingView` today always
-  runs extraction. A profile split (Record / Intelligence / Assistant /
-  Participant) touches `meeting-extract.ts`'s trigger policy, the view's
-  state, and the transcript store's `kind` field becoming optional-by-profile.
+- **D — Meeting modes as behavior profiles.** **SHIPPED under the owner
+  build order** ("complete A–H first"): `web/src/meeting-modes.ts`
+  (`record`/`intelligence`/`assistant`/`participant`,
+  `modeAllowsExtraction` — the only thing the loop reads) with Record
+  burning zero generations (refusal one call above the send, unit-pinned),
+  Assistant/Participant degrading to Intelligence disclosed (never a refused
+  meeting); the capture profile persists on the transcript
+  (`meeting_transcripts.mode`, migration 0030, strict 400 on a typo, absent
+  on older rows — never backfilled). `MeetingView` picker + disclosure note.
   Legal-now sub-case: if a user reports that a Record-only meeting still
   burned generations, that is clause 4 (shipped behavior wrong), not the
   feature.
-- **E — External meeting connectors.** Zoom/Meet/Teams → turns. Lands on
-  `integrations/provider.ts` (a new adapter family), reuses the exactly-once
-  ledger and the human-gated inbound queue, and emits turns into the same
-  `MeetingStore`. The convergence rule is already structural: a connector's
-  only job is turns.
+- **E — External meeting connectors.** **SHIPPED under the owner build
+  order** ("complete A–H first"): connector seam
+  (`server/src/meetingConnectors.ts` — a connector's only job is turns,
+  per-request BYO-style credentials never stored) with the `mock` source
+  and `POST /api/boards/:id/meetings/import` (editor floor, recording
+  policy honored, strict turn validation, 502 on source failure or dirty
+  turns). Deliberately NOT the ops-approval/inbound queue — that gates
+  mutations, and a transcript import is a save. Vendor adapters
+  (Zoom/Meet/Teams + the §3.3 authorized-attendee grant) arrive against the
+  interface, not as route edits.
 - **F — Diarization for shared-mic capture.** **SHIPPED 2026-09-16 as
   docs/25 V1** (out of order, on the clause-4 sub-case below plus an
   explicit owner build order): fourth STT slot in `web/src/stt/`
@@ -205,15 +222,22 @@ plan is complete; costed as slices V1–V3 in docs/25 (voice-platform advisory,
 
 ## 7. Phases G–H — Infrastructure-gated
 
+> **Closed 2026-09-16 under the owner build order** ("complete A–H
+> first") — G as recorded decisions (S4), H as policy + sweep (S5).
+> Per-org region pinning, `LUCENT_REGION` enforcement, and DPA artifacts
+> still need counsel and stay open; everything else in these phases is done.
+
 - **G — Encryption at rest / data residency.** Both are infrastructure
   decisions with real costs. Encryption-at-rest in-app fights the retrieval
   seam's substring queries (ADR 0024) — cost it honestly before choosing;
   platform disk encryption may be the right answer. Residency is a
   region-pinned deployment, same ledger as docs/20 P7's regional item.
-- **H — Retention-as-policy.** Only needed once a class can outlive its
-  board. Today audio is never stored and transcripts die with the board, so
-  the strictest case is already free. When it is needed, the sweep belongs in
-  the P3/P4 `maintenance` job family, not a new timer.
+- **H — Retention-as-policy.** **Shipped**: org `retention.transcriptDays`
+  - hourly `sweep-retention` (ended-only, org-scoped, running immune,
+    garbage keeps). Audio never stored and transcripts die with the board by
+    default, so the strictest case was already free; the sweep covers the
+    first class that can outlive its board. It belongs in
+    the P3/P4 `maintenance` job family, not a new timer — as built.
 
 ## 8. Gates and the commit register
 

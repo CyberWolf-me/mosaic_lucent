@@ -1466,3 +1466,31 @@ shipped surface.
   (boards are classified through the owner-gated API; the client still
   ignores the tier — what shipped here is the provider-policy control and
   the member-visible sentence, not that picker).
+
+## Amendment (2026-09-16): owner build order — complete A–H, then V, then related M (clause 1 + owner decision)
+
+Two explicit owner orders arrived the same day Phase C committed: first
+"do them according to the structure and plan" (voice), then "complete the
+A–H first and then V ones, if related to M ones complete them as well".
+Together they lift Gates C/D for D/E and authorize the voice slices, with
+the advisory's own honesty constraints (no second store, no fake audio,
+no unprompted speech, no Python in the repo) holding throughout. This
+amendment is the ledger row docs/24 §8 requires: everything below shipped
+under these two orders, each slice verified before the next began.
+
+- **D/V2 modes, E/V3 connectors seam, G decisions, H retention** (docs/24):
+  modes as behavior profiles (Record burns zero, rest degrade disclosed;
+  profile persisted, migration 0030); connector seam + mock + editor-floor
+  import (vendors plug in, credentials per-request); S4 decided (platform
+  disk/SSE, no in-app layer; single-region posture; counsel items open);
+  S5 as `retention.transcriptDays` + hourly `sweep-retention` (ended-only,
+  org-scoped, running immune, garbage keeps — the suite caught a real
+  cross-org deletion in the first implementation).
+- **V1b events, V4 engine, V5 VAD-1, V6 text loop, V7 TTS, V8/V9 honest
+  form** (docs/25): SpeechEvent primitive with one bridge; engine refactor
+  with byte-identical behavior; sidecar VAD verdict forwarded; addressed
+  text answers through Ask with TTS playback, mute, and capture-start
+  yield; open-questions panel; response-policy table.
+- **Still gated, explicitly**: proactive speech (M6.3 maturity + measured
+  reliability), vendor STT/TTS adapters (keys + live verification),
+  continuous transport/VAD onset, per-org residency + DPA (counsel), board-tier picker.

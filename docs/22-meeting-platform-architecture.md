@@ -1,14 +1,17 @@
 # 22. Meeting Platform — the live-meeting advisory, audited
 
-> **Status: the hard part — meeting intelligence (M1–M5 below) — is shipped and
-> gated at ≈93 composite (docs/16, docs/17 Gate A).** This document takes the
+> **Status: M1–M5 shipped and gated at ≈93 composite (docs/16, docs/17 Gate A);
+> M6–M7 shipped in honest form (docs/25 V6–V9: text voice loop, TTS seam,
+> chunk-cadence turn-taking, proactive text panel); external connectors as a
+> tested seam with mock (docs/24 Phase E); modes shipped (Phase D).** This document takes the
 > 2026-09-15 meeting-architecture advisory (two parts: the speech-pipeline
 > design, then the native-vs-external product framing) and audits it against
 > the code, the same way docs/20 audited the production-architecture advisory.
 > Every "build" claim below was checked against a file; where the advisory
 > asks for something that exists, the row says so and costs nothing. The real
-> gaps (M6–M7, external connectors, meeting modes, retention) are frozen
-> behind docs/17's gates unless they arrive as user evidence.
+> gaps (M6–M7 honest form, external seam, meeting modes, retention) shipped
+> under the 2026-09-16 owner build order; proactive speech, vendor
+> adapters, and continuous transport stay gated.
 
 ## 1. The advisory's core claim, and Lucent's answer to it
 
@@ -48,12 +51,12 @@ voice-interacting Lucent. That is flashy but not the foundation.").
 | Confidence + status on statements                                         | Structured JSON per detection                    | **Partial**                                     | Kind + status (`open/resolved/rejected/superseded`) exist; no numeric confidence — the freeze's `fact`/`constraint` precedent (docs/17) says a field nobody acts on is a bug                                                                                                                             |
 | Meeting state machine SCHEDULED→…→FINALIZED                               | Explicit lifecycle                               | **Partial**                                     | Two states exist: open capture (`endedAt` null, `appendTo` legal) and ended (immutable; `end` is idempotent). SCHEDULED/LOBBY/PROCESSING/FINALIZED do not exist — no scheduling surface wants them yet                                                                                                   |
 | Finalize pass on END (deep analysis, cross-meeting memory)                | Post-meeting processing                          | **Shipped where measured**                      | Cross-meeting memory is a projection over canonical state (ADR 0023), computed on read — no finalize job needed for it; `MeetingEnded` is a P2 outbox event                                                                                                                                              |
-| Meeting Event Stream as a formal type                                     | Typed union of every event                       | **Not built — and deliberately informal**       | Events are implicit: React state for partials, store calls for checkpoints, ops for commits. A typed union with no second consumer would be ceremony (ADR 0026's projection rule: don't persist what you can derive)                                                                                     |
-| Native + external meetings converge on one internal model                 | Zoom/Meet → same pipeline                        | **Not built (external); converged (native)**    | Native meetings already land as: capture → turns → extraction → statements → provenance. External connectors (Zoom/Meet/Teams) have no code — the integrations seam (`integrations/provider.ts`, ADRs 0030–0036) is the natural home when a Gate C ask arrives                                           |
+| Meeting Event Stream as a formal type                                     | Typed union of every event                       | **Shipped for speech (docs/25 V1b)**            | `web/src/stt/events.ts` — `speech_started`/`interim`/`final`/`speech_stopped` with distinct identity fields, one bridge deriving callbacks, interim structurally barred from durability. Domain events (outbox vocabulary) stay fixed/small by rule                                                      |
+| Native + external meetings converge on one internal model                 | Zoom/Meet → same pipeline                        | **Shipped seam + mock (E/V3)**                  | Native meetings already land as: capture → turns → extraction → statements → provenance. External import lands the same way (`meetingConnectors.ts` + import route); vendor adapters + attendee grant follow when a Gate C ask or credentials arrive                                                     |
 | Retention: audio/transcript/intelligence separately                       | Configurable per class                           | **Trivially satisfied today, policy not built** | Audio is never stored at all (STT is streaming; only text persists) — the advisory's strictest default. Transcript retention = board deletion; no independent policy                                                                                                                                     |
 | Native AV meeting room (video/screen share)                               | Lucent as the meeting product                    | **Not built**                                   | LiveKit is used as an STT transport (token-minted rooms), not as an AV surface; MeetingView is transcript-first by design                                                                                                                                                                                |
-| Meeting modes: record / intelligence / assistant / participant            | Behavior profiles, not prompt toggles            | **Not built as modes**                          | Recording implies intelligence today (the differential loop always runs); the mode split is real design work, see §5                                                                                                                                                                                     |
-| Response Policy Engine + TTS                                              | Lucent speaks, with thresholds                   | **Not built**                                   | No TTS code exists in any package (searched: zero hits); no wake/addressing detection; "Lucent," utterance routing unbuilt                                                                                                                                                                               |
+| Meeting modes: record / intelligence / assistant / participant            | Behavior profiles, not prompt toggles            | **Shipped (D/V2)**                              | `web/src/meeting-modes.ts` (Record burns zero generations, Assistant/Participant degrade disclosed); profile persisted on transcripts (migration 0030); picker + note in MeetingView                                                                                                                     |
+| Response Policy Engine + TTS                                              | Lucent speaks, with thresholds                   | **Shipped (V6–V9 honest form)**                 | Wake/address detection + mode policy table (docs/25 §5); text answers via Ask, TTS seam (local default + server proxy), chunk-cadence interruption, proactive text panel. Proactive speech + per-utterance barge-in stay gated                                                                           |
 | Model router (fast/smart/reasoning)                                       | Different models per loop                        | **Partial**                                     | One provider per deployment + BYO-key per request (`modelRouter.ts`); no per-loop routing — justified only when a second loop exists (M6)                                                                                                                                                                |
 | Intelligence agent tools (search, get_board_state, propose ops)           | LLM with tools                                   | **Shipped in the house style**                  | The generation pipeline already assembles context and emits validated ops; the narrowing prompt registry (`ai/src/registry.ts`) is the vocabulary guard. No free-form tool surface, per ADR 0005                                                                                                         |
 | "Meeting" as first-class object alongside Board                           | Not everything on the canvas                     | **Shipped**                                     | Meeting transcripts are board-scoped rows with their own routes (`routes/meetings.ts`), not canvas shapes; statements surface through Intelligence views (ADR 0026)                                                                                                                                      |
@@ -89,12 +92,13 @@ false distinction — `MeetingView`'s own header comment).
 
 ## 4. The real gaps (and what each costs)
 
-1. **M6 — the voice assistant.** TTS provider seam (none exists), wake/address
-   detection ("Lucent, …"), a response policy (when may it speak — the
-   advisory's intervention thresholds), and the retrieve→reason→speak path.
-   This is the largest genuinely new subsystem in the advisory.
-2. **M7 — proactive participant.** Gated behind M6 reliability by the
-   advisory's own ordering.
+1. **M6 — the voice assistant.** **Shipped in honest form (docs/25
+   V6–V8)**: wake/address detection, text answers through Ask, TTS seam
+   (local + server proxy), chunk-cadence interruption. Per-utterance
+   barge-in and vendor adapters stay open.
+2. **M7 — proactive participant.** **Shipped in honest form (docs/25 V9)**:
+   response-policy table + open-questions text panel. Proactive speech
+   stays gated on M6.3 maturity + measured reliability.
 3. **External meeting connectors.** Zoom/Meet/Teams → turns. The convergence
    rule is already satisfied structurally: a connector's only job is to emit
    turns into the same store. Builds on the proven integrations seam
@@ -119,18 +123,17 @@ M2 speaker attribution       SHIPPED for individual streams (LiveKit identity) +
 M3 event stream              SHIPPED in substance (turns checkpoint; triggers)
 M4 meeting intelligence      SHIPPED (differential loop, six kinds, ≈93 gate)
 M5 context-aware extraction  SHIPPED (board context + provenance + ADR 0023)
-M6 voice assistant           NOT BUILT — the next real work
-M7 proactive participant    NOT BUILT — after M6 is reliable
+M6 voice assistant           SHIPPED honest form (V6–V8: addressed text answers, TTS seam, chunk-cadence yield)
+M7 proactive participant    SHIPPED honest form (V9: policy table + open-questions panel; speech stays gated)
 ```
 
 **Freeze legality (docs/17).** M1–M5 cost nothing — they are the record of
-what shipped before this advisory arrived. M6, M7, the external connectors,
-and the mode profiles are **new features**, frozen behind Gate C (users name
-the wall) and Gate D (evidence picks the investment). Diarization left that
-freeze 2026-09-16 as docs/25 V1, on two independent grounds the freeze
-allows: a clause-4 correctness fix (shared-mic capture labelled every turn
-"You") and an explicit owner build order. The one pre-approved path
-remaining: a connector that arrives as a bug fix to a shipped surface.
+what shipped before this advisory arrived. The remaining rows shipped
+2026-09-16 under the owner "complete A–H, then the V ones, and the related
+M ones" order, each in the honest form its gate allows (seam + mock where
+vendors are needed, text where audio needs maturity, policy where speech
+needs evidence). What stays gated: proactive speech, vendor STT/TTS
+adapters, continuous transport, counsel artifacts.
 
 ## 6. What this plan deliberately does not build
 

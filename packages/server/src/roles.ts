@@ -114,6 +114,15 @@ export const RECURRING_JOBS: RecurringJob[] = [
     type: "prune-usage",
     everyMs: 10 * 60_000,
   },
+  // docs/24 Phase H: transcript retention is coarse (day granularity), so an
+  // hourly sweep is plenty — retention deletes history, and history deletion
+  // should never race the meeting it deletes by minutes.
+  {
+    key: "sweep-retention",
+    family: "maintenance",
+    type: "sweep-retention",
+    everyMs: 60 * 60_000,
+  },
 ];
 
 /**
@@ -166,8 +175,9 @@ export function familiesFor(role: LucentRole, env: string | undefined): JobFamil
     const requested = env
       .split(",")
       .map((f) => f.trim().toLowerCase())
-      .filter((f): f is JobFamily =>
-        f === "ai" || f === "media" || f === "integration" || f === "maintenance",
+      .filter(
+        (f): f is JobFamily =>
+          f === "ai" || f === "media" || f === "integration" || f === "maintenance",
       );
     if (requested.length > 0) return requested;
   }

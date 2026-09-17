@@ -1,4 +1,4 @@
-import { and, desc, eq, isNull, lte } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, isNull, lt, lte } from "drizzle-orm";
 import type { Db } from "../db/client.js";
 import { meetingTranscripts } from "../db/schema.js";
 import {
@@ -31,6 +31,7 @@ export class PostgresMeetingStore implements MeetingStore {
         startedAt: input.startedAt,
         endedAt: input.endedAt ?? null,
         turns: input.turns,
+        ...(input.mode !== undefined ? { mode: input.mode } : {}),
         createdBy: input.createdBy,
         createdAt: input.createdAt,
       })
@@ -92,11 +93,7 @@ export class PostgresMeetingStore implements MeetingStore {
    * keeps a bad timestamp from back-dating the meeting's end before its
    * start.
    */
-  async end(
-    boardId: string,
-    id: string,
-    endedAt: number,
-  ): Promise<MeetingTranscript | undefined> {
+  async end(boardId: string, id: string, endedAt: number): Promise<MeetingTranscript | undefined> {
     const rows = await this.target.db
       .update(meetingTranscripts)
       .set({ endedAt })
@@ -117,6 +114,38 @@ export class PostgresMeetingStore implements MeetingStore {
     if (rows[0]) return toRow(rows[0]);
     return this.get(boardId, id);
   }
+
+  /**
+   * docs/24 Phase H: delete ended transcripts older than the cutoff, oldest
+   * first, bounded. Two steps (select ids, then delete by id) because
+   * Postgres DELETE takes no LIMIT: the ids are the claim, and a concurrent
+   * end between the steps can only move a row OUT of eligibility (endedAt
+   * becomes now, which is past any cutoff) — never strand a running
+   * capture, which the WHERE excludes by construction.
+   */
+  async deleteExpired(orgId: string, endedBefore: number, limit: number): Promise<number> {
+    if (limit <= 0) return 0;
+    const stale = await this.target.db
+      .select({ id: meetingTranscripts.id })
+      .from(meetingTranscripts)
+      .where(
+        and(
+          eq(meetingTranscripts.orgId, orgId),
+          isNotNull(meetingTranscripts.endedAt),
+          lt(meetingTranscripts.endedAt, endedBefore),
+        ),
+      )
+      .orderBy(meetingTranscripts.endedAt)
+      .limit(limit);
+    if (stale.length === 0) return 0;
+    await this.target.db.delete(meetingTranscripts).where(
+      inArray(
+        meetingTranscripts.id,
+        stale.map((r) => r.id),
+      ),
+    );
+    return stale.length;
+  }
 }
 
 function toRow(row: typeof meetingTranscripts.$inferSelect): MeetingTranscript {
@@ -129,5 +158,9 @@ function toRow(row: typeof meetingTranscripts.$inferSelect): MeetingTranscript {
     turns: row.turns as MeetingTurn[],
     createdBy: row.createdBy,
     createdAt: row.createdAt,
+    // Pre-profile rows read NULL: absence, not a value (meetings.ts).
+    ...(row.mode !== null && row.mode !== undefined
+      ? { mode: row.mode as MeetingTranscript["mode"] }
+      : {}),
   };
 }

@@ -24,6 +24,7 @@ function utteranceView(u: SttUtterance): Record<string, unknown> {
     ...(u.speaker !== undefined ? { speaker: u.speaker } : {}),
     ...(u.startedAt !== undefined ? { start: u.startedAt } : {}),
     ...(u.endedAt !== undefined ? { end: u.endedAt } : {}),
+    ...(u.confidence !== undefined ? { confidence: u.confidence } : {}),
   };
 }
 
@@ -120,9 +121,9 @@ export const registerSttRoutes: RegisterRoutes = (router, s) => {
       send(res, 400, { error: "empty audio chunk" });
       return;
     }
-    let finals: SttUtterance[];
+    let pushed: import("../stt.js").SttChunkResult;
     try {
-      finals = await entry.handle.push(
+      pushed = await entry.handle.push(
         new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength),
       );
     } catch (err) {
@@ -137,7 +138,9 @@ export const registerSttRoutes: RegisterRoutes = (router, s) => {
       return;
     }
     sttSessions.touch(entry, bytes.byteLength);
-    send(res, 200, { finals: finals.map(utteranceView) });
+    // docs/25 V5: the sidecar's VAD verdict rides along (null when
+    // unoffered). No consumer reads it yet — turn-taking does, at V8.
+    send(res, 200, { finals: pushed.utterances.map(utteranceView), speech: pushed.speech });
   });
 
   router.post("/api/stt/sessions/:id/close", async (ctx) => {

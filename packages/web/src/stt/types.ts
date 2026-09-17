@@ -1,3 +1,5 @@
+import type { VoiceEventHandlers } from "./events.js";
+
 /**
  * Speech-to-text provider abstraction. Voice is a swappable STT layer, mirroring
  * how @lucent/ai keeps the LLM behind a provider interface (docs/06 calls for a
@@ -70,6 +72,13 @@ export interface SttProvider {
   isSupported(): boolean;
   /** Begin a capture session. Returns null only if unsupported. */
   start(handlers: VoiceHandlers): VoiceSession | null;
+  /**
+   * Begin a capture session on the event stream (the seam's primitive —
+   * `events.ts`). Every provider implements this; `start()` is the
+   * `eventConsumerFromCallbacks` bridge over it, so simple consumers
+   * (canvas voice input) never drift from event consumers (meetings).
+   */
+  startWithEvents?(handlers: VoiceEventHandlers): VoiceSession | null;
   /**
    * Human-readable reason this provider can't be used right now (missing
    * configuration, unsupported browser). Null when it is ready.

@@ -113,6 +113,18 @@ export interface Config {
     url: string | undefined;
     name: string | undefined;
   };
+  /**
+   * docs/25 V7: server voice synthesis (M6.2). Key + URL configured means
+   * `POST /api/tts/speak` renders real audio through the sidecar; anything
+   * less is the standby mock and the route answers 503, so the client falls
+   * back to local speech synthesis instead of faked audio.
+   */
+  tts: {
+    apiKey: string | undefined;
+    url: string | undefined;
+    name: string | undefined;
+    voice: string | undefined;
+  };
 }
 
 export interface ConfigEnv {
@@ -137,6 +149,10 @@ export interface ConfigEnv {
   LUCENT_STT_KEY?: string;
   LUCENT_STT_URL?: string;
   LUCENT_STT_NAME?: string;
+  LUCENT_TTS_KEY?: string;
+  LUCENT_TTS_URL?: string;
+  LUCENT_TTS_NAME?: string;
+  LUCENT_TTS_VOICE?: string;
   LUCENT_MAIL_TRANSPORT?: string;
   LUCENT_MAIL_ENDPOINT?: string;
   LUCENT_MAIL_API_KEY?: string;
@@ -253,6 +269,12 @@ export function readConfig(env: ConfigEnv = process.env): Config {
       apiKey: env.LUCENT_STT_KEY || undefined,
       url: env.LUCENT_STT_URL || undefined,
       name: env.LUCENT_STT_NAME || undefined,
+    },
+    tts: {
+      apiKey: env.LUCENT_TTS_KEY || undefined,
+      url: env.LUCENT_TTS_URL || undefined,
+      name: env.LUCENT_TTS_NAME || undefined,
+      voice: env.LUCENT_TTS_VOICE || undefined,
     },
   };
 }

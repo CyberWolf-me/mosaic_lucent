@@ -67,6 +67,8 @@ describe("org settings policy (unit)", () => {
       agentDisabled: false,
       recordingDisabled: false,
       serverSttDisabled: false,
+      serverTtsDisabled: false,
+      retention: { transcriptDays: null },
       providerPolicy: { mode: "any", allow: null },
     });
     expect(effectiveSettings({}).classificationFloor).toBe("internal");
@@ -145,6 +147,7 @@ describe("org settings policy (unit)", () => {
       { classificationFloor: "PUBLIC" },
       { ai: "sometimes" },
       { serverStt: "sometimes" },
+      { serverTts: "sometimes" },
       { typoInKey: true },
       { ai: 1 },
     ]) {
@@ -713,6 +716,7 @@ describe("provider policy: the surfaces", () => {
     expect(read.body).toEqual({
       providerPolicy: { mode: "self-hosted-only", allow: null },
       serverStt: "allowed",
+      serverTts: "allowed",
     });
     // ...and the FULL plane does not ride it: no floor, no denials. The
     // provider policy is a transparency fact; the rest is the console's.

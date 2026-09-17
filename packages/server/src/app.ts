@@ -10,10 +10,13 @@ import {
   isBoardClassification,
   providerPolicyRefusal,
   serverSttRefusal,
+  serverTtsRefusal,
   BOARD_CLASSIFICATIONS,
 } from "./classification.js";
 import type { OutboundBoundary, ProviderFact } from "./classification.js";
 import { MockSttService, createSttSessionRegistry } from "./stt.js";
+import { MockTtsService } from "./tts.js";
+import { MockMeetingSource } from "./meetingConnectors.js";
 import { handleImage } from "./image.js";
 import type { UsageTracker, UsageLimits } from "./usage.js";
 import type { Telemetry, TelemetryEvent } from "./telemetry.js";
@@ -123,6 +126,7 @@ import { registerAskRoutes } from "./routes/ask.js";
 import { registerSearchRoutes } from "./routes/search.js";
 import { registerIntegrationRoutes } from "./routes/integrations.js";
 import { registerSttRoutes } from "./routes/stt.js";
+import { registerTtsRoutes } from "./routes/tts.js";
 import { mintLiveKitToken } from "./livekit.js";
 import { registerAssetRoutes } from "./routes/assets.js";
 import { registerScimRoutes } from "./routes/scim.js";
@@ -161,6 +165,12 @@ export interface AppDeps {
    * injects a live service.
    */
   stt?: import("./stt.js").SttService;
+  /**
+   * docs/25 V7: server voice synthesis. Optional like `stt` — omitted
+   * means the standby mock, so existing harnesses keep working and the
+   * route answers 503 until a live service is injected.
+   */
+  tts?: import("./tts.js").TtsService;
   userStore: UserStore;
   boardStore: BoardStore;
   secret: string;
@@ -253,6 +263,12 @@ export interface AppDeps {
    * LUCENT_DATABASE_URL is set, in-memory otherwise).
    */
   meetings?: import("./meetings.js").MeetingStore;
+  /**
+   * docs/24 Phase E: external meeting connectors. Optional in deps —
+   * omitted means the mock-only registry, so every existing harness keeps
+   * working and tests inject scripted sources. main.ts takes the default.
+   */
+  meetingConnectors?: import("./meetingConnectors.js").MeetingConnectorRegistry;
   /**
    * Stage B3: review-gate proposals. When present, proposal create/list/
    * decide are real; without it they answer 503 (fail-closed, like the other
@@ -504,6 +520,15 @@ export function createApp(deps: AppDeps): App {
    */
   const sttService = deps.stt ?? new MockSttService();
   const sttSessions = createSttSessionRegistry();
+  const ttsService = deps.tts ?? new MockTtsService();
+  /**
+   * docs/24 Phase E: the connector registry. Omitted deps mean mock-only
+   * (offline dev, every existing harness); tests inject scripted sources;
+   * vendor adapters register here with per-request credentials.
+   */
+  const meetingConnectors = deps.meetingConnectors ?? {
+    sources: new Map([["mock", new MockMeetingSource()]]),
+  };
 
   /**
    * The Stripe webhook receiver, built once. Signature verification, ledger
@@ -1792,6 +1817,30 @@ export function createApp(deps: AppDeps): App {
     return false;
   }
 
+  /**
+   * docs/25 V7: the server-voice gate (`policy:tts`). Same shape as
+   * `sttGate`, for the synthesis egress.
+   */
+  async function ttsGate(
+    req: IncomingMessage,
+    res: ServerResponse,
+    orgId: string | undefined,
+    route: string,
+  ): Promise<boolean> {
+    if (!orgId) return true;
+    const settings = await orgPolicy(orgId);
+    const refusal = serverTtsRefusal(settings);
+    if (!refusal) return true;
+    telemetry.record({
+      kind: "refused",
+      route,
+      reason: "policy:tts",
+      requestId: traceOf(req),
+    });
+    send(res, 403, { error: refusal, boundary: "tts" });
+    return false;
+  }
+
   const services: RouteServices = {
     config,
     logger,
@@ -1802,6 +1851,8 @@ export function createApp(deps: AppDeps): App {
     imageProvider,
     stt: sttService,
     sttSessions,
+    tts: ttsService,
+    meetingConnectors,
     authCtx,
     userStore,
     boardStore,
@@ -1855,6 +1906,7 @@ export function createApp(deps: AppDeps): App {
     orgPolicy,
     providerGate,
     sttGate,
+    ttsGate,
     applyAuthLimiter,
     applyAccountLimiter,
     applyMailLimiter,
@@ -1896,6 +1948,7 @@ export function createApp(deps: AppDeps): App {
   registerIntegrationRoutes(router, services);
   registerOrgSettingsRoutes(router, services);
   registerSttRoutes(router, services);
+  registerTtsRoutes(router, services);
   /**
    * Asset gateway (M7 / M4 storage): `/api/assets/*`. The handler is built
    * here, not registered through the router, because it consumes a body-cap

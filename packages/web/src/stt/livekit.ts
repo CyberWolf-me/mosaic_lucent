@@ -1,4 +1,5 @@
 import type { LiveKitConfig, SttProvider, VoiceHandlers, VoiceSession } from "./types.js";
+import { eventConsumerFromCallbacks, type VoiceEventHandlers } from "./events.js";
 
 /**
  * LiveKit-backed speech-to-text.
@@ -77,6 +78,12 @@ export const livekitSttProvider: SttProvider = {
   },
 
   start(handlers: VoiceHandlers): VoiceSession | null {
+    const withEvents = this.startWithEvents;
+    if (!withEvents) return null;
+    return withEvents.call(this, eventConsumerFromCallbacks(handlers));
+  },
+
+  startWithEvents(handlers: VoiceEventHandlers): VoiceSession | null {
     const reason = this.unavailableReason?.();
     if (reason) {
       handlers.onError?.(reason);
@@ -111,8 +118,14 @@ export const livekitSttProvider: SttProvider = {
         // Transcription arrives from the server agent. LiveKit exposes it as a
         // TranscriptionReceived event; segments carry `final` so interim words
         // can stream while the final text accumulates — and the speaking
-        // participant's identity, which rides along to onFinal so meeting
-        // capture can attribute turns to people.
+        // participant's identity, which becomes the event's participantId
+        // (per-stream identity IS the person here — advisory §2, no
+        // diarization needed and none attempted).
+        //
+        // Cadence preserved exactly: finals accumulate and emit ONCE at stop
+        // as one joined turn. Per-utterance finals while running would change
+        // how often the extraction loop bills a generation — a billing and
+        // behavior decision, not a contract-migration side effect.
         room.on(
           livekit.RoomEvent.TranscriptionReceived ?? "transcriptionReceived",
           (segments: TranscriptionSegment[]) => {
@@ -125,10 +138,23 @@ export const livekitSttProvider: SttProvider = {
                 chunks.push(seg.text);
                 lastSpeaker = speaker ?? lastSpeaker;
               } else {
-                handlers.onInterim?.(seg.text);
+                handlers.onEvent({
+                  type: "interim",
+                  text: seg.text,
+                  at: Date.now(),
+                  participantId: speaker,
+                  source: "livekit",
+                });
               }
             }
-            if (chunks.length > 0) handlers.onInterim?.(chunks.join(" "));
+            if (chunks.length > 0)
+              handlers.onEvent({
+                type: "interim",
+                text: chunks.join(" "),
+                at: Date.now(),
+                participantId: lastSpeaker,
+                source: "livekit",
+              });
           },
         );
 
@@ -143,6 +169,7 @@ export const livekitSttProvider: SttProvider = {
         }
         await room.localParticipant.setMicrophoneEnabled(true);
         handlers.onStatus?.("listening");
+        handlers.onEvent({ type: "speech_started", at: Date.now() });
         handlers.onStart?.();
       } catch (err) {
         if (stopped) return;
@@ -162,8 +189,18 @@ export const livekitSttProvider: SttProvider = {
         handlers.onStatus?.("idle");
         disconnect?.();
         const text = chunks.join(" ").trim();
-        if (text) handlers.onFinal(text, lastSpeaker ? { speaker: lastSpeaker } : undefined);
+        if (text)
+          handlers.onEvent({
+            type: "final",
+            text,
+            at: Date.now(),
+            participantId: lastSpeaker,
+            source: "livekit",
+          });
         else handlers.onError?.("");
+        // Boundary flush first, stopped last — same order as every
+        // provider, so consumers never lose the last turn to the stop.
+        handlers.onEvent({ type: "speech_stopped", at: Date.now(), participantId: lastSpeaker });
       },
     };
   },

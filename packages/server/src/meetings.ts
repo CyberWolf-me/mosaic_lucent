@@ -34,6 +34,12 @@ export interface MeetingTranscript {
   turns: MeetingTurn[];
   createdBy: string | null;
   createdAt: number;
+  /**
+   * Capture profile in force when recorded (docs/24 Phase D). Absent on
+   * rows written before profiles existed — unknown how captured, and never
+   * backfilled (a guess about history would be a lie about it).
+   */
+  mode?: MeetingMode;
 }
 
 export interface NewMeetingTranscript {
@@ -44,6 +50,35 @@ export interface NewMeetingTranscript {
   turns: MeetingTurn[];
   createdBy: string;
   createdAt: number;
+  mode?: MeetingMode;
+}
+
+/**
+ * The capture profiles (docs/24 Phase D). Copied, not imported, from the
+ * web's meeting-modes: the server validates the wire, it does not share the
+ * client's UI vocabulary (same split as MeetingTurn/kind).
+ */
+export const MEETING_MODES = ["record", "intelligence", "assistant", "participant"] as const;
+
+export type MeetingMode = (typeof MEETING_MODES)[number];
+
+export function isMeetingMode(value: unknown): value is MeetingMode {
+  return typeof value === "string" && (MEETING_MODES as readonly string[]).includes(value);
+}
+
+/**
+ * Validate the optional mode on a save body. Absent is legal (pre-profile
+ * clients and rows); present must name a profile — a typo must not create
+ * a fifth mode no gate understands (the classification-typo rule, same one).
+ */
+export function validateMeetingMode(
+  input: unknown,
+): { ok: true; mode: MeetingMode | undefined } | { ok: false; error: string } {
+  if (input === undefined) return { ok: true, mode: undefined };
+  if (!isMeetingMode(input)) {
+    return { ok: false, error: `mode must be one of: ${MEETING_MODES.join(", ")}` };
+  }
+  return { ok: true, mode: input };
 }
 
 export interface MeetingStore {
@@ -53,6 +88,14 @@ export interface MeetingStore {
   forBoard(boardId: string, limit?: number): Promise<MeetingTranscript[]>;
   /** One transcript, scoped to its board so a leaked id is not a read. */
   get(boardId: string, id: string): Promise<MeetingTranscript | undefined>;
+  /**
+   * Delete one org's ENDED transcripts older than `endedBefore`, up to
+   * `limit` rows, oldest first. The retention sweep's primitive (docs/24
+   * Phase H): org-scoped, because each org carries its own lifetime, and
+   * running captures (`endedAt` null) are never eligible at any setting.
+   * Returns the deleted count.
+   */
+  deleteExpired(orgId: string, endedBefore: number, limit: number): Promise<number>;
   /**
    * Append turns to a running meeting (M2): a live capture checkpoints as it
    * goes instead of holding the whole transcript in a tab. The transcript
@@ -151,6 +194,7 @@ export class InMemoryMeetingStore implements MeetingStore {
       turns: input.turns.map((t) => ({ ...t })),
       createdBy: input.createdBy,
       createdAt: input.createdAt,
+      ...(input.mode !== undefined ? { mode: input.mode } : {}),
     };
     this.rows.set(row.id, row);
     return { ...row, turns: [...row.turns] };
@@ -183,11 +227,16 @@ export class InMemoryMeetingStore implements MeetingStore {
     return { ...row, turns: [...row.turns] };
   }
 
-  async end(
-    boardId: string,
-    id: string,
-    endedAt: number,
-  ): Promise<MeetingTranscript | undefined> {
+  async deleteExpired(orgId: string, endedBefore: number, limit: number): Promise<number> {
+    const eligible = [...this.rows.values()]
+      .filter((r) => r.orgId === orgId && r.endedAt !== null && r.endedAt < endedBefore)
+      .sort((a, b) => (a.endedAt as number) - (b.endedAt as number))
+      .slice(0, Math.max(0, limit));
+    for (const row of eligible) this.rows.delete(row.id);
+    return eligible.length;
+  }
+
+  async end(boardId: string, id: string, endedAt: number): Promise<MeetingTranscript | undefined> {
     const row = this.rows.get(id);
     if (!row || row.boardId !== boardId) return undefined;
     // Idempotent: an already-ended row returns unchanged (the same

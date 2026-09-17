@@ -38,6 +38,11 @@ export interface SttUtterance {
   /** Provider timestamps, when offered. Informational only. */
   startedAt?: number;
   endedAt?: number;
+  /**
+   * Provider confidence 0..1, when offered. Accepted and passed through;
+   * acted on by nothing yet (a field nobody acts on stays inert).
+   */
+  confidence?: number;
 }
 
 /** One live transcription session: chunks in, finals out. */
@@ -45,15 +50,26 @@ export interface SttSession {
   /**
    * Offer audio bytes (any container the provider accepts — the client
    * sends MediaRecorder slices; the mock counts them). Returns the
-   * utterances that finalized BECAUSE of this chunk, possibly none.
+   * utterances that finalized BECAUSE of this chunk, plus the sidecar's
+   * VAD verdict on the delivered audio when it offers one (`speech`, docs/25
+   * V5 stage 1: approximate boundaries inferred within chunks, not true
+   * realtime onset — that needs the V8 transport; no consumer reads this
+   * yet except the route, which forwards it).
    */
-  push(chunk: Uint8Array): Promise<SttUtterance[]>;
+  push(chunk: Uint8Array): Promise<SttChunkResult>;
   /**
    * End the session: flush whatever finalized at the boundary and report
    * how much audio the session consumed (the voice-minutes meter reads
    * this, not a guess from byte counts — codecs lie about duration).
    */
   close(): Promise<{ utterances: SttUtterance[]; audioSeconds: number }>;
+}
+
+/** What one chunk produced: new finals, and the VAD verdict if offered. */
+export interface SttChunkResult {
+  utterances: SttUtterance[];
+  /** The sidecar's speech verdict on this chunk; null when unoffered. */
+  speech: boolean | null;
 }
 
 export interface SttService {
@@ -96,8 +112,9 @@ export class MockSttService implements SttService {
     const stride = this.bytesPerUtterance;
     const now = this.now;
     const startedAt = now();
+    const result = (utterances: SttUtterance[]): SttChunkResult => ({ utterances, speech: null });
     return {
-      async push(chunk: Uint8Array): Promise<SttUtterance[]> {
+      async push(chunk: Uint8Array): Promise<SttChunkResult> {
         pending += chunk.byteLength;
         const out: SttUtterance[] = [];
         while (pending >= stride && cursor < script.length) {
@@ -107,8 +124,9 @@ export class MockSttService implements SttService {
         }
         // Bytes beyond an exhausted script are absorbed, never invented
         // into: the mock must not hallucinate speech that never arrived.
+        // The mock has no VAD: verdict null, always.
         if (cursor >= script.length) pending = 0;
-        return out;
+        return result(out);
       },
       async close(): Promise<{ utterances: SttUtterance[]; audioSeconds: number }> {
         return { utterances: [], audioSeconds: Math.max(0, (now() - startedAt) / 1000) };
@@ -125,7 +143,10 @@ export class MockSttService implements SttService {
  * Contract (POST `{url}/transcribe`, Bearer key, binary body):
  * request carries `x-lucent-session` (opaque id) and `x-lucent-finalize:
  * true` on the closing call; response JSON is `{ finals?: Array<{ text:
- * string, speaker?: string, start?: number, end?: number }> }`. Anything
+ * string, speaker?: string, start?: number, end?: number, confidence?:
+ * number }>, speech?: boolean }`, where `speech` is the sidecar's VAD
+ * verdict on the delivered chunk (docs/25 V5 stage 1 — approximate
+ * boundaries within chunks, never true onset). Anything
  * else — non-2xx, unparseable body, timeout — throws and the route answers
  * 502, the same "provider failed" shape generation uses. No vendor is
  * live-verified in this repo; Deepgram/OpenAI adapters arrive as follow-ups
@@ -152,7 +173,7 @@ export class GenericHttpSttService implements SttService {
     const startedAt = Date.now();
     const timeoutMs = this.options.timeoutMs ?? 30_000;
     const fetchImpl = this.options.fetchImpl ?? fetch;
-    const sendChunk = async (chunk: Uint8Array, finalize: boolean): Promise<SttUtterance[]> => {
+    const sendChunk = async (chunk: Uint8Array, finalize: boolean): Promise<SttChunkResult> => {
       const endpoint = this.options.url.replace(/\/+$/, "") + "/transcribe";
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -170,12 +191,22 @@ export class GenericHttpSttService implements SttService {
         });
         if (!res.ok) throw new Error(`sidecar answered ${res.status}`);
         const body = (await res.json().catch(() => null)) as {
-          finals?: Array<{ text?: unknown; speaker?: unknown; start?: unknown; end?: unknown }>;
+          finals?: Array<{
+            text?: unknown;
+            speaker?: unknown;
+            start?: unknown;
+            end?: unknown;
+            confidence?: unknown;
+          }>;
+          speech?: unknown;
         } | null;
-        if (!body || !Array.isArray(body.finals)) return [];
+        if (!body) return { utterances: [], speech: null };
         // Validate minimally: model output is untrusted input, and a sidecar
-        // that echoes garbage must not become turns on a board.
-        return body.finals.flatMap((f) =>
+        // that echoes garbage must not become turns on a board. The VAD
+        // verdict degrades to null (unknown), never to a guessed boolean.
+        const speech = typeof body.speech === "boolean" ? body.speech : null;
+        if (!Array.isArray(body.finals)) return { utterances: [], speech };
+        const utterances = body.finals.flatMap((f) =>
           typeof f.text === "string" && f.text.trim() !== ""
             ? [
                 {
@@ -185,20 +216,27 @@ export class GenericHttpSttService implements SttService {
                     : {}),
                   ...(typeof f.start === "number" ? { startedAt: f.start } : {}),
                   ...(typeof f.end === "number" ? { endedAt: f.end } : {}),
+                  ...(typeof f.confidence === "number" && f.confidence >= 0 && f.confidence <= 1
+                    ? { confidence: f.confidence }
+                    : {}),
                 },
               ]
             : [],
         );
+        return { utterances, speech };
       } finally {
         clearTimeout(timer);
       }
     };
     return {
       push: (chunk: Uint8Array) => sendChunk(chunk, false),
-      close: async () => ({
-        utterances: await sendChunk(new Uint8Array(0), true),
-        audioSeconds: Math.max(0, (Date.now() - startedAt) / 1000),
-      }),
+      close: async () => {
+        const { utterances } = await sendChunk(new Uint8Array(0), true);
+        return {
+          utterances,
+          audioSeconds: Math.max(0, (Date.now() - startedAt) / 1000),
+        };
+      },
     };
   }
 }

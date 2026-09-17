@@ -5,6 +5,22 @@ import { useWorkspace } from "../workspace.js";
 import { useToast } from "../ui/Toast.js";
 import { useSettings } from "../settings.js";
 import { getSttProvider, isAnyVoiceSupported, type VoiceSession } from "../stt/index.js";
+import { askLucent } from "../boards.js";
+import {
+  shouldAnswerVoice,
+  voiceAnswerCard,
+  openBoardQuestions,
+  type VoiceAnswer,
+} from "../meeting-voice.js";
+import { speakAnswer } from "../tts.js";
+import type { VoiceHandlers } from "../stt/index.js";
+import {
+  MEETING_MODES,
+  MODE_LABELS,
+  MODE_NOTES,
+  isMeetingMode,
+  modeAllowsExtraction,
+} from "../meeting-modes.js";
 import {
   appendMeetingTurns,
   classifyTurn,
@@ -15,7 +31,13 @@ import {
   type MeetingTranscript,
   type MeetingTurn,
 } from "../meetings.js";
-import { differentialPrompt, shouldExtract } from "../meeting-extract.js";
+import { differentialPrompt } from "../meeting-extract.js";
+import {
+  applyExtractOutcome,
+  createMeetingEngine,
+  extractStatusMessage,
+  sliceBatch,
+} from "../meeting-engine.js";
 import { isLiveProvenance, objectsByTurn, pointsAtLive } from "../meetingTimeline.js";
 
 /**
@@ -78,7 +100,7 @@ function withTopicBreaks(list: MeetingTurn[], breaks: number[]): MeetingTurn[] {
 export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: string) => void }) {
   const { setView, send, boardId, projectName, workspace, onCitation } = useWorkspace();
   const { notify } = useToast();
-  const [settings] = useSettings();
+  const [settings, setSettings] = useSettings();
   const [recording, setRecording] = useState(false);
   const [startedAt, setStartedAt] = useState<number | null>(null);
   const [turns, setTurns] = useState<MeetingTurn[]>([]);
@@ -94,14 +116,27 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
   const [saved, setSaved] = useState<MeetingTranscript[]>([]);
   const [selectedMeeting, setSelectedMeeting] = useState<MeetingTranscript | null>(null);
   const voiceRef = useRef<VoiceSession | null>(null);
-  // ---- Live extraction state (M2) -------------------------------------------
-  // Turn indices not yet sent to the model, the wall-clock of the last
-  // extract call, and an in-flight flag so one generation runs at a time.
+  // ---- Live extraction state (M2, engine-driven) --------------------------
+  // Turn indices not yet sent to the model live in state (they render);
+  // clock state lives in the meeting engine (meeting-engine.ts) — one
+  // boundary for when a generation may fire, unit-tested without a DOM.
   const [extractQueued, setExtractQueued] = useState(0);
-  const extractInFlight = useRef(false);
-  const lastExtractAtRef = useRef<number | null>(null);
-  const lastFinalAtRef = useRef<number | null>(null);
+  const engineRef = useRef(createMeetingEngine());
   const [lastExtractStatus, setLastExtractStatus] = useState<string | null>(null);
+  // M6.1: spoken answers (text). Session-local, never stored — answers are
+  // reads, not minutes. One in flight at a time; a question arriving while
+  // busy waits for the next trigger rather than overlapping speech.
+  const [voiceAnswers, setVoiceAnswers] = useState<VoiceAnswer[]>([]);
+  const answerInFlight = useRef(false);
+  // M6.2: server/local speech for answers. Session-local mute; the playback
+  // ref lets stopRecording (and the next answer) cancel audio in flight —
+  // the turn-taking basis V8 builds on.
+  const [voiceMuted, setVoiceMuted] = useState(false);
+  const playbackRef = useRef<{ stop(): void } | null>(null);
+  // Fresh-closure trap: answers fire long after startRecording built the
+  // callback, so the mute flag is mirrored into a ref read at answer time.
+  const voiceMutedRef = useRef(false);
+  voiceMutedRef.current = voiceMuted;
   // The server-side transcript for the RUNNING meeting: created at recording
   // start, appended-to at each extraction checkpoint, ended on stop.
   const [liveMeetingId, setLiveMeetingId] = useState<string | null>(null);
@@ -154,6 +189,12 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
   // Render-local — the saved transcript is never rewritten — and spliced
   // into extraction prompts as "── topic break ──" lines.
   const [topicBreaks, setTopicBreaks] = useState<number[]>([]);
+
+  // Phase D: the behavior profile. Sanitized at the use site (stored
+  // settings predate the field and may hold anything); the capture loop
+  // reads only the effective behavior, the UI shows the selected mode.
+  const selectedMode = isMeetingMode(settings.meetingMode) ? settings.meetingMode : "intelligence";
+  const extracts = modeAllowsExtraction(selectedMode);
 
   const voiceSupported = isAnyVoiceSupported();
   const livekitConfigured = settings.livekitTokenUrl.trim().length > 0;
@@ -223,7 +264,44 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
       tokenUrl: settings.livekitTokenUrl,
       room: settings.livekitRoom,
     });
-    const session = provider.start({
+    // M6.1: the text voice loop. Addressed turns in the assistant profiles
+    // ask the board through the read-only pipeline and render the answer
+    // below the transcript. One at a time; anything else is surfaced, never
+    // silently dropped into overlap.
+    const maybeAnswerVoice = (text: string): Promise<void> => {
+      if (!shouldAnswerVoice(selectedMode, text)) return Promise.resolve();
+      if (!boardId) {
+        notify("Share the board first — voice answers read a shared board.");
+        return Promise.resolve();
+      }
+      if (answerInFlight.current) {
+        notify("Lucent is answering — one spoken question at a time.");
+        return Promise.resolve();
+      }
+      answerInFlight.current = true;
+      return (async () => {
+        try {
+          const question = text.trim();
+          const result = await askLucent(boardId, question);
+          const card = voiceAnswerCard(question, result);
+          setVoiceAnswers((prev) => [...prev, card]);
+          // M6.2: read the answer aloud unless muted. Errors stay text —
+          // speaking a paywall would be theater, and speaking nothing is.
+          if (!voiceMutedRef.current && !card.error && card.answer !== "") {
+            playbackRef.current?.stop();
+            const spoken = await speakAnswer(card.answer);
+            playbackRef.current = spoken.playback;
+            if (spoken.reason) notify(`Voice: ${spoken.reason}`);
+          }
+        } finally {
+          answerInFlight.current = false;
+        }
+      })();
+    };
+    // One callbacks object feeding both surfaces: providers that speak
+    // events go through it (final → onFinal below), so the stream and the
+    // legacy path append byte-identical turns.
+    const voiceCallbacks: VoiceHandlers = {
       onStart: () => setRecording(true),
       onInterim: () => {
         // Interim text is display-only here; the durable record is finals.
@@ -231,12 +309,12 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
       onFinal: (text, meta) => {
         const t = text.trim();
         if (!t) return;
-        lastFinalAtRef.current = Date.now();
+        engineRef.current.noteFinal(Date.now());
         appendTurn({
-          // The provider tells us who spoke when it can (LiveKit segments
-          // carry the room identity, the hosted provider the sidecar's
-          // speaker labels; the browser provider has no concept and "You"
-          // is the honest fallback rather than a fake guess).
+          // Display precedence (events.ts ladder), not an identity claim:
+          // a diarized label shows opaquely, a stream identity shows as
+          // minted, and "You"/"Speaker" is the honest fallback rather than
+          // a fake guess.
           speaker:
             meta?.speaker ??
             (provider.id === "livekit" || provider.id === "hosted" ? "Speaker" : "You"),
@@ -245,12 +323,19 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
           kind: classifyTurn(t),
         });
         // Queue the turn for the live extraction loop — the trigger effect
-        // decides when the batch is worth a model call.
-        setExtractQueued((q) => q + 1);
+        // decides when the batch is worth a model call. Record mode never
+        // queues: a Record meeting that burns a generation is a clause-4
+        // defect, so the refusal lives here, one call above the send.
+        if (extracts) setExtractQueued((q) => q + 1);
         // P1-MT-001: checkpoint the CAPTURED turn immediately — durability of
         // what was said must not depend on the extraction loop deciding a
         // batch is worth a model call, or on an extraction succeeding at all.
         void checkpointTurns();
+        // M6.1: an addressed turn in an assistant profile gets a text answer
+        // through the read-only Ask pipeline (never a board write). The mode
+        // is captured at recording start, like the STT provider: switching
+        // profiles mid-capture takes effect on the next capture.
+        void maybeAnswerVoice(t);
       },
       onStatus: (s) => {
         if (s === "transcribing") notify("Transcribing on device…");
@@ -260,7 +345,31 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
         setRecording(false);
         if (msg) notify(msg);
       },
-    });
+    };
+    // The event stream is the primitive; callbacks are derived. Interim
+    // events never reach onFinal (the bridge is structurally silent on
+    // them), which is what keeps live captions out of durable turns.
+    // V8 (chunk cadence): a new capture silences in-flight answers — human
+    // speech outranks Lucent. Per-utterance barge-in needs VAD onset
+    // events the chunk transport cannot produce; until the V8 transport
+    // lands, capture-start yield is the honest form of interruption.
+    const session = provider.startWithEvents
+      ? provider.startWithEvents({
+          onEvent: (event) => {
+            if (event.type === "speech_started") {
+              playbackRef.current?.stop();
+              playbackRef.current = null;
+              return;
+            }
+            if (event.type !== "final") return;
+            const speaker = event.speakerId ?? event.participantId;
+            voiceCallbacks.onFinal(event.text, speaker === undefined ? undefined : { speaker });
+          },
+          onStart: voiceCallbacks.onStart,
+          onError: voiceCallbacks.onError,
+          onStatus: voiceCallbacks.onStatus,
+        })
+      : provider.start(voiceCallbacks);
     if (session) {
       voiceRef.current = session;
       setStartedAt(Date.now());
@@ -268,11 +377,14 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
       // prior meetings.
       turnsRef.current = [];
       setTurns([]);
+      setVoiceAnswers([]);
       persistedCountRef.current = 0;
       setExtractQueued(0);
       setLastExtractStatus(null);
-      lastFinalAtRef.current = null;
-      lastExtractAtRef.current = null;
+      // Fresh capture resets the engine clock — including a stuck in-flight
+      // flag, which the old refs carried across restarts and wedged the
+      // loop with. Reset-on-start recovers by construction.
+      engineRef.current.reset();
       setRecording(true);
       // Open the server-side transcript NOW with an empty turn list: every
       // captured final checkpoints into it the moment it lands, so everything
@@ -283,6 +395,7 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
           const stored = await saveMeeting(boardId, {
             turns: [],
             startedAt: Date.now(),
+            mode: selectedMode,
           });
           if (stored) {
             liveMeetingIdRef.current = stored.id;
@@ -296,6 +409,10 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
   const stopRecording = (): void => {
     voiceRef.current?.stop();
     voiceRef.current = null;
+    // M6.2: a stopped meeting stops talking — cancel audio in flight so no
+    // answer outlives the capture it answered.
+    playbackRef.current?.stop();
+    playbackRef.current = null;
     setRecording(false);
     // End the running transcript (Stage C3 + P1-MT-001): flush every captured
     // turn the checkpoint pipeline hasn't confirmed BEFORE the end route makes
@@ -325,6 +442,7 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
           turns: captured,
           startedAt: startedAt ?? Date.now(),
           endedAt: Date.now(),
+          mode: selectedMode,
         });
         if (stored) {
           setSaved((prev) => [stored, ...prev]);
@@ -344,7 +462,7 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
     setLiveMeetingTurnCount(0);
   };
 
-  // ---- The live extraction loop (M2) ----------------------------------------
+  // ---- The live extraction loop (M2), driven by the meeting engine -----
   // While recording, new finals accumulate. On the hybrid trigger (enough new
   // turns + a speaking pause, or a burst, or overdue — see meeting-extract.ts)
   // the NEW turns go to the model with a differential prompt: the board already
@@ -359,16 +477,19 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
   // stopRecording ends it.
   //
   // One generation in flight at a time: the trigger effect re-checks when the
-  // flight ends and the queue still holds unextracted turns.
-  const pendingTurns = turns.slice(Math.max(0, turns.length - extractQueued));
+  // flight ends and the queue still holds unextracted turns. Clock state
+  // lives in the engine (meeting-engine.ts), not in refs here — the view
+  // owns React state, the engine owns timing.
+  const { batch: pendingTurns, batchStart } = sliceBatch(turns, extractQueued);
   const runExtraction = async (): Promise<void> => {
-    if (extractInFlight.current || pendingTurns.length === 0) return;
-    extractInFlight.current = true;
+    // Defense in depth behind the trigger gate: extraction without the
+    // profile's permission is a spend bug, never a feature.
+    if (!extracts) return;
+    if (pendingTurns.length === 0 || engineRef.current.state.inFlight) return;
+    engineRef.current.markFired();
     const batch = pendingTurns;
     const prompt = differentialPrompt(batch);
-    const batchStart = Math.max(0, turns.length - extractQueued);
     setExtractQueued((q) => Math.max(0, q - batch.length));
-    lastExtractAtRef.current = Date.now();
     try {
       // send() runs the full pipeline and now reports its terminal state
       // (P1-MT-002): applied / proposed / answered / rejected / failed /
@@ -391,64 +512,29 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
         },
       });
       const n = batch.length;
-      switch (result.outcome) {
-        case "applied":
-          setLastExtractStatus(`Applied ${n === 1 ? "1 new turn" : `${n} new turns`} to the board`);
-          break;
-        case "proposed":
-          setLastExtractStatus(
-            `Extracted ${n === 1 ? "1 turn" : `${n} turns`} — review the ${result.ops} proposed changes on the canvas`,
-          );
-          break;
-        case "answered":
-          setLastExtractStatus(
-            `Extracted ${n === 1 ? "1 turn" : `${n} turns`} — no board changes were needed`,
-          );
-          break;
-        case "rejected":
-          setLastExtractStatus(
-            `Extraction refused — ${n} turn${n === 1 ? "" : "s"} left in the transcript, nothing was changed`,
-          );
-          break;
-        case "busy":
-          // Another generation holds the pipeline; the turns stay queued.
-          setExtractQueued((q) => q + n);
-          setLastExtractStatus(`Extraction waiting — another request is running`);
-          break;
-        case "refused":
-          setLastExtractStatus(`Extraction refused — this board is read-only for you`);
-          break;
-        case "failed":
-          // Transport/provider failure: retry on the next trigger arm rather
-          // than losing the batch behind a "handled" status.
-          setExtractQueued((q) => q + n);
-          setLastExtractStatus(`Extraction failed: ${result.error} — will retry`);
-          break;
-        case "cancelled":
-          setLastExtractStatus(`Extraction cancelled — nothing was applied`);
-          break;
-      }
+      setExtractQueued((q) => applyExtractOutcome(q, n, result.outcome));
+      setLastExtractStatus(
+        extractStatusMessage(result.outcome, n, {
+          ...(result.outcome === "proposed" ? { ops: result.ops } : {}),
+          ...(result.outcome === "failed" ? { error: result.error } : {}),
+        }),
+      );
     } catch (err) {
       // send() itself catches and reports into chat; this arm guards a
       // failure in OUR plumbing around it. Re-queue, same as a failed send.
       setExtractQueued((q) => q + batch.length);
       setLastExtractStatus(`Extraction failed: ${(err as Error).message} — will retry`);
     } finally {
-      extractInFlight.current = false;
+      engineRef.current.markDone();
     }
   };
 
   // Trigger check: on every new final and on a timer (the silence + overdue
-  // arms need time to fire even when no more speech arrives).
+  // arms need time to fire even when no more speech arrives). The engine
+  // owns the timing decision; the view only asks.
   useEffect(() => {
-    if (!recording || extractInFlight.current) return;
-    const msSinceLastFinal = lastFinalAtRef.current
-      ? Date.now() - lastFinalAtRef.current
-      : Infinity;
-    const msSinceLastExtract = lastExtractAtRef.current
-      ? Date.now() - lastExtractAtRef.current
-      : Infinity;
-    if (shouldExtract(pendingTurns.length, msSinceLastFinal, msSinceLastExtract)) {
+    if (!recording) return;
+    if (engineRef.current.shouldFire(pendingTurns.length)) {
       void runExtraction();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -457,14 +543,7 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
   useEffect(() => {
     if (!recording) return;
     const tick = setInterval(() => {
-      if (extractInFlight.current) return;
-      const msSinceLastFinal = lastFinalAtRef.current
-        ? Date.now() - lastFinalAtRef.current
-        : Infinity;
-      const msSinceLastExtract = lastExtractAtRef.current
-        ? Date.now() - lastExtractAtRef.current
-        : Infinity;
-      if (shouldExtract(pendingTurns.length, msSinceLastFinal, msSinceLastExtract)) {
+      if (engineRef.current.shouldFire(pendingTurns.length)) {
         void runExtraction();
       }
     }, 3_000);
@@ -486,6 +565,7 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
       turns,
       startedAt: startedAt ?? Date.now(),
       endedAt: Date.now(),
+      mode: selectedMode,
     });
     setSaving(false);
     if (!stored) {
@@ -511,14 +591,23 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
 
   const shown = selectedMeeting;
   const displayTurns = shown ? shown.turns : turns;
+  // V9 (M6.4), first proactive surface: the board's open questions, shown
+  // only in Participant mode and only while capturing live. Text panel,
+  // never speech — nothing here speaks unprompted (docs/25 §V9).
+  const openQuestions = useMemo(
+    () =>
+      selectedMode === "participant" && !shown
+        ? openBoardQuestions(workspace)
+        : { items: [], total: 0 },
+    [selectedMode, shown, workspace],
+  );
   // Topic breaks index into the displayed transcript — switching transcripts
   // would misalign them, so they reset with the view.
   const shownId = shown?.id ?? null;
   useEffect(() => {
     setTopicBreaks([]);
   }, [shownId]);
-  // Reverse provenance (Stage C3): which board objects each turn of the
-  // SELECTED meeting produced. Computed from the workspace this browser
+  // Reverse provenance (Stage C3): which board objects each turn of the  // SELECTED meeting produced. Computed from the workspace this browser
   // already holds — C2 put provenance in the state, so no server call is
   // needed. Live capture shows none: its turns are still flowing and the
   // affordance belongs to the closed record.
@@ -674,6 +763,24 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
                   Stop
                 </button>
               )}
+              {(selectedMode === "assistant" || selectedMode === "participant") && (
+                <button
+                  className="btn"
+                  title={
+                    voiceMuted ? "Unmute Lucent's spoken answers" : "Mute Lucent's spoken answers"
+                  }
+                  aria-pressed={!voiceMuted}
+                  onClick={() => {
+                    if (!voiceMuted) {
+                      playbackRef.current?.stop();
+                      playbackRef.current = null;
+                    }
+                    setVoiceMuted((m) => !m);
+                  }}
+                >
+                  {voiceMuted ? "Unmute voice" : "Mute voice"}
+                </button>
+              )}
               {!shown && turns.length > 0 && (
                 <button className="btn primary" onClick={() => void onSave()} disabled={saving}>
                   {saving ? "Saving…" : "Save meeting"}
@@ -705,6 +812,31 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
               Local STT labels every line "You". Configure LiveKit in Settings for per-speaker
               identity, or Hosted for server-side diarisation.
             </p>
+          )}
+
+          {/* Phase D: behavior profile. Capture + checkpoint always run; the
+              profile decides whether the extraction loop may spend. Assistant
+              and Participant degrade to Intelligence, disclosed, until M6. */}
+          {!recording && (
+            <div style={{ marginTop: 8 }}>
+              <div className="segmented" role="radiogroup" aria-label="Meeting mode">
+                {MEETING_MODES.map((mode) => (
+                  <button
+                    key={mode}
+                    className={selectedMode === mode ? "active" : ""}
+                    aria-pressed={selectedMode === mode}
+                    title={MODE_NOTES[mode]}
+                    onClick={() => setSettings({ meetingMode: mode })}
+                  >
+                    {MODE_LABELS[mode]}
+                    {(mode === "assistant" || mode === "participant") && " · soon"}
+                  </button>
+                ))}
+              </div>
+              <p className="mono small" style={{ color: "var(--ink-3)", margin: "4px 0 0" }}>
+                {MODE_NOTES[selectedMode]}
+              </p>
+            </div>
           )}
 
           <div className="meeting-turns">
@@ -879,6 +1011,36 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
               >
                 ── topic break ──
               </button>
+            )}
+            {/* M6.1: spoken answers, session-local. Text only for now —
+                voice audio arrives with M6.2; citations render as labels,
+                with jumps following the C1 plumbing later. */}
+            {!shown &&
+              voiceAnswers.map((a) => (
+                <div key={a.id} className="meeting-turn meeting-answer">
+                  <span className="mono small meeting-turn-speaker">✦ Lucent</span>
+                  <span style={{ flex: 1, fontSize: 13.5, color: "var(--ink-1)" }}>
+                    {a.error ? `Couldn't answer: ${a.error}` : a.answer}
+                  </span>
+                  {a.citations.length > 0 && (
+                    <span className="mono" style={{ fontSize: 10, color: "var(--ink-3)" }}>
+                      {a.citations.join(" · ")}
+                    </span>
+                  )}
+                </div>
+              ))}
+            {/* V9: open questions, participant mode only. Derived live from
+                the                 board each render — no store, no speech, dismissed by
+                leaving the profile. */}
+            {!shown && openQuestions.total > 0 && (
+              <div className="meeting-turn meeting-questions">
+                <span className="mono small meeting-turn-speaker">? Open</span>
+                <span style={{ flex: 1, fontSize: 13.5, color: "var(--ink-1)" }}>
+                  {openQuestions.items.map((q) => q.label).join(" · ")}
+                  {openQuestions.total > openQuestions.items.length &&
+                    ` (+${openQuestions.total - openQuestions.items.length} more)`}
+                </span>
+              </div>
             )}
           </div>
         </div>

@@ -18,7 +18,7 @@ import type { RegisterRoutes } from "./context.js";
  * through it by design, as everywhere else.
  */
 export const registerMeetingRoutes: RegisterRoutes = (router, s) => {
-  const { send, requireBoardRole, readBody, meetings, orgPolicy } = s;
+  const { send, requireBoardRole, readBody, meetings, orgPolicy, meetingConnectors } = s;
 
   router.post("/api/boards/:id/meetings", async (ctx) => {
     const { req, res } = ctx;
@@ -45,6 +45,7 @@ export const registerMeetingRoutes: RegisterRoutes = (router, s) => {
       turns?: unknown;
       startedAt?: unknown;
       endedAt?: unknown;
+      mode?: unknown;
     };
     try {
       const raw = await readBody(req);
@@ -65,10 +66,17 @@ export const registerMeetingRoutes: RegisterRoutes = (router, s) => {
 
     // Imported here rather than module scope so this route file needs no
     // runtime dependency on the meetings domain beyond the store interface.
-    const { validateTurns } = await import("../meetings.js");
+    const { validateTurns, validateMeetingMode } = await import("../meetings.js");
     const checked = validateTurns(body.turns);
     if (!checked.ok) {
       send(res, 400, { error: checked.error });
+      return;
+    }
+    // docs/24 Phase D: the capture profile rides the save (absent on older
+    // clients); a typo is a named 400, never a fifth mode.
+    const modeChecked = validateMeetingMode(body.mode);
+    if (!modeChecked.ok) {
+      send(res, 400, { error: modeChecked.error });
       return;
     }
 
@@ -78,6 +86,7 @@ export const registerMeetingRoutes: RegisterRoutes = (router, s) => {
       startedAt,
       endedAt,
       turns: checked.turns,
+      ...(modeChecked.mode !== undefined ? { mode: modeChecked.mode } : {}),
       createdBy: guard.user.id,
       createdAt: Date.now(),
     });
@@ -211,5 +220,87 @@ export const registerMeetingRoutes: RegisterRoutes = (router, s) => {
       return;
     }
     send(res, 200, row);
+  });
+
+  // External import (docs/24 Phase E, docs/25 V3): a Zoom/Meet/Teams
+  // transcript lands as turns in the same store. Editor floor — importing
+  // minutes is a write about what was said, the same judgment a manual
+  // save gets — and the org's recording policy governs it, because capture
+  // from outside is still capture. The connector's only job is turns; the
+  // route validates before anything persists, and the saved row carries no
+  // mode (imported, not captured under a profile).
+  router.post("/api/boards/:id/meetings/import", async (ctx) => {
+    const { req, res } = ctx;
+    const boardId = ctx.param("id");
+    const guard = await requireBoardRole(
+      req,
+      res,
+      boardId,
+      "editor",
+      "/api/boards/:id/meetings/import",
+    );
+    if (!guard.ok) return;
+    if ((await orgPolicy(guard.board.orgId)).recordingDisabled) {
+      send(res, 403, {
+        error: "this organization's policy disables meeting capture for every board",
+        recordingDisabled: true,
+      });
+      return;
+    }
+    if (!meetings) return send(res, 503, { error: "meeting transcripts are not configured" });
+
+    let body: { source?: unknown; ref?: unknown; credential?: unknown };
+    try {
+      const raw = await readBody(req);
+      body = raw ? (JSON.parse(raw) as typeof body) : {};
+    } catch (err) {
+      send(res, 400, { error: "bad request", detail: (err as Error).message });
+      return;
+    }
+    const source =
+      typeof body.source === "string" ? meetingConnectors.sources.get(body.source) : undefined;
+    if (!source) {
+      send(res, 400, {
+        error: `unknown meeting source (available: ${[...meetingConnectors.sources.keys()].join(", ") || "none"})`,
+      });
+      return;
+    }
+    const ref = body.ref as { id?: unknown; title?: unknown } | undefined;
+    if (!ref || typeof ref.id !== "string" || ref.id.trim() === "") {
+      send(res, 400, { error: "ref.id must be a non-empty string" });
+      return;
+    }
+    const credential =
+      typeof body.credential === "string" && body.credential !== "" ? body.credential : undefined;
+
+    const { validateTurns } = await import("../meetings.js");
+    let fetched: { turns: unknown; title?: string };
+    try {
+      fetched = await source.fetchTranscript(
+        {
+          id: ref.id,
+          ...(typeof ref.title === "string" && ref.title !== "" ? { title: ref.title } : {}),
+        },
+        credential,
+      );
+    } catch (err) {
+      send(res, 502, { error: "meeting source failed", detail: (err as Error).message });
+      return;
+    }
+    const checked = validateTurns(fetched.turns);
+    if (!checked.ok) {
+      send(res, 502, { error: "meeting source returned unusable turns", detail: checked.error });
+      return;
+    }
+    const saved = await meetings.insert({
+      boardId,
+      orgId: guard.board.orgId,
+      startedAt: Date.now(),
+      endedAt: Date.now(),
+      turns: checked.turns,
+      createdBy: guard.user.id,
+      createdAt: Date.now(),
+    });
+    send(res, 201, { ...saved, source: source.name });
   });
 };

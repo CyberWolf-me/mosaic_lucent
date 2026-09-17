@@ -1,4 +1,5 @@
 import type { SttProvider, VoiceHandlers, VoiceSession } from "./types.js";
+import { eventConsumerFromCallbacks, type VoiceEventHandlers } from "./events.js";
 
 /**
  * On-device Whisper via transformers.js. Free, private, works in any browser
@@ -61,6 +62,11 @@ export const whisperSttProvider: SttProvider = {
     typeof navigator !== "undefined" &&
     Boolean(navigator.mediaDevices?.getUserMedia),
   start(handlers: VoiceHandlers): VoiceSession | null {
+    const withEvents = this.startWithEvents;
+    if (!withEvents) return null;
+    return withEvents.call(this, eventConsumerFromCallbacks(handlers));
+  },
+  startWithEvents(handlers: VoiceEventHandlers): VoiceSession | null {
     if (!this.isSupported()) {
       handlers.onError?.(
         "On-device voice needs MediaRecorder + microphone support, which this browser lacks.",
@@ -99,7 +105,10 @@ export const whisperSttProvider: SttProvider = {
             const { text } = await transcribe(pcm);
             handlers.onStatus?.("idle");
             const clean = text.trim();
-            if (clean) handlers.onFinal(clean);
+            // The only final this provider ever emits: on-device Whisper has
+            // no speaker concept and no timing, so the event is text + source.
+            if (clean)
+              handlers.onEvent({ type: "final", text: clean, at: Date.now(), source: "whisper" });
             else handlers.onError?.("Didn't catch any speech — try again.");
           } catch (err) {
             handlers.onStatus?.("idle");
@@ -109,6 +118,7 @@ export const whisperSttProvider: SttProvider = {
           }
         };
         recorder.start();
+        handlers.onEvent({ type: "speech_started", at: Date.now() });
         handlers.onStart?.();
         handlers.onStatus?.("listening");
       })
@@ -121,6 +131,7 @@ export const whisperSttProvider: SttProvider = {
     return {
       stop: () => {
         stopped = true;
+        handlers.onEvent({ type: "speech_stopped", at: Date.now() });
         try {
           if (recorder && recorder.state !== "inactive") recorder.stop();
           else stream?.getTracks().forEach((t) => t.stop());

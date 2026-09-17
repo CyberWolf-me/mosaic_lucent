@@ -1,4 +1,7 @@
 import type { Job } from "./jobs.js";
+import { effectiveSettings } from "./classification.js";
+import type { StoredOrg } from "./orgs.js";
+import type { MeetingStore } from "./meetings.js";
 
 /**
  * The sweep handlers (docs/20 P3, advisory §9).
@@ -47,6 +50,10 @@ export interface SweepContext {
     pruneJobs: (olderThanMs: number) => Promise<number>;
     pruneOutbox: (olderThanMs: number) => Promise<number>;
     pruneUsage: () => Promise<void> | void;
+  };
+  /** Transcript retention (docs/24 Phase H): org enumeration + expiry delete. */
+  retention?: {
+    sweepTranscripts: () => Promise<{ orgsChecked: number; transcriptsDeleted: number }>;
   };
 }
 
@@ -108,5 +115,46 @@ export function buildSweepHandlers(ctx: SweepContext): Record<string, (job: Job)
       if (!ctx.maintenance) return;
       await ctx.maintenance.pruneUsage();
     },
+
+    async "sweep-retention"(): Promise<void> {
+      if (!ctx.retention) return;
+      const { orgsChecked, transcriptsDeleted } = await ctx.retention.sweepTranscripts();
+      if (transcriptsDeleted > 0) {
+        ctx.logger.info("retention.swept-transcripts", { orgsChecked, transcriptsDeleted });
+      }
+    },
   };
+}
+
+/**
+ * Delete per-org expired transcripts (docs/24 Phase H). One pass: every org
+ * whose retention policy names a transcript lifetime loses the ended
+ * transcripts older than it, oldest first, bounded per org. Orgs without a
+ * policy are not even read for deletion — absence means board lifetime, and
+ * the sweep must never invent work for them. Running captures are immune by
+ * construction (`deleteExpired` only sees ended rows), so a policy turned
+ * on mid-meeting strands nothing.
+ */
+export async function sweepRetentionTranscripts(deps: {
+  orgs: { list(): Promise<StoredOrg[]> };
+  meetings: MeetingStore;
+  now?: () => number;
+  batch?: number;
+}): Promise<{ orgsChecked: number; transcriptsDeleted: number }> {
+  const now = deps.now ?? Date.now;
+  const batch = deps.batch ?? 100;
+  const at = now();
+  let orgsChecked = 0;
+  let transcriptsDeleted = 0;
+  for (const org of await deps.orgs.list()) {
+    const days = effectiveSettings(org).retention.transcriptDays;
+    if (days === null) continue;
+    orgsChecked += 1;
+    transcriptsDeleted += await deps.meetings.deleteExpired(
+      org.id,
+      at - days * 24 * 60 * 60 * 1000,
+      batch,
+    );
+  }
+  return { orgsChecked, transcriptsDeleted };
 }

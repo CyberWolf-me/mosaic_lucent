@@ -629,6 +629,13 @@ ELK/dagre.
       limits, close-metering), client slot suite (5: finals, 503/403
       messages, mic-less, registry). No vendor live-verified — the sidecar
       contract ships against a stub, Deepgram/OpenAI adapters follow.
+- [x] SpeechEvent primitive (V1b): `speech_started`/`interim`/`final`/
+      `speech_stopped` with `participantId` vs `speakerId` kept distinct
+      (display ladder, never an identity claim), timing/provenance fields
+      from day one, one bridge deriving callbacks, flush-then-stopped order
+      uniform across all four providers, interim structurally barred from
+      durability. MeetingView on the stream, CanvasView untouched
+      (`test/stt-events.test.ts`: bridge, per-provider sequences).
 - [ ] Not this slice: TTS, response policy, voice loop (V4/M6), modes (V2),
       connectors (V3) — still gated per docs/25 §5.
 
@@ -2165,3 +2172,43 @@ The nine-phase plan, executed against the benchmark:
       failures; typecheck green.
 - [ ] Not this phase: S4/S5 (residency, at-rest encryption, retention-as-policy)
       and the web board-tier picker (open since Phase A).
+
+## A–H completion + V4–V9 honest form (2026-09-16, owner build orders, docs/17 amendment)
+
+- [x] **D/V2 modes**: `meeting-modes.ts` (Record burns zero — refusal one
+      call above the send; Assistant/Participant degrade disclosed);
+      profile persisted on transcripts (migration 0030, strict 400, absent
+      on old rows); picker + note in MeetingView (`meeting-modes.test.ts`).
+- [x] **E/V3 connectors**: `meetingConnectors.ts` seam (turns-only
+      convergence, per-request credentials never stored) + mock source +
+      `POST .../meetings/import` (editor floor, recording policy, strict
+      validation, 502s loud); deliberately not the ops-approval queue
+      (minutes, not mutations). Vendors + attendee grant plug into the
+      interface.
+- [x] **G decisions (S4)**: platform disk/SSE posture, in-app layer
+      declined with rationale (ADR 0024), single-region operator-pinned
+      residency; per-org pinning + DPA need counsel and stay open.
+- [x] **H retention (S5)**: org `retention.transcriptDays` (strict,
+      audited, huskless clear) + hourly `sweep-retention` (ended-only,
+      org-scoped — the suite caught a cross-org delete pre-ship — running
+      immune, garbage keeps). Audio never stored; intelligence dies with
+      its board.
+- [x] **V1b events**: SpeechEvent primitive, one bridge, distinct identity
+      fields, timing/provenance day one, interim structurally barred from
+      durability, flush-then-stopped uniform (`stt-events.test.ts`).
+- [x] **V4 engine**: clock state out of view refs, same trigger/batches/
+      strings (`meeting-engine.test.ts`; meeting suites observe no change).
+- [x] **V5 VAD-1**: sidecar `speech` verdict parsed/forwarded (garbage →
+      null); continuous onset awaits the V8 transport, marked in code.
+- [x] **V6 text loop**: address detection (invocation, not mention) +
+      mode permission + Ask answers as session cards, one at a time
+      (`meeting-voice.test.ts`).
+- [x] **V7 TTS**: seam (local default + server proxy), `POST /api/tts/speak`
+      (503 standby, `serverTts` policy as `policy:tts`, floored voice-minute
+      metering, 502s never bill), answers read aloud unless muted,
+      cancelled on stop (`tts.test.ts` ×2).
+- [x] **V8/V9 honest form**: capture-start yield + cancel paths; response-
+      policy table; open-questions text panel in Participant mode. Nothing
+      speaks unprompted; per-utterance barge-in + vendor adapters stay open.
+- [ ] Still gated: proactive speech, vendor STT/TTS adapters, continuous
+      transport, counsel artifacts, board-tier picker.

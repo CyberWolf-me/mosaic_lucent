@@ -129,6 +129,12 @@ export interface OrgStore {
   // Orgs
   insert(org: StoredOrg): Promise<void>;
   get(orgId: string): Promise<StoredOrg | undefined>;
+  /**
+   * Every org, for the maintenance sweep (docs/24 Phase H reads each org's
+   * retention policy). No paging: org count grows with customers, not with
+   * usage, and the sweep batches deletions per org.
+   */
+  list(): Promise<StoredOrg[]>;
   /** Personal-org id for a user, created lazily on first need. */
   ensurePersonal(userId: string, displayName: string, now: number): Promise<StoredOrg>;
   rename(orgId: string, name: string): Promise<void>;
@@ -312,6 +318,10 @@ export class InMemoryOrgStore implements OrgStore {
     return this.orgs.get(orgId);
   }
 
+  async list(): Promise<StoredOrg[]> {
+    return [...this.orgs.values()];
+  }
+
   async ensurePersonal(userId: string, displayName: string, now: number): Promise<StoredOrg> {
     const id = personalOrgId(userId);
     const existing = this.orgs.get(id);
@@ -468,6 +478,11 @@ export class PostgresOrgStore implements OrgStore {
       .where(eq(organizations.id, orgId))
       .limit(1);
     return rows[0] && rowToStoredOrg(rows[0]);
+  }
+
+  async list(): Promise<StoredOrg[]> {
+    const rows = await this.target.db.select().from(organizations);
+    return rows.map((r) => rowToStoredOrg(r));
   }
 
   async ensurePersonal(userId: string, displayName: string, now: number): Promise<StoredOrg> {

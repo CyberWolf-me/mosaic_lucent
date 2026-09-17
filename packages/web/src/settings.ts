@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import type { SttProviderId } from "./stt/index.js";
+import type { MeetingMode } from "./meeting-modes.js";
 
 export type { SttProviderId };
+export type { MeetingMode };
 
 /**
  * Global settings store persisted to localStorage, ported from the reference
@@ -26,6 +28,8 @@ export interface Settings {
   activityIndicators: boolean;
   /** Which speech-to-text engine the mic uses (docs/06). */
   sttProvider: SttProviderId;
+  /** Meeting behavior profile (docs/24 Phase D). Validated at the use site. */
+  meetingMode: MeetingMode;
   /** LiveKit room URL (wss://…). Empty means LiveKit is not configured. */
   livekitUrl: string;
   /**
@@ -52,6 +56,7 @@ export const DEFAULT_SETTINGS: Settings = {
   autosave: true,
   activityIndicators: true,
   sttProvider: "browser",
+  meetingMode: "intelligence",
   livekitUrl: "",
   livekitTokenUrl: "",
   livekitRoom: "lucent-voice",

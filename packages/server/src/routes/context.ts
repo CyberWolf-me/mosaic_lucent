@@ -16,6 +16,7 @@ import type { MeetingStore } from "../meetings.js";
 import type { Operation } from "@lucent/core";
 import type { TicketStore } from "../realtimeTicket.js";
 import type { SttService, SttSessionRegistry } from "../stt.js";
+import type { TtsService } from "../tts.js";
 import type { Telemetry } from "../telemetry.js";
 import type { UsageLimits, UsageTracker } from "../usage.js";
 import type { UsageKind, UsageStore } from "../usageStore.js";
@@ -76,6 +77,11 @@ export interface RouteServices {
    * routes only.
    */
   readonly sttSessions: SttSessionRegistry;
+  /**
+   * docs/25 V7: server voice synthesis. Always present — unconfigured
+   * deployments get the standby mock and the route answers 503.
+   */
+  readonly tts: TtsService;
 
   /**
    * The shared auth context: stores, the session-cookie shape, the mailer and
@@ -93,6 +99,12 @@ export interface RouteServices {
   readonly usageStore: UsageStore | undefined;
   /** E3/R3: meeting transcripts; undefined → the meetings routes answer 503. */
   readonly meetings: MeetingStore | undefined;
+  /**
+   * docs/24 Phase E: external meeting connectors (Zoom/Meet/Teams → turns).
+   * The registry always carries at least the mock source; vendor adapters
+   * register against the same interface with per-request credentials.
+   */
+  readonly meetingConnectors: import("../meetingConnectors.js").MeetingConnectorRegistry;
   /** Stage B3: review-gate proposals; undefined → the proposal routes answer 503. */
   readonly proposals: import("../proposals.js").ProposalStore | undefined;
   /** F1: SSO connections + domain claims; undefined → the SSO routes answer 503. */
@@ -248,6 +260,16 @@ export interface RouteServices {
    * `orgId` may be undefined (auth-off deployments): no org, no org policy.
    */
   sttGate(
+    req: IncomingMessage,
+    res: ServerResponse,
+    orgId: string | undefined,
+    route: string,
+  ): Promise<boolean>;
+  /**
+   * docs/25 V7: the server-voice gate (`policy:tts`). Same shape as
+   * `sttGate`, for the synthesis egress.
+   */
+  ttsGate(
     req: IncomingMessage,
     res: ServerResponse,
     orgId: string | undefined,

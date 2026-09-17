@@ -518,6 +518,8 @@ const { server, realtime } = createApp({
   // docs/25 V1: server-hosted diarizing STT. Key + URL mean a live sidecar;
   // anything less is the standby mock and the STT routes answer 503.
   stt: (await import("./stt.js")).selectSttService(process.env),
+  // docs/25 V7: server voice synthesis. Same doctrine as STT.
+  tts: (await import("./tts.js")).selectTtsService(process.env),
   userStore: stores.userStore,
   boardStore: stores.boardStore,
   // M1: wire the session store alongside the user/board stores. Tests can
@@ -922,6 +924,19 @@ const jobRunner = runsJobs(role)
           usage.prune();
           authLimiter.prune();
           void tickets.prune();
+        },
+        // docs/24 Phase H: per-org transcript retention. No-op without both
+        // stores (family rule: unconfigured work completes, never fails).
+        "sweep-retention": async () => {
+          if (!stores.orgStore || !stores.meetings) return;
+          const { sweepRetentionTranscripts } = await import("./sweeps.js");
+          const { orgsChecked, transcriptsDeleted } = await sweepRetentionTranscripts({
+            orgs: stores.orgStore,
+            meetings: stores.meetings,
+          });
+          if (transcriptsDeleted > 0) {
+            logger.info("retention.swept-transcripts", { orgsChecked, transcriptsDeleted });
+          }
         },
       },
       ...(familiesFor(role, process.env.LUCENT_JOB_FAMILIES)

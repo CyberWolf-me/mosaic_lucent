@@ -28,6 +28,8 @@ export interface MeetingTranscript {
   turns: MeetingTurn[];
   createdBy: string | null;
   createdAt: number;
+  /** Capture profile in force when recorded (docs/24 Phase D); absent on older rows. */
+  mode?: string;
 }
 
 /**
@@ -91,7 +93,7 @@ export function promptFromTranscript(meeting: MeetingTranscript): string {
 /** Save the in-progress capture to the board. Returns the stored transcript or null. */
 export async function saveMeeting(
   boardId: string,
-  input: { turns: MeetingTurn[]; startedAt: number; endedAt?: number | null },
+  input: { turns: MeetingTurn[]; startedAt: number; endedAt?: number | null; mode?: string },
 ): Promise<MeetingTranscript | null> {
   const res = await apiFetch(`/api/boards/${encodeURIComponent(boardId)}/meetings`, {
     method: "POST",

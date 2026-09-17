@@ -92,6 +92,18 @@ export const registerOrgSettingsRoutes: RegisterRoutes = (router, s) => {
       if (sub.mode === undefined && sub.allow === undefined) delete merged.providerPolicy;
       else merged.providerPolicy = sub;
     }
+    // `retention` merges the same way: a transcriptDays-only PATCH preserves
+    // future sibling fields, and a policy cleared back to keep-forever
+    // (`transcriptDays: null`, the only other writable value) is removed as
+    // a field rather than stored as a husk.
+    if (parsed.settings.retention) {
+      const sub: import("../classification.js").OrgRetentionPolicy = {
+        ...before.retention,
+        ...parsed.settings.retention,
+      };
+      if (sub.transcriptDays === null || sub.transcriptDays === undefined) delete merged.retention;
+      else merged.retention = sub;
+    }
     await orgStore.setSettings(id, merged);
 
     // Audit names the CHANGED KEYS with from→to (docs/24 §4 acceptance):
@@ -152,6 +164,7 @@ export const registerOrgSettingsRoutes: RegisterRoutes = (router, s) => {
     send(res, 200, {
       providerPolicy: effective.providerPolicy,
       serverStt: effective.serverSttDisabled ? "disabled" : "allowed",
+      serverTts: effective.serverTtsDisabled ? "disabled" : "allowed",
     });
   });
 };

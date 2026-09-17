@@ -12,6 +12,7 @@ import { Limiter } from "../src/limiter.js";
 import { InMemoryTicketStore } from "../src/realtimeTicket.js";
 import { readConfig } from "../src/config.js";
 import { InMemoryMeetingStore, validateTurns } from "../src/meetings.js";
+import { MockMeetingSource } from "../src/meetingConnectors.js";
 
 /**
  * Board meeting routes (E3 / R3): save/list/read a board's diarised
@@ -37,7 +38,9 @@ interface Harness {
   seedBoard: (token: string, name?: string) => Promise<string>;
 }
 
-async function harness(): Promise<Harness> {
+async function harness(
+  connectors?: import("../src/meetingConnectors.js").MeetingConnectorRegistry,
+): Promise<Harness> {
   const limits = limitsFromEnv();
   const config = { ...readConfig({ LUCENT_REQUIRE_AUTH: "1" }), requireAuth: true };
   const boardStore = new InMemoryBoardStore();
@@ -55,6 +58,7 @@ async function harness(): Promise<Harness> {
     tickets: new InMemoryTicketStore(60_000),
     sessionStore: new InMemorySessionStore(),
     meetings: new InMemoryMeetingStore(),
+    ...(connectors ? { meetingConnectors: connectors } : {}),
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const { port } = server.address() as AddressInfo;
@@ -161,6 +165,39 @@ describe("board meetings routes (E3/R3)", () => {
     });
     expect(res.status).toBe(400);
     expect(res.body.error).toMatch(/speaker/);
+  });
+
+  it("records the capture profile on save; a typo is a named 400, never a fifth mode", async () => {
+    // docs/24 Phase D: the transcript carries how it was captured.
+    h = await harness();
+    const owner = await h.signup("owner-mode@example.com");
+    const boardId = await h.seedBoard(owner.token);
+    const recorded = await h.api(`/api/boards/${boardId}/meetings`, {
+      method: "POST",
+      token: owner.token,
+      body: JSON.stringify({ turns: TURNS, mode: "record" }),
+    });
+    expect(recorded.status).toBe(201);
+    expect(recorded.body.mode).toBe("record");
+    const one = await h.api(`/api/boards/${boardId}/meetings/${recorded.body.id as string}`, {
+      token: owner.token,
+    });
+    expect(one.body.mode).toBe("record");
+    // Pre-profile saves carry no mode — absence, not a value.
+    const plain = await h.api(`/api/boards/${boardId}/meetings`, {
+      method: "POST",
+      token: owner.token,
+      body: JSON.stringify({ turns: TURNS }),
+    });
+    expect(plain.status).toBe(201);
+    expect(plain.body.mode).toBeUndefined();
+    const bad = await h.api(`/api/boards/${boardId}/meetings`, {
+      method: "POST",
+      token: owner.token,
+      body: JSON.stringify({ turns: TURNS, mode: "transcribe" }),
+    });
+    expect(bad.status).toBe(400);
+    expect(bad.body.error).toMatch(/mode must be one of/);
   });
 
   it("a viewer may read but not save", async () => {
@@ -414,12 +451,104 @@ describe("ending a live capture (Stage C3)", () => {
       token: owner.token,
       body: JSON.stringify({ turns: TURNS.slice(0, 1), startedAt: 1_000 }),
     });
-    const res = await h.api(
-      `/api/boards/${opened.body.id}/meetings/${opened.body.id}/end`,
-      { method: "POST", token: viewer.token },
-    );
+    const res = await h.api(`/api/boards/${opened.body.id}/meetings/${opened.body.id}/end`, {
+      method: "POST",
+      token: viewer.token,
+    });
     // The path is malformed on purpose: a viewer must not learn whether the
     // meeting id exists — the guard answers 404 the same as a stranger.
     expect([403, 404]).toContain(res.status);
+  });
+});
+
+describe("external import (docs/24 Phase E)", () => {
+  let h: Awaited<ReturnType<typeof harness>> | null = null;
+
+  afterEach(async () => {
+    await h?.close();
+    h = null;
+  });
+
+  const scripted = () =>
+    harness({
+      sources: new Map([
+        [
+          "mock",
+          new MockMeetingSource({
+            good: { turns: TURNS, title: "Weekly sync" },
+            dirty: { turns: [{ speaker: "", at: 1, text: "x" }] },
+          }),
+        ],
+      ]),
+    });
+
+  async function importBody(
+    hh: NonNullable<typeof h>,
+    boardId: string,
+    token: string,
+    body: unknown,
+  ) {
+    return hh.api(`/api/boards/${boardId}/meetings/import`, {
+      method: "POST",
+      token,
+      body: JSON.stringify(body),
+    });
+  }
+
+  it("lands external turns as a transcript, attributed and readable like a native one", async () => {
+    h = await scripted();
+    const owner = await h.signup("import@example.com");
+    const boardId = await h.seedBoard(owner.token);
+    const res = await importBody(h, boardId, owner.token, {
+      source: "mock",
+      ref: { id: "good" },
+    });
+    expect(res.status).toBe(201);
+    expect(res.body.source).toBe("mock");
+    expect(res.body.turns).toHaveLength(3);
+    expect(res.body.turns[0].speaker).toBe("Ada");
+    // No capture profile: imported, not recorded under one.
+    expect(res.body.mode).toBeUndefined();
+    const one = await h.api(`/api/boards/${boardId}/meetings/${res.body.id as string}`, {
+      token: owner.token,
+    });
+    expect(one.body.turns[1].kind).toBe("problem");
+  });
+
+  it("unknown sources, bad refs, source failures, and dirty turns are refused loudly", async () => {
+    h = await scripted();
+    const owner = await h.signup("import-bad@example.com");
+    const boardId = await h.seedBoard(owner.token);
+    const unknown = await importBody(h, boardId, owner.token, {
+      source: "zoom",
+      ref: { id: "good" },
+    });
+    expect(unknown.status).toBe(400);
+    expect(unknown.body.error).toContain("unknown meeting source");
+    const badRef = await importBody(h, boardId, owner.token, { source: "mock", ref: {} });
+    expect(badRef.status).toBe(400);
+    const missing = await importBody(h, boardId, owner.token, {
+      source: "mock",
+      ref: { id: "nope" },
+    });
+    expect(missing.status).toBe(502);
+    const dirty = await importBody(h, boardId, owner.token, {
+      source: "mock",
+      ref: { id: "dirty" },
+    });
+    expect(dirty.status).toBe(502);
+    expect(dirty.body.error).toContain("unusable turns");
+  });
+
+  it("a viewer cannot import (editor floor — minutes record what was said)", async () => {
+    h = await scripted();
+    const owner = await h.signup("import-owner@example.com");
+    const stranger = await h.signup("import-stranger@example.com");
+    const boardId = await h.seedBoard(owner.token);
+    const res = await importBody(h, boardId, stranger.token, {
+      source: "mock",
+      ref: { id: "good" },
+    });
+    expect(res.status).toBe(404);
   });
 });

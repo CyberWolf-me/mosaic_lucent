@@ -1034,6 +1034,13 @@ export const meetingTranscripts = pgTable(
     startedAt: bigint("started_at", { mode: "number" }).notNull(),
     endedAt: bigint("ended_at", { mode: "number" }),
     turns: jsonb("turns").notNull(),
+    /**
+     * docs/24 Phase D: the capture profile in force when recorded
+     * (record/intelligence/assistant/participant). Nullable: rows written
+     * before profiles existed carry no mode, and the readers treat absence
+     * as unknown — never backfilled.
+     */
+    mode: text("mode"),
     /** Null when the creator has been deleted; the transcript stays. */
     createdBy: text("created_by").references(() => users.id, { onDelete: "set null" }),
     createdAt: bigint("created_at", { mode: "number" }).notNull(),

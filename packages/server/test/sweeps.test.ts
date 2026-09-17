@@ -16,7 +16,16 @@ import type { Job } from "../src/jobs.js";
  *     rather than silently lost.
  */
 
-const JOB = { id: "j1", family: "integration", type: "x", payload: {}, status: "claimed", attempts: 1, runAfter: 0, createdAt: 0 } as Job;
+const JOB = {
+  id: "j1",
+  family: "integration",
+  type: "x",
+  payload: {},
+  status: "claimed",
+  attempts: 1,
+  runAfter: 0,
+  createdAt: 0,
+} as Job;
 
 function context(overrides: Partial<SweepContext> = {}): SweepContext & { calls: string[] } {
   const calls: string[] = [];
@@ -38,6 +47,7 @@ describe("buildSweepHandlers", () => {
       "sweep-stripe",
       "sweep-execution",
       "sweep-webhooks",
+      "sweep-retention",
       "prune-jobs",
       "prune-outbox",
       "prune-usage",

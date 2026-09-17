@@ -195,6 +195,8 @@ describe("POST /api/stt/sessions/:id/audio", () => {
     // Crossing the stride emits script order with speakers intact.
     const first = await postAudio(h, alice, sessionId, new Uint8Array([3, 4, 5, 6]));
     expect(first.body.finals).toEqual([{ text: "first turn", speaker: "spk_01" }]);
+    // No VAD verdict from the mock: null, forwarded honestly.
+    expect(first.body.speech).toBeNull();
     const second = await postAudio(h, alice, sessionId, new Uint8Array([7, 8, 9, 10]));
     expect(second.body.finals).toEqual([{ text: "second turn", speaker: "spk_02" }]);
   });

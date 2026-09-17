@@ -29,7 +29,8 @@ describe("MockSttService", () => {
     expect(service.live).toBe(false);
     expect(service.name).toBe("mock");
     const session = service.createSession();
-    expect(await session.push(new Uint8Array([1, 2, 3]))).toEqual([]);
+    // The mock has no VAD: verdict null, always.
+    expect(await session.push(new Uint8Array([1, 2, 3]))).toEqual({ utterances: [], speech: null });
     const closed = await session.close();
     expect(closed.utterances).toEqual([]);
     expect(closed.audioSeconds).toBeGreaterThanOrEqual(0);
@@ -40,12 +41,21 @@ describe("MockSttService", () => {
     expect(service.live).toBe(true);
     const session = service.createSession();
     // Below stride: buffered, nothing finalized.
-    expect(await session.push(new Uint8Array([1, 2]))).toEqual([]);
+    expect(await session.push(new Uint8Array([1, 2]))).toEqual({ utterances: [], speech: null });
     // Crossing the stride emits in script order with speakers intact.
-    expect(await session.push(new Uint8Array([3, 4, 5, 6]))).toEqual([SCRIPT[0]]);
-    expect(await session.push(new Uint8Array([7, 8, 9, 10]))).toEqual([SCRIPT[1]]);
+    expect(await session.push(new Uint8Array([3, 4, 5, 6]))).toEqual({
+      utterances: [SCRIPT[0]],
+      speech: null,
+    });
+    expect(await session.push(new Uint8Array([7, 8, 9, 10]))).toEqual({
+      utterances: [SCRIPT[1]],
+      speech: null,
+    });
     // Exhausted: further audio is absorbed, never invented into.
-    expect(await session.push(new Uint8Array(100).fill(9))).toEqual([]);
+    expect(await session.push(new Uint8Array(100).fill(9))).toEqual({
+      utterances: [],
+      speech: null,
+    });
     expect((await session.close()).utterances).toEqual([]);
   });
 
@@ -98,14 +108,14 @@ describe("GenericHttpSttService", () => {
       name: "sidecar",
       fetchImpl: stubFetch(seen, {
         finals: [
-          { text: "hello", speaker: "spk_01", start: 0.5, end: 1.2 },
+          { text: "hello", speaker: "spk_01", start: 0.5, end: 1.2, confidence: 0.9 },
           { text: "  ", speaker: "spk_02" },
           { nope: true },
         ],
       }),
     });
     const session = service.createSession();
-    const finals = await session.push(new Uint8Array([1, 2, 3]));
+    const pushed = await session.push(new Uint8Array([1, 2, 3]));
     expect(seen).toHaveLength(1);
     expect(seen[0]!.url).toBe("https://stt.internal/transcribe");
     expect(seen[0]!.headers.authorization).toBe("Bearer secret");
@@ -113,12 +123,35 @@ describe("GenericHttpSttService", () => {
     expect(seen[0]!.headers["x-lucent-finalize"]).toBeUndefined();
     expect(seen[0]!.bytes).toBe(3);
     // Empty text and non-utterance shapes are dropped, never surfaced.
-    expect(finals).toEqual([{ text: "hello", speaker: "spk_01", startedAt: 0.5, endedAt: 1.2 }]);
+    expect(pushed).toEqual({
+      utterances: [
+        { text: "hello", speaker: "spk_01", startedAt: 0.5, endedAt: 1.2, confidence: 0.9 },
+      ],
+      // No verdict offered → null, never a guessed boolean.
+      speech: null,
+    });
     // Close finalizes (the header) and still reports the clock.
     const closed = await session.close();
     expect(seen).toHaveLength(2);
     expect(seen[1]!.headers["x-lucent-finalize"]).toBe("true");
     expect(closed.audioSeconds).toBeGreaterThanOrEqual(0);
+  });
+
+  it("forwards the sidecar's VAD verdict, degrading garbage to null", async () => {
+    // docs/25 V5 stage 1: approximate boundaries, validated like finals.
+    const verdict = (body: unknown) =>
+      new GenericHttpSttService({
+        url: "https://stt.internal",
+        apiKey: "k",
+        fetchImpl: stubFetch([], body),
+      })
+        .createSession()
+        .push(new Uint8Array([1]));
+    expect((await verdict({ finals: [], speech: true })).speech).toBe(true);
+    expect((await verdict({ finals: [], speech: false })).speech).toBe(false);
+    expect((await verdict({ finals: [] })).speech).toBeNull();
+    expect((await verdict({ finals: [], speech: "yes" })).speech).toBeNull();
+    expect((await verdict({ finals: [], speech: 1 })).speech).toBeNull();
   });
 
   it("throws on non-2xx and unparseable bodies — the route answers 502", async () => {
@@ -135,20 +168,23 @@ describe("GenericHttpSttService", () => {
     });
     // Unparseable is not an utterance — and not a throw either: an empty
     // result degrades to silence, a 5xx to a loud failure.
-    expect(await garbage.createSession().push(new Uint8Array([1]))).toEqual([]);
+    expect(await garbage.createSession().push(new Uint8Array([1]))).toEqual({
+      utterances: [],
+      speech: null,
+    });
   });
 });
 
 describe("createSttSessionRegistry", () => {
   function fakeService(): {
     createSession: () => {
-      push: () => Promise<[]>;
+      push: () => Promise<{ utterances: []; speech: null }>;
       close: () => Promise<{ utterances: []; audioSeconds: number }>;
     };
   } {
     return {
       createSession: () => ({
-        push: async () => [],
+        push: async () => ({ utterances: [], speech: null }) as { utterances: []; speech: null },
         close: async () => ({ utterances: [], audioSeconds: 0 }),
       }),
     };

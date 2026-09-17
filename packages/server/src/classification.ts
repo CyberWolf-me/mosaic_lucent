@@ -181,6 +181,32 @@ export type OrgAiPolicy = "allowed" | "disabled";
  */
 export type OrgServerStt = "allowed" | "disabled";
 
+/**
+ * Where the org stands on the server voice proxy (docs/25 V7, M6.2). The
+ * parallel of `serverStt` for synthesis: `disabled` refuses
+ * `POST /api/tts/speak` for every caller in the org. Separate switch,
+ * same shape — transcription and synthesis are different egresses and an
+ * org may allow one without the other.
+ */
+export type OrgServerTts = "allowed" | "disabled";
+
+/**
+ * Per-class retention lifetimes (docs/23 S5, docs/24 Phase H). Today one
+ * class has a lifetime: transcripts. Audio is never stored (nothing to
+ * sweep) and intelligence lives on board nodes (dies with the board) — both
+ * recorded here by their absence, so a future class arrives as a field,
+ * not a redesign.
+ */
+export interface OrgRetentionPolicy {
+  /**
+   * Days an ENDED transcript survives, then the maintenance sweep deletes
+   * it. Null (or absent) means board lifetime — today's behavior, zero
+   * change for untouched orgs. Running captures (`endedAt` null) are never
+   * swept at any setting: a policy turned on mid-meeting strands nothing.
+   */
+  transcriptDays?: number | null;
+}
+
 export interface OrgSettings {
   /**
    * The floor every board's tier is raised to (`stricterOf`): a board in a
@@ -208,6 +234,14 @@ export interface OrgSettings {
    * means `allowed` (zero behavior change for untouched orgs).
    */
   serverStt?: OrgServerStt;
+  /** Server voice synthesis for every caller in the org (docs/25 V7). Absent means allowed. */
+  serverTts?: OrgServerTts;
+  /**
+   * Per-class retention lifetimes (docs/23 S5). Absent means keep with the
+   * board — the only behavior that ever existed, so untouched orgs see
+   * zero change.
+   */
+  retention?: OrgRetentionPolicy;
   /** Meeting capture disabled: the POST routes refuse for every board. */
   recordingDisabled?: boolean;
   /**
@@ -234,6 +268,8 @@ export interface EffectiveOrgSettings {
   agentDisabled: boolean;
   recordingDisabled: boolean;
   serverSttDisabled: boolean;
+  serverTtsDisabled: boolean;
+  retention: { transcriptDays: number | null };
   providerPolicy: EffectiveProviderPolicy;
 }
 
@@ -268,6 +304,14 @@ export function effectiveSettings(org: OrgPolicySource): EffectiveOrgSettings {
         : raw.serverStt === undefined
           ? false
           : raw.serverStt !== "allowed",
+    // Same one-boolean discipline as serverStt: absent allowed, garbage disabled.
+    serverTtsDisabled:
+      raw.serverTts === "disabled"
+        ? true
+        : raw.serverTts === undefined
+          ? false
+          : raw.serverTts !== "allowed",
+    retention: effectiveRetention(raw.retention),
     providerPolicy: effectiveProviderPolicy(raw.providerPolicy),
   };
 }
@@ -307,6 +351,40 @@ export function parseOrgSettings(
         }
         settings.serverStt = value;
         break;
+      case "serverTts":
+        if (value !== "allowed" && value !== "disabled") {
+          return { ok: false, error: "serverTts must be 'allowed' or 'disabled'" };
+        }
+        settings.serverTts = value;
+        break;
+      case "retention": {
+        if (typeof value !== "object" || value === null || Array.isArray(value)) {
+          return { ok: false, error: "retention must be an object" };
+        }
+        const raw = value as Record<string, unknown>;
+        for (const sub of Object.keys(raw)) {
+          if (sub !== "transcriptDays") {
+            return { ok: false, error: `unknown retention field "${sub}"` };
+          }
+        }
+        const days = raw.transcriptDays;
+        if (days !== undefined && days !== null) {
+          if (
+            !Number.isInteger(days) ||
+            (days as number) < 1 ||
+            (days as number) > MAX_RETENTION_DAYS
+          ) {
+            return {
+              ok: false,
+              error: `retention.transcriptDays must be null or an integer 1..${MAX_RETENTION_DAYS}`,
+            };
+          }
+        }
+        settings.retention = {
+          ...(days !== undefined ? { transcriptDays: days as number | null } : {}),
+        };
+        break;
+      }
       case "sharingDisabled":
       case "agentDisabled":
       case "recordingDisabled":
@@ -419,6 +497,16 @@ export function serverSttRefusal(settings: EffectiveOrgSettings): string | null 
 }
 
 /**
+ * docs/25 V7: the server-voice refusal, or null. Same shape as the STT
+ * refusal — a wholesale service switch, not a tier boundary.
+ */
+export function serverTtsRefusal(settings: EffectiveOrgSettings): string | null {
+  return settings.serverTtsDisabled
+    ? "this organization's policy disables the server voice — answers stay text"
+    : null;
+}
+
+/**
  * The org's denial for the boundary, or null. The three booleans are plain;
  * `ai` is the org's strictest switch — `disabled` refuses every generation,
  * the in-process mock included, because the org said no to AI in the
@@ -514,6 +602,27 @@ export interface ProviderFact {
 export interface ProviderPolicyRefusal {
   mode: OrgProviderMode;
   error: string;
+}
+
+/** Longest transcript lifetime an org may set: ten years. Past that is archive, not retention. */
+export const MAX_RETENTION_DAYS = 3650;
+
+/**
+ * The retention policy with every default resolved. The deliberate
+ * exception to the fail-closed rule: an absent or uninterpretable value
+ * resolves to KEEP (null), not to deletion. Fail-closed protects
+ * boundaries by refusing outward traffic; for deletion the safe default
+ * is preservation — garbage must never become data loss.
+ */
+export function effectiveRetention(raw: OrgRetentionPolicy | undefined): {
+  transcriptDays: number | null;
+} {
+  if (raw === undefined) return { transcriptDays: null };
+  const days = raw.transcriptDays;
+  if (days === undefined || days === null) return { transcriptDays: null };
+  return Number.isInteger(days) && days >= 1 && days <= MAX_RETENTION_DAYS
+    ? { transcriptDays: days }
+    : { transcriptDays: null };
 }
 
 /** The providerPolicy with every default resolved (see `effectiveSettings`). */

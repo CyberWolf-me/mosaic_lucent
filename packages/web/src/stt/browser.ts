@@ -1,4 +1,5 @@
 import type { SttProvider, VoiceHandlers, VoiceSession } from "./types.js";
+import { eventConsumerFromCallbacks, type VoiceEventHandlers } from "./events.js";
 
 /**
  * Web Speech API provider. Streams live interim words, but is Chrome/Edge-only
@@ -80,6 +81,15 @@ export const browserSttProvider: SttProvider = {
   id: "browser",
   isSupported: () => getCtor() !== null,
   start(handlers: VoiceHandlers): VoiceSession | null {
+    // The only implementation is the event stream; callbacks are derived in
+    // one place so the two surfaces can never disagree. The guard is
+    // unreachable (every provider implements events) and exists so `this`
+    // stays honest without a non-null assertion.
+    const withEvents = this.startWithEvents;
+    if (!withEvents) return null;
+    return withEvents.call(this, eventConsumerFromCallbacks(handlers));
+  },
+  startWithEvents(handlers: VoiceEventHandlers): VoiceSession | null {
     const Ctor = getCtor();
     if (!Ctor) {
       handlers.onError?.(
@@ -113,13 +123,19 @@ export const browserSttProvider: SttProvider = {
             // recognizer restarts and replays the list).
             if (i > emittedThrough && transcript.trim()) {
               emittedThrough = i;
-              handlers.onFinal(transcript.trim());
+              handlers.onEvent({
+                type: "final",
+                text: transcript.trim(),
+                at: Date.now(),
+                source: "browser",
+              });
             }
           } else {
             interim += transcript;
           }
         }
-        if (interim) handlers.onInterim?.(interim);
+        if (interim)
+          handlers.onEvent({ type: "interim", text: interim, at: Date.now(), source: "browser" });
       };
       recognition.onerror = (event) => {
         const msg = describeError(event?.error);
@@ -140,6 +156,9 @@ export const browserSttProvider: SttProvider = {
       };
       try {
         recognition.start();
+        // No VAD here: capture-begin is the honest speech_started, refined
+        // when a voice-activity layer lands (events.ts).
+        handlers.onEvent({ type: "speech_started", at: Date.now() });
         handlers.onStart?.();
         handlers.onStatus?.("listening");
       } catch (err) {
@@ -166,6 +185,7 @@ export const browserSttProvider: SttProvider = {
     return {
       stop: () => {
         stopped = true;
+        handlers.onEvent({ type: "speech_stopped", at: Date.now() });
         try {
           recognition?.stop();
         } catch {

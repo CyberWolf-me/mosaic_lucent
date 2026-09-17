@@ -1,5 +1,6 @@
 import { apiFetch } from "../http.js";
 import type { SttProvider, VoiceHandlers, VoiceSession } from "./types.js";
+import { eventConsumerFromCallbacks, type VoiceEventHandlers } from "./events.js";
 
 /**
  * Server-hosted diarizing STT (docs/25 V1 — the fourth slot).
@@ -28,8 +29,16 @@ interface SessionResponse {
   error?: string;
 }
 
+interface ServerFinal {
+  text?: unknown;
+  speaker?: unknown;
+  start?: unknown;
+  end?: unknown;
+  confidence?: unknown;
+}
+
 interface AudioResponse {
-  finals?: Array<{ text?: unknown; speaker?: unknown }>;
+  finals?: ServerFinal[];
   error?: string;
 }
 
@@ -62,6 +71,12 @@ export const hostedSttProvider: SttProvider = {
   },
 
   start(handlers: VoiceHandlers): VoiceSession | null {
+    const withEvents = this.startWithEvents;
+    if (!withEvents) return null;
+    return withEvents.call(this, eventConsumerFromCallbacks(handlers));
+  },
+
+  startWithEvents(handlers: VoiceEventHandlers): VoiceSession | null {
     if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
       handlers.onError?.("This browser can't access the microphone.");
       return null;
@@ -87,10 +102,18 @@ export const hostedSttProvider: SttProvider = {
       if (stopped || !finals) return;
       for (const f of finals) {
         if (typeof f.text !== "string" || f.text.trim() === "") continue;
-        handlers.onFinal(
-          f.text,
-          typeof f.speaker === "string" && f.speaker !== "" ? { speaker: f.speaker } : undefined,
-        );
+        // Mixed-stream labels stay opaque speakerIds (never persons); the
+        // sidecar's timing rides along; confidence passes through inert.
+        handlers.onEvent({
+          type: "final",
+          text: f.text,
+          at: Date.now(),
+          ...(typeof f.speaker === "string" && f.speaker !== "" ? { speakerId: f.speaker } : {}),
+          ...(typeof f.start === "number" ? { startMs: f.start * 1000 } : {}),
+          ...(typeof f.end === "number" ? { endMs: f.end * 1000 } : {}),
+          ...(typeof f.confidence === "number" ? { confidence: f.confidence } : {}),
+          source: "hosted",
+        });
       }
     };
 
@@ -130,6 +153,9 @@ export const hostedSttProvider: SttProvider = {
         if (!res.ok) return;
         const data = (await res.json().catch(() => null)) as CloseResponse | null;
         emitFinals(data?.finals);
+        // Boundary flush first, stopped last: consumers must see every final
+        // before the stream ends, or the last turn is silently losable.
+        handlers.onEvent({ type: "speech_stopped", at: Date.now() });
       });
     };
 
@@ -197,6 +223,7 @@ export const hostedSttProvider: SttProvider = {
         fail("This browser can't record audio for upload.");
         return;
       }
+      handlers.onEvent({ type: "speech_started", at: Date.now() });
       handlers.onStatus?.("listening");
       handlers.onStart?.();
     })();
