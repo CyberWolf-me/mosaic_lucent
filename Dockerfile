@@ -33,6 +33,9 @@ COPY packages/ai/package.json packages/ai/
 COPY packages/server/package.json packages/server/
 COPY packages/web/package.json packages/web/
 COPY packages/mcp/package.json packages/mcp/
+COPY packages/i18n/package.json packages/i18n/
+COPY packages/site/package.json packages/site/
+COPY packages/load/package.json packages/load/
 RUN npm ci --no-audit --no-fund
 
 FROM deps AS build
@@ -42,7 +45,7 @@ COPY . .
 # bundle via Vite (which reads core/ai from source through the `module`
 # condition, so the four builds have no ordering constraint between them).
 # `packages/mcp` is a developer tool and is not part of the image.
-RUN npm run build -w @lucent/core -w @lucent/ai -w @lucent/server -w @lucent/web
+RUN npm run build -w @lucent/core -w @lucent/ai -w @lucent/i18n -w @lucent/server -w @lucent/web
 
 FROM node:${NODE_VERSION}-alpine AS run
 # Run as a non-root user. node:alpine ships with `node`; add a dedicated uid
@@ -58,6 +61,9 @@ COPY packages/ai/package.json packages/ai/
 COPY packages/server/package.json packages/server/
 COPY packages/web/package.json packages/web/
 COPY packages/mcp/package.json packages/mcp/
+COPY packages/i18n/package.json packages/i18n/
+COPY packages/site/package.json packages/site/
+COPY packages/load/package.json packages/load/
 # Prod-only deps for the one workspace this image runs. `--omit=dev` drops
 # tsx/drizzle-kit/vitest/typescript; `-w @lucent/server` drops every other
 # workspace's runtime tree, which is what keeps the browser-side stack

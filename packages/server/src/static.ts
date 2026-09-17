@@ -89,10 +89,11 @@ const CSP = [
   "form-action 'self'",
 ].join("; ");
 
-/** Only the microphone is needed (push-to-talk voice); everything else is denied. */
+/** Microphone and camera are needed for voice and native room conferencing; screen share needs display-capture. */
 const PERMISSIONS_POLICY = [
   "microphone=(self)",
-  "camera=()",
+  "camera=(self)",
+  "display-capture=(self)",
   "geolocation=()",
   "payment=()",
   "usb=()",

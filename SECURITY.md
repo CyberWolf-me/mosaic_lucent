@@ -1,9 +1,8 @@
 # Security policy
 
-Lucent is pre-1.0 and is not yet operated as a hosted service. That shapes
-everything below: there is no on-call rotation, no bug bounty, and no patch
-branches. What there is: a private channel a maintainer reads, and honest
-timing rather than a promised SLA.
+Lucent operates both as a hosted cloud service and as a self-hosted platform.
+We take the security of your boards, transcripts, and AI integrations seriously.
+Below is our vulnerability disclosure process and response targets.
 
 ## Supported versions
 

@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Ico } from "../ui/icons.js";
 import { ProfileMenu } from "../ui/ProfileMenu.js";
 import { NotificationTray } from "../ui/NotificationTray.js";
@@ -15,15 +15,23 @@ import {
   svgToOps,
 } from "../board/importers.js";
 import { useToast } from "../ui/Toast.js";
+import { getSessionUser, hasSession } from "../session.js";
+import { loadOrgs, type OrgSummary } from "../orgs.js";
+import { listBoards, type BoardSummary } from "../boards.js";
+import { TEMPLATES } from "../templates.js";
 
 /** Project dashboard, ported from reference/screen_dashboard.jsx and wired to
- * real localStorage projects plus a few sample templates. */
+ * real localStorage projects plus cloud boards and sample templates. */
 
 interface DisplayProject extends ProjectMeta {
   kind: string;
   mini: MiniKind;
   nodes: number;
   accent?: boolean;
+  isCloud?: boolean;
+  isShared?: boolean;
+  isTemplate?: boolean;
+  templateId?: string;
 }
 
 const DIAGRAM_TO_KIND: Record<DiagramKind, { kind: string; mini: MiniKind }> = {
@@ -38,11 +46,43 @@ const DIAGRAM_TO_KIND: Record<DiagramKind, { kind: string; mini: MiniKind }> = {
 };
 
 export function DashboardView({ onOpenSettings }: { onOpenSettings: (section?: string) => void }) {
-  const { newProject, openProject, importWorkspace, setView } = useWorkspace();
+  const { newProject, openProject, openBoard, importWorkspace, setView } = useWorkspace();
   const { notify } = useToast();
   const [filter, setFilter] = useState("all");
   const [search, setSearch] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
+
+  const [currentOrg, setCurrentOrg] = useState<OrgSummary | null>(null);
+  const [cloudBoards, setCloudBoards] = useState<BoardSummary[]>([]);
+  const [sharedBoards, setSharedBoards] = useState<BoardSummary[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!hasSession()) return;
+    void (async () => {
+      try {
+        const { current } = await loadOrgs();
+        if (cancelled) return;
+        setCurrentOrg(current);
+        if (current) {
+          const [orgBoards, shared] = await Promise.all([
+            listBoards(current.id),
+            listBoards(current.id, "shared"),
+          ]);
+          if (!cancelled) {
+            setCloudBoards(orgBoards);
+            const orgBoardIds = new Set(orgBoards.map((b) => b.id));
+            setSharedBoards(shared.filter((b) => !orgBoardIds.has(b.id)));
+          }
+        }
+      } catch {
+        /* offline or backend unavailable: local projects remain accessible */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const onImportFile = (file: File) => {
     const reader = new FileReader();
@@ -107,29 +147,71 @@ export function DashboardView({ onOpenSettings }: { onOpenSettings: (section?: s
     reader.readAsText(file);
   };
 
-  const saved: DisplayProject[] = listProjects().map((p) => {
-    const data = loadProject(p.id);
-    const ws = data?.workspace;
-    const mapped = ws
-      ? DIAGRAM_TO_KIND[ws.diagramKind]
-      : { kind: "Workspace", mini: "arch" as MiniKind };
-    return {
-      ...p,
-      kind: mapped.kind,
-      mini: mapped.mini,
-      nodes: ws ? Object.keys(ws.nodes).length : 0,
-    };
-  });
-  // Only real saved projects. Six fake sample cards used to sit here, and
-  // clicking any of them silently called newProject() — the card looked like a
-  // board you could open and instead replaced whatever you were working on.
-  const projects = saved;
+  const localSaved: DisplayProject[] = useMemo(() => {
+    return listProjects().map((p) => {
+      const data = loadProject(p.id);
+      const ws = data?.workspace;
+      const mapped = ws
+        ? DIAGRAM_TO_KIND[ws.diagramKind]
+        : { kind: "Workspace", mini: "arch" as MiniKind };
+      return {
+        ...p,
+        kind: mapped.kind,
+        mini: mapped.mini,
+        nodes: ws ? Object.keys(ws.nodes).length : 0,
+        isCloud: false,
+      };
+    });
+  }, []);
+
+  const allCloudProjects: DisplayProject[] = useMemo(() => {
+    const combined: BoardSummary[] = [...cloudBoards, ...sharedBoards];
+    const seen = new Set<string>();
+    const list: DisplayProject[] = [];
+    for (const b of combined) {
+      if (seen.has(b.id)) continue;
+      seen.add(b.id);
+      const isShared = sharedBoards.some((sb) => sb.id === b.id);
+      list.push({
+        id: b.id,
+        name: b.name,
+        updatedAt: b.updatedAt,
+        kind: "Workspace",
+        mini: "arch",
+        nodes: b.nodes ?? 0,
+        isCloud: true,
+        isShared,
+      });
+    }
+    return list;
+  }, [cloudBoards, sharedBoards]);
+
+  const projects: DisplayProject[] = useMemo(() => {
+    const cloudIds = new Set(allCloudProjects.map((p) => p.id));
+    const localOnly = localSaved.filter((p) => !cloudIds.has(p.id));
+    return [...allCloudProjects, ...localOnly].sort((a, b) => b.updatedAt - a.updatedAt);
+  }, [allCloudProjects, localSaved]);
+
+  const templateProjects: DisplayProject[] = useMemo(() => {
+    return TEMPLATES.map((t) => ({
+      id: `tpl_${t.id}`,
+      name: t.name,
+      updatedAt: Date.now(),
+      kind: t.kind,
+      mini: (t.id === "mindmap-seed" ? "mind" : t.id === "swot" ? "arch" : "flow") as MiniKind,
+      nodes: 0,
+      accent: true,
+      isTemplate: true,
+      templateId: t.id,
+    }));
+  }, []);
 
   const filtered = useMemo(() => {
     let list = projects;
     if (filter === "recents") list = list.slice(0, 6);
-    if (filter === "templates") list = [];
-    if (!["all", "recents", "shared", "templates"].includes(filter)) {
+    else if (filter === "shared") list = projects.filter((p) => p.isShared);
+    else if (filter === "templates") list = templateProjects;
+    else if (!["all", "recents", "shared", "templates"].includes(filter)) {
       list = projects.filter((p) => p.kind === filter);
     }
     if (search) {
@@ -139,14 +221,13 @@ export function DashboardView({ onOpenSettings }: { onOpenSettings: (section?: s
       );
     }
     return list;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filter, search, saved.length]);
+  }, [filter, search, projects, templateProjects]);
 
   const sidebarTop = [
     { id: "all", label: "All projects", count: projects.length, icon: <Ico.Grid /> },
-    { id: "recents", label: "Recents", count: 6, icon: <Ico.History /> },
-    { id: "shared", label: "Shared", count: 0, icon: <Ico.Share /> },
-    { id: "templates", label: "Templates", count: null, icon: <Ico.Book /> },
+    { id: "recents", label: "Recents", count: Math.min(projects.length, 6), icon: <Ico.History /> },
+    { id: "shared", label: "Shared", count: sharedBoards.length, icon: <Ico.Share /> },
+    { id: "templates", label: "Templates", count: TEMPLATES.length, icon: <Ico.Book /> },
   ];
   const byArtifact = [
     { id: "Architecture", label: "Architecture", icon: <Ico.Layers /> },
@@ -157,9 +238,30 @@ export function DashboardView({ onOpenSettings }: { onOpenSettings: (section?: s
     { id: "Sequence", label: "Sequence", icon: <Ico.Flow /> },
   ];
 
-  const open = (p: DisplayProject) => {
-    openProject(p.id);
+  const open = async (p: DisplayProject) => {
+    if (p.isTemplate && p.templateId) {
+      const template = TEMPLATES.find((t) => t.id === p.templateId);
+      if (template) {
+        const ops = template.build();
+        const ws = applyOperations(createWorkspace({ name: template.name }), ops);
+        importWorkspace(ws, template.name);
+      }
+      return;
+    }
+    if (p.isCloud) {
+      const ok = await openBoard(p.id);
+      if (!ok) {
+        openProject(p.id);
+      }
+    } else {
+      openProject(p.id);
+    }
   };
+
+  const user = getSessionUser();
+  const firstName = user?.name ? user.name.trim().split(/\s+/)[0] : "there";
+  const hour = new Date().getHours();
+  const timeGreeting = hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
 
   return (
     <div
@@ -186,7 +288,7 @@ export function DashboardView({ onOpenSettings }: { onOpenSettings: (section?: s
           <span>Lucent</span>
         </button>
         <span className="crumb-sep">/</span>
-        <span className="crumb current">Personal</span>
+        <span className="crumb current">{currentOrg?.name ?? "Personal"}</span>
         <div className="spacer" />
         <div className="actions">
           <div
@@ -302,7 +404,7 @@ export function DashboardView({ onOpenSettings }: { onOpenSettings: (section?: s
                 color: "var(--ink-0)",
               }}
             >
-              Good afternoon, Alex
+              {timeGreeting}, {firstName}
             </h1>
             <span className="mono" style={{ fontSize: 11, color: "var(--ink-3)" }}>
               {projects.length} workspaces
@@ -532,7 +634,28 @@ function ProjectCard({ project, onOpen }: { project: DisplayProject; onOpen: () 
             gap: 6,
           }}
         >
-          {project.name}
+          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>
+            {project.name}
+          </span>
+          {project.isCloud && (
+            <span
+              title={project.isShared ? "Shared with you" : "Cloud board"}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 3,
+                fontSize: 10,
+                color: "var(--ink-3)",
+                background: "var(--canvas-2)",
+                padding: "2px 6px",
+                borderRadius: 4,
+                border: "1px solid var(--stroke-1)",
+              }}
+            >
+              {project.isShared ? <Ico.Share width={10} height={10} /> : <Ico.Layers width={10} height={10} />}
+              <span>{project.isShared ? "Shared" : "Cloud"}</span>
+            </span>
+          )}
           {project.accent && (
             <span
               style={{

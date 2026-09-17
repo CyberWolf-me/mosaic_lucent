@@ -256,6 +256,9 @@ describe("the SSRF-safe site policy (ADR 0034)", () => {
     expect(isSafeOutboundUrl("https://192.168.0.1")).toMatchObject({ ok: false });
     expect(isSafeOutboundUrl("https://172.16.0.1")).toMatchObject({ ok: false });
     expect(isSafeOutboundUrl("https://[::1]")).toMatchObject({ ok: false });
+    expect(isSafeOutboundUrl("https://[::]")).toMatchObject({ ok: false });
+    expect(isSafeOutboundUrl("https://[::ffff:127.0.0.1]")).toMatchObject({ ok: false });
+    expect(isSafeOutboundUrl("https://[::ffff:169.254.169.254]")).toMatchObject({ ok: false });
     expect(isSafeOutboundUrl("https://user:pass@acme.atlassian.net")).toMatchObject({ ok: false });
     expect(isSafeOutboundUrl("not a url")).toMatchObject({ ok: false });
   });

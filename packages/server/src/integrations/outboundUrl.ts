@@ -19,6 +19,15 @@ import { isIP } from "node:net";
  * audit trail records who configured what.
  */
 
+function isPrivateIpv4(a: number, b: number): boolean {
+  if (a === 127 || a === 10 || a === 0) return true; // loopback, 10/8, 0/8
+  if (a === 172 && b >= 16 && b <= 31) return true; // 172.16/12
+  if (a === 192 && b === 168) return true; // 192.168/16
+  if (a === 169 && b === 254) return true; // 169.254/16 link-local
+  if (a === 100 && b >= 64 && b <= 127) return true; // 100.64/10 carrier-grade NAT
+  return false;
+}
+
 /** The private/link-local/loopback ranges refused as hostname literals. */
 function isPrivateAddress(hostname: string): boolean {
   // Normalize brackets off IPv6 literals.
@@ -26,22 +35,42 @@ function isPrivateAddress(hostname: string): boolean {
   const kind = isIP(bare);
   if (kind === 6) {
     const lower = bare.toLowerCase();
-    return (
+    if (
       lower === "::1" ||
+      lower === "::" ||
       lower.startsWith("fc") ||
       lower.startsWith("fd") || // fc00::/7 unique local
       lower.startsWith("fe") // fe80::/10 link local (heuristic prefix)
-    );
+    ) {
+      return true;
+    }
+    // Unwrap IPv4-mapped IPv6 literals (e.g. ::ffff:127.0.0.1 or WHATWG-normalized ::ffff:7f00:1)
+    if (lower.startsWith("::ffff:")) {
+      const rest = lower.slice("::ffff:".length);
+      if (rest.includes(".")) {
+        const parts = rest.split(".").map((p) => Number(p));
+        if (parts.length === 4 && parts.every((p) => !Number.isNaN(p))) {
+          return isPrivateIpv4(parts[0]!, parts[1]!);
+        }
+      } else if (rest.includes(":")) {
+        const hexParts = rest.split(":");
+        if (hexParts.length === 2) {
+          const h1 = parseInt(hexParts[0]!, 16);
+          const h2 = parseInt(hexParts[1]!, 16);
+          if (!Number.isNaN(h1) && !Number.isNaN(h2)) {
+            const a = (h1 >> 8) & 0xff;
+            const b = h1 & 0xff;
+            return isPrivateIpv4(a, b);
+          }
+        }
+      }
+    }
+    return false;
   }
   if (kind === 4) {
     const parts = bare.split(".").map((p) => Number(p));
     const [a, b] = parts as [number, number, number, number];
-    if (a === 127 || a === 10) return true; // loopback, 10/8
-    if (a === 172 && b >= 16 && b <= 31) return true; // 172.16/12
-    if (a === 192 && b === 168) return true; // 192.168/16
-    if (a === 169 && b === 254) return true; // 169.254/16 link-local
-    if (a === 0) return true; // 0/8
-    return false;
+    return isPrivateIpv4(a, b);
   }
   return false;
 }
