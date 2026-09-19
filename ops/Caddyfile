@@ -1,0 +1,43 @@
+161.33.167.15.sslip.io {
+    encode gzip zstd
+
+    @backend {
+        path /api/* /ws /metrics* /health /oauth/* /saml/* /scim/*
+    }
+    handle @backend {
+        reverse_proxy 127.0.0.1:4387
+    }
+
+    @manifest {
+        path /site.webmanifest
+    }
+    header @manifest Content-Type "application/manifest+json; charset=utf-8"
+
+    handle {
+        root * /var/www/lucent
+        try_files {path} /index.html
+        file_server
+    }
+}
+
+:80 {
+    encode gzip zstd
+
+    @backend {
+        path /api/* /ws /metrics* /health /oauth/* /saml/* /scim/*
+    }
+    handle @backend {
+        reverse_proxy 127.0.0.1:4387
+    }
+
+    @manifest {
+        path /site.webmanifest
+    }
+    header @manifest Content-Type "application/manifest+json; charset=utf-8"
+
+    handle {
+        root * /var/www/lucent
+        try_files {path} /index.html
+        file_server
+    }
+}

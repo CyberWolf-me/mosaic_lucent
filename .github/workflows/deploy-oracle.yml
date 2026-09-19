@@ -69,7 +69,7 @@ jobs:
 
             echo "Updating web static assets in /var/www/lucent..."
             mkdir -p /var/www/lucent
-            rsync -a --delete /home/opc/lucent/packages/web/dist/ /var/www/lucent/
+            rsync -rlt --no-o --no-g --delete /home/opc/lucent/packages/web/dist/ /var/www/lucent/
 
             echo "Applying pending database migrations..."
             cd /home/opc/lucent

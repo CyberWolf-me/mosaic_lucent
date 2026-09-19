@@ -18,7 +18,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "evals": "tsx scripts/evals.ts",
+    "evals": "tsx --conditions=development scripts/evals.ts",
     "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
