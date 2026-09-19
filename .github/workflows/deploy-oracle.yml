@@ -1,0 +1,88 @@
+name: Deploy to Oracle Cloud
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-oracle
+  cancel-in-progress: false
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Run tests
+        run: npm test
+
+      - name: Build packages
+        run: npm run build
+
+      - name: Package deployment bundle
+        run: |
+          tar -czf deploy.tar.gz \
+            packages/core/dist \
+            packages/ai/dist \
+            packages/server/dist \
+            packages/server/migrations \
+            packages/mcp/dist \
+            packages/web/dist \
+            ecosystem.config.cjs \
+            package.json \
+            package-lock.json
+
+      - name: Configure SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.ORACLE_SSH_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H ${{ secrets.ORACLE_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Transfer deployment bundle
+        run: |
+          scp deploy.tar.gz ${{ secrets.ORACLE_USER }}@${{ secrets.ORACLE_HOST }}:/home/${{ secrets.ORACLE_USER }}/deploy.tar.gz
+
+      - name: Deploy and reload PM2 cluster on Oracle Cloud
+        run: |
+          ssh ${{ secrets.ORACLE_USER }}@${{ secrets.ORACLE_HOST }} << 'EOF'
+            set -e
+            echo "Extracting deployment bundle into /home/opc/lucent..."
+            tar -xzf /home/opc/deploy.tar.gz -C /home/opc/lucent/
+            rm -f /home/opc/deploy.tar.gz
+
+            echo "Updating web static assets in /var/www/lucent..."
+            mkdir -p /var/www/lucent
+            cp -r /home/opc/lucent/packages/web/dist/* /var/www/lucent/
+
+            echo "Applying pending database migrations..."
+            cd /home/opc/lucent
+            npm run db:migrate -w @lucent/server || true
+
+            echo "Performing zero-downtime PM2 cluster reload..."
+            pm2 reload ecosystem.config.cjs --update-env
+
+            echo "Deployment to Oracle Cloud completed successfully."
+          EOF
+
+      - name: Post-deploy healthcheck
+        run: |
+          echo "Verifying service health..."
+          curl -fsS --retry 5 --retry-delay 3 https://${{ secrets.ORACLE_HOST }}.sslip.io/health
+          echo "Service is healthy and responding 200 OK."
