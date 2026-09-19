@@ -59,7 +59,23 @@ export function operationJsonSchema(): JsonSchema {
 
 /** JSON Schema for the tool's full argument object. */
 export function toolParametersJsonSchema(): JsonSchema {
-  return {
+  // A recursive operation variant (nodes carry `children`/`root` that
+  // reference the node schema itself) makes Zod emit a `$defs` block with
+  // root-relative `$ref`s such as `#/$defs/__schema0`. Splicing that schema in
+  // under `operations.items` would bury its `$defs` where a root-relative
+  // `$ref` can no longer reach it — strict-schema gateways (OpenAI-compatible
+  // structured output, e.g. 1412520.cyou / grok-4.6) then reject the whole
+  // tool with "unresolvable $ref '#/$defs/__schema0'". The parameters object is
+  // the JSON Schema document root the provider sends, so the definitions must
+  // live at *its* top level. Hoist them there and every `#/$defs/...` resolves.
+  const items = operationJsonSchema();
+  const defs =
+    items.$defs && typeof items.$defs === "object"
+      ? (items.$defs as Record<string, unknown>)
+      : undefined;
+  if (defs) delete items.$defs;
+
+  const params: JsonSchema = {
     type: "object",
     properties: {
       operations: {
@@ -71,7 +87,7 @@ export function toolParametersJsonSchema(): JsonSchema {
           `Completeness beats polish: emit ALL the CONNECT_NODES the described ` +
           `system implies, even if it means shorter labels — a diagram missing ` +
           `its relationships is wrong, a diagram with terse labels is fine.`,
-        items: operationJsonSchema(),
+        items,
       },
       explanation: {
         type: "string",
@@ -83,6 +99,8 @@ export function toolParametersJsonSchema(): JsonSchema {
     required: ["operations"],
     additionalProperties: false,
   };
+  if (defs && Object.keys(defs).length > 0) params.$defs = defs;
+  return params;
 }
 
 /** Vendor-neutral tool descriptor; providers adapt it to their own wire format. */

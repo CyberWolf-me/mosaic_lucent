@@ -1,0 +1,12 @@
+title = "gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Ignore test fixtures and documentation false positives"
+paths = [
+  '''packages/server/test/.*''',
+  '''scripts/p0-smoke\.ts''',
+  '''docs/checklist\.md'''
+]

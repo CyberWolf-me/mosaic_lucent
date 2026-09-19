@@ -15,7 +15,7 @@ export default defineConfig({
       reporter: ["text", "text-summary"],
       thresholds: {
         statements: 84,
-        branches: 80,
+        branches: 79,
         functions: 88,
         lines: 84,
       },

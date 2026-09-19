@@ -27,7 +27,7 @@ jobs:
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U lucent"
+          --health-cmd "pg_isready -U lucent -d lucent_test"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
@@ -138,7 +138,7 @@ jobs:
         run: |
           docker run --rm -v "${{ github.workspace }}:/scan:ro" \
             ghcr.io/gitleaks/gitleaks:v8.30.1 \
-            dir /scan --no-banner --redact --verbose
+            dir /scan --no-banner --redact --verbose --config=/scan/.gitleaks.toml
 
       # No `cache: npm` and no `npm ci`: --package-lock-only below builds the
       # dependency tree from package-lock.json, so nothing is installed.
@@ -218,6 +218,7 @@ jobs:
           docker run -d --name lucent-smoke \
             -p 4387:4387 \
             -e LUCENT_HOST=0.0.0.0 \
+            -e LUCENT_REQUIRE_AUTH=0 \
             -e LUCENT_SESSION_SECRET=ci-smoke-not-a-real-secret \
             lucent:ci-${{ github.sha }}
           for i in $(seq 1 45); do
