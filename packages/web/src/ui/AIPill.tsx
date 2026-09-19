@@ -38,6 +38,8 @@ export function AIPill({
   listening = false,
   onToggleMic,
   voiceSupported = true,
+  onToggleVoiceAgent,
+  voiceAgentActive = false,
   history = [],
   busy = false,
   shifted = false,
@@ -66,6 +68,8 @@ export function AIPill({
   listening?: boolean;
   onToggleMic?: () => void;
   voiceSupported?: boolean;
+  onToggleVoiceAgent?: () => void;
+  voiceAgentActive?: boolean;
   history?: ChatEntry[];
   busy?: boolean;
   /** Shift left so it clears the right-side review panel while proposing. */
@@ -262,6 +266,31 @@ export function AIPill({
             >
               <Ico.Mic />
             </button>
+            {onToggleVoiceAgent && (
+              <button
+                className={`mic-btn voice-call-btn ${voiceAgentActive ? "active" : ""}`}
+                onClick={onToggleVoiceAgent}
+                title={
+                  voiceAgentActive
+                    ? "End live duplex voice call"
+                    : "Live Voice Call (ChatGPT / Grok-style duplex conversation with Lucent)"
+                }
+                aria-label="Live Voice Call"
+                aria-pressed={voiceAgentActive}
+                style={
+                  voiceAgentActive
+                    ? {
+                        background: "linear-gradient(135deg, #8b5cf6, #6366f1)",
+                        color: "#ffffff",
+                        borderColor: "#a78bfa",
+                        boxShadow: "0 0 12px rgba(139, 92, 246, 0.5)",
+                      }
+                    : undefined
+                }
+              >
+                <Ico.Phone />
+              </button>
+            )}
             <button
               className="send-btn"
               onClick={onSubmit}

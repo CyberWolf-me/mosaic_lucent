@@ -3179,6 +3179,86 @@ export function createApp(deps: AppDeps): App {
       return;
     }
 
+    if (req.method === "POST" && req.url === "/api/livekit/dispatch") {
+      if (!requireCsrf(req, res, "/api/livekit/dispatch")) return;
+      const user = await requireUser(req, res);
+      if (!user) return;
+      const { apiKey, apiSecret, url } = config.livekit;
+      if (!apiKey || !apiSecret || !url) {
+        send(res, 503, { error: "LiveKit is not configured" });
+        return;
+      }
+
+      let room = "";
+      let boardId = "";
+      let agentName = "lucent-voice-agent";
+      try {
+        const raw = await readBody(req);
+        const body = raw
+          ? (JSON.parse(raw) as {
+              room?: unknown;
+              boardId?: unknown;
+              agentName?: unknown;
+            })
+          : {};
+        if (typeof body.boardId === "string" && body.boardId.trim().length > 0) {
+          boardId = body.boardId.trim().slice(0, 120);
+        }
+        if (typeof body.room === "string" && body.room.trim().length > 0) {
+          room = body.room.trim().slice(0, 128);
+        } else if (boardId) {
+          room = `voice_${boardId}`;
+        }
+        if (typeof body.agentName === "string" && body.agentName.trim().length > 0) {
+          agentName = body.agentName.trim().slice(0, 64);
+        }
+      } catch (err) {
+        send(res, 400, { error: "Invalid JSON body" });
+        return;
+      }
+
+      if (!room) {
+        send(res, 400, { error: "room or boardId is required" });
+        return;
+      }
+
+      if (boardId) {
+        const guard = await requireBoardRole(req, res, boardId, "editor", "/api/livekit/dispatch", user);
+        if (!guard.ok) return;
+      }
+
+      try {
+        const { AgentDispatchClient } = await import("livekit-server-sdk");
+        const httpUrl = url.replace(/^wss:\/\//i, "https://").replace(/^ws:\/\//i, "http://");
+        const dispatchClient = new AgentDispatchClient(httpUrl, apiKey, apiSecret);
+
+        const userToken = req.headers["authorization"]?.replace(/^Bearer\s+/i, "") || "";
+        const metadata = JSON.stringify({
+          boardId,
+          userId: user.id,
+          token: userToken,
+        });
+
+        const dispatch = await dispatchClient.createDispatch(room, agentName, {
+          metadata,
+        });
+
+        send(res, 200, {
+          ok: true,
+          dispatchId: dispatch.id,
+          room,
+          agentName,
+        });
+        return;
+      } catch (err) {
+        send(res, 502, {
+          error: "Failed to dispatch agent",
+          detail: (err as Error).message,
+        });
+        return;
+      }
+    }
+
     // --- Board storage (auth required: boards belong to a user) ---
     if (req.method === "POST" && req.url === "/api/boards") {
       if (!requireCsrf(req, res, "/api/boards")) return;

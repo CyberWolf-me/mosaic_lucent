@@ -1,9 +1,13 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 /**
  * Right-click context menu for the board (FigJam/Miro parity). Positioned at the
  * cursor; actions operate on the current selection. Closes on outside click,
  * scroll, or Escape.
+ *
+ * The enter/exit scale is anchored to the cursor (skill §7: spatial
+ * consistency) via an inline transform-origin, and dismissal plays the exit
+ * leg before unmounting so the menu returns along its entry path.
  */
 export interface MenuItem {
   label: string;
@@ -34,6 +38,15 @@ export function ContextMenu({
     const first = items.findIndex((it) => !it.sep && !it.disabled);
     return first >= 0 ? first : 0;
   });
+  const [closing, setClosing] = useState(false);
+  const closeTimer = useRef(0);
+  const requestClose = useCallback(() => {
+    if (closing) return;
+    setClosing(true);
+    closeTimer.current = window.setTimeout(onClose, 120);
+  }, [closing, onClose]);
+
+  useEffect(() => () => window.clearTimeout(closeTimer.current), []);
 
   const focusAt = (index: number): void => {
     const order = items
@@ -48,11 +61,11 @@ export function ContextMenu({
   };
 
   useEffect(() => {
-    const close = () => onClose();
+    const close = () => requestClose();
     window.addEventListener("mousedown", close);
     window.addEventListener("scroll", close, true);
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") requestClose();
       else if (e.key === "ArrowDown") {
         e.preventDefault();
         const order = items
@@ -86,7 +99,7 @@ export function ContextMenu({
           const it = items[active];
           if (it && !it.sep && !it.disabled) {
             it.onClick();
-            onClose();
+            requestClose();
           }
         }
       }
@@ -97,7 +110,7 @@ export function ContextMenu({
       window.removeEventListener("scroll", close, true);
       window.removeEventListener("keydown", onKey);
     };
-  }, [onClose, items, active]);
+  }, [requestClose, items, active]);
 
   // Initial focus: first enabled item, so ArrowUp/Down continues from there.
   useEffect(() => {
@@ -105,12 +118,15 @@ export function ContextMenu({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Anchor the scale to the cursor: when the menu flips to stay on screen,
+  // the origin rides with the click point, not the box corner.
+  const origin = `${x - clampedX}px ${y - clampedY}px`;
   return (
     <div
-      className="context-menu"
+      className={closing ? "context-menu closing" : "context-menu"}
       role="menu"
       aria-label="Board actions"
-      style={{ left: clampedX, top: clampedY }}
+      style={{ left: clampedX, top: clampedY, transformOrigin: origin }}
       onMouseDown={(e) => e.stopPropagation()}
       onKeyDown={(e) => {
         if (e.key === "ArrowDown") {
@@ -128,13 +144,13 @@ export function ContextMenu({
             const it = items[active];
             if (it && !it.sep && !it.disabled) {
               it.onClick();
-              onClose();
+              requestClose();
             }
           }
         } else if (e.key === "Escape") {
           e.preventDefault();
           e.stopPropagation();
-          onClose();
+          requestClose();
         }
       }}
     >
@@ -152,7 +168,7 @@ export function ContextMenu({
             disabled={it.disabled}
             onClick={() => {
               it.onClick();
-              onClose();
+              requestClose();
             }}
             onMouseEnter={() => setActive(i)}
           >

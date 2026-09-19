@@ -7,6 +7,11 @@ import {
   contentBounds,
   buildBoardSvg,
   shapesInFrame,
+  projectMomentum,
+  rubberband,
+  VelocityTracker,
+  approach,
+  softClampZoom,
 } from "../src/board/geometry.js";
 import type { Shape } from "@lucent/core";
 
@@ -183,6 +188,55 @@ describe("board geometry", () => {
     // definition — count the marker-end references, not the raw string.
     expect((svg.match(/marker-end="url\(#export-arrow\)"/g) ?? []).length).toBe(5);
     expect(svg).toContain("Launch Plan · Process map");
+  });
+
+  it("projects flick momentum with Apple's exponential-decay form", () => {
+    // 1000px/s flick at the default 0.998 rate travels ~499px past release.
+    expect(projectMomentum(1000)).toBeCloseTo(499, 0);
+    expect(projectMomentum(0)).toBe(0);
+    expect(projectMomentum(-500)).toBeCloseTo(-249.5, 0);
+  });
+
+  it("rubber-bands past a boundary with progressive resistance", () => {
+    expect(rubberband(0, 80)).toBe(0);
+    const small = rubberband(20, 80);
+    const large = rubberband(400, 80);
+    // Small overshoots track closely; huge ones asymptote instead of following.
+    expect(small).toBeGreaterThan(9);
+    expect(large).toBeLessThan(80);
+    expect(rubberband(-20, 80)).toBeCloseTo(-small, 5);
+  });
+
+  it("tracks release velocity from recent samples only", () => {
+    const v = new VelocityTracker();
+    expect(v.velocity()).toEqual({ x: 0, y: 0 });
+    v.push(0, 0, 0);
+    v.push(100, 0, 100);
+    expect(v.velocity().x).toBeCloseTo(1000, 0);
+    // Stale samples fall out of the window: a pause reads as stopped.
+    v.push(100, 0, 500);
+    expect(v.velocity().x).toBe(0);
+  });
+
+  it("approaches a re-targeted value without overshoot", () => {
+    let cur = 0;
+    for (let i = 0; i < 600; i++) {
+      // Mid-flight reversal: the target flips halfway through.
+      cur = approach(cur, i < 300 ? 100 : 0, 12, 1 / 60);
+    }
+    expect(cur).toBe(0);
+    expect(approach(99.999, 100, 12, 1 / 60)).toBe(100);
+  });
+
+  it("soft-clamps zoom with resistance outside the limits", () => {
+    expect(softClampZoom(100)).toBe(100);
+    expect(softClampZoom(25)).toBe(25);
+    // Overshoot resists: 100px past the max reads far smaller, but grows.
+    const over = softClampZoom(500);
+    expect(over).toBeGreaterThan(400);
+    expect(over).toBeLessThan(450);
+    expect(softClampZoom(600)).toBeGreaterThan(over);
+    expect(softClampZoom(-100)).toBeLessThan(25);
   });
 
   it("finds shapes contained within a frame", () => {

@@ -3,6 +3,7 @@ import { ToolIco } from "./icons.js";
 import { isImageDataUrl } from "@lucent/core";
 import type { Shape } from "@lucent/core";
 import { normalizeZ, type DropKind } from "../shapes.js";
+import { DRAG_HYSTERESIS_PX } from "../board/geometry.js";
 
 export type { DropKind };
 
@@ -242,31 +243,57 @@ export function ShapeElement({
             ? "Double-click to edit"
             : "Rectangle");
 
-  const startResize = (e: React.MouseEvent) => {
+  // Resize and move both use Pointer Events with capture (skill §2), so
+  // touch/pen work and tracking survives the pointer leaving the element.
+  // Release is a hard stop: shape placement is precision work, so unlike
+  // viewport pans there is no momentum projection here.
+  const [dragging, setDragging] = useState(false);
+  const resizeRef = useRef<{ startX: number; startY: number; baseW: number; baseH: number } | null>(
+    null,
+  );
+
+  const startResize = (e: React.PointerEvent) => {
     e.stopPropagation();
     e.preventDefault();
-    const startX = e.clientX;
-    const startY = e.clientY;
-    const baseW = size.width;
-    const baseH = size.height;
-    const onMove2 = (ev: MouseEvent) => {
-      const w = Math.max(24, baseW + (ev.clientX - startX) / scale);
-      const h = Math.max(24, baseH + (ev.clientY - startY) / scale);
-      setLiveSize({ width: w, height: h });
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {
+      // Best-effort; in-bounds movement still resizes.
+    }
+    resizeRef.current = {
+      startX: e.clientX,
+      startY: e.clientY,
+      baseW: size.width,
+      baseH: size.height,
     };
-    const onUp = (ev: MouseEvent) => {
-      window.removeEventListener("mousemove", onMove2);
-      window.removeEventListener("mouseup", onUp);
-      const w = Math.max(24, baseW + (ev.clientX - startX) / scale);
-      const h = Math.max(24, baseH + (ev.clientY - startY) / scale);
-      setLiveSize(null);
+  };
+  const onResizeMove = (e: React.PointerEvent) => {
+    const r = resizeRef.current;
+    if (!r) return;
+    const w = Math.max(24, r.baseW + (e.clientX - r.startX) / scale);
+    const h = Math.max(24, r.baseH + (e.clientY - r.startY) / scale);
+    setLiveSize({ width: w, height: h });
+  };
+  const endResize = (e: React.PointerEvent, commit: boolean) => {
+    const r = resizeRef.current;
+    resizeRef.current = null;
+    if (!r) return;
+    setLiveSize(null);
+    if (commit) {
+      const w = Math.max(24, r.baseW + (e.clientX - r.startX) / scale);
+      const h = Math.max(24, r.baseH + (e.clientY - r.startY) / scale);
       onResize?.(id, Math.round(w), Math.round(h), true);
-    };
-    window.addEventListener("mousemove", onMove2);
-    window.addEventListener("mouseup", onUp);
+    }
+  };
+  const resizeProps = {
+    onPointerDown: startResize,
+    onPointerMove: onResizeMove,
+    onPointerUp: (e: React.PointerEvent) => endResize(e, true),
+    // Takeover (scroll, alert): drop the live size, skip the commit.
+    onPointerCancel: (e: React.PointerEvent) => endResize(e, false),
   };
 
-  const onMouseDown = (e: React.MouseEvent) => {
+  const onPointerDown = (e: React.PointerEvent) => {
     if (editing) return;
     e.stopPropagation();
     // Alt/Option-drag duplicates: hand off to the parent, which creates the copy
@@ -280,28 +307,48 @@ export function ShapeElement({
     // Locked shapes can be selected but not dragged.
     if (shape.locked) return;
     dragRef.current = { startX: e.clientX, startY: e.clientY, baseX: x, baseY: y, moved: false };
-
-    const onMouseMove = (ev: MouseEvent) => {
-      const d = dragRef.current;
-      if (!d) return;
-      const dx = (ev.clientX - d.startX) / scale;
-      const dy = (ev.clientY - d.startY) / scale;
-      if (Math.abs(dx) > 2 || Math.abs(dy) > 2) d.moved = true;
-      onMove?.(id, d.baseX + dx, d.baseY + dy, false);
-    };
-    const onMouseUp = (ev: MouseEvent) => {
-      window.removeEventListener("mousemove", onMouseMove);
-      window.removeEventListener("mouseup", onMouseUp);
-      const d = dragRef.current;
-      if (d?.moved) {
-        const dx = (ev.clientX - d.startX) / scale;
-        const dy = (ev.clientY - d.startY) / scale;
-        onMove?.(id, d.baseX + dx, d.baseY + dy, true);
+    // Capture keeps the move/up stream glued to the shape even when the
+    // pointer leaves its bounds (skill §2: respect the grab, track 1:1).
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {
+      // Best-effort; in-bounds movement still drags.
+    }
+  };
+  const onPointerMove = (e: React.PointerEvent) => {
+    const d = dragRef.current;
+    if (!d) return;
+    if (!d.moved) {
+      // Hysteresis in screen px: a tap that jitters stays a click.
+      if (
+        Math.abs(e.clientX - d.startX) < DRAG_HYSTERESIS_PX &&
+        Math.abs(e.clientY - d.startY) < DRAG_HYSTERESIS_PX
+      ) {
+        return;
       }
-      dragRef.current = null;
-    };
-    window.addEventListener("mousemove", onMouseMove);
-    window.addEventListener("mouseup", onMouseUp);
+      d.moved = true;
+      setDragging(true);
+    }
+    const dx = (e.clientX - d.startX) / scale;
+    const dy = (e.clientY - d.startY) / scale;
+    onMove?.(id, d.baseX + dx, d.baseY + dy, false);
+  };
+  const endDrag = (clientX: number, clientY: number) => {
+    const d = dragRef.current;
+    dragRef.current = null;
+    setDragging(false);
+    if (d?.moved) {
+      const dx = (clientX - d.startX) / scale;
+      const dy = (clientY - d.startY) / scale;
+      onMove?.(id, d.baseX + dx, d.baseY + dy, true);
+    }
+  };
+  const dragProps = {
+    onPointerDown,
+    onPointerMove,
+    onPointerUp: (e: React.PointerEvent) => endDrag(e.clientX, e.clientY),
+    // System takeover: keep the last live position, don't snap back.
+    onPointerCancel: (e: React.PointerEvent) => endDrag(e.clientX, e.clientY),
   };
 
   const commitLabel = () => {
@@ -313,8 +360,8 @@ export function ShapeElement({
   if (kind === "draw") {
     return (
       <svg
-        className={`shape draw ${selected ? "selected" : ""}`}
-        onMouseDown={onMouseDown}
+        className={`shape draw ${selected ? "selected" : ""} ${dragging ? "dragging" : ""}`}
+        {...dragProps}
         style={{
           left: x,
           top: y,
@@ -344,8 +391,8 @@ export function ShapeElement({
     const fh = liveSize?.height ?? size.height;
     return (
       <div
-        className={`shape frame ${selected ? "selected" : ""}`}
-        onMouseDown={onMouseDown}
+        className={`shape frame ${selected ? "selected" : ""} ${dragging ? "dragging" : ""}`}
+        {...dragProps}
         onDoubleClick={(e) => {
           e.stopPropagation();
           setEditing(true);
@@ -373,6 +420,7 @@ export function ShapeElement({
                 if (e.key === "Escape") setEditing(false);
               }}
               onMouseDown={(e) => e.stopPropagation()}
+          onPointerDown={(e) => e.stopPropagation()}
               style={{
                 font: "inherit",
                 color: "inherit",
@@ -385,7 +433,7 @@ export function ShapeElement({
             text || "Frame"
           )}
         </div>
-        {selected && <span className="shape-resize" onMouseDown={startResize} title="Resize" />}
+        {selected && <span className="shape-resize" {...resizeProps} title="Resize" />}
       </div>
     );
   }
@@ -395,8 +443,8 @@ export function ShapeElement({
     return (
       <div
         {...{
-          className: `shape file ${selected ? "selected" : ""}`,
-          onMouseDown,
+          className: `shape file ${selected ? "selected" : ""} ${dragging ? "dragging" : ""}`,
+          ...dragProps,
           onContextMenu: (e: React.MouseEvent) => {
             e.preventDefault();
             e.stopPropagation();
@@ -414,7 +462,7 @@ export function ShapeElement({
       >
         <span className="file-icon">📄</span>
         <span className="file-name">{text || "Document"}</span>
-        {selected && <span className="shape-resize" onMouseDown={startResize} title="Resize" />}
+        {selected && <span className="shape-resize" {...resizeProps} title="Resize" />}
       </div>
     );
   }
@@ -427,8 +475,8 @@ export function ShapeElement({
     if (!isSafeImageSrc(src)) {
       return (
         <div
-          className={`shape image ${selected ? "selected" : ""}`}
-          onMouseDown={onMouseDown}
+          className={`shape image ${selected ? "selected" : ""} ${dragging ? "dragging" : ""}`}
+          {...dragProps}
           style={{
             left: x,
             top: y,
@@ -451,16 +499,16 @@ export function ShapeElement({
           }}
         >
           Image unavailable
-          {selected && <span className="shape-resize" onMouseDown={startResize} title="Resize" />}
+          {selected && <span className="shape-resize" {...resizeProps} title="Resize" />}
         </div>
       );
     }
     return (
       <img
-        className={`shape image ${selected ? "selected" : ""}`}
+        className={`shape image ${selected ? "selected" : ""} ${dragging ? "dragging" : ""}`}
         src={src}
         alt=""
-        onMouseDown={onMouseDown}
+        {...dragProps}
         style={{
           left: x,
           top: y,
@@ -493,7 +541,7 @@ export function ShapeElement({
     const safeSrc = isHttpUrl(src) ? src : "about:blank";
     return (
       <div
-        className={`shape embed ${selected ? "selected" : ""}`}
+        className={`shape embed ${selected ? "selected" : ""} ${dragging ? "dragging" : ""}`}
         style={{
           left: x,
           top: y,
@@ -507,7 +555,7 @@ export function ShapeElement({
           border: "1px solid var(--stroke-2)",
         }}
       >
-        <div className="embed-drag" onMouseDown={onMouseDown} title="Drag" />
+        <div className="embed-drag" {...dragProps} title="Drag" />
         {isIframe ? (
           <iframe
             src={safeSrc}
@@ -530,7 +578,7 @@ export function ShapeElement({
             referrerPolicy="no-referrer"
           />
         )}
-        {selected && <span className="shape-resize" onMouseDown={startResize} title="Resize" />}
+        {selected && <span className="shape-resize" {...resizeProps} title="Resize" />}
       </div>
     );
   }
@@ -543,6 +591,7 @@ export function ShapeElement({
     selected ? "selected" : "",
     linkSource ? "link-source" : "",
     shape.locked ? "locked" : "",
+    dragging ? "dragging" : "",
   ]
     .filter(Boolean)
     .join(" ");
@@ -586,6 +635,7 @@ export function ShapeElement({
           }
         }}
         onMouseDown={(e) => e.stopPropagation()}
+          onPointerDown={(e) => e.stopPropagation()}
         rows={1}
         style={{
           font: "inherit",
@@ -612,6 +662,7 @@ export function ShapeElement({
           if (e.key === "Escape") setEditing(false);
         }}
         onMouseDown={(e) => e.stopPropagation()}
+          onPointerDown={(e) => e.stopPropagation()}
         style={{
           font: "inherit",
           color: "inherit",
@@ -631,7 +682,7 @@ export function ShapeElement({
   const commonProps = {
     className: cls,
     style,
-    onMouseDown,
+    ...dragProps,
     onDoubleClick: (e: React.MouseEvent) => {
       e.stopPropagation();
       setEditing(true);
@@ -645,7 +696,7 @@ export function ShapeElement({
 
   const resizeHandle =
     selected && !shape.locked ? (
-      <span className="shape-resize" onMouseDown={startResize} title="Resize" />
+      <span className="shape-resize" {...resizeProps} title="Resize" />
     ) : null;
 
   if (kind === "diamond") {

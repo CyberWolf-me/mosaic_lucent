@@ -226,4 +226,47 @@ describe("POST /api/livekit/token (route)", () => {
       expect.fail("token failed verification");
     }
   });
+
+  describe("POST /api/livekit/dispatch", () => {
+    it("answers 503 when LiveKit is not configured", async () => {
+      await boot();
+      const token = await signup();
+      const res = await fetch(`${base}/api/livekit/dispatch`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ room: "voice_brd_test" }),
+      });
+      expect(res.status).toBe(503);
+    });
+
+    it("answers 401 when caller has no session", async () => {
+      await boot({
+        LUCENT_LIVEKIT_API_KEY: API_KEY,
+        LUCENT_LIVEKIT_API_SECRET: API_SECRET,
+        LUCENT_LIVEKIT_URL: URL,
+      });
+      const res = await fetch(`${base}/api/livekit/dispatch`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ room: "voice_brd_test" }),
+      });
+      expect(res.status).toBe(401);
+    });
+
+    it("answers 400 when body is missing room and boardId", async () => {
+      await boot({
+        LUCENT_LIVEKIT_API_KEY: API_KEY,
+        LUCENT_LIVEKIT_API_SECRET: API_SECRET,
+        LUCENT_LIVEKIT_URL: URL,
+      });
+      const token = await signup();
+      const res = await fetch(`${base}/api/livekit/dispatch`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      expect(res.status).toBe(400);
+    });
+  });
 });
+

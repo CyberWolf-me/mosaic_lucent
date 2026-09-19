@@ -1,4 +1,12 @@
-import { useEffect, useId, useRef, type CSSProperties, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from "react";
 
 /**
  * UX-7 design-system consolidation: the smallest shared primitives that let
@@ -9,7 +17,13 @@ import { useEffect, useId, useRef, type CSSProperties, type ReactNode } from "re
  * new visual language is introduced — consolidation, not a redesign.
  */
 
-/** Modal dialog: scrim + centred panel, Escape to close, focus in + back out. */
+/**
+ * Modal dialog: scrim + centred panel, Escape to close, focus in + back out.
+ *
+ * Dismissal plays the exit leg before unmounting (skill §7: symmetric
+ * paths) — `onClose` fires ~130ms after the request so the materialize
+ * animation can run in reverse instead of vanishing mid-frame.
+ */
 export function Dialog({
   onClose,
   label,
@@ -27,6 +41,16 @@ export function Dialog({
 }): React.ReactElement {
   const heading = title ?? label ?? "Dialog";
   const dialogRef = useRef<HTMLDivElement>(null);
+  const [closing, setClosing] = useState(false);
+  const closeTimer = useRef(0);
+
+  const requestClose = useCallback(() => {
+    if (closing) return;
+    setClosing(true);
+    closeTimer.current = window.setTimeout(onClose, 130);
+  }, [closing, onClose]);
+
+  useEffect(() => () => window.clearTimeout(closeTimer.current), []);
 
   useEffect(() => {
     const prev = document.activeElement as HTMLElement | null;
@@ -40,7 +64,7 @@ export function Dialog({
     const onKey = (e: KeyboardEvent): void => {
       if (e.key === "Escape") {
         e.preventDefault();
-        onClose();
+        requestClose();
       }
     };
     document.addEventListener("keydown", onKey);
@@ -49,14 +73,15 @@ export function Dialog({
       // Return focus to whatever opened the dialog.
       prev?.focus();
     };
-  }, [onClose]);
+  }, [requestClose]);
 
+  const panelCls = `${className ? `confirm-dialog ${className}` : "confirm-dialog"}${closing ? " closing" : ""}`;
   return (
     <>
-      <div className="modal-scrim" onClick={onClose} />
+      <div className={closing ? "modal-scrim closing" : "modal-scrim"} onClick={requestClose} />
       <div
         ref={dialogRef}
-        className={className ? `confirm-dialog ${className}` : "confirm-dialog"}
+        className={panelCls}
         role="dialog"
         aria-modal="true"
         aria-label={heading}
@@ -69,19 +94,27 @@ export function Dialog({
   );
 }
 
-/** Popup menu: ArrowUp/Down move, Enter activates, Escape closes, outside click closes. */
+/**
+ * Popup menu: ArrowUp/Down move, Enter activates, Escape closes, outside click closes.
+ *
+ * `origin` anchors the enter/exit scale to the trigger (skill §7) — pass the
+ * button edge the menu drops from (e.g. "top center"). Defaults to the top
+ * edge; the board context menu sets its own cursor-relative origin inline.
+ */
 export function Menu({
   onClose,
   children,
   label,
   className,
   style,
+  origin,
 }: {
   onClose: () => void;
   children: ReactNode;
   label?: string;
   className?: string;
   style?: CSSProperties;
+  origin?: string;
 }): React.ReactElement {
   const rootRef = useRef<HTMLDivElement>(null);
 
@@ -128,7 +161,7 @@ export function Menu({
       aria-label={label ?? "Menu"}
       tabIndex={-1}
       className={className ? `context-menu ${className}` : "context-menu"}
-      style={style}
+      style={origin ? { ...style, transformOrigin: origin } : style}
       onKeyDown={(e) => {
         if (e.key === "ArrowDown") {
           e.preventDefault();

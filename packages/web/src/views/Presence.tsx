@@ -14,7 +14,12 @@ export function PresenceCursors({ peers }: { peers: Peer[] }) {
           <div
             key={p.userId}
             className="presence-cursor"
-            style={{ left: p.cursor.x, top: p.cursor.y, color: p.color }}
+            // Transform-positioned (see .presence-cursor): layout properties
+            // here would reflow the board on every remote cursor frame.
+            style={{
+              transform: `translate(${p.cursor.x - 2}px, ${p.cursor.y - 2}px)`,
+              color: p.color,
+            }}
           >
             <svg width="18" height="18" viewBox="0 0 18 18" fill="currentColor" aria-hidden>
               <path d="M2 2l5 14 2.5-5.5L15 8z" />

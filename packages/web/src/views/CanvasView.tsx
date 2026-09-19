@@ -4,7 +4,7 @@ import { applyLayout, applyRoutes, computeLayoutWithRoutes } from "@lucent/core"
 import { Ico } from "../ui/icons.js";
 import { AIPill } from "../ui/AIPill.js";
 import { TopBar, LeftRail, ZoomBadge, StatusBadge } from "../ui/Chrome.js";
-import { CanvasViewport, type ViewportControls } from "../ui/atoms.js";
+import { CanvasViewport, emitHaptic, type ViewportControls } from "../ui/atoms.js";
 import { DiagramLayer } from "../ui/DiagramLayer.js";
 import {
   ShapeToolbar,
@@ -58,6 +58,12 @@ import { generateImage } from "../api.js";
 import { WireframeRenderer } from "../ui/WireframeRenderer.js";
 import { speakAnswer } from "../tts.js";
 import { getSttProvider, isAnyVoiceSupported, type VoiceSession } from "../stt/index.js";
+import { VoiceAgentBar } from "../ui/VoiceAgentBar.js";
+import {
+  startVoiceAgentSession,
+  type VoiceAgentController,
+  type VoiceAgentState,
+} from "../stt/voiceAgentSession.js";
 import { nextZ, normalizeZ, shapeId } from "../shapes.js";
 import { resolveEmbed } from "../embed.js";
 import { boardToMarkdown, boardToCsv, csvToStickyOps } from "../board/serialize.js";
@@ -869,6 +875,64 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
     settings.livekitRoom,
     setListening,
   ]);
+
+  // LiveKit Duplex Voice Agent State
+  const [voiceAgentState, setVoiceAgentState] = useState<VoiceAgentState>("idle");
+  const [voiceAgentMuted, setVoiceAgentMuted] = useState(false);
+  const [voiceAgentTranscript, setVoiceAgentTranscript] = useState("");
+  const voiceAgentCtrlRef = useRef<VoiceAgentController | null>(null);
+
+  const toggleVoiceAgent = useCallback(async () => {
+    if (
+      voiceAgentState !== "idle" &&
+      voiceAgentState !== "disconnected" &&
+      voiceAgentState !== "error"
+    ) {
+      voiceAgentCtrlRef.current?.disconnect();
+      voiceAgentCtrlRef.current = null;
+      setVoiceAgentState("disconnected");
+      notify("Voice agent call ended.");
+      return;
+    }
+
+    if (!boardId) {
+      notify("Please create or open a board first.");
+      return;
+    }
+
+    try {
+      notify("Connecting to LiveKit Voice Agent…");
+      const ctrl = await startVoiceAgentSession({
+        boardId,
+        onStateChange: (st) => {
+          setVoiceAgentState(st);
+        },
+        onTranscript: (t) => {
+          setVoiceAgentTranscript(`${t.isAgent ? "Lucent: " : "You: "}${t.text}`);
+        },
+        onError: (err) => {
+          notify(`Voice Agent: ${err}`);
+        },
+      });
+      voiceAgentCtrlRef.current = ctrl;
+      setVoiceAgentMuted(false);
+    } catch (err) {
+      notify(`Voice Agent connection failed: ${(err as Error).message}`);
+    }
+  }, [boardId, voiceAgentState, notify]);
+
+  const toggleVoiceAgentMute = useCallback(async () => {
+    if (!voiceAgentCtrlRef.current) return;
+    const nextMuted = !voiceAgentMuted;
+    await voiceAgentCtrlRef.current.setMuted(nextMuted);
+    setVoiceAgentMuted(nextMuted);
+  }, [voiceAgentMuted]);
+
+  useEffect(() => {
+    return () => {
+      voiceAgentCtrlRef.current?.disconnect();
+    };
+  }, []);
 
   const addShape = useCallback(
     (op: import("@lucent/core").Operation & { op: "CREATE_SHAPE" }) => {
@@ -2500,6 +2564,19 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
             />
           )}
 
+          <VoiceAgentBar
+            state={voiceAgentState}
+            muted={voiceAgentMuted}
+            transcript={voiceAgentTranscript}
+            onToggleMute={toggleVoiceAgentMute}
+            onDisconnect={() => {
+              voiceAgentCtrlRef.current?.disconnect();
+              voiceAgentCtrlRef.current = null;
+              setVoiceAgentState("disconnected");
+              notify("Voice agent call ended.");
+            }}
+          />
+
           {mode !== "present" && (
             <AIPill
               status={status}
@@ -2520,6 +2597,12 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
               listening={listening}
               onToggleMic={toggleVoice}
               voiceSupported={voiceSupported}
+              onToggleVoiceAgent={toggleVoiceAgent}
+              voiceAgentActive={
+                voiceAgentState !== "idle" &&
+                voiceAgentState !== "disconnected" &&
+                voiceAgentState !== "error"
+              }
               history={chat}
               busy={busy}
               shifted={canvasPhase === "proposing"}

@@ -493,6 +493,101 @@ export function shapesInFrame(frame: Shape, shapes: Shape[]): string[] {
     .map((s) => s.id);
 }
 
+/**
+ * Apple-design motion physics (skill §4–6, §9). Pure math, no DOM: gesture
+ * handlers feed pointer samples in, and drive the returned targets with
+ * `approach()` on `requestAnimationFrame`. Precision object drags (nodes,
+ * shapes) deliberately stop dead on release — Figma/Miro parity — while
+ * viewport pans and zoom glide from the release velocity.
+ */
+
+/** Drag must exceed this (content px per axis) before it becomes a move, not a click. */
+export const DRAG_HYSTERESIS_PX = 10;
+
+/** Hard zoom limits (percent). Targets may overshoot softly; rest always lands inside. */
+export const ZOOM_MIN = 25;
+export const ZOOM_MAX = 400;
+/** Soft overshoot room (percent) before resistance goes near-vertical. */
+export const ZOOM_OVERSHOOT = 80;
+
+/**
+ * Project where a flick is *going* (skill §6): exponential-decay projection,
+ * exactly Apple's Designing Fluid Interfaces form — not the v²/(2·decel)
+ * textbook variant. `velocityPxPerSec` is the release velocity.
+ */
+export function projectMomentum(velocityPxPerSec: number, decelerationRate = 0.998): number {
+  return ((velocityPxPerSec / 1000) * decelerationRate) / (1 - decelerationRate);
+}
+
+/**
+ * Progressive boundary resistance (skill §9): the further past the bound, the
+ * less the value follows. Sign-preserving; `dimension` scales the softness.
+ */
+export function rubberband(overshoot: number, dimension: number, constant = 0.55): number {
+  if (overshoot === 0) return 0;
+  const sign = Math.sign(overshoot);
+  const abs = Math.abs(overshoot);
+  return sign * ((abs * dimension * constant) / (dimension + constant * abs));
+}
+
+/**
+ * Short pointer-position history for release-velocity handoff (skill §5).
+ * Push raw client px with their timestamps; `velocity()` returns px/sec from
+ * the samples inside the trailing window, or zero when there is no motion.
+ */
+export class VelocityTracker {
+  private samples: Array<{ x: number; y: number; t: number }> = [];
+  constructor(
+    private readonly windowMs = 120,
+    private readonly maxSamples = 6,
+  ) {}
+
+  push(x: number, y: number, nowMs = performance.now()): void {
+    this.samples.push({ x, y, t: nowMs });
+    while (this.samples.length > this.maxSamples) this.samples.shift();
+    const cutoff = nowMs - this.windowMs;
+    while (this.samples.length > 1 && this.samples[0]!.t < cutoff) this.samples.shift();
+  }
+
+  velocity(): { x: number; y: number } {
+    const s = this.samples;
+    if (s.length < 2) return { x: 0, y: 0 };
+    const first = s[0]!;
+    const last = s[s.length - 1]!;
+    const dt = (last.t - first.t) / 1000;
+    if (dt <= 0) return { x: 0, y: 0 };
+    return { x: (last.x - first.x) / dt, y: (last.y - first.y) / dt };
+  }
+
+  reset(): void {
+    this.samples = [];
+  }
+}
+
+/**
+ * One critically-damped approach step (skill §4, damping 1.0 default): no
+ * overshoot, no fixed duration — the settle time emerges from `speedPerSec`.
+ * Re-targeting mid-flight just moves `target`; motion stays continuous, which
+ * is what makes interruption clean. Returns the new value.
+ */
+export function approach(current: number, target: number, speedPerSec: number, dtSec: number): number {
+  if (current === target || dtSec <= 0) return target;
+  const k = 1 - Math.exp(-speedPerSec * dtSec);
+  const next = current + (target - current) * k;
+  // Snap when imperceptible so loops terminate instead of easing forever.
+  return Math.abs(target - next) < 0.01 ? target : next;
+}
+
+/**
+ * Soft-clamp a zoom target: inside the limits it passes through; outside, the
+ * excess meets rubber-band resistance instead of a hard stop (skill §9).
+ */
+export function softClampZoom(zoom: number): number {
+  if (zoom >= ZOOM_MIN && zoom <= ZOOM_MAX) return zoom;
+  if (zoom < ZOOM_MIN) return ZOOM_MIN + rubberband(zoom - ZOOM_MIN, ZOOM_OVERSHOOT);
+  return ZOOM_MAX + rubberband(zoom - ZOOM_MAX, ZOOM_OVERSHOOT);
+}
+
 export type AlignMode = "left" | "hcenter" | "right" | "top" | "vcenter" | "bottom";
 
 /**

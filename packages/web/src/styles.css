@@ -125,11 +125,15 @@ body {
 body {
   font-family: var(--font-sans);
   font-feature-settings: "ss01", "cv11";
+  /* Optical sizing so the system face reshapes with size (skill §15). */
+  font-optical-sizing: auto;
   background: var(--canvas-0);
   color: var(--ink-0);
   overflow: hidden;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  /* Body tracking stays near zero; display sizes tighten per-rule below —
+     one global letter-spacing is wrong somewhere (skill §15). */
   letter-spacing: -0.005em;
 }
 
@@ -2042,8 +2046,14 @@ html[data-theme="light"] .shape.diamond {
    MOTION & EASE — makes the board feel alive, not static
    ============================================================ */
 
-/* Nodes brighten on hover without spatial jitter, press-settle on click. */
-.node {
+/* Nodes brighten on hover without spatial jitter, press-settle on click.
+   will-change stays scoped to live motion (skill §11): hinting a compositor
+   layer on every node of a 300-node board is a memory tax for zero benefit.
+   .dragging is set while a pointer drag is in flight (NodeCard/ShapeElement). */
+.node.dragging,
+.node.emerging,
+.node.appear,
+.shape.dragging {
   will-change: transform;
 }
 .node:hover {
@@ -2184,6 +2194,46 @@ html[data-motion="reduced"] * {
   }
 }
 
+/* Reduced transparency: frosted chrome goes solid (skill §14). The html-
+   prefixed selectors outrank the plain-class dark rules, and the
+   [data-theme="light"] rows tie the light overrides but win by source order. */
+@media (prefers-reduced-transparency: reduce) {
+  html .screen-switcher,
+  html .left-rail,
+  html .ai-pill,
+  html .pill-status,
+  html .right-panel,
+  html .shape-toolbar,
+  html .canvas-utility-bar,
+  html .utility-popover,
+  html .selection-hud,
+  html .toast,
+  html .context-menu,
+  html .chrome-badge,
+  html .ai-history-bubble,
+  html .ai-msg-count-btn {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    background: var(--canvas-2);
+  }
+  html[data-theme="light"] .screen-switcher,
+  html[data-theme="light"] .left-rail,
+  html[data-theme="light"] .ai-pill,
+  html[data-theme="light"] .pill-status,
+  html[data-theme="light"] .right-panel,
+  html[data-theme="light"] .shape-toolbar,
+  html[data-theme="light"] .canvas-utility-bar,
+  html[data-theme="light"] .utility-popover,
+  html[data-theme="light"] .selection-hud,
+  html[data-theme="light"] .toast,
+  html[data-theme="light"] .context-menu,
+  html[data-theme="light"] .chrome-badge,
+  html[data-theme="light"] .ai-history-bubble,
+  html[data-theme="light"] .ai-msg-count-btn {
+    background: var(--paper-0);
+  }
+}
+
 /* ============================================================
    PROFILE MENU + SETTINGS MODAL
    ============================================================ */
@@ -2275,11 +2325,56 @@ html[data-theme="light"] .profile-menu {
      `translate(-50%, -50%)`, which lands on half-pixels at odd viewport sizes
      and blurs the whole panel.
    Atmosphere belongs on the canvas, not on top of body copy. */
+/* Dialog materialize (skill §7, §12): blur + scale arrive together so the
+   surface reads as a real material, and dismissal runs the same path in
+   reverse. The .closing legs are driven by Dialog's deferred unmount. */
+@keyframes dialog-in {
+  from {
+    opacity: 0;
+    transform: scale(0.97);
+    filter: blur(3px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+    filter: blur(0);
+  }
+}
+@keyframes dialog-out {
+  from {
+    opacity: 1;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+}
+@keyframes scrim-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes scrim-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
 .modal-scrim {
   position: fixed;
   inset: 0;
   z-index: 400;
   background: oklch(0.1 0.005 252 / 0.72);
+  animation: scrim-in 0.18s ease-out backwards;
+}
+.modal-scrim.closing {
+  animation: scrim-out 0.13s ease-in both;
 }
 html[data-theme="light"] .modal-scrim {
   background: oklch(0.3 0.01 252 / 0.42);
@@ -2301,6 +2396,9 @@ html[data-theme="light"] .modal-scrim {
   display: grid;
   grid-template-columns: 200px 1fr;
   overflow: hidden;
+  /* Enter leg only: the settings shell unmounts immediately on close, so
+     there is no deferred exit here the way Dialog's .closing provides. */
+  animation: dialog-in 0.2s var(--e-out) backwards;
 }
 html[data-theme="light"] .settings-modal {
   background: oklch(1 0 0);
@@ -2349,9 +2447,12 @@ html[data-theme="light"] .settings-modal {
 .settings-body h2 {
   font-family: var(--font-display);
   font-size: 22px;
+  /* Display sizes tighten and lead tight (skill §15); body keeps room. */
   letter-spacing: -0.02em;
+  line-height: 1.15;
   font-weight: 600;
   color: var(--ink-0);
+  text-wrap: balance;
 }
 .settings-body .subtitle {
   font-size: 12.5px;
@@ -3334,6 +3435,32 @@ html[data-board="sketch"] .frame-tag {
 }
 
 /* Right-click context menu (docs/14 board parity) */
+/* Popover materialize (skill §7): the scale anchors to the trigger via
+   transform-origin — the cursor for ContextMenu (inline), the button edge
+   for Menu (`origin` prop, defaulting below) — and exit mirrors entry.
+   Deliberately not the toast easing: menus grow from a source, toasts rise. */
+@keyframes menu-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+    filter: blur(2px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+    filter: blur(0);
+  }
+}
+@keyframes menu-out {
+  from {
+    opacity: 1;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+}
 .context-menu {
   position: fixed;
   z-index: 500;
@@ -3344,7 +3471,11 @@ html[data-board="sketch"] .frame-tag {
   border: 1px solid var(--stroke-2);
   box-shadow: var(--elev-3);
   backdrop-filter: blur(20px);
-  animation: toast-in 0.14s var(--e-out) both;
+  transform-origin: top center;
+  animation: menu-in 0.16s var(--e-out) backwards;
+}
+.context-menu.closing {
+  animation: menu-out 0.12s var(--e-in-out) both;
 }
 .ctx-item {
   display: block;
@@ -4376,6 +4507,10 @@ html[data-theme="light"] .badge-react {
   border: 1px solid var(--stroke-2);
   box-shadow: var(--elev-3);
   color: var(--ink-0);
+  animation: dialog-in 0.18s var(--e-out) backwards;
+}
+.confirm-dialog.closing {
+  animation: dialog-out 0.13s var(--e-in-out) both;
 }
 .confirm-title {
   font-size: 15px;
@@ -4597,11 +4732,14 @@ html[data-theme="light"] .badge-react {
    ============================================================ */
 .presence-cursor {
   position: absolute;
-  transform: translate(-2px, -2px);
-  transition:
-    left 0.08s linear,
-    top 0.08s linear;
-  will-change: left, top;
+  left: 0;
+  top: 0;
+  /* Positioned by inline transform, never left/top: remote cursors update
+     every frame, and layout properties there reflow the board (skill §11).
+     The 0.08s linear tail smooths network jitter on ambient, non-interactive
+     motion — never on anything the local finger drives. */
+  transition: transform 0.08s linear;
+  will-change: transform;
 }
 .presence-cursor svg {
   display: block;
