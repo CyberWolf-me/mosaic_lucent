@@ -6,7 +6,7 @@
 ## Context
 
 Stage C1 made the board's history queryable; the Stage C document's C2 batch
-asked the next question: what does the history *mean*? A board could say
+asked the next question: what does the history _mean_? A board could say
 "Alex changed pricing at 10:12" but not "the team decided $15/month" —
 meaning lived in labels ("Proposal: …", "Rejected: X" were string
 conventions in the extraction prompt) and in the meeting transcript, with no
@@ -47,7 +47,7 @@ issue layer for meaning instead of work tracking.**
   its target's setter when the model emits them backwards.
 - **Identity survives visual change**: relabels, type changes, and transforms
   never touch the statement or provenance — asserted by round-trip test.
-  The statement is what the node *is*; the label is its current caption.
+  The statement is what the node _is_; the label is its current caption.
 
 Because the contract is operations, everything the platform already
 guarantees applies on day one: the model's tool schema derives the new ops
@@ -56,9 +56,9 @@ derivation), MCP agents see statements in `get_board`, validation rejects
 bad batches at every boundary, undo restores every superseded target's prior
 statement, and statements shared through the op log land on every peer.
 
-**Two senses of "proposal", documented on purpose**: the statement *kind*
+**Two senses of "proposal", documented on purpose**: the statement _kind_
 (a hedged idea the meeting surfaced — "maybe we could…") and the Stage B3
-review-gate *proposal* (a batch of operations awaiting human approval) are
+review-gate _proposal_ (a batch of operations awaiting human approval) are
 different objects sharing a word. The gate is a workflow state; the kind is
 a meaning. The UI says "pending review" for the former and "proposal" for
 the latter where they could collide.

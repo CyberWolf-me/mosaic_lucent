@@ -7,7 +7,7 @@
 Stage C1: history and Ask — the board's evolution becomes queryable, and the AI pill learns to answer questions about it with citations.
 
 - **History API (`@lucent/server`, `@lucent/web`)**: `GET
-  /api/boards/:id/history` serves the op log's windowed revision timeline —
+/api/boards/:id/history` serves the op log's windowed revision timeline —
   actor names, labels, touched objects, and the proposal link for gated
   changes. `history.depth` (Free 25 / Pro 500 / unlimited) is enforced as a
   read boundary for the first time: nothing is deleted, so upgrading

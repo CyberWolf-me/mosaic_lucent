@@ -97,9 +97,7 @@ function VideoTile({
           pointerEvents: "none",
         }}
       >
-        <span style={{ fontSize: 11 }}>
-          {micMuted ? "🔇" : isSpeaking ? "🔊" : "🎙️"}
-        </span>
+        <span style={{ fontSize: 11 }}>{micMuted ? "🔇" : isSpeaking ? "🔊" : "🎙️"}</span>
         <span>{tile.screen ? `${tile.name} (Screen)` : tile.name}</span>
       </div>
     </div>
@@ -181,9 +179,7 @@ function AvatarTile({
           letterSpacing: "0.02em",
         }}
       >
-        <span style={{ fontSize: 11 }}>
-          {micMuted ? "🔇" : isSpeaking ? "🔊" : "🎙️"}
-        </span>
+        <span style={{ fontSize: 11 }}>{micMuted ? "🔇" : isSpeaking ? "🔊" : "🎙️"}</span>
         <span>{name}</span>
       </div>
     </div>
@@ -197,7 +193,7 @@ export function NativeRoom({
   panelOpen = false,
   onTogglePanel,
   activePanel = "transcript",
-  turnsCount = 0,
+  turnsCount: _turnsCount = 0,
   onToggleNotes,
   notesOpen,
 }: {
@@ -270,7 +266,8 @@ export function NativeRoom({
           Lucent Video Meeting
         </h3>
         <p style={{ margin: "0 0 24px", fontSize: 13.5, color: "var(--ink-2)", maxWidth: 420 }}>
-          Join the multi-party video call with screen sharing and live AI diagram extraction directly on your canvas.
+          Join the multi-party video call with screen sharing and live AI diagram extraction
+          directly on your canvas.
         </p>
 
         {/* Device preview toggles */}
@@ -365,9 +362,7 @@ export function NativeRoom({
               boxShadow: "0 0 8px #22c55e",
             }}
           />
-          <span style={{ fontSize: 13, fontWeight: 600, color: "#fff" }}>
-            Live Room
-          </span>
+          <span style={{ fontSize: 13, fontWeight: 600, color: "#fff" }}>Live Room</span>
           <span
             style={{
               fontSize: 11,
@@ -420,9 +415,7 @@ export function NativeRoom({
         {camOn && videoTiles.some((t) => t.identity === "local") ? (
           videoTiles
             .filter((t) => t.identity === "local" && !t.screen)
-            .map((t) => (
-              <VideoTile key={t.key} tile={t} isSpeaking={false} micMuted={!micOn} />
-            ))
+            .map((t) => <VideoTile key={t.key} tile={t} isSpeaking={false} micMuted={!micOn} />)
         ) : (
           <AvatarTile name="You" isSpeaking={false} micMuted={!micOn} isLocal={true} />
         )}
@@ -442,17 +435,9 @@ export function NativeRoom({
           return (
             <div key={peer.identity} style={{ display: "contents" }}>
               {peerVideo ? (
-                <VideoTile
-                  tile={peerVideo}
-                  isSpeaking={peer.speaking}
-                  micMuted={!peer.micOn}
-                />
+                <VideoTile tile={peerVideo} isSpeaking={peer.speaking} micMuted={!peer.micOn} />
               ) : (
-                <AvatarTile
-                  name={peer.name}
-                  isSpeaking={peer.speaking}
-                  micMuted={!peer.micOn}
-                />
+                <AvatarTile name={peer.name} isSpeaking={peer.speaking} micMuted={!peer.micOn} />
               )}
               {peerScreen && (
                 <VideoTile tile={peerScreen} isSpeaking={false} micMuted={!peer.micOn} />
@@ -546,7 +531,9 @@ export function NativeRoom({
         {onToggleRecording && (
           <button
             onClick={onToggleRecording}
-            title={isRecording ? "Stop recording audio" : "Start recording audio & live AI transcription"}
+            title={
+              isRecording ? "Stop recording audio" : "Start recording audio & live AI transcription"
+            }
             style={{
               width: 46,
               height: 46,
@@ -559,7 +546,9 @@ export function NativeRoom({
               fontSize: 18,
               cursor: "pointer",
               transition: "all 0.15s ease",
-              boxShadow: isRecording ? "0 0 14px rgba(239, 68, 68, 0.6)" : "0 2px 8px rgba(0,0,0,0.3)",
+              boxShadow: isRecording
+                ? "0 0 14px rgba(239, 68, 68, 0.6)"
+                : "0 2px 8px rgba(0,0,0,0.3)",
             }}
           >
             {isRecording ? "⏹️" : "🔴"}
@@ -570,12 +559,17 @@ export function NativeRoom({
         {onTogglePanel && (
           <button
             onClick={() => onTogglePanel("transcript")}
-            title={panelOpen && activePanel === "transcript" ? "Hide minutes" : "Show meeting minutes & transcript"}
+            title={
+              panelOpen && activePanel === "transcript"
+                ? "Hide minutes"
+                : "Show meeting minutes & transcript"
+            }
             style={{
               width: 46,
               height: 46,
               borderRadius: "50%",
-              background: panelOpen && activePanel === "transcript" ? "var(--amber-2, #f59e0b)" : "#262a34",
+              background:
+                panelOpen && activePanel === "transcript" ? "var(--amber-2, #f59e0b)" : "#262a34",
               color: panelOpen && activePanel === "transcript" ? "#000" : "#fff",
               border: "none",
               display: "grid",
@@ -594,12 +588,17 @@ export function NativeRoom({
         {onTogglePanel && (
           <button
             onClick={() => onTogglePanel("extract")}
-            title={panelOpen && activePanel === "extract" ? "Hide extracted statements" : "Show extracted diagram statements"}
+            title={
+              panelOpen && activePanel === "extract"
+                ? "Hide extracted statements"
+                : "Show extracted diagram statements"
+            }
             style={{
               width: 46,
               height: 46,
               borderRadius: "50%",
-              background: panelOpen && activePanel === "extract" ? "var(--amber-2, #f59e0b)" : "#262a34",
+              background:
+                panelOpen && activePanel === "extract" ? "var(--amber-2, #f59e0b)" : "#262a34",
               color: panelOpen && activePanel === "extract" ? "#000" : "#fff",
               border: "none",
               display: "grid",
@@ -638,7 +637,9 @@ export function NativeRoom({
           </button>
         )}
 
-        <div style={{ width: 1, height: 24, background: "rgba(255, 255, 255, 0.15)", margin: "0 4px" }} />
+        <div
+          style={{ width: 1, height: 24, background: "rgba(255, 255, 255, 0.15)", margin: "0 4px" }}
+        />
 
         {/* Leave Meeting Button */}
         <button

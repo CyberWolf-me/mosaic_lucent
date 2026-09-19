@@ -242,11 +242,24 @@ describe("get_board derived execution (Stage D3)", () => {
       operations: [
         { op: "CREATE_NODE", id: "design", nodeType: "action", label: "Design approval" },
         { op: "SET_STATEMENT", id: "design", statement: { kind: "action", status: "open" } },
-        { op: "SET_ISSUE", id: "design", issue: { type: "task", status: "blocked", dueDate: "2020-01-01" } },
+        {
+          op: "SET_ISSUE",
+          id: "design",
+          issue: { type: "task", status: "blocked", dueDate: "2020-01-01" },
+        },
         { op: "CREATE_NODE", id: "implementation", nodeType: "action", label: "Implementation" },
-        { op: "SET_STATEMENT", id: "implementation", statement: { kind: "action", status: "open" } },
+        {
+          op: "SET_STATEMENT",
+          id: "implementation",
+          statement: { kind: "action", status: "open" },
+        },
         { op: "SET_ISSUE", id: "implementation", issue: { type: "task", status: "open" } },
-        { op: "CONNECT_NODES", source: "implementation", target: "design", relationship: "depends_on" },
+        {
+          op: "CONNECT_NODES",
+          source: "implementation",
+          target: "design",
+          relationship: "depends_on",
+        },
       ],
     });
     const res = s.callTool("get_board", {});

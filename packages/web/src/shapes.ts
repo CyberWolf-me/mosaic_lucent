@@ -16,7 +16,7 @@ export type DropKind =
   | "text"
   | "frame";
 
-const STICKY_TEXT = [
+const _STICKY_TEXT = [
   "Try one-click checkout",
   "Ask: what happens if Stripe fails?",
   "Move payment above shipping",

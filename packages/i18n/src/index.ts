@@ -78,7 +78,8 @@ export const en: Messages = {
   "exec.counts.blocked": "Blocked",
   "exec.counts.atRisk": "At risk",
   "exec.counts.overdue": "Overdue",
-  "exec.atRisk.title": "An upstream item is past due and unfinished — an analytical signal, never a status.",
+  "exec.atRisk.title":
+    "An upstream item is past due and unfinished — an analytical signal, never a status.",
   "exec.blocking.title": "What's blocking us",
   "exec.blocking.empty": "Nothing is blocked.",
   "exec.decisions.title": "Decisions behind the work",
@@ -114,7 +115,8 @@ export const en: Messages = {
   "integrations.project": "Project: {project}",
   "integrations.warnings.title": "This provider cannot represent some fields faithfully:",
   "integrations.panel.title": "External actions — {provider}",
-  "integrations.panel.hint": "Propose a batch of external tasks; review the preview; approve to execute.",
+  "integrations.panel.hint":
+    "Propose a batch of external tasks; review the preview; approve to execute.",
   "integrations.panel.propose": "Propose",
   "integrations.panel.approve": "Approve",
   "integrations.panel.sendAnyway": "Send anyway",
@@ -133,12 +135,13 @@ export const en: Messages = {
   "integrations.context.body":
     "Lucent creates and updates tasks in the connected external system only through this preview-and-approve flow. Nothing is deleted; existing tasks change only in the fields shown. The board itself never carries provider data — links live in Lucent's integration registry.",
   "integrations.inbound.title": "External changes",
-  "integrations.inbound.hint": "Changes detected in the connected system queue here. Nothing applies to the board until you accept it.",
+  "integrations.inbound.hint":
+    "Changes detected in the connected system queue here. Nothing applies to the board until you accept it.",
   "integrations.inbound.empty": "No queued external changes.",
   "integrations.inbound.accept": "Accept",
   "integrations.inbound.dismiss": "Keep ours",
   "integrations.inbound.warning":
-    "{provider} says \"{value}\" — Lucent has no translation for that; the board keeps its state.",
+    '{provider} says "{value}" — Lucent has no translation for that; the board keeps its state.',
   "integrations.inbound.resolved": "The board already says {value}.",
   "integrations.inbound.row": "{provider} says {external} — the board says {board}",
   "integrations.inbound.applied": "accepted",
@@ -209,8 +212,7 @@ export const hu: Messages = {
   "toast.insert.conflict": "{name} nem szúrható be — ütközik a tábla jelenlegi állapotával.",
   "intel.title": "Intelligencia",
   "exec.title": "Végrehajtás",
-  "exec.subtitle":
-    "Hogy áll a munka és mi blokkolja — a tábla végrehajtható teendőinek vetülete.",
+  "exec.subtitle": "Hogy áll a munka és mi blokkolja — a tábla végrehajtható teendőinek vetülete.",
   "exec.counts.completed": "Kész",
   "exec.counts.inProgress": "Folyamatban",
   "exec.counts.blocked": "Blokkolva",
@@ -232,7 +234,8 @@ export const hu: Messages = {
   "intel.section.action": "Teendők",
   "intel.section.requirement": "Követelmények",
   "intel.section.risk": "Kockázatok",
-  "intel.empty.section": "Még nincs {kind} — a statementek érkeznek meetingekből, a szerkesztőből és a Kérdezésből.",
+  "intel.empty.section":
+    "Még nincs {kind} — a statementek érkeznek meetingekből, a szerkesztőből és a Kérdezésből.",
   "intel.empty.view": "Még nincs mit mutatni",
   "intel.empty.view.hint":
     "A statementek akkor jelennek meg itt, ahogy meetingek, szerkesztések és beszélgetések hozzáadják őket a táblához.",
@@ -252,7 +255,8 @@ export const hu: Messages = {
   "integrations.project": "Projekt: {project}",
   "integrations.warnings.title": "Ez a szolgáltató nem tud hűen minden mezőt megjeleníteni:",
   "integrations.panel.title": "Külső teendők — {provider}",
-  "integrations.panel.hint": "Javasolj egy kötet külső feladatot; nézd át az előnézetet; hagyd jóvá a végrehajtáshoz.",
+  "integrations.panel.hint":
+    "Javasolj egy kötet külső feladatot; nézd át az előnézetet; hagyd jóvá a végrehajtáshoz.",
   "integrations.panel.propose": "Javaslat",
   "integrations.panel.approve": "Jóváhagyás",
   "integrations.panel.sendAnyway": "Küldés mégis",
@@ -271,7 +275,8 @@ export const hu: Messages = {
   "integrations.context.body":
     "A Lucent csak ezen az előnézet-jóváhagyás folyamaton keresztül hoz létre és frissít feladatokat a csatlakoztatott külső rendszerben. Semmi nem törlődik; a meglévő feladatok csak a mutatott mezőkben változnak. A tábla maga sosem hordoz szolgáltatói adatot — a hivatkozások a Lucent integrációs regisztrumában élnek.",
   "integrations.inbound.title": "Külső változások",
-  "integrations.inbound.hint": "A csatlakoztatott rendszerben észlelt változások itt sorakoznak fel. Semmi nem kerül a táblára, amíg el nem fogadod.",
+  "integrations.inbound.hint":
+    "A csatlakoztatott rendszerben észlelt változások itt sorakoznak fel. Semmi nem kerül a táblára, amíg el nem fogadod.",
   "integrations.inbound.empty": "Nincs sorban álló külső változás.",
   "integrations.inbound.accept": "Elfogadás",
   "integrations.inbound.dismiss": "Maradjon a mienk",
@@ -294,7 +299,8 @@ export const hu: Messages = {
   "intel.inbox.title": "Javaslatok",
   "intel.inbox.empty": "Nincs nyitott javaslat — a témák konzisztentének tűnnek.",
   "intel.inbox.dup": "Lehetséges kettős téma: „{dup}” ≈ „{existing}”",
-  "intel.inbox.evidence": "{a} statement a(z) „{existing}” témán, {b} a(z) „{dup}” témán, {m} meetingből",
+  "intel.inbox.evidence":
+    "{a} statement a(z) „{existing}” témán, {b} a(z) „{dup}” témán, {m} meetingből",
   "intel.inbox.merge": "Egyesítés",
   "intel.inbox.keep": "Külön tartás",
   "intel.inbox.merge.preview":

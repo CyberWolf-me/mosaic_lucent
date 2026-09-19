@@ -90,5 +90,11 @@ export function executionProjection(workspace: Workspace, now: number): Executio
       });
     }
   }
-  return { rollup, chains, decisionsBehind, empty: rollup.total === 0, attention: needsAttention(workspace, now) };
+  return {
+    rollup,
+    chains,
+    decisionsBehind,
+    empty: rollup.total === 0,
+    attention: needsAttention(workspace, now),
+  };
 }

@@ -21,24 +21,24 @@ exact, not timed).
 
 ## The numbers (crossings; the decision metric)
 
-| board | polyline | ortho | Δ |
-| --- | ---: | ---: | ---: |
-| layered 150 | 240 | 170 | −29% |
-| layered 300 | 571 | 419 | −27% |
-| layered 500 | 902 | 668 | **−26%** |
-| dense 150 | 1340 | 615 | −54% |
-| dense 300 | 4431 | 1930 | −56% |
-| dense 500 | 8396 | 3739 | **−55%** |
-| adversarial 150 | 620 | 357 | −42% |
-| adversarial 300 | 1341 | 498 | −63% |
-| adversarial 500 | 2377 | 1093 | **−54%** |
-| long-edge 150 | 21 | 28 | +33% |
-| long-edge 300 | 10 | 9 | −10% |
-| long-edge 500 | 18 | 17 | tie |
-| mixed-region 150–500 | 1–2 | 1–2 | tie |
-| radial 150–500 | 0 | 0 | tie |
-| tree 150–500 | 0 | 0 | tie |
-| swimlane 150–500 | 0 | 0 | tie |
+| board                | polyline | ortho |        Δ |
+| -------------------- | -------: | ----: | -------: |
+| layered 150          |      240 |   170 |     −29% |
+| layered 300          |      571 |   419 |     −27% |
+| layered 500          |      902 |   668 | **−26%** |
+| dense 150            |     1340 |   615 |     −54% |
+| dense 300            |     4431 |  1930 |     −56% |
+| dense 500            |     8396 |  3739 | **−55%** |
+| adversarial 150      |      620 |   357 |     −42% |
+| adversarial 300      |     1341 |   498 |     −63% |
+| adversarial 500      |     2377 |  1093 | **−54%** |
+| long-edge 150        |       21 |    28 |     +33% |
+| long-edge 300        |       10 |     9 |     −10% |
+| long-edge 500        |       18 |    17 |      tie |
+| mixed-region 150–500 |      1–2 |   1–2 |      tie |
+| radial 150–500       |        0 |     0 |      tie |
+| tree 150–500         |        0 |     0 |      tie |
+| swimlane 150–500     |        0 |     0 |      tie |
 
 Ortho wins every routed fixture with real crossings at every scale; the
 long-edge ladder (the deliberate far-target case) is a tie-to-noise
@@ -65,8 +65,8 @@ carry no route).
 1. **Collinear overlap is not a crossing.** The crossing metric counts
    proper X-intersections only (`segmentsCross` uses strict signs; shared
    endpoints and collinear overlap are excluded). Orthogonal corridors
-   share row/column lines, so part of ortho's win is crossings *converted
-   into overlap* — visually busier, mechanically invisible. If the human
+   share row/column lines, so part of ortho's win is crossings _converted
+   into overlap_ — visually busier, mechanically invisible. If the human
    pass reads ortho's overlapped corridors as noise, the verdict flips to
    polyline; this is precisely the judgment the mechanical half cannot make.
 2. **Spline's skeleton is identical to polyline's.** `routedVertices`

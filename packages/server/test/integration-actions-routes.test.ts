@@ -63,13 +63,28 @@ async function makeHarness() {
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const { port } = server.address() as AddressInfo;
-  return { base: `http://127.0.0.1:${port}`, userStore, boardStore, fake, close: async () => { await close(); } };
+  return {
+    base: `http://127.0.0.1:${port}`,
+    userStore,
+    boardStore,
+    fake,
+    close: async () => {
+      await close();
+    },
+  };
 }
 
 let open: Awaited<ReturnType<typeof makeHarness>> | null = null;
-afterEach(async () => { await open?.close(); open = null; });
+afterEach(async () => {
+  await open?.close();
+  open = null;
+});
 
-async function api(h: NonNullable<typeof open>, path: string, init: RequestInit & { token?: string; csrf?: string } = {}) {
+async function api(
+  h: NonNullable<typeof open>,
+  path: string,
+  init: RequestInit & { token?: string; csrf?: string } = {},
+) {
   const { token, csrf, ...rest } = init;
   const res = await fetch(`${h.base}${path}`, {
     ...rest,
@@ -104,7 +119,16 @@ function action(id: string, fields: { assignee?: string; dueDate?: string } = {}
   return [
     { op: "CREATE_NODE", id, nodeType: "action", label: id.replace(/-/g, " ") },
     { op: "SET_STATEMENT", id, statement: { kind: "action", status: "open", topic: "d5" } },
-    { op: "SET_ISSUE", id, issue: { type: "task", status: "open", ...(fields.assignee ? { assignee: fields.assignee } : {}), ...(fields.dueDate ? { dueDate: fields.dueDate } : {}) } },
+    {
+      op: "SET_ISSUE",
+      id,
+      issue: {
+        type: "task",
+        status: "open",
+        ...(fields.assignee ? { assignee: fields.assignee } : {}),
+        ...(fields.dueDate ? { dueDate: fields.dueDate } : {}),
+      },
+    },
   ];
 }
 
@@ -131,21 +155,33 @@ describe("the propose → preview route", () => {
     const alice = await signup(h, "p@example.com");
     const orgId = await orgIdOf(h, alice.id);
     const put = await api(h, `/api/orgs/${orgId}/integrations/fake`, {
-      method: "PUT", token: alice.token, csrf: "csrf",
+      method: "PUT",
+      token: alice.token,
+      csrf: "csrf",
       body: JSON.stringify({ credentialRef: "R" }),
     });
     expect(put.status).toBe(201);
 
-    const ops = [...action("task-1", { assignee: "Sarah", dueDate: "2026-09-20" }), ...action("task-2")];
+    const ops = [
+      ...action("task-1", { assignee: "Sarah", dueDate: "2026-09-20" }),
+      ...action("task-2"),
+    ];
     const boardId = await seedBoardWith(h, alice.token, ops);
 
     const propose = await api(h, `/api/boards/${boardId}/integrations/fake/propose`, {
-      method: "POST", token: alice.token, csrf: "csrf",
+      method: "POST",
+      token: alice.token,
+      csrf: "csrf",
     });
     expect(propose.status).toBe(201);
     expect(propose.body.action.status).toBe("pending");
     expect(propose.body.preview.creates).toHaveLength(2);
-    expect(propose.body.preview.creates[0]).toMatchObject({ nodeId: "task-1", title: "task 1", assignee: "Sarah", dueDate: "2026-09-20" });
+    expect(propose.body.preview.creates[0]).toMatchObject({
+      nodeId: "task-1",
+      title: "task 1",
+      assignee: "Sarah",
+      dueDate: "2026-09-20",
+    });
     expect(propose.body.preview.updates).toEqual([]);
     expect(propose.body.preview.statement).toContain("Nothing will be deleted");
     expect(propose.body.preview.statement).toContain("2 task(s)");
@@ -156,12 +192,23 @@ describe("the propose → preview route", () => {
     const alice = await signup(h, "p2@example.com");
     const orgId = await orgIdOf(h, alice.id);
     await api(h, `/api/orgs/${orgId}/integrations/fake`, {
-      method: "PUT", token: alice.token, csrf: "csrf", body: JSON.stringify({ credentialRef: "R" }),
+      method: "PUT",
+      token: alice.token,
+      csrf: "csrf",
+      body: JSON.stringify({ credentialRef: "R" }),
     });
     const boardId = await seedBoardWith(h, alice.token, action("n1"));
 
-    const first = await api(h, `/api/boards/${boardId}/integrations/fake/propose`, { method: "POST", token: alice.token, csrf: "csrf" });
-    const second = await api(h, `/api/boards/${boardId}/integrations/fake/propose`, { method: "POST", token: alice.token, csrf: "csrf" });
+    const first = await api(h, `/api/boards/${boardId}/integrations/fake/propose`, {
+      method: "POST",
+      token: alice.token,
+      csrf: "csrf",
+    });
+    const second = await api(h, `/api/boards/${boardId}/integrations/fake/propose`, {
+      method: "POST",
+      token: alice.token,
+      csrf: "csrf",
+    });
     expect(second.status).toBe(201);
     expect(second.body.action.supersededId).toBe(first.body.action.id);
   });
@@ -173,17 +220,30 @@ describe("the approve → execute route", () => {
     const alice = await signup(h, "a@example.com");
     const orgId = await orgIdOf(h, alice.id);
     await api(h, `/api/orgs/${orgId}/integrations/fake`, {
-      method: "PUT", token: alice.token, csrf: "csrf", body: JSON.stringify({ credentialRef: "R" }),
+      method: "PUT",
+      token: alice.token,
+      csrf: "csrf",
+      body: JSON.stringify({ credentialRef: "R" }),
     });
     const ops: Operation[] = [];
     for (let i = 1; i <= 10; i += 1) ops.push(...action(`task-${i}`));
     const boardId = await seedBoardWith(h, alice.token, ops);
 
-    const propose = await api(h, `/api/boards/${boardId}/integrations/fake/propose`, { method: "POST", token: alice.token, csrf: "csrf" });
-    const actionId = propose.body.action.id;
-    const approve = await api(h, `/api/boards/${boardId}/integrations/actions/${actionId}/approve`, {
-      method: "POST", token: alice.token, csrf: "csrf",
+    const propose = await api(h, `/api/boards/${boardId}/integrations/fake/propose`, {
+      method: "POST",
+      token: alice.token,
+      csrf: "csrf",
     });
+    const actionId = propose.body.action.id;
+    const approve = await api(
+      h,
+      `/api/boards/${boardId}/integrations/actions/${actionId}/approve`,
+      {
+        method: "POST",
+        token: alice.token,
+        csrf: "csrf",
+      },
+    );
     expect(approve.status).toBe(200);
     expect(approve.body.applied).toBe(10);
     expect(approve.body.failed).toBe(0);
@@ -196,7 +256,9 @@ describe("the approve → execute route", () => {
     // The second approve: the decided-once guard answers duplicate with the
     // ORIGINAL outcome, zero new effects.
     const second = await api(h, `/api/boards/${boardId}/integrations/actions/${actionId}/approve`, {
-      method: "POST", token: alice.token, csrf: "csrf",
+      method: "POST",
+      token: alice.token,
+      csrf: "csrf",
     });
     expect(second.status).toBe(200);
     expect(second.body.duplicate).toBe(true);
@@ -208,13 +270,26 @@ describe("the approve → execute route", () => {
     const alice = await signup(h, "r@example.com");
     const orgId = await orgIdOf(h, alice.id);
     await api(h, `/api/orgs/${orgId}/integrations/fake`, {
-      method: "PUT", token: alice.token, csrf: "csrf", body: JSON.stringify({ credentialRef: "R" }),
+      method: "PUT",
+      token: alice.token,
+      csrf: "csrf",
+      body: JSON.stringify({ credentialRef: "R" }),
     });
     const boardId = await seedBoardWith(h, alice.token, action("n1"));
-    const propose = await api(h, `/api/boards/${boardId}/integrations/fake/propose`, { method: "POST", token: alice.token, csrf: "csrf" });
-    const reject = await api(h, `/api/boards/${boardId}/integrations/actions/${propose.body.action.id}/reject`, {
-      method: "POST", token: alice.token, csrf: "csrf",
+    const propose = await api(h, `/api/boards/${boardId}/integrations/fake/propose`, {
+      method: "POST",
+      token: alice.token,
+      csrf: "csrf",
     });
+    const reject = await api(
+      h,
+      `/api/boards/${boardId}/integrations/actions/${propose.body.action.id}/reject`,
+      {
+        method: "POST",
+        token: alice.token,
+        csrf: "csrf",
+      },
+    );
     expect(reject.status).toBe(200);
     expect(reject.body.action.status).toBe("rejected");
     expect(h.fake.calls).toHaveLength(0); // the provider was never called
@@ -227,21 +302,32 @@ describe("the approve → execute route", () => {
     const viewer = await signup(h, "v@example.com");
     const orgId = await orgIdOf(h, alice.id);
     await api(h, `/api/orgs/${orgId}/integrations/fake`, {
-      method: "PUT", token: alice.token, csrf: "csrf", body: JSON.stringify({ credentialRef: "R" }),
+      method: "PUT",
+      token: alice.token,
+      csrf: "csrf",
+      body: JSON.stringify({ credentialRef: "R" }),
     });
     const boardId = await seedBoardWith(h, alice.token, action("n1"));
     const share = await api(h, `/api/boards/${boardId}/share`, {
-      method: "POST", token: alice.token, body: JSON.stringify({ role: "viewer" }),
+      method: "POST",
+      token: alice.token,
+      body: JSON.stringify({ role: "viewer" }),
     });
     await api(h, `/api/boards/${boardId}/join`, {
-      method: "POST", token: viewer.token, body: JSON.stringify({ token: share.body.token }),
+      method: "POST",
+      token: viewer.token,
+      body: JSON.stringify({ token: share.body.token }),
     });
 
     const propose = await api(h, `/api/boards/${boardId}/integrations/fake/propose`, {
-      method: "POST", token: viewer.token, csrf: "csrf",
+      method: "POST",
+      token: viewer.token,
+      csrf: "csrf",
     });
     expect(propose.status).toBe(404);
-    const list = await api(h, `/api/boards/${boardId}/integrations/actions`, { token: viewer.token });
+    const list = await api(h, `/api/boards/${boardId}/integrations/actions`, {
+      token: viewer.token,
+    });
     expect(list.status).toBe(200); // reads are viewer-floor
   });
 });

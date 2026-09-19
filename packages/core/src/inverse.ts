@@ -153,9 +153,7 @@ export function inverseOperations(ops: readonly Operation[], before: Workspace):
         // targets superseded; undo must give them THEIR prior statements back
         // too, or "undo the rejection" leaves the rejected proposal buried.
         const targets =
-          op.op === "SET_STATEMENT"
-            ? (op.statement?.supersedes ?? [])
-            : (op.supersedes ?? []);
+          op.op === "SET_STATEMENT" ? (op.statement?.supersedes ?? []) : (op.supersedes ?? []);
         for (const target of targets) {
           const prior = walking.nodes[target]?.statement;
           // Replayed against the walking state, which the SET_STATEMENT above

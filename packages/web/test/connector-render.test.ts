@@ -138,4 +138,3 @@ describe("dynamic connector anchors under drag (UX-P1-003)", () => {
     expect(anchorB.x).toBe(origB.cx + origB.w / 2);
   });
 });
-

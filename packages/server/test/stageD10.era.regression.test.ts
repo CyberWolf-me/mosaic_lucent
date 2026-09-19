@@ -47,8 +47,12 @@ class SelectorLLM implements LLMProvider {
   readonly name = "selector";
   calls = 0;
   plan: ExternalPlanResult = { nodeIds: [], explanation: "" };
-  generateOperations(): never { throw new Error("not under test"); }
-  generateAnswer(): never { throw new Error("not under test"); }
+  generateOperations(): never {
+    throw new Error("not under test");
+  }
+  generateAnswer(): never {
+    throw new Error("not under test");
+  }
   async generateExternalPlan(_req: ExternalPlanRequest): Promise<ExternalPlanResult> {
     this.calls += 1;
     return { ...this.plan };
@@ -90,10 +94,17 @@ async function api(
   return { status: res.status, body };
 }
 
-function action(id: string, fields: { assignee?: string; dueDate?: string; status?: "open" | "resolved" } = {}): Operation[] {
+function action(
+  id: string,
+  fields: { assignee?: string; dueDate?: string; status?: "open" | "resolved" } = {},
+): Operation[] {
   return [
     { op: "CREATE_NODE", id, nodeType: "action", label: id.replace(/-/g, " ") },
-    { op: "SET_STATEMENT", id, statement: { kind: "action", status: fields.status ?? "open", topic: "era" } },
+    {
+      op: "SET_STATEMENT",
+      id,
+      statement: { kind: "action", status: fields.status ?? "open", topic: "era" },
+    },
     {
       op: "SET_ISSUE",
       id,
@@ -119,7 +130,13 @@ async function signup(h: BaseHarness, email: string) {
   return { token: body.token as string, id: body.user.id as string, orgId };
 }
 
-async function putCredential(h: BaseHarness, token: string, orgId: string, provider: string, ref: string) {
+async function putCredential(
+  h: BaseHarness,
+  token: string,
+  orgId: string,
+  provider: string,
+  ref: string,
+) {
   return api(h, `/api/orgs/${orgId}/integrations/${provider}`, {
     method: "PUT",
     token,
@@ -145,7 +162,10 @@ async function seedBoardWith(h: BaseHarness, token: string, ops: Operation[], la
   return boardId;
 }
 
-async function makeBaseHarness(extra?: { linear?: LinearProvider; llm?: LLMProvider }): Promise<BaseHarness> {
+async function makeBaseHarness(extra?: {
+  linear?: LinearProvider;
+  llm?: LLMProvider;
+}): Promise<BaseHarness> {
   const limits = limitsFromEnv();
   const config = {
     ...readConfig({ LUCENT_REQUIRE_AUTH: "1", LUCENT_WEB_ORIGIN: "http://127.0.0.1" }),
@@ -159,9 +179,10 @@ async function makeBaseHarness(extra?: { linear?: LinearProvider; llm?: LLMProvi
   const webhookEvents = new InMemoryIntegrationWebhookEventStore();
   const inbound = new InMemoryInboundChangeStore();
   process.env.D10_FAKE_CRED = "fake-key";
-  const providers = new Map<string, import("../src/integrations/provider.js").ExecutionProviderFactory>([
-    ["fake", () => fake],
-  ]);
+  const providers = new Map<
+    string,
+    import("../src/integrations/provider.js").ExecutionProviderFactory
+  >([["fake", () => fake]]);
   if (extra?.linear) {
     providers.set("linear", () => extra.linear!);
   }
@@ -201,7 +222,9 @@ async function makeBaseHarness(extra?: { linear?: LinearProvider; llm?: LLMProvi
     webhookEvents,
     inbound,
     fake,
-    close: async () => { await close(); },
+    close: async () => {
+      await close();
+    },
   };
 }
 
@@ -302,7 +325,8 @@ describe("Stage D10 — the era regression: one process, isolated harnesses over
     const h = (open = await makeBaseHarness());
     const alice = await signup(h, "d4@era.example");
     const ops: Operation[] = [];
-    for (let i = 1; i <= 10; i += 1) ops.push(...action(`d4-${i}`, { assignee: "Sarah", dueDate: "2026-09-30" }));
+    for (let i = 1; i <= 10; i += 1)
+      ops.push(...action(`d4-${i}`, { assignee: "Sarah", dueDate: "2026-09-30" }));
     const boardId = await seedBoardWith(h, alice.token, ops);
     const cred = await putCredential(h, alice.token, alice.orgId, "fake", "fake-era");
     expect(cred.status).toBe(201);
@@ -312,11 +336,15 @@ describe("Stage D10 — the era regression: one process, isolated harnesses over
       csrf: "csrf",
     });
     expect(proposed.status).toBe(201);
-    const approved = await api(h, `/api/boards/${boardId}/integrations/actions/${proposed.body.action.id}/approve`, {
-      method: "POST",
-      token: alice.token,
-      csrf: "csrf",
-    });
+    const approved = await api(
+      h,
+      `/api/boards/${boardId}/integrations/actions/${proposed.body.action.id}/approve`,
+      {
+        method: "POST",
+        token: alice.token,
+        csrf: "csrf",
+      },
+    );
     expect(approved.status).toBe(200);
     expect(approved.body.applied).toBe(10);
     const links = await api(h, `/api/boards/${boardId}/integrations/links`, { token: alice.token });
@@ -328,7 +356,8 @@ describe("Stage D10 — the era regression: one process, isolated harnesses over
     const h = (open = await makeBaseHarness());
     const alice = await signup(h, "d5@era.example");
     const ops: Operation[] = [];
-    for (let i = 1; i <= 10; i += 1) ops.push(...action(`d5-${i}`, { assignee: "Sarah", dueDate: "2026-09-30" }));
+    for (let i = 1; i <= 10; i += 1)
+      ops.push(...action(`d5-${i}`, { assignee: "Sarah", dueDate: "2026-09-30" }));
     const boardId = await seedBoardWith(h, alice.token, ops);
     await putCredential(h, alice.token, alice.orgId, "fake", "fake-era");
     const proposed = await api(h, `/api/boards/${boardId}/integrations/fake/propose`, {
@@ -339,11 +368,15 @@ describe("Stage D10 — the era regression: one process, isolated harnesses over
     // Arm one failure on the FIRST create — the contract's claim ladder
     // reclaims the key on retry.
     h.fake.failNext("createTask", new Error("simulated network timeout"));
-    const first = await api(h, `/api/boards/${boardId}/integrations/actions/${proposed.body.action.id}/approve`, {
-      method: "POST",
-      token: alice.token,
-      csrf: "csrf",
-    });
+    const first = await api(
+      h,
+      `/api/boards/${boardId}/integrations/actions/${proposed.body.action.id}/approve`,
+      {
+        method: "POST",
+        token: alice.token,
+        csrf: "csrf",
+      },
+    );
     expect(first.status).toBe(200);
     expect(first.body.failed).toBe(1);
     const failedNodeId = first.body.results.find((r: any) => r.action === "failed").nodeId;
@@ -355,11 +388,15 @@ describe("Stage D10 — the era regression: one process, isolated harnesses over
       csrf: "csrf",
     });
     expect(reproposed.body.preview.creates.map((c: any) => c.nodeId)).toEqual([failedNodeId]);
-    const second = await api(h, `/api/boards/${boardId}/integrations/actions/${reproposed.body.action.id}/approve`, {
-      method: "POST",
-      token: alice.token,
-      csrf: "csrf",
-    });
+    const second = await api(
+      h,
+      `/api/boards/${boardId}/integrations/actions/${reproposed.body.action.id}/approve`,
+      {
+        method: "POST",
+        token: alice.token,
+        csrf: "csrf",
+      },
+    );
     expect(second.status).toBe(200);
     // The approve route counts creates + updates both as applied; the
     // contract's exactly-once is proven by the create count (1) — the
@@ -369,7 +406,9 @@ describe("Stage D10 — the era regression: one process, isolated harnesses over
     expect(secondCreates).toHaveLength(1);
     expect(secondCreates[0].nodeId).toBe(failedNodeId);
     // Final state: 10 unique tasks (exactly once).
-    const tasksByKey = new Set(h.fake.calls.filter((c) => c.method === "createTask").map((c: any) => c.input.idempotencyKey));
+    const tasksByKey = new Set(
+      h.fake.calls.filter((c) => c.method === "createTask").map((c: any) => c.input.idempotencyKey),
+    );
     expect(tasksByKey.size).toBe(10);
     const links = await api(h, `/api/boards/${boardId}/integrations/links`, { token: alice.token });
     expect(links.body.links).toHaveLength(10);
@@ -382,43 +421,57 @@ describe("Stage D10 — the era regression: one process, isolated harnesses over
     const linearFetchImpl: typeof fetch = async (input, init) => {
       void input;
       const body = init?.body ? JSON.parse(init.body as string) : undefined;
-      const q = (body as any)?.query as string ?? "";
+      const q = ((body as any)?.query as string) ?? "";
       if (q.includes("issueCreate")) {
         // Linear's mutation carries FLAT variables ($title, $description, …),
         // not a nested input object.
         const vars = (body as any).variables as Record<string, string>;
-        return new Response(JSON.stringify({
-          data: {
-            issueCreate: {
-              success: true,
-              issue: {
-                id: `uuid-${Math.random().toString(36).slice(2)}`,
-                identifier: `ERA-${Math.floor(Math.random() * 1000)}`,
-                title: vars.title,
-                description: vars.description ?? "",
-                url: `https://linear.app/team/issue/ERA-${Math.floor(Math.random() * 1000)}`,
-                state: { name: "Todo", type: "started" },
+        return new Response(
+          JSON.stringify({
+            data: {
+              issueCreate: {
+                success: true,
+                issue: {
+                  id: `uuid-${Math.random().toString(36).slice(2)}`,
+                  identifier: `ERA-${Math.floor(Math.random() * 1000)}`,
+                  title: vars.title,
+                  description: vars.description ?? "",
+                  url: `https://linear.app/team/issue/ERA-${Math.floor(Math.random() * 1000)}`,
+                  state: { name: "Todo", type: "started" },
+                },
               },
             },
-          },
-        }), { status: 200, headers: { "content-type": "application/json" } });
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
       }
       if (q.includes("workflowStates")) {
-        return new Response(JSON.stringify({ data: { workflowStates: { nodes: [{ id: "ws-todo", name: "Todo" }] } } }), {
-          status: 200, headers: { "content-type": "application/json" },
-        });
+        return new Response(
+          JSON.stringify({
+            data: { workflowStates: { nodes: [{ id: "ws-todo", name: "Todo" }] } },
+          }),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
+        );
       }
       if (q.includes("issues(") || q.includes("issues {")) {
         return new Response(JSON.stringify({ data: { issues: { nodes: [] } } }), {
-          status: 200, headers: { "content-type": "application/json" },
+          status: 200,
+          headers: { "content-type": "application/json" },
         });
       }
       if (q.includes("users(") || q.startsWith("query { users")) {
         return new Response(JSON.stringify({ data: { users: { nodes: [] } } }), {
-          status: 200, headers: { "content-type": "application/json" },
+          status: 200,
+          headers: { "content-type": "application/json" },
         });
       }
-      return new Response(JSON.stringify({ data: {} }), { status: 200, headers: { "content-type": "application/json" } });
+      return new Response(JSON.stringify({ data: {} }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
     };
     const linear = new LinearProvider({
       apiKey: "lin_api_era",
@@ -431,7 +484,8 @@ describe("Stage D10 — the era regression: one process, isolated harnesses over
     const alice = await signup(h, "d6@era.example");
     process.env.LUCENT_LINEAR_TEST_KEY = "lin_api_era";
     const ops: Operation[] = [];
-    for (let i = 1; i <= 3; i += 1) ops.push(...action(`d6-${i}`, { assignee: "Sarah", dueDate: "2026-09-30" }));
+    for (let i = 1; i <= 3; i += 1)
+      ops.push(...action(`d6-${i}`, { assignee: "Sarah", dueDate: "2026-09-30" }));
     const boardId = await seedBoardWith(h, alice.token, ops);
     await api(h, `/api/orgs/${alice.orgId}/integrations/linear`, {
       method: "PUT",
@@ -449,14 +503,20 @@ describe("Stage D10 — the era regression: one process, isolated harnesses over
     });
     expect(proposed.status).toBe(201);
     expect(proposed.body.preview.creates).toHaveLength(3);
-    const approved = await api(h, `/api/boards/${boardId}/integrations/actions/${proposed.body.action.id}/approve`, {
-      method: "POST",
-      token: alice.token,
-      csrf: "csrf",
-    });
+    const approved = await api(
+      h,
+      `/api/boards/${boardId}/integrations/actions/${proposed.body.action.id}/approve`,
+      {
+        method: "POST",
+        token: alice.token,
+        csrf: "csrf",
+      },
+    );
     expect(approved.status).toBe(200);
     expect(approved.body.applied).toBe(3);
-    expect(approved.body.results.every((r: any) => r.action === "create" && r.externalId)).toBe(true);
+    expect(approved.body.results.every((r: any) => r.action === "create" && r.externalId)).toBe(
+      true,
+    );
     const links = await api(h, `/api/boards/${boardId}/integrations/links`, { token: alice.token });
     expect(links.body.links.filter((l: any) => l.provider === "linear")).toHaveLength(3);
   });
@@ -469,7 +529,10 @@ describe("Stage D10 — the era regression: one process, isolated harnesses over
       teamId: "team_1",
       baseUrl: "https://linear.test/graphql",
       fetchImpl: (async (_input: any, _init: any) => {
-        return new Response(JSON.stringify({ data: {} }), { status: 200, headers: { "content-type": "application/json" } });
+        return new Response(JSON.stringify({ data: {} }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
       }) as typeof fetch,
       maxAttempts: 1,
     });
@@ -520,38 +583,49 @@ describe("Stage D10 — the era regression: one process, isolated harnesses over
       fetchImpl: (async (input: any, init: any) => {
         void input;
         const body = init?.body ? JSON.parse(init.body as string) : undefined;
-        const q = (body as any)?.query as string ?? "";
+        const q = ((body as any)?.query as string) ?? "";
         if (q.includes("issueCreate")) {
           const vars = (body as any).variables as Record<string, string>;
-          return new Response(JSON.stringify({
-            data: {
-              issueCreate: {
-                success: true,
-                issue: {
-                  id: `uuid-${Math.random().toString(36).slice(2)}`,
-                  identifier: `ERA-${Math.floor(Math.random() * 1000)}`,
-                  title: vars.title,
-                  description: vars.description ?? "",
-                  url: "https://linear.app/x",
-                  state: { name: "Todo", type: "started" },
+          return new Response(
+            JSON.stringify({
+              data: {
+                issueCreate: {
+                  success: true,
+                  issue: {
+                    id: `uuid-${Math.random().toString(36).slice(2)}`,
+                    identifier: `ERA-${Math.floor(Math.random() * 1000)}`,
+                    title: vars.title,
+                    description: vars.description ?? "",
+                    url: "https://linear.app/x",
+                    state: { name: "Todo", type: "started" },
+                  },
                 },
               },
-            },
-          }), { status: 200, headers: { "content-type": "application/json" } });
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          );
         }
         if (q.includes("workflowStates")) {
-          return new Response(JSON.stringify({ data: { workflowStates: { nodes: [{ id: "ws-todo", name: "Todo" }] } } }), {
-            status: 200, headers: { "content-type": "application/json" },
-          });
+          return new Response(
+            JSON.stringify({
+              data: { workflowStates: { nodes: [{ id: "ws-todo", name: "Todo" }] } },
+            }),
+            {
+              status: 200,
+              headers: { "content-type": "application/json" },
+            },
+          );
         }
         if (q.includes("issues(") || q.includes("issues {")) {
           return new Response(JSON.stringify({ data: { issues: { nodes: [] } } }), {
-            status: 200, headers: { "content-type": "application/json" },
+            status: 200,
+            headers: { "content-type": "application/json" },
           });
         }
         if (q.includes("users(") || q.startsWith("query { users")) {
           return new Response(JSON.stringify({ data: { users: { nodes: [] } } }), {
-            status: 200, headers: { "content-type": "application/json" },
+            status: 200,
+            headers: { "content-type": "application/json" },
           });
         }
         return new Response("{}", { status: 200 });
@@ -581,11 +655,15 @@ describe("Stage D10 — the era regression: one process, isolated harnesses over
       csrf: "csrf",
     });
     expect(fakePropose.status).toBe(201);
-    const fakeApprove = await api(h, `/api/boards/${boardId}/integrations/actions/${fakePropose.body.action.id}/approve`, {
-      method: "POST",
-      token: alice.token,
-      csrf: "csrf",
-    });
+    const fakeApprove = await api(
+      h,
+      `/api/boards/${boardId}/integrations/actions/${fakePropose.body.action.id}/approve`,
+      {
+        method: "POST",
+        token: alice.token,
+        csrf: "csrf",
+      },
+    );
     expect(fakeApprove.body.applied).toBe(1);
     const linPropose = await api(h, `/api/boards/${boardId}/integrations/linear/propose`, {
       method: "POST",
@@ -593,11 +671,15 @@ describe("Stage D10 — the era regression: one process, isolated harnesses over
       csrf: "csrf",
     });
     expect(linPropose.status).toBe(201);
-    const linApprove = await api(h, `/api/boards/${boardId}/integrations/actions/${linPropose.body.action.id}/approve`, {
-      method: "POST",
-      token: alice.token,
-      csrf: "csrf",
-    });
+    const linApprove = await api(
+      h,
+      `/api/boards/${boardId}/integrations/actions/${linPropose.body.action.id}/approve`,
+      {
+        method: "POST",
+        token: alice.token,
+        csrf: "csrf",
+      },
+    );
     expect(linApprove.body.applied).toBe(1);
     // The same node carries links for BOTH providers.
     const links = await api(h, `/api/boards/${boardId}/integrations/links`, { token: alice.token });
@@ -615,7 +697,8 @@ describe("Stage D10 — the era regression: one process, isolated harnesses over
     const h = (open = await makeBaseHarness({ llm: selector }));
     const alice = await signup(h, "d9@era.example");
     const ops: Operation[] = [];
-    for (let i = 1; i <= 10; i += 1) ops.push(...action(`d9-${i}`, { assignee: "Sarah", dueDate: "2026-09-30" }));
+    for (let i = 1; i <= 10; i += 1)
+      ops.push(...action(`d9-${i}`, { assignee: "Sarah", dueDate: "2026-09-30" }));
     const boardId = await seedBoardWith(h, alice.token, ops);
     await putCredential(h, alice.token, alice.orgId, "fake", "fake-era");
     // The narrowing: the AI route — model returns 4 of 10, the server
@@ -632,11 +715,15 @@ describe("Stage D10 — the era regression: one process, isolated harnesses over
     expect(proposed.body.preview.selectedCount).toBe(4);
     expect(proposed.body.preview.totalCandidates).toBe(10);
     // Approve: exactly the 4 land on the wire, the rest stay unsynced.
-    const approved = await api(h, `/api/boards/${boardId}/integrations/actions/${proposed.body.action.id}/approve`, {
-      method: "POST",
-      token: alice.token,
-      csrf: "csrf",
-    });
+    const approved = await api(
+      h,
+      `/api/boards/${boardId}/integrations/actions/${proposed.body.action.id}/approve`,
+      {
+        method: "POST",
+        token: alice.token,
+        csrf: "csrf",
+      },
+    );
     expect(approved.status).toBe(200);
     expect(approved.body.applied).toBe(4);
     expect(h.fake.calls.filter((c) => c.method === "createTask")).toHaveLength(4);

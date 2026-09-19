@@ -63,13 +63,27 @@ async function makeHarness(withIntegrations = true) {
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const { port } = server.address() as AddressInfo;
-  return { base: `http://127.0.0.1:${port}`, userStore, boardStore, close: async () => { await close(); } };
+  return {
+    base: `http://127.0.0.1:${port}`,
+    userStore,
+    boardStore,
+    close: async () => {
+      await close();
+    },
+  };
 }
 
 let open: Awaited<ReturnType<typeof makeHarness>> | null = null;
-afterEach(async () => { await open?.close(); open = null; });
+afterEach(async () => {
+  await open?.close();
+  open = null;
+});
 
-async function api(h: NonNullable<typeof open>, path: string, init: RequestInit & { token?: string; csrf?: string } = {}) {
+async function api(
+  h: NonNullable<typeof open>,
+  path: string,
+  init: RequestInit & { token?: string; csrf?: string } = {},
+) {
   const { token, csrf, ...rest } = init;
   const res = await fetch(`${h.base}${path}`, {
     ...rest,
@@ -142,7 +156,9 @@ describe("the connection surface (org owner)", () => {
     // idempotent replace is proven by: one row, and the full new value
     // absent from the response.
     expect(JSON.stringify(list.body)).not.toContain("LUCENT_FAKE_TEST_KEY_V2");
-    expect(list.body.integrations[0].updatedAt).toBeGreaterThanOrEqual(put.body.integration.updatedAt);
+    expect(list.body.integrations[0].updatedAt).toBeGreaterThanOrEqual(
+      put.body.integration.updatedAt,
+    );
   });
 
   it("configuring a provider nothing implements is a 400, not a dead connection", async () => {
@@ -227,11 +243,15 @@ describe("the link surface (board viewer)", () => {
     // the app's own seam by... the sync route is Batch 3. For Batch 2 the
     // READ surface is what's pinned — an empty list is the honest state.)
 
-    const asViewer = await api(h, `/api/boards/${boardId}/integrations/links`, { token: viewer.token });
+    const asViewer = await api(h, `/api/boards/${boardId}/integrations/links`, {
+      token: viewer.token,
+    });
     expect(asViewer.status).toBe(200);
     expect(asViewer.body.links).toEqual([]);
 
-    const asStranger = await api(h, `/api/boards/${boardId}/integrations/links`, { token: stranger.token });
+    const asStranger = await api(h, `/api/boards/${boardId}/integrations/links`, {
+      token: stranger.token,
+    });
     expect(asStranger.status).toBe(404);
   });
 

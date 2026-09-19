@@ -29,8 +29,9 @@ export function ProposalPanel() {
   // Partial-application honesty (M1/UX-2): the gate or the server may have
   // skipped ops while proposing the rest. The proposal record itself carries
   // no skipped list, so fall back to the review-gate reply in chat.
-  const proposalSkipped = (proposal as unknown as { skippedOps?: Array<{ op: string; reason: string }> })
-    .skippedOps;
+  const proposalSkipped = (
+    proposal as unknown as { skippedOps?: Array<{ op: string; reason: string }> }
+  ).skippedOps;
   const chatSkipped = [...chat].reverse().find((e) => (e.skippedOps?.length ?? 0) > 0)?.skippedOps;
   const skipped = proposalSkipped ?? chatSkipped ?? [];
 
@@ -56,11 +57,9 @@ export function ProposalPanel() {
           </div>
           <div className="panel-sub">Preview · applies what still fits · reports the rest</div>
           {skipped.length > 0 && (
-            <div
-              className="mono"
-              style={{ fontSize: 10.5, color: "var(--amber-2)", marginTop: 4 }}
-            >
-              {skipped.length} change{skipped.length === 1 ? "" : "s"} didn&apos;t fit — see chat for details
+            <div className="mono" style={{ fontSize: 10.5, color: "var(--amber-2)", marginTop: 4 }}>
+              {skipped.length} change{skipped.length === 1 ? "" : "s"} didn&apos;t fit — see chat
+              for details
             </div>
           )}
         </div>
@@ -121,8 +120,13 @@ export function ProposalPanel() {
         <button className="btn ghost" onClick={cancelProposal} title="Cancel proposal (Esc)">
           Cancel <span style={{ opacity: 0.6, fontSize: 10, marginLeft: 4 }}>Esc</span>
         </button>
-        <button className="btn amber" onClick={applyProposal} title="Apply all changes (⌘Enter or Ctrl+Enter)">
-          <Ico.Check /> Apply all <span style={{ opacity: 0.8, fontSize: 10, marginLeft: 4 }}>⌘↵</span>
+        <button
+          className="btn amber"
+          onClick={applyProposal}
+          title="Apply all changes (⌘Enter or Ctrl+Enter)"
+        >
+          <Ico.Check /> Apply all{" "}
+          <span style={{ opacity: 0.8, fontSize: 10, marginLeft: 4 }}>⌘↵</span>
         </button>
       </div>
     </div>

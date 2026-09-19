@@ -288,7 +288,9 @@ describe("POST /api/boards/:id/ask", () => {
       startedAt: Date.now() - 40 * 60_000,
       endedAt: null,
       createdAt: Date.now() - 40 * 60_000,
-      turns: [{ speaker: "Alex", at: Date.now() - 40 * 60_000, text: "old decision", kind: "decision" }],
+      turns: [
+        { speaker: "Alex", at: Date.now() - 40 * 60_000, text: "old decision", kind: "decision" },
+      ],
       createdBy: alice.id,
     });
 
@@ -325,7 +327,10 @@ describe("POST /api/boards/:id/ask", () => {
     expect(res.body.citations).toHaveLength(1);
     expect(res.body.citations[0].id).toBe("30");
     expect(res.body.warnings).toEqual([
-      { citation: { kind: "revision", id: "5" }, reason: "revision outside your visible history window" },
+      {
+        citation: { kind: "revision", id: "5" },
+        reason: "revision outside your visible history window",
+      },
       { citation: { kind: "node", id: "ghost" }, reason: "node not found on the board" },
     ]);
   });
@@ -345,7 +350,9 @@ describe("POST /api/boards/:id/ask", () => {
       startedAt: Date.now() + 60_000,
       endedAt: null,
       createdAt: Date.now() + 60_000,
-      turns: [{ speaker: "Alex", at: Date.now() + 60_000, text: "go with stripe", kind: "decision" }],
+      turns: [
+        { speaker: "Alex", at: Date.now() + 60_000, text: "go with stripe", kind: "decision" },
+      ],
       createdBy: alice.id,
     });
 

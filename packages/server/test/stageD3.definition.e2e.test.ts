@@ -1,7 +1,14 @@
 import { afterEach, describe, expect, it } from "vitest";
 import type { AddressInfo } from "node:net";
 import { MockImageProvider, MockProvider } from "@lucent/ai";
-import { applyOperations, createWorkspace, inverseOperations, stampAuthorship, validateOperations, type Operation } from "@lucent/core";
+import {
+  applyOperations,
+  createWorkspace,
+  inverseOperations,
+  stampAuthorship,
+  validateOperations,
+  type Operation,
+} from "@lucent/core";
 import { createApp } from "../src/app.js";
 import { InMemoryUserStore } from "../src/accounts.js";
 import { InMemoryBoardStore } from "../src/boards.js";
@@ -58,13 +65,27 @@ async function makeHarness() {
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const { port } = server.address() as AddressInfo;
-  return { base: `http://127.0.0.1:${port}`, userStore, boardStore, close: async () => { await close(); } };
+  return {
+    base: `http://127.0.0.1:${port}`,
+    userStore,
+    boardStore,
+    close: async () => {
+      await close();
+    },
+  };
 }
 
 let open: Awaited<ReturnType<typeof makeHarness>> | null = null;
-afterEach(async () => { await open?.close(); open = null; });
+afterEach(async () => {
+  await open?.close();
+  open = null;
+});
 
-async function api(h: NonNullable<typeof open>, path: string, init: RequestInit & { token?: string } = {}) {
+async function api(
+  h: NonNullable<typeof open>,
+  path: string,
+  init: RequestInit & { token?: string } = {},
+) {
   const { token, ...rest } = init;
   const res = await fetch(`${h.base}${path}`, {
     ...rest,
@@ -94,7 +115,15 @@ function task(id: string, fields: { status?: string; dueDate?: string } = {}): O
   return [
     { op: "CREATE_NODE", id, nodeType: "action", label: id.replace(/-/g, " ") },
     { op: "SET_STATEMENT", id, statement: { kind: "action", status: "open", topic: "graph" } },
-    { op: "SET_ISSUE", id, issue: { type: "task", status: fields.status ?? "open", ...(fields.dueDate ? { dueDate: fields.dueDate } : {}) } },
+    {
+      op: "SET_ISSUE",
+      id,
+      issue: {
+        type: "task",
+        status: fields.status ?? "open",
+        ...(fields.dueDate ? { dueDate: fields.dueDate } : {}),
+      },
+    },
   ];
 }
 
@@ -196,8 +225,10 @@ describe("Stage D3 definition of done — the execution graph acceptance gate", 
     // -- The cycle rule composes with the live board's real state ----------------
     // (validate against the current board: a fresh cycle through t7 still refuses)
     const cycleTwo = await submit(
-      [{ op: "CONNECT_NODES", source: "t10", target: "t7", relationship: "depends_on" },
-       { op: "CONNECT_NODES", source: "t7", target: "t10", relationship: "depends_on" }],
+      [
+        { op: "CONNECT_NODES", source: "t10", target: "t7", relationship: "depends_on" },
+        { op: "CONNECT_NODES", source: "t7", target: "t10", relationship: "depends_on" },
+      ],
       "the two-step cycle",
     );
     expect(cycleTwo.status).toBe(422);
@@ -206,8 +237,15 @@ describe("Stage D3 definition of done — the execution graph acceptance gate", 
     const del: Operation[] = [{ op: "DELETE_NODE", id: "t1" }];
     expect(validateOperations(ws1, stampAuthorship(del, alice.id))).toEqual([]);
     const deleted = applyOperations(ws1, stampAuthorship(del, alice.id));
-    expect(Object.values(deleted.edges).some((e) => e.relationship === "depends_on" && e.target === "t1")).toBe(false);
-    const restored = applyOperations(deleted, stampAuthorship(inverseOperations(del, ws1), alice.id));
+    expect(
+      Object.values(deleted.edges).some(
+        (e) => e.relationship === "depends_on" && e.target === "t1",
+      ),
+    ).toBe(false);
+    const restored = applyOperations(
+      deleted,
+      stampAuthorship(inverseOperations(del, ws1), alice.id),
+    );
     expect(restored.edges["t2->t1:depends_on"]).toBeDefined();
 
     // -- The derived truth reaches the surfaces -----------------------------------

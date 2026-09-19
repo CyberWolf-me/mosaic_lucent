@@ -98,7 +98,11 @@ export function WhyThis({ nodeId, onClose }: { nodeId: string; onClose: () => vo
           </button>
         )}
         {quote && (
-          <button className="btn ghost" style={{ height: 28, fontSize: 12 }} onClick={() => void copyQuote()}>
+          <button
+            className="btn ghost"
+            style={{ height: 28, fontSize: 12 }}
+            onClick={() => void copyQuote()}
+          >
             {copied ? "Copied" : "Copy quote"}
           </button>
         )}

@@ -30,7 +30,10 @@ function boardOf(ops: Operation[]) {
   return applyOperations(createWorkspace(), ops);
 }
 
-function actionNode(id: string, extra: { issue?: Record<string, unknown>; statement?: boolean } = {}) {
+function actionNode(
+  id: string,
+  extra: { issue?: Record<string, unknown>; statement?: boolean } = {},
+) {
   const ops: Operation[] = [
     { op: "CREATE_NODE", id, nodeType: "action", label: id },
     ...(extra.statement === false
@@ -43,7 +46,13 @@ function actionNode(id: string, extra: { issue?: Record<string, unknown>; statem
           } as Operation,
         ]),
     ...(extra.issue
-      ? [{ op: "SET_ISSUE", id, issue: { type: "task", status: "open", ...extra.issue } } as Operation]
+      ? [
+          {
+            op: "SET_ISSUE",
+            id,
+            issue: { type: "task", status: "open", ...extra.issue },
+          } as Operation,
+        ]
       : []),
   ];
   return ops;
@@ -114,22 +123,43 @@ describe("dueDate + description on the issue layer (Stage D1)", () => {
       {
         op: "SET_ISSUE",
         id: "a1",
-        issue: { type: "task", status: "assigned", dueDate: "2026-09-12", description: "The brief" },
+        issue: {
+          type: "task",
+          status: "assigned",
+          dueDate: "2026-09-12",
+          description: "The brief",
+        },
       },
     ]);
     expect(setWs.nodes.a1?.issue?.dueDate).toBe("2026-09-12");
-    const undoneSet = applyOperations(setWs, inverseOperations(
-      [{ op: "SET_ISSUE", id: "a1", issue: { type: "task", status: "assigned", dueDate: "2026-09-12", description: "The brief" } }],
-      before,
-    ));
+    const undoneSet = applyOperations(
+      setWs,
+      inverseOperations(
+        [
+          {
+            op: "SET_ISSUE",
+            id: "a1",
+            issue: {
+              type: "task",
+              status: "assigned",
+              dueDate: "2026-09-12",
+              description: "The brief",
+            },
+          },
+        ],
+        before,
+      ),
+    );
     expect(undoneSet.nodes.a1?.issue?.dueDate).toBeUndefined();
     expect(undoneSet.nodes.a1?.issue?.description).toBeUndefined();
 
-    const updated = applyOperations(setWs, [{ op: "UPDATE_ISSUE", id: "a1", dueDate: "2026-09-30" }]);
-    const undoneUpdate = applyOperations(updated, inverseOperations(
-      [{ op: "UPDATE_ISSUE", id: "a1", dueDate: "2026-09-30" }],
-      setWs,
-    ));
+    const updated = applyOperations(setWs, [
+      { op: "UPDATE_ISSUE", id: "a1", dueDate: "2026-09-30" },
+    ]);
+    const undoneUpdate = applyOperations(
+      updated,
+      inverseOperations([{ op: "UPDATE_ISSUE", id: "a1", dueDate: "2026-09-30" }], setWs),
+    );
     expect(undoneUpdate.nodes.a1?.issue?.dueDate).toBe("2026-09-12");
   });
 
@@ -157,7 +187,9 @@ describe("dueDate + description on the issue layer (Stage D1)", () => {
 describe("status independence (the ADR 0027 non-derivation rule)", () => {
   it("changing the assignee never touches the status, and vice versa", () => {
     const ws = boardOf(
-      actionNode("a1", { issue: { status: "completed", assignee: "sarah", dueDate: "2026-09-12" } }),
+      actionNode("a1", {
+        issue: { status: "completed", assignee: "sarah", dueDate: "2026-09-12" },
+      }),
     );
     // Unassign a COMPLETED action: status stays completed — "assigned" is an
     // initialization convention, not a derived state.
@@ -172,7 +204,9 @@ describe("status independence (the ADR 0027 non-derivation rule)", () => {
 
   it("the statement lifecycle never derives from the issue status", () => {
     const ws = boardOf(actionNode("a1", { issue: { status: "completed" } }));
-    const progressed = applyOperations(ws, [{ op: "UPDATE_ISSUE", id: "a1", status: "in_progress" }]);
+    const progressed = applyOperations(ws, [
+      { op: "UPDATE_ISSUE", id: "a1", status: "in_progress" },
+    ]);
     // The action statement is still open — the semantic lifecycle is its own.
     expect(progressed.nodes.a1?.statement?.status).toBe("open");
   });

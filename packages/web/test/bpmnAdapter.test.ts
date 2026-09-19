@@ -24,7 +24,13 @@ function processBoard(): Workspace {
   ];
   for (const [id, nodeType, label] of nodes) {
     const i = Number(id.slice(2));
-    ws.nodes[id] = { id, nodeType, label, position: { x: i * 220, y: (i % 2) * 140 }, size: { width: 160, height: 64 } };
+    ws.nodes[id] = {
+      id,
+      nodeType,
+      label,
+      position: { x: i * 220, y: (i % 2) * 140 },
+      size: { width: 160, height: 64 },
+    };
   }
   const edges: Array<[string, string, string]> = [
     ["e-1", "n-000", "n-001"],
@@ -115,7 +121,7 @@ describe("BPMN import (docs/19 subset)", () => {
     const { xml } = toBpmnXml(processBoard());
     const withTimer = xml.replace(
       "    <bpmn:sequenceFlow",
-      "    <bpmn:timerEventDefinition id=\"t-1\"/>\n    <bpmn:sequenceFlow",
+      '    <bpmn:timerEventDefinition id="t-1"/>\n    <bpmn:sequenceFlow',
     );
     const { ignored } = fromBpmnXml(withTimer);
     expect(ignored).toContain("bpmn:timerEventDefinition");

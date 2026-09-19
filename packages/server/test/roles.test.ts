@@ -88,11 +88,7 @@ describe("the recurring schedule", () => {
     // one job rather than three — and it is enforced by the database's
     // partial unique index, so it holds across processes too.
     const queue = new InMemoryJobQueue();
-    await Promise.all([
-      enqueueRecurring(queue),
-      enqueueRecurring(queue),
-      enqueueRecurring(queue),
-    ]);
+    await Promise.all([enqueueRecurring(queue), enqueueRecurring(queue), enqueueRecurring(queue)]);
     const depth = await queue.depth();
     const total = Object.values(depth).reduce((a, b) => a + b, 0);
     expect(total).toBe(RECURRING_JOBS.length);

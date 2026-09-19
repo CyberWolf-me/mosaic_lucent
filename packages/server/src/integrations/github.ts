@@ -125,11 +125,7 @@ export class GithubProvider implements ExecutionProvider {
 
   constructor(options: GitHubProviderOptions) {
     if (!validGitHubRepo(options.repo)) {
-      throw new GithubError(
-        `repo must be "owner/repo" (got "${options.repo}")`,
-        0,
-        false,
-      );
+      throw new GithubError(`repo must be "owner/repo" (got "${options.repo}")`, 0, false);
     }
     this.token = options.token;
     this.repo = options.repo;
@@ -172,7 +168,9 @@ export class GithubProvider implements ExecutionProvider {
         if (!res.ok) {
           const body = (await res.json().catch(() => ({}))) as { message?: string };
           throw new GithubError(
-            body.message ? `github responded ${res.status}: ${body.message}` : `github responded ${res.status}`,
+            body.message
+              ? `github responded ${res.status}: ${body.message}`
+              : `github responded ${res.status}`,
             res.status,
             false,
           );
@@ -210,7 +208,8 @@ export class GithubProvider implements ExecutionProvider {
   }
 
   async createTask(input: CreateTaskInput): Promise<ExternalTask> {
-    const assignees = input.assignee !== undefined ? await this.resolveAssignee(input.assignee) : null;
+    const assignees =
+      input.assignee !== undefined ? await this.resolveAssignee(input.assignee) : null;
     const issue = await this.rest<GithubIssue>(this.issuePath(), {
       method: "POST",
       body: JSON.stringify({
@@ -228,22 +227,27 @@ export class GithubProvider implements ExecutionProvider {
     if (!Number.isInteger(number)) {
       throw new GithubError(`external id "${externalId}" is not a GitHub issue number`, 0, false);
     }
-    const assignees = input.assignee !== undefined ? await this.resolveAssignee(input.assignee) : null;
+    const assignees =
+      input.assignee !== undefined ? await this.resolveAssignee(input.assignee) : null;
     // The close word splits across the wire's two fields: state ("closed")
     // + state_reason ("completed"/"not_planned") — GitHub rejects a
     // state_reason on an open issue, so it rides only on close.
-    const externalWord = input.status !== undefined ? this.toExternalStatus(input.status) : undefined;
-    const [wireState, wireReason] = externalWord !== undefined && externalWord.startsWith("closed:")
-      ? [externalWord.split(":")[0]!, externalWord.split(":")[1]!]
-      : externalWord !== undefined
-        ? [externalWord, undefined]
-        : [undefined, undefined];
+    const externalWord =
+      input.status !== undefined ? this.toExternalStatus(input.status) : undefined;
+    const [wireState, wireReason] =
+      externalWord !== undefined && externalWord.startsWith("closed:")
+        ? [externalWord.split(":")[0]!, externalWord.split(":")[1]!]
+        : externalWord !== undefined
+          ? [externalWord, undefined]
+          : [undefined, undefined];
     const issue = await this.rest<GithubIssue>(this.issuePath(number), {
       method: "PATCH",
       body: JSON.stringify({
         ...(input.title !== undefined ? { title: input.title } : {}),
         ...(input.description !== undefined
-          ? { body: `${input.description}\n\n<!-- ${markerFor({ title: input.title ?? externalId })} -->`.trim() }
+          ? {
+              body: `${input.description}\n\n<!-- ${markerFor({ title: input.title ?? externalId })} -->`.trim(),
+            }
           : {}),
         ...(assignees ? { assignees: [assignees] } : {}),
         ...(wireState !== undefined ? { state: wireState } : {}),
@@ -348,7 +352,12 @@ export class GithubProvider implements ExecutionProvider {
         reason: `GitHub has no due-date field; ${input.dueDate} will not be synced`,
       });
     }
-    if (input.status !== undefined && input.status !== "open" && input.status !== "completed" && input.status !== "cancelled") {
+    if (
+      input.status !== undefined &&
+      input.status !== "open" &&
+      input.status !== "completed" &&
+      input.status !== "cancelled"
+    ) {
       warnings.push({
         field: "status",
         reason: `"${input.status}" is represented as open on GitHub`,
@@ -424,9 +433,10 @@ export class GithubProvider implements ExecutionProvider {
  * validated at connect time (the honest 400, the teamId precedent) —
  * malformed names never reach URL construction.
  */
-export function githubConnectionFactory(): (
-  connection: { credentialRef: string; config?: Record<string, string> },
-) => ExecutionProvider {
+export function githubConnectionFactory(): (connection: {
+  credentialRef: string;
+  config?: Record<string, string>;
+}) => ExecutionProvider {
   return (connection) => {
     const token = process.env[connection.credentialRef];
     if (!token) {
@@ -446,7 +456,9 @@ export function githubConnectionFactory(): (
     return new GithubProvider({
       token,
       repo,
-      ...(connection.config?.baseUrl ? { baseUrl: resolveGithubBaseUrl(connection.config.baseUrl) } : {}),
+      ...(connection.config?.baseUrl
+        ? { baseUrl: resolveGithubBaseUrl(connection.config.baseUrl) }
+        : {}),
     });
   };
 }
@@ -457,7 +469,10 @@ export function githubConnectionFactory(): (
  */
 export function resolveGithubBaseUrl(candidate: string): string {
   const checked = assertSafeOutboundUrl(candidate, "github config.baseUrl");
-  if (process.env["NODE_ENV"] === "production" && process.env["LUCENT_ALLOW_CUSTOM_INTEGRATION_URL"] !== "1") {
+  if (
+    process.env["NODE_ENV"] === "production" &&
+    process.env["LUCENT_ALLOW_CUSTOM_INTEGRATION_URL"] !== "1"
+  ) {
     throw new GithubError(
       "github config.baseUrl is disabled in production (set LUCENT_ALLOW_CUSTOM_INTEGRATION_URL=1 to allow self-hosted proxies)",
       0,

@@ -43,7 +43,13 @@ function regionBoard(n: number, k: number): Workspace {
   for (let i = 0; i < k; i++) {
     const node = { id: `f-${i}`, nodeType: "step", label: `Flow ${i}` };
     ws.nodes[node.id] = node;
-    if (prev) ws.edges[`e-f-${i}`] = { id: `e-f-${i}`, source: prev, target: node.id, relationship: "then" };
+    if (prev)
+      ws.edges[`e-f-${i}`] = {
+        id: `e-f-${i}`,
+        source: prev,
+        target: node.id,
+        relationship: "then",
+      };
     prev = node.id;
   }
   return ws;
@@ -168,7 +174,10 @@ class FakeDecliningWorker {
     const { id, kind } = envelope as { id: number; kind: string };
     queueMicrotask(() => {
       this.onmessage?.({
-        data: kind === "region" ? { kind: "region-declined", id } : { kind: "layout-error", id, message: "no" },
+        data:
+          kind === "region"
+            ? { kind: "region-declined", id }
+            : { kind: "layout-error", id, message: "no" },
       } as MessageEvent);
     });
   }

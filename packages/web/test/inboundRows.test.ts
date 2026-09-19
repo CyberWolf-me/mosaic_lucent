@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { inboundRowActions, inboundRowIsWarning, pendingInboundCount } from "../src/views/inboundRows.js";
+import {
+  inboundRowActions,
+  inboundRowIsWarning,
+  pendingInboundCount,
+} from "../src/views/inboundRows.js";
 import type { InboundChangeView } from "../src/boards.js";
 
 /** A minimal row factory — the tests fill only what each rule reads. */

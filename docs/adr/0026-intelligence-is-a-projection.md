@@ -33,9 +33,9 @@ time lens explicitly out.
 
 ## Decision
 
-**The spec sentence**: *Intelligence is a projection of the current
+**The spec sentence**: _Intelligence is a projection of the current
 semantic workspace; it does not create new truth, mutate state without
-approval, or replace History as the source for temporal analysis.*
+approval, or replace History as the source for temporal analysis._
 
 1. **One view, six sections.** The fixed order — decisions, proposals,
    questions, actions, requirements, risks — every kind first-class (the

@@ -51,8 +51,16 @@ function issueUpdate(identifier: string, stateName: string): string {
 
 const SEED_OPS: Operation[] = [
   { op: "CREATE_NODE", id: "nd_task", nodeType: "task", label: "Sync me" },
-  { op: "SET_STATEMENT", id: "nd_task", statement: { kind: "action", status: "open", topic: "d7" } },
-  { op: "SET_ISSUE", id: "nd_task", issue: { type: "task", status: "open", statusCategory: "todo" } },
+  {
+    op: "SET_STATEMENT",
+    id: "nd_task",
+    statement: { kind: "action", status: "open", topic: "d7" },
+  },
+  {
+    op: "SET_ISSUE",
+    id: "nd_task",
+    issue: { type: "task", status: "open", statusCategory: "todo" },
+  },
 ];
 
 interface Harness {
@@ -97,9 +105,10 @@ async function makeHarness(): Promise<Harness> {
     tickets: new InMemoryTicketStore(60_000),
     integrations: {
       store,
-      providers: new Map<string, import("../src/integrations/provider.js").ExecutionProviderFactory>([
-        ["fake", () => new FakeProvider()],
-      ]),
+      providers: new Map<
+        string,
+        import("../src/integrations/provider.js").ExecutionProviderFactory
+      >([["fake", () => new FakeProvider()]]),
       actions: new InMemoryIntegrationActionStore(),
       ledger: new InMemoryExecutionLedger(),
       webhookEvents: new InMemoryIntegrationWebhookEventStore(),
@@ -116,7 +125,11 @@ async function makeHarness(): Promise<Harness> {
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ email: "d7@example.com", password: "password123", name: "D7 Owner" }),
   });
-  const signupBody = (await signup.json()) as { token: string; user: { id: string }; memberships: Array<{ orgId: string }> };
+  const signupBody = (await signup.json()) as {
+    token: string;
+    user: { id: string };
+    memberships: Array<{ orgId: string }>;
+  };
   const token = signupBody.token;
   const userId = signupBody.user.id;
   const orgId = signupBody.memberships[0]!.orgId;
@@ -132,7 +145,20 @@ async function makeHarness(): Promise<Harness> {
     body: JSON.stringify({ ops: SEED_OPS, label: "seed" }),
   });
   expect(ops.status).toBe(200);
-  return { port, base, boardId, orgId, token, userId, boardStore, store, inbound, close: async () => { await close(); } };
+  return {
+    port,
+    base,
+    boardId,
+    orgId,
+    token,
+    userId,
+    boardStore,
+    store,
+    inbound,
+    close: async () => {
+      await close();
+    },
+  };
 }
 
 async function api(h: Harness, method: string, path: string, body?: unknown) {
@@ -144,7 +170,10 @@ async function api(h: Harness, method: string, path: string, body?: unknown) {
     },
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
   });
-  return { status: res.status, body: (await res.json().catch(() => null)) as Record<string, unknown> | null };
+  return {
+    status: res.status,
+    body: (await res.json().catch(() => null)) as Record<string, unknown> | null,
+  };
 }
 
 describe("the inbound queue routes", () => {
@@ -197,7 +226,7 @@ describe("the inbound queue routes", () => {
     await fireWebhook("done");
     const result = await api(h, "GET", `/api/boards/${h.boardId}/integrations/inbound`);
     expect(result.status).toBe(200);
-    const rows = (result.body!.inbound as Array<Record<string, unknown>>);
+    const rows = result.body!.inbound as Array<Record<string, unknown>>;
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({
       nodeId: "nd_task",
@@ -211,9 +240,14 @@ describe("the inbound queue routes", () => {
 
   it("accept applies the reviewed snapshot with the SYSTEM actor and updates the link", async () => {
     await fireWebhook("done");
-    const rows = (await api(h, "GET", `/api/boards/${h.boardId}/integrations/inbound`)).body!.inbound as Array<Record<string, unknown>>;
+    const rows = (await api(h, "GET", `/api/boards/${h.boardId}/integrations/inbound`)).body!
+      .inbound as Array<Record<string, unknown>>;
     const changeId = rows[0]!.id as string;
-    const result = await api(h, "POST", `/api/boards/${h.boardId}/integrations/inbound/${changeId}/accept`);
+    const result = await api(
+      h,
+      "POST",
+      `/api/boards/${h.boardId}/integrations/inbound/${changeId}/accept`,
+    );
     expect(result.status).toBe(200);
     expect(result.body).toMatchObject({ applied: 1, seq: expect.any(Number) });
 
@@ -225,22 +259,34 @@ describe("the inbound queue routes", () => {
     const log = await h.boardStore.loadLog(h.boardId, 0);
     const entry = [...log].reverse().find((e) => e.label === "sync from fake");
     expect(entry).toBeDefined();
-    expect(entry!.actor).toMatchObject({ actorType: "system", actorId: "fake", initiatedBy: h.userId });
+    expect(entry!.actor).toMatchObject({
+      actorType: "system",
+      actorId: "fake",
+      initiatedBy: h.userId,
+    });
     // The link's lastSyncedStatus records the provider's word.
-    const link = (await h.store.linksForNode(h.boardId, "nd_task")).find((l) => l.provider === "fake");
+    const link = (await h.store.linksForNode(h.boardId, "nd_task")).find(
+      (l) => l.provider === "fake",
+    );
     expect(link!.lastSyncedStatus).toBe("done");
     // The record is applied.
-    const after = (await api(h, "GET", `/api/boards/${h.boardId}/integrations/inbound`)).body!.inbound as Array<Record<string, unknown>>;
+    const after = (await api(h, "GET", `/api/boards/${h.boardId}/integrations/inbound`)).body!
+      .inbound as Array<Record<string, unknown>>;
     expect(after[0]).toMatchObject({ status: "applied" });
   });
 
   it("a second accept is the honest duplicate — no second op", async () => {
     await fireWebhook("done");
-    const rows = (await api(h, "GET", `/api/boards/${h.boardId}/integrations/inbound`)).body!.inbound as Array<Record<string, unknown>>;
+    const rows = (await api(h, "GET", `/api/boards/${h.boardId}/integrations/inbound`)).body!
+      .inbound as Array<Record<string, unknown>>;
     const changeId = rows[0]!.id as string;
     await api(h, "POST", `/api/boards/${h.boardId}/integrations/inbound/${changeId}/accept`);
     const before = (await h.boardStore.loadLog(h.boardId, 0)).length;
-    const second = await api(h, "POST", `/api/boards/${h.boardId}/integrations/inbound/${changeId}/accept`);
+    const second = await api(
+      h,
+      "POST",
+      `/api/boards/${h.boardId}/integrations/inbound/${changeId}/accept`,
+    );
     expect(second.status).toBe(200);
     expect(second.body).toMatchObject({ duplicate: true });
     expect((await h.boardStore.loadLog(h.boardId, 0)).length).toBe(before);
@@ -249,32 +295,49 @@ describe("the inbound queue routes", () => {
   it("a never-guesses warning row: accept refuses with the honest 409, dismiss works", async () => {
     // A word the FakeProvider does not know.
     await fireWebhook("In QA");
-    const rows = (await api(h, "GET", `/api/boards/${h.boardId}/integrations/inbound`)).body!.inbound as Array<Record<string, unknown>>;
+    const rows = (await api(h, "GET", `/api/boards/${h.boardId}/integrations/inbound`)).body!
+      .inbound as Array<Record<string, unknown>>;
     expect(rows[0]).toMatchObject({ externalValue: "In QA", mappedValue: null, status: "pending" });
     const changeId = rows[0]!.id as string;
-    const accept = await api(h, "POST", `/api/boards/${h.boardId}/integrations/inbound/${changeId}/accept`);
+    const accept = await api(
+      h,
+      "POST",
+      `/api/boards/${h.boardId}/integrations/inbound/${changeId}/accept`,
+    );
     expect(accept.status).toBe(409);
-    expect((accept.body!.error as string)).toContain("no translation");
+    expect(accept.body!.error as string).toContain("no translation");
     // The board is untouched.
     const board = await h.boardStore.get(h.boardId);
     expect(board!.workspace.nodes["nd_task"]!.issue!.status).toBe("open");
     // Dismiss is the offered path.
-    const dismiss = await api(h, "POST", `/api/boards/${h.boardId}/integrations/inbound/${changeId}/dismiss`);
+    const dismiss = await api(
+      h,
+      "POST",
+      `/api/boards/${h.boardId}/integrations/inbound/${changeId}/dismiss`,
+    );
     expect(dismiss.status).toBe(200);
     // The link still records the provider's word.
-    const link = (await h.store.linksForNode(h.boardId, "nd_task")).find((l) => l.provider === "fake");
+    const link = (await h.store.linksForNode(h.boardId, "nd_task")).find(
+      (l) => l.provider === "fake",
+    );
     expect(link!.lastSyncedStatus).toBe("In QA");
   });
 
   it("dismiss keeps the board's value and marks the row dismissed", async () => {
     await fireWebhook("done");
-    const rows = (await api(h, "GET", `/api/boards/${h.boardId}/integrations/inbound`)).body!.inbound as Array<Record<string, unknown>>;
+    const rows = (await api(h, "GET", `/api/boards/${h.boardId}/integrations/inbound`)).body!
+      .inbound as Array<Record<string, unknown>>;
     const changeId = rows[0]!.id as string;
-    const dismiss = await api(h, "POST", `/api/boards/${h.boardId}/integrations/inbound/${changeId}/dismiss`);
+    const dismiss = await api(
+      h,
+      "POST",
+      `/api/boards/${h.boardId}/integrations/inbound/${changeId}/dismiss`,
+    );
     expect(dismiss.status).toBe(200);
     const board = await h.boardStore.get(h.boardId);
     expect(board!.workspace.nodes["nd_task"]!.issue!.status).toBe("open");
-    const after = (await api(h, "GET", `/api/boards/${h.boardId}/integrations/inbound`)).body!.inbound as Array<Record<string, unknown>>;
+    const after = (await api(h, "GET", `/api/boards/${h.boardId}/integrations/inbound`)).body!
+      .inbound as Array<Record<string, unknown>>;
     expect(after[0]).toMatchObject({ status: "dismissed" });
   });
 
@@ -283,12 +346,17 @@ describe("the inbound queue routes", () => {
     const sync = await api(h, "POST", `/api/boards/${h.boardId}/integrations/fake/sync`);
     expect(sync.status).toBe(200);
     expect(sync.body).toMatchObject({ supersededInbound: 1 });
-    const rows = (await api(h, "GET", `/api/boards/${h.boardId}/integrations/inbound`)).body!.inbound as Array<Record<string, unknown>>;
+    const rows = (await api(h, "GET", `/api/boards/${h.boardId}/integrations/inbound`)).body!
+      .inbound as Array<Record<string, unknown>>;
     expect(rows[0]).toMatchObject({ status: "superseded" });
   });
 
   it("an unknown change id is a board-scoped 404", async () => {
-    const result = await api(h, "POST", `/api/boards/${h.boardId}/integrations/inbound/inb_missing/accept`);
+    const result = await api(
+      h,
+      "POST",
+      `/api/boards/${h.boardId}/integrations/inbound/inb_missing/accept`,
+    );
     expect(result.status).toBe(404);
   });
 
@@ -297,7 +365,8 @@ describe("the inbound queue routes", () => {
     // "open" is "todo". A "todo" webhook equals the live value → the
     // resolution-level dedupe: no pending row, nothing to decide.
     await fireWebhook("todo");
-    const rows = (await api(h, "GET", `/api/boards/${h.boardId}/integrations/inbound`)).body!.inbound as Array<Record<string, unknown>>;
+    const rows = (await api(h, "GET", `/api/boards/${h.boardId}/integrations/inbound`)).body!
+      .inbound as Array<Record<string, unknown>>;
     expect(rows.filter((r) => r.status === "pending")).toHaveLength(0);
   });
 });

@@ -72,7 +72,15 @@ function AuthShell({ children }: { children: React.ReactNode }) {
       </div>
       <footer className="auth-footer">
         <div>By continuing you agree that your data is yours — we never train AI models on it.</div>
-        <div style={{ marginTop: 8, display: "flex", justifyContent: "center", alignItems: "center", gap: 8 }}>
+        <div
+          style={{
+            marginTop: 8,
+            display: "flex",
+            justifyContent: "center",
+            alignItems: "center",
+            gap: 8,
+          }}
+        >
           <a
             href="/privacy"
             onClick={(e) => {

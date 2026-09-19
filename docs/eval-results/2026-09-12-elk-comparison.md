@@ -30,7 +30,7 @@
 (both are the kind of thing the experiment exists to catch, recorded here
 because they change what earlier numbers mean):
 
-1. The runner measured a *recompute*, not the engine's geometry:
+1. The runner measured a _recompute_, not the engine's geometry:
    `measureVisualMetrics(routed)` without the pre-supplied layout re-runs the
    built-in engine over the stamped workspace. Invisible for the
    self-consistent default engine (the Phase 0 baseline is unaffected —
@@ -43,16 +43,16 @@ because they change what earlier numbers mean):
 
 ## The comparison (nodes = 500 except where noted)
 
-| board | ours cross / thru / eMean / ms | ELK cross / thru / eMean / ms |
-| --- | --- | --- |
-| layered (flowchart/arch) | 902 / 128 / 318 / 29.6 | **833** / **0** / **230** / 868.8 |
-| dense (fan-in 2–3) | 8396 / 948 / 369 / 58.7 | **4350** / **0** / **335** / 1984.8 |
-| adversarial (diamonds+cycles) | 2377 / 308 / 333 / 16.9 | **1034** / **0** / **201** / 1113.9 |
-| long-edge (deep spine) | 18 / 67 / 4147 / 7.4 | **0** / **0** / **109** / 142.2 |
-| mixed regions (mind+tree+flow) | **2** / **1** / **756** / 3.7 | 6456 / 199 / 7963 / 242 |
-| radial (mind map) | **0** / **0** / **501** / 0.7 | 1810 / 106 / 2284 / 67918.6 |
-| tree (decision/org) | 0 / 0 / 613 / 1.6 | 0 / 0 / **127** / 186.3 |
-| swimlane (process) | **0** / 128 / **3111** / 0.9 | 118300 / 396 / 8104 / 1295.9 |
+| board                          | ours cross / thru / eMean / ms | ELK cross / thru / eMean / ms       |
+| ------------------------------ | ------------------------------ | ----------------------------------- |
+| layered (flowchart/arch)       | 902 / 128 / 318 / 29.6         | **833** / **0** / **230** / 868.8   |
+| dense (fan-in 2–3)             | 8396 / 948 / 369 / 58.7        | **4350** / **0** / **335** / 1984.8 |
+| adversarial (diamonds+cycles)  | 2377 / 308 / 333 / 16.9        | **1034** / **0** / **201** / 1113.9 |
+| long-edge (deep spine)         | 18 / 67 / 4147 / 7.4           | **0** / **0** / **109** / 142.2     |
+| mixed regions (mind+tree+flow) | **2** / **1** / **756** / 3.7  | 6456 / 199 / 7963 / 242             |
+| radial (mind map)              | **0** / **0** / **501** / 0.7  | 1810 / 106 / 2284 / 67918.6         |
+| tree (decision/org)            | 0 / 0 / 613 / 1.6              | 0 / 0 / **127** / 186.3             |
+| swimlane (process)             | **0** / 128 / **3111** / 0.9   | 118300 / 396 / 8104 / 1295.9        |
 
 At 150 nodes the shape is the same: layered 240→**156**, dense 1340→**697**,
 adversarial 620→**296**, long-edge 21→**0**, tree 0→0; mixed **1**→477,
@@ -88,7 +88,7 @@ to both).
    therefore not optional if ELK is adopted for graph families. Our engine's
    ≤30 ms at 500 nodes remains the interaction baseline.
 5. **A renderer-model caveat, on record:** ELK routes anchor at node
-   *borders*; Lucent's renderer draws centre-anchored polylines
+   _borders_; Lucent's renderer draws centre-anchored polylines
    (`Edge.route` between node centres). The comparison measures ELK's
    routes stamped into Lucent's model — which is what adoption would mean
    today. The measured polyline keeps the orthogonal path (full section
@@ -98,12 +98,12 @@ to both).
 
 ## Verdict against the Phase 3 bar
 
-| Bar (doc 18, stated before numbers) | Result |
-| --- | --- |
+| Bar (doc 18, stated before numbers)                  | Result                                                                                                            |
+| ---------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
 | Materially fewer crossings per edge at 150–500 nodes | **Met for flat graph families** (8–56%, decisive on dense/long-edge); not met for radial, swimlane, mixed regions |
-| No overlap regressions | **Met** — zero overlaps everywhere for both engines |
-| Layout cost within the interactive budget | **Not met on the main thread** — 20–400× cost; viable only as the Phase 4 worker path |
-| The human pass prefers or ties ELK's output | **Pending** — live-protocol item |
+| No overlap regressions                               | **Met** — zero overlaps everywhere for both engines                                                               |
+| Layout cost within the interactive budget            | **Not met on the main thread** — 20–400× cost; viable only as the Phase 4 worker path                             |
+| The human pass prefers or ties ELK's output          | **Pending** — live-protocol item                                                                                  |
 
 Per doc 18's own rule, this is **Result B's shape, undecided**: ELK for
 graph/architecture families, the hand-written engines retained for radial,

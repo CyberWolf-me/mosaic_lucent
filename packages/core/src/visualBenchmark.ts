@@ -213,7 +213,12 @@ export function measureVisualMetrics(
     // keep the single centre-to-centre segment.
     const path =
       edge.route && edge.route.length > 0
-        ? routedVertices(s, t, edge.route, routeStyleOverride ?? routeStyleFor(workspace.diagramKind))
+        ? routedVertices(
+            s,
+            t,
+            edge.route,
+            routeStyleOverride ?? routeStyleFor(workspace.diagramKind),
+          )
         : [s, t];
     bendsTotal += path.length - 2;
     let edgeLength = 0;
@@ -260,7 +265,8 @@ export function measureVisualMetrics(
     }
   }
   lengths.sort((a, b) => a - b);
-  const edgeLengthMean = lengths.length > 0 ? lengths.reduce((a, b) => a + b, 0) / lengths.length : 0;
+  const edgeLengthMean =
+    lengths.length > 0 ? lengths.reduce((a, b) => a + b, 0) / lengths.length : 0;
 
   // Viewport coverage: how much of the layout's bounding box is actual node
   // content vs empty canvas the eye must cross. 1 = perfectly tight packing.

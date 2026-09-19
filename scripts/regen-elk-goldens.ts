@@ -15,7 +15,10 @@ import { ELK_LAYOUT_ENGINE } from "../packages/web/src/diagram/elk/elkLayoutEngi
 import { goldenElkWorkspaces } from "../packages/web/test/elkGoldenFixtures.js";
 
 function geometryHash(out: {
-  layout: Record<string, { position: { x: number; y: number }; size: { width: number; height: number } }>;
+  layout: Record<
+    string,
+    { position: { x: number; y: number }; size: { width: number; height: number } }
+  >;
 }): string {
   const parts = Object.keys(out.layout)
     .sort()
@@ -39,7 +42,9 @@ for (const [name, build] of Object.entries(goldenElkWorkspaces)) {
 }
 
 // Rewrite the hashes block in the fixtures module, in place.
-const fixturesPath = fileURLToPath(new URL("../packages/web/test/elkGoldenFixtures.ts", import.meta.url));
+const fixturesPath = fileURLToPath(
+  new URL("../packages/web/test/elkGoldenFixtures.ts", import.meta.url),
+);
 let src = readFileSync(fixturesPath, "utf8");
 const block = Object.entries(results)
   .map(([k, v]) => `  "${k}": "${v}",`)

@@ -157,7 +157,9 @@ export const registerProposalRoutes: RegisterRoutes = (router, s) => {
       // through the room carries provenance to every peer, the log, and undo.
       // Idempotent per op (attachProvenance), so a proposal whose ops were
       // already enriched on the client keeps the client's copy.
-      const { attachProvenance, existingTopics, foldStatementTopics } = await import("@lucent/core");
+      const { attachProvenance, existingTopics, foldStatementTopics } = await import(
+        "@lucent/core"
+      );
       const evidence =
         proposal.meetingId !== null
           ? {
@@ -171,7 +173,9 @@ export const registerProposalRoutes: RegisterRoutes = (router, s) => {
                 : {}),
             }
           : undefined;
-      const enriched = evidence ? attachProvenance(proposal.operations, evidence) : proposal.operations;
+      const enriched = evidence
+        ? attachProvenance(proposal.operations, evidence)
+        : proposal.operations;
       // The topic fold (Stage C5): a proposal is the model's output, so its
       // statement topics fold against the board's existing authored keys at
       // commit — alongside the provenance enrichment, same reasoning: what

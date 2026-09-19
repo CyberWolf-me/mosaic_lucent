@@ -26,9 +26,9 @@ The owner's decisions: node-based; dueDate + description in IssueFields
 (a third node layer would scatter work data); the six-value execution
 vocabulary as convention, not a zod enum (existing "To Do"/"In Review"
 boards must load unchanged); the two status systems never derive from each
-other — and per the review, *issue status is independently editable;
+other — and per the review, _issue status is independently editable;
 "assigned" is an AI/default initialization convention, not a derived
-state*; dependencies deferred entirely to D3, with the eleven questions
+state_; dependencies deferred entirely to D3, with the eleven questions
 they raise recorded as D3's ADR outline. Two review clarifications locked
 in: relative dates resolve against the meeting/message timestamp (a fixed
 reference — deterministic per input, no calendar/timezone infrastructure),
@@ -36,16 +36,16 @@ and the server/core validator stays authoritative where a textarea doesn't.
 
 ## Decision
 
-**The D1 contract**: *An Action is an ordinary Lucent workspace node that
+**The D1 contract**: _An Action is an ordinary Lucent workspace node that
 carries an action statement and execution metadata. Users and AI can
 assign, describe, schedule, and update its work state through the existing
 validated operation protocol without introducing a second task store or
 changing semantic statement lifecycle. Existing free-form boards remain
-compatible.*
+compatible._
 
-1. **One node, two layers.** The statement layer answers *what is this
-   semantically* (kind=action, lifecycle, topic, provenance); the issue
-   layer answers *how is the work managed* (assignee, priority, points,
+1. **One node, two layers.** The statement layer answers _what is this
+   semantically_ (kind=action, lifecycle, topic, provenance); the issue
+   layer answers _how is the work managed_ (assignee, priority, points,
    status, dueDate, description). `actionNodes(workspace)` selects the
    executable actions: statement.kind === "action" AND an issue present —
    a bare action statement is still just a statement ("maybe we should

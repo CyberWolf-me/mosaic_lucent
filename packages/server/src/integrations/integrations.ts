@@ -27,7 +27,14 @@ import { actionNodes, type Workspace } from "@lucent/core";
  * the store validates against the KNOWN set so a typo'd provider name
  * fails at the boundary, while the provider MAP in AppDeps stays the
  * runtime authority on what is actually implemented. */
-export const INTEGRATION_PROVIDERS = ["fake", "linear", "github", "jira", "figma", "slack"] as const;
+export const INTEGRATION_PROVIDERS = [
+  "fake",
+  "linear",
+  "github",
+  "jira",
+  "figma",
+  "slack",
+] as const;
 export type IntegrationProviderName = (typeof INTEGRATION_PROVIDERS)[number];
 
 export const INTEGRATION_STATUSES = ["active", "disabled"] as const;
@@ -65,9 +72,7 @@ export function assertSafeCredentialRef(ref: string): void {
   const upper = ref.toUpperCase();
   for (const needle of FORBIDDEN_CREDENTIAL_REF_SUBSTRINGS) {
     if (upper.includes(needle)) {
-      throw new Error(
-        `credentialRef must not reference operator secrets (contains "${needle}")`,
-      );
+      throw new Error(`credentialRef must not reference operator secrets (contains "${needle}")`);
     }
   }
 }
@@ -138,7 +143,10 @@ export interface IntegrationStore {
    * flow, the SsoStore putConnection precedent. One connection per provider
    * per org — a second config replaces the first.
    */
-  putConnection(input: NewIntegrationConnection & { config?: Record<string, string> }, now: number): Promise<IntegrationConnection>;
+  putConnection(
+    input: NewIntegrationConnection & { config?: Record<string, string> },
+    now: number,
+  ): Promise<IntegrationConnection>;
   /** The org's connections, oldest first. */
   connectionsForOrg(orgId: string): Promise<IntegrationConnection[]>;
   connection(orgId: string, provider: string): Promise<IntegrationConnection | undefined>;
@@ -203,7 +211,10 @@ export function normalizeConnection(
     throw new Error(`credentialRef must be 1..${MAX_CREDENTIAL_REF_CHARS} characters`);
   }
   assertSafeCredentialRef(ref);
-  const scopes = (input.scopes ?? []).map((s) => s.trim()).filter(Boolean).slice(0, MAX_SCOPES);
+  const scopes = (input.scopes ?? [])
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .slice(0, MAX_SCOPES);
   // Stage D6: provider config — shallow-validated (≤10 entries, short
   // strings); provider-specific validation is the factory's business at
   // connect time (the Linear factory 400s on a missing teamId).
@@ -248,7 +259,14 @@ export function normalizeLink(input: LinkTaskInput): LinkTaskInput {
 export function extractProposalItems(
   workspace: Workspace,
   linksForProvider: ReadonlyMap<string, { nodeId: string; externalId: string }>,
-  capabilityWarnings: ((fields: { title: string; assignee?: string; dueDate?: string; status?: string }) => Array<{ field: string; reason: string }>) | undefined,
+  capabilityWarnings:
+    | ((fields: {
+        title: string;
+        assignee?: string;
+        dueDate?: string;
+        status?: string;
+      }) => Array<{ field: string; reason: string }>)
+    | undefined,
 ): IntegrationActionItem[] {
   return actionNodes(workspace).map((node) => {
     const issue = node.issue!;
@@ -337,10 +355,7 @@ export class InMemoryIntegrationStore implements IntegrationStore {
       .map((c) => ({ ...c }));
   }
 
-  async connection(
-    orgId: string,
-    provider: string,
-  ): Promise<IntegrationConnection | undefined> {
+  async connection(orgId: string, provider: string): Promise<IntegrationConnection | undefined> {
     const found = [...this.connections.values()].find(
       (c) => c.orgId === orgId && c.provider === provider,
     );
@@ -403,9 +418,7 @@ export class InMemoryIntegrationStore implements IntegrationStore {
   }
 
   async linksForBoard(boardId: string): Promise<IntegrationTaskLink[]> {
-    return [...this.links.values()]
-      .filter((l) => l.boardId === boardId)
-      .map((l) => ({ ...l }));
+    return [...this.links.values()].filter((l) => l.boardId === boardId).map((l) => ({ ...l }));
   }
 
   async linksForNode(boardId: string, nodeId: string): Promise<IntegrationTaskLink[]> {
@@ -585,10 +598,7 @@ export class InMemoryIntegrationActionStore implements IntegrationActionStore {
     sourceSeq?: number | null;
   }): Promise<{ record: IntegrationActionRecord; supersededId: string | null }> {
     const pending = [...this.records.values()].find(
-      (r) =>
-        r.boardId === input.boardId &&
-        r.provider === input.provider &&
-        r.status === "pending",
+      (r) => r.boardId === input.boardId && r.provider === input.provider && r.status === "pending",
     );
     let supersededId: string | null = null;
     if (pending) {

@@ -249,11 +249,7 @@ export function validateOperations(workspace: Workspace, ops: Operation[]): Vali
               `drives edge from "${op.source}" to "${op.target}" refused: the source carries no decision statement`,
             );
           }
-          if (
-            !targetStatement ||
-            targetStatement.kind !== "action" ||
-            !issueOf.has(op.target)
-          ) {
+          if (!targetStatement || targetStatement.kind !== "action" || !issueOf.has(op.target)) {
             err(
               `drives edge from "${op.source}" to "${op.target}" refused: the target is not executable work (an action statement and an issue)`,
             );
@@ -271,10 +267,18 @@ export function validateOperations(workspace: Workspace, ops: Operation[]): Vali
         // later ops in the batch validate against the post-disconnect graph.
         if (op.relationship === "depends_on") {
           const list = dependsOnOf.get(op.source);
-          if (list) dependsOnOf.set(op.source, list.filter((t) => t !== op.target));
+          if (list)
+            dependsOnOf.set(
+              op.source,
+              list.filter((t) => t !== op.target),
+            );
         } else if (op.relationship === "blocks") {
           const list = dependsOnOf.get(op.target);
-          if (list) dependsOnOf.set(op.target, list.filter((t) => t !== op.source));
+          if (list)
+            dependsOnOf.set(
+              op.target,
+              list.filter((t) => t !== op.source),
+            );
         }
         break;
       }

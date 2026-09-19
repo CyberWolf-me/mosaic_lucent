@@ -1,7 +1,13 @@
 import { describe, it, expect } from "vitest";
 import { createWorkspace, applyOperations } from "@lucent/core";
 import type { Operation } from "@lucent/core";
-import { boardToMarkdown, boardToCsv, parseCsv, csvToStickyOps, csvCell } from "../src/board/serialize.js";
+import {
+  boardToMarkdown,
+  boardToCsv,
+  parseCsv,
+  csvToStickyOps,
+  csvCell,
+} from "../src/board/serialize.js";
 
 function ecommerce() {
   const ops: Operation[] = [

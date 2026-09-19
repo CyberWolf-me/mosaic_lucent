@@ -20,10 +20,7 @@ export interface HistoryDay {
  * boundaries — "yesterday's meeting" is a wall-clock question, and the
  * timeline's reader is in that timezone, not UTC.
  */
-export function groupHistoryByDay(
-  items: BoardHistoryItem[],
-  now = Date.now(),
-): HistoryDay[] {
+export function groupHistoryByDay(items: BoardHistoryItem[], now = Date.now()): HistoryDay[] {
   const dayKey = (at: number) => {
     const d = new Date(at);
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
@@ -38,14 +35,28 @@ export function groupHistoryByDay(
     yesterday.setDate(today.getDate() - 1);
     if (key === todayKey) return "Today";
     if (key === dayOf(yesterday)) return "Yesterday";
-    const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    const months = [
+      "Jan",
+      "Feb",
+      "Mar",
+      "Apr",
+      "May",
+      "Jun",
+      "Jul",
+      "Aug",
+      "Sep",
+      "Oct",
+      "Nov",
+      "Dec",
+    ];
     const thisYear = y === today.getFullYear();
     return `${months[(m ?? 1) - 1]} ${d}${thisYear ? "" : `, ${y}`}`;
   };
   const dayOf = (d: Date): string =>
-    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
-      d.getDate(),
-    ).padStart(2, "0")}`;
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(
+      2,
+      "0",
+    )}`;
 
   const byDay = new Map<string, BoardHistoryItem[]>();
   for (const item of items) {
@@ -64,9 +75,11 @@ export function groupHistoryByDay(
  * what is visible, what the plan allows, and where the rest went — never
  * "the board begins here". Null when the window is the whole log.
  */
-export function depthBanner(
-  history: { hasMore: boolean; historyDepth: number | null; items: unknown[] },
-): string | null {
+export function depthBanner(history: {
+  hasMore: boolean;
+  historyDepth: number | null;
+  items: unknown[];
+}): string | null {
   if (!history.hasMore) return null;
   const depth = history.historyDepth;
   if (depth === null) return null; // unlimited plan: nothing is hidden
@@ -154,9 +167,10 @@ export function chronologyByDay(
     ).padStart(2, "0")}`;
   };
   const dayOf = (d: Date): string =>
-    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
-      d.getDate(),
-    ).padStart(2, "0")}`;
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(
+      2,
+      "0",
+    )}`;
   const labelFor = (key: string): string => {
     const [y, m, d] = key.split("-").map(Number);
     const today = new Date(now);
@@ -164,7 +178,20 @@ export function chronologyByDay(
     const yesterday = new Date(now);
     yesterday.setDate(today.getDate() - 1);
     if (key === dayOf(yesterday)) return "Yesterday";
-    const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    const months = [
+      "Jan",
+      "Feb",
+      "Mar",
+      "Apr",
+      "May",
+      "Jun",
+      "Jul",
+      "Aug",
+      "Sep",
+      "Oct",
+      "Nov",
+      "Dec",
+    ];
     return `${months[(m ?? 1) - 1]} ${d}${y === today.getFullYear() ? "" : `, ${y}`}`;
   };
   const byDay = new Map<string, ChronologyRow[]>();

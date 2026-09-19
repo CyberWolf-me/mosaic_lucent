@@ -21,7 +21,14 @@ import {
 
 const NOW = Date.UTC(2026, 8, 9, 12, 0); // 2026-09-09
 
-function action(id: string, fields: { status?: string; statusCategory?: "todo" | "in_progress" | "done"; dueDate?: string } = {}): Operation[] {
+function action(
+  id: string,
+  fields: {
+    status?: string;
+    statusCategory?: "todo" | "in_progress" | "done";
+    dueDate?: string;
+  } = {},
+): Operation[] {
   return [
     { op: "CREATE_NODE", id, nodeType: "action", label: id.replace(/-/g, " ") },
     { op: "SET_STATEMENT", id, statement: { kind: "action", status: "open" } },
@@ -82,7 +89,9 @@ describe("executionRollup", () => {
 
   it("blocked is the manual status OR any derived blocker", () => {
     // manual-blocked, no upstream
-    const manual = board([...action("stuck", { status: "blocked", statusCategory: "in_progress" })]);
+    const manual = board([
+      ...action("stuck", { status: "blocked", statusCategory: "in_progress" }),
+    ]);
     expect(executionRollup(manual, NOW).blocked).toBe(1);
     // open status, blocked through the graph — the downstream counts; the
     // blocked upstream counts too (it is itself an executable action whose
@@ -98,7 +107,11 @@ describe("executionRollup", () => {
   it("at-risk counts blocked-and-overdue upstream (blocked NOT excluded — ADR 0029)", () => {
     const ws = board([
       // blocked AND past due: the compounded trouble the settled rule keeps
-      ...action("sour", { status: "blocked", statusCategory: "in_progress", dueDate: "2020-01-01" }),
+      ...action("sour", {
+        status: "blocked",
+        statusCategory: "in_progress",
+        dueDate: "2020-01-01",
+      }),
       ...action("downstream"),
       depends("downstream", "sour"),
     ]);
@@ -112,7 +125,11 @@ describe("executionRollup", () => {
     const ws = board([
       ...action("late", { dueDate: "2026-09-01" }),
       ...action("on-time", { dueDate: "2026-12-31" }),
-      ...action("late-but-done", { status: "completed", statusCategory: "done", dueDate: "2026-09-01" }),
+      ...action("late-but-done", {
+        status: "completed",
+        statusCategory: "done",
+        dueDate: "2026-09-01",
+      }),
     ]);
     expect(executionRollup(ws, NOW).overdue).toBe(1);
   });
@@ -158,8 +175,17 @@ describe("blockingChains", () => {
       ...action("derived-blocked", { status: "in_progress", statusCategory: "in_progress" }),
       ...action("waiting"),
       { op: "CREATE_NODE", id: "plain", nodeType: "task", label: "Plain blocker" },
-      { op: "SET_ISSUE", id: "plain", issue: { type: "task", status: "blocked", statusCategory: "in_progress" } },
-      { op: "CONNECT_NODES", source: "derived-blocked", target: "plain", relationship: "depends_on" },
+      {
+        op: "SET_ISSUE",
+        id: "plain",
+        issue: { type: "task", status: "blocked", statusCategory: "in_progress" },
+      },
+      {
+        op: "CONNECT_NODES",
+        source: "derived-blocked",
+        target: "plain",
+        relationship: "depends_on",
+      },
       depends("waiting", "derived-blocked"),
     ]);
     const chains = blockingChains(ws, NOW);

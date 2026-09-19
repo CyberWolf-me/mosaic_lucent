@@ -98,11 +98,7 @@ export interface ExecutionLedger {
     now: number,
   ): Promise<void>;
   /** One row by its composite key (the approve route's duplicate answer). */
-  get(
-    boardId: string,
-    provider: string,
-    requestId: string,
-  ): Promise<ExecutionRecord | undefined>;
+  get(boardId: string, provider: string, requestId: string): Promise<ExecutionRecord | undefined>;
   /** Reclaimable rows, oldest first (the sweep's feed). */
   pending(staleAfterMs: number, now: number, limit?: number): Promise<ExecutionRecord[]>;
 }
@@ -155,7 +151,11 @@ export class InMemoryExecutionLedger implements ExecutionLedger {
     }
     // Exhausted: max attempts reached, stays failed, refuses re-claims.
     if (existing.attempts >= this.maxAttempts && existing.status === "received") {
-      const stuck: ExecutionRecord = { ...existing, status: "failed", error: "exhausted after max attempts" };
+      const stuck: ExecutionRecord = {
+        ...existing,
+        status: "failed",
+        error: "exhausted after max attempts",
+      };
       this.rows.set(k, stuck);
       return { outcome: "exhausted", record: { ...stuck } };
     }

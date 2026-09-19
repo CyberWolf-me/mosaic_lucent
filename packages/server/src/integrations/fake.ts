@@ -120,8 +120,8 @@ export class FakeProvider implements ExecutionProvider {
     this.calls.push({ method: "searchTasks", input: query, at: Date.now() });
     const needle = query.toLowerCase();
     return Promise.resolve(
-      [...this.tasks.values()].filter((t) =>
-        t.title.toLowerCase().includes(needle) || t.externalId.includes(needle),
+      [...this.tasks.values()].filter(
+        (t) => t.title.toLowerCase().includes(needle) || t.externalId.includes(needle),
       ),
     );
   }

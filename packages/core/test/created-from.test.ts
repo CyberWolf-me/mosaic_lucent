@@ -125,10 +125,9 @@ describe("attachPlanProvenance: fill-don't-overwrite, merge-with-meeting", () =>
       "decision-2",
     ]);
     const set = stamped[1]!;
-    expect(set.op === "SET_STATEMENT" ? set.statement?.provenance?.createdFrom : undefined).toEqual([
-      "decision-1",
-      "decision-2",
-    ]);
+    expect(set.op === "SET_STATEMENT" ? set.statement?.provenance?.createdFrom : undefined).toEqual(
+      ["decision-1", "decision-2"],
+    );
     // Groups carry no provenance — evidence is about creation, not layout.
     expect(stamped[2]).toEqual(planOps[2]);
   });

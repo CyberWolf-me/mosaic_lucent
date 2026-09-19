@@ -39,7 +39,11 @@ function action(id: string, fields: { status?: string; dueDate?: string } = {}):
     {
       op: "SET_ISSUE",
       id,
-      issue: { type: "task", status: fields.status ?? "open", ...(fields.dueDate ? { dueDate: fields.dueDate } : {}) },
+      issue: {
+        type: "task",
+        status: fields.status ?? "open",
+        ...(fields.dueDate ? { dueDate: fields.dueDate } : {}),
+      },
     },
   ];
 }
@@ -80,17 +84,20 @@ describe("decisionDriveGraph — the causal adjacency", () => {
     // A drives edge whose source is not a decision or whose target is not
     // executable reads as no causality — the read-side defensive filter,
     // same stance as derivedExecution takes toward its graph.
-    const ws = applyOperations(createWorkspace(), stampAuthorship([
-      // target without an issue: an action statement alone is not work.
-      { op: "CREATE_NODE", id: "bare", nodeType: "action", label: "Bare" },
-      { op: "SET_STATEMENT", id: "bare", statement: { kind: "action", status: "open" } },
-      // source without a decision statement: a plain node drives nothing.
-      { op: "CREATE_NODE", id: "plain", nodeType: "task", label: "Plain" },
-      ...action("act-a"),
-      ...decision("dec-0"),
-      drives("dec-0", "bare"),
-      drives("plain", "act-a"),
-    ]));
+    const ws = applyOperations(
+      createWorkspace(),
+      stampAuthorship([
+        // target without an issue: an action statement alone is not work.
+        { op: "CREATE_NODE", id: "bare", nodeType: "action", label: "Bare" },
+        { op: "SET_STATEMENT", id: "bare", statement: { kind: "action", status: "open" } },
+        // source without a decision statement: a plain node drives nothing.
+        { op: "CREATE_NODE", id: "plain", nodeType: "task", label: "Plain" },
+        ...action("act-a"),
+        ...decision("dec-0"),
+        drives("dec-0", "bare"),
+        drives("plain", "act-a"),
+      ]),
+    );
     expect(decisionDriveGraph(ws).size).toBe(0);
     expect(actionsFromDecision(ws, "dec-0")).toEqual([]);
     expect(decisionsBehindAction(ws, "act-a")).toEqual([]);
@@ -112,11 +119,7 @@ describe("decisionDriveGraph — the causal adjacency", () => {
 
 describe("drives never enters the dependency graph", () => {
   it("dependsOnGraph ignores drives edges", () => {
-    const ws = board([
-      ...decision("dec-0"),
-      ...action("act-a"),
-      drives("dec-0", "act-a"),
-    ]);
+    const ws = board([...decision("dec-0"), ...action("act-a"), drives("dec-0", "act-a")]);
     expect(dependsOnGraph(ws).size).toBe(0);
   });
 
@@ -170,11 +173,7 @@ describe("the validator's endpoint rule", () => {
   });
 
   it("refuses when the target carries no action statement", () => {
-    const errors = check([
-      ...decision("dec-0"),
-      ...decision("dec-1"),
-      drives("dec-0", "dec-1"),
-    ]);
+    const errors = check([...decision("dec-0"), ...decision("dec-1"), drives("dec-0", "dec-1")]);
     expect(errors).toHaveLength(1);
     expect(errors[0]!.message).toContain("the target is not executable work");
   });
@@ -195,18 +194,22 @@ describe("the validator's endpoint rule", () => {
   });
 
   it("disconnect of a drives edge stays always-valid", () => {
-    const ws = board([
-      ...decision("dec-0"),
-      ...action("act-a"),
-      drives("dec-0", "act-a"),
-    ]);
-    const errors = validateOperations(ws, stampAuthorship([
-      { op: "DISCONNECT_NODES", source: "dec-0", target: "act-a", relationship: "drives" },
-    ], "test-user"));
+    const ws = board([...decision("dec-0"), ...action("act-a"), drives("dec-0", "act-a")]);
+    const errors = validateOperations(
+      ws,
+      stampAuthorship(
+        [{ op: "DISCONNECT_NODES", source: "dec-0", target: "act-a", relationship: "drives" }],
+        "test-user",
+      ),
+    );
     expect(errors).toEqual([]);
-    const after = applyOperations(ws, stampAuthorship([
-      { op: "DISCONNECT_NODES", source: "dec-0", target: "act-a", relationship: "drives" },
-    ], "test-user"));
+    const after = applyOperations(
+      ws,
+      stampAuthorship(
+        [{ op: "DISCONNECT_NODES", source: "dec-0", target: "act-a", relationship: "drives" }],
+        "test-user",
+      ),
+    );
     expect(decisionDriveGraph(after).size).toBe(0);
   });
 });

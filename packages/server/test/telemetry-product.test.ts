@@ -73,7 +73,10 @@ describe("the Prometheus bridge — the product series", () => {
     // The CARDINALITY RULE: the event label only ever carries the fixed
     // vocabulary — no board id, no org id, no user id anywhere.
     for (const line of body.split("\n")) {
-      if (line.includes("lucent_product_events_total{") && !/event="(board_created|share_link_created)"/.test(line)) {
+      if (
+        line.includes("lucent_product_events_total{") &&
+        !/event="(board_created|share_link_created)"/.test(line)
+      ) {
         throw new Error(`cardinality violation: ${line}`);
       }
       if (line.includes("lucent_time_to_first_board_seconds{")) {

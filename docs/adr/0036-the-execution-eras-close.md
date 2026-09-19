@@ -17,9 +17,9 @@ the record made true. The freeze rule governed: no new features, no UI.
 
 ## Decision
 
-**THE LINK-GC RECOVERY INVARIANT (the era's last lock)**: *link garbage
+**THE LINK-GC RECOVERY INVARIANT (the era's last lock)**: _link garbage
 collection removes stale Lucent linkage, but must NEVER turn an existing
-external task into an unrecognized task on the next synchronization.*
+external task into an unrecognized task on the next synchronization._
 The GC defines dead as **board missing OR node missing** (links are
 sync state, not audit — a deleted board's links are as dead as a
 deleted node's). The fix is on the CREATE side: both the sync route and
@@ -80,7 +80,7 @@ D1 persist/undo/redo → D3 cycle-refused/edge-accepted → D4 10 actions
 failed node → D6 Linear creates land on a stubbed wire → D7 the inbound
 route mounts + the queue's initial state → D8 one node, links for two
 providers → D9 the narrowing selects 4 of 10, exactly 4 on the wire.
-The SPINE, not a tenth copy of every assertion — the stageD*.e2e files
+The SPINE, not a tenth copy of every assertion — the stageD\*.e2e files
 remain the depth; no shared mutable world between stages.
 
 **THE D-NUMBERING'S HONEST END**: D10 is the era's close, not a feature

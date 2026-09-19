@@ -16,9 +16,9 @@ This document certifies the release readiness of **Lucent** (AI-Native Voice Vis
 
 ### Summary of Results
 
-| Total Tests Evaluated | PASS | PARTIAL | NOT CERTIFIED | FAIL |
-|:---:|:---:|:---:|:---:|:---:|
-| **45** | **39** | **1** | **5** | **0** |
+| Total Tests Evaluated |  PASS  | PARTIAL | NOT CERTIFIED | FAIL  |
+| :-------------------: | :----: | :-----: | :-----------: | :---: |
+|        **45**         | **39** |  **1**  |     **5**     | **0** |
 
 Per the certification decision rule, **`NOT CERTIFIED` is never treated as `PASS`**. Items marked `NOT CERTIFIED` reflect requirements demanding multi-party physical human acoustic isolation, third-party vendor marketplace approvals, or external design partner rollout phases.
 
@@ -28,33 +28,35 @@ Per the certification decision rule, **`NOT CERTIFIED` is never treated as `PASS
 
 The entire certification suite was executed over the public network against the live cloud deployment:
 
-| Subsystem | Production Implementation & Provider | Configuration & Status |
-|---|---|---|
-| **Host & Compute** | Oracle Cloud Infrastructure (OCI) VM | Ubuntu 22.04 LTS, Node.js v22.23.2 |
-| **Edge Ingress / TLS** | Caddy v1.1.0 with Let's Encrypt automated TLS | Domain: `161.33.167.15.sslip.io`, TLS 1.3, HTTP/2, WebSocket reverse proxy |
-| **App Cluster** | PM2 Process Manager v6.0.14 | 4-instance Node cluster mode running `packages/server/dist/main.js` |
-| **Persistence** | PostgreSQL 16 (AWS Seoul via Supabase pooler) | 43 production schema migrations applied; pooler `aws-0-ap-northeast-2.pooler.supabase.com:5432` |
-| **Realtime Engine** | Server-Authoritative WebSocket Sequenced Log | `wss://161.33.167.15.sslip.io/ws?ticket=` with heartbeat and catchup replay |
-| **AI Generation** | DeepSeek (`deepseek-v4.1-flash`) via `1412520.cyou` | Real model inference, structured operations JSON output, 0 spatial coordinates |
-| **Speech-to-Text (STT)**| Deepgram Live STT Engine | Real WebSocket streaming session (`nova-2`), owner API key, sentence mapping |
-| **Text-to-Speech (TTS)**| Deepgram Live Synthesis (`aura-asteria-en`) | Streaming `audio/mpeg` frame sync, real bytes |
-| **Media Transport** | LiveKit Cloud Managed Infrastructure | Host: `wss://lucent-bjeymvze.livekit.cloud`, JWT room token generation |
-| **Agent Interface** | `@lucent/mcp` Stdio JSON-RPC | RemoteBoardSession over HTTPS/WSS, core Zod operation schema derivation |
-| **External Integrations**| GitHub API v3 REST | Real PAT token (`LUCENT_GITHUB_CERT_TOKEN`) for `cicadame0701-del` |
-| **Email Delivery** | Resend Transactional Mailer | Live REST dispatch for transactional email and invitation verification |
-| **Observability** | Native Prometheus Metric Collector | `/metrics/prometheus` and `/metrics` (authenticated) |
+| Subsystem                 | Production Implementation & Provider                | Configuration & Status                                                                          |
+| ------------------------- | --------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| **Host & Compute**        | Oracle Cloud Infrastructure (OCI) VM                | Ubuntu 22.04 LTS, Node.js v22.23.2                                                              |
+| **Edge Ingress / TLS**    | Caddy v1.1.0 with Let's Encrypt automated TLS       | Domain: `161.33.167.15.sslip.io`, TLS 1.3, HTTP/2, WebSocket reverse proxy                      |
+| **App Cluster**           | PM2 Process Manager v6.0.14                         | 4-instance Node cluster mode running `packages/server/dist/main.js`                             |
+| **Persistence**           | PostgreSQL 16 (AWS Seoul via Supabase pooler)       | 43 production schema migrations applied; pooler `aws-0-ap-northeast-2.pooler.supabase.com:5432` |
+| **Realtime Engine**       | Server-Authoritative WebSocket Sequenced Log        | `wss://161.33.167.15.sslip.io/ws?ticket=` with heartbeat and catchup replay                     |
+| **AI Generation**         | DeepSeek (`deepseek-v4.1-flash`) via `1412520.cyou` | Real model inference, structured operations JSON output, 0 spatial coordinates                  |
+| **Speech-to-Text (STT)**  | Deepgram Live STT Engine                            | Real WebSocket streaming session (`nova-2`), owner API key, sentence mapping                    |
+| **Text-to-Speech (TTS)**  | Deepgram Live Synthesis (`aura-asteria-en`)         | Streaming `audio/mpeg` frame sync, real bytes                                                   |
+| **Media Transport**       | LiveKit Cloud Managed Infrastructure                | Host: `wss://lucent-bjeymvze.livekit.cloud`, JWT room token generation                          |
+| **Agent Interface**       | `@lucent/mcp` Stdio JSON-RPC                        | RemoteBoardSession over HTTPS/WSS, core Zod operation schema derivation                         |
+| **External Integrations** | GitHub API v3 REST                                  | Real PAT token (`LUCENT_GITHUB_CERT_TOKEN`) for `cicadame0701-del`                              |
+| **Email Delivery**        | Resend Transactional Mailer                         | Live REST dispatch for transactional email and invitation verification                          |
+| **Observability**         | Native Prometheus Metric Collector                  | `/metrics/prometheus` and `/metrics` (authenticated)                                            |
 
 ---
 
 ## 3. Comprehensive Test Ledger (Tests 0 – 45)
 
 ### Test 0: Certification Environment
+
 - **Status:** `PASS`
 - **Timestamp:** `2026-09-19T08:51:21.073Z`
 - **Implementation & Provider:** Oracle Cloud VM, Caddy TLS ingress, 4-worker PM2 cluster, Supabase PostgreSQL 16 (AWS Seoul pooler), LiveKit Cloud, Deepgram STT/TTS, `deepseek-v4.1-flash` LLM, MCP stdio process, Resend mailer, GitHub OAuth/PAT.
 - **Evidence & Measurements:** Full stack reachable over TLS; in-memory fallback inactive; database connection verified.
 
 ### Test 1: Deployment Smoke Test
+
 - **Status:** `PASS`
 - **Timestamp:** `2026-09-19T08:51:34.632Z`
 - **Implementation & Provider:** Caddy + PM2 Cluster + PostgreSQL 16
@@ -68,6 +70,7 @@ The entire certification suite was executed over the public network against the 
   - `GET /ws?ticket=` -> WebSocket welcome frame received.
 
 ### Test 2: Authentication and Organization Security
+
 - **Status:** `PASS`
 - **Timestamp:** `2026-09-19T08:51:41.357Z`
 - **Implementation & Provider:** Lucent Server Auth / Role-based Access Control
@@ -77,35 +80,40 @@ The entire certification suite was executed over the public network against the 
   - Direct WebSocket connection without valid ticket rejected with `401 Unauthorized` (`Unexpected server response: 401`).
 
 ### Test 3: Classification / Security Policy Test
+
 - **Status:** `PASS`
 - **Timestamp:** `2026-09-19T08:51:45.137Z`
 - **Implementation & Provider:** Lucent Server Security Policy Middleware
 - **Evidence & Measurements:** Board classified as `restricted`. Attempted `/api/generate` immediately aborted pre-dispatch: returned `403 Forbidden` (`{"error":"this board is classified restricted, which forbids sending board content to an external AI provider","classification":"restricted","boundary":"ai"}`). Zero provider egress, zero token spend.
 
 ### Test 4: Canvas Fundamental Test
+
 - **Status:** `PASS`
 - **Timestamp:** `2026-09-19T08:51:47.727Z`
 - **Implementation & Provider:** `@lucent/core` Reducer + PostgreSQL Board Store
 - **Evidence & Measurements:** 6 manual shapes (`rect`, `ellipse`, `sticky`, `connector`, `frame`, `group`) committed through `POST /api/boards/:id/ops`. Server assigned sequence `1`. Board fetch upon reload confirmed canonical persistence of all objects.
 
 ### Test 5: AI Generation Test
+
 - **Status:** `PASS`
 - **Timestamp:** `2026-09-19T08:51:54.236Z`
 - **Implementation & Provider:** `deepseek-v4.1-flash` via `https://1412520.cyou/v1` + `@lucent/core` Layout Engine
 - **Evidence & Measurements:**
-  - Prompt: *"Create a payment processing flowchart with authorization, fraud check, and settlement"*.
+  - Prompt: _"Create a payment processing flowchart with authorization, fraud check, and settlement"_.
   - Latency: `6497ms`.
   - Returned: `33` valid structured operations (`CREATE_NODE`, `CREATE_EDGE`).
   - Spatial sanity: `0` authoritative x/y coordinates emitted by AI.
   - Layout Engine placed `14` nodes deterministically. Flowchart -> MindMap -> Flowchart transformation roundtrip preserved all semantic nodes.
 
 ### Test 6: Invalid AI-Operation Test
+
 - **Status:** `PASS`
 - **Timestamp:** `2026-09-19T08:51:55.437Z`
 - **Implementation & Provider:** `@lucent/core` Zod Validator & Server Ingress Gate
 - **Evidence & Measurements:** Malformed operation batch (illegal op `INVALID_OP` and invalid node targets) submitted to `/api/boards/:id/ops`. Server rejected at boundary with `422 Unprocessable Entity` (`{"error":"operations failed validation","errors":[{"index":0,"op":"unknown","message":"Invalid input (at 1.op)"}]}`). Zero corrupted state entered the board; sequence number unincremented.
 
 ### Test 7: ELK / Layout Test
+
 - **Status:** `PASS`
 - **Timestamp:** `2026-09-19T08:51:55.468Z`
 - **Implementation & Provider:** `@lucent/core/layout` (Sugiyama layered & radial layout)
@@ -116,112 +124,130 @@ The entire certification suite was executed over the public network against the 
   - 150 nodes: `3.9ms`, overlap-free: `true`, placed: `150`. Geometry fully finite, bounded, and deterministic.
 
 ### Test 8: BPMN-Style Lens Test
+
 - **Status:** `PASS`
 - **Timestamp:** `2026-09-19T08:51:55.469Z`
 - **Implementation & Provider:** `@lucent/core` Semantic Lens Engine
 - **Evidence & Measurements:** 8-node payment workflow with XOR gateways mapped to BPMN semantics. Gateway types preserved, sequence flows verified, roundtrip conversion to flowchart canonical (8 placed).
 
 ### Test 9: Realtime Multiplayer Test
+
 - **Status:** `PASS`
 - **Timestamp:** `2026-09-19T08:52:00.510Z`
 - **Implementation & Provider:** Lucent WebSocket Room (`server/src/room.ts`)
 - **Evidence & Measurements:** 2 concurrent real WebSocket clients connected to board room. Client A submitted `CREATE_SHAPE` op. Server assigned sequence `2` and broadcast frame to Client B within `45ms`. Client B presence cursor received by Client A.
 
 ### Test 10: Reconnect and Failure Test
+
 - **Status:** `PASS`
 - **Timestamp:** `2026-09-19T08:52:03.231Z`
 - **Implementation & Provider:** WebSocket Room Catchup Replay
 - **Evidence & Measurements:** Client disconnected, missed ops, and reconnected specifying `fromSeq: 0`. Server returned catchup array replay restoring complete canonical state.
 
 ### Test 11: Database Failure Test
+
 - **Status:** `PASS`
 - **Timestamp:** `2026-09-19T08:52:03.231Z`
 - **Implementation & Provider:** Supabase AWS Seoul pooler + PostgreSQL transactional isolation
 - **Evidence & Measurements:** Transient connection timeouts handled with explicit `500 Internal Server Error` and `x-request-id`. Zero partial commits allowed; sequence monotonically recovered on reconnect.
 
 ### Test 12: Meeting Creation Test
+
 - **Status:** `PASS`
 - **Timestamp:** `2026-09-19T08:52:05.536Z`
 - **Implementation & Provider:** LiveKit Cloud (`wss://lucent-bjeymvze.livekit.cloud`) + Lucent Server
 - **Evidence & Measurements:** Meeting room created via `/api/livekit/token`. Minted verified JWT token with audio/video/screen permissions (`eyJhbGciOiJIUzI1NiIs...`). Token expiry set to 10 minutes.
 
 ### Test 13: STT Provider Certification
+
 - **Status:** `PASS`
 - **Timestamp:** `2026-09-19T08:52:06.766Z`
 - **Implementation & Provider:** Deepgram Live STT Service
 - **Evidence & Measurements:** `POST /api/stt/sessions` created session `stt_mu85fdyurdrkfqz7` with `provider: deepgram`. Audio buffering, interim filtering, and utterance segmentation confirmed live.
 
 ### Test 14: SpeechEvent Test
+
 - **Status:** `PASS`
 - **Timestamp:** `2026-09-19T08:52:06.767Z`
 - **Implementation & Provider:** `@lucent/core` SpeechEvent Schema & Meeting Engine
 - **Evidence & Measurements:** Strict event ordering verified: `speech_started` -> `interim*` -> `final` -> `speech_stopped`. `participantId` and `speakerId` tracking maintained; interim events structurally barred from entering durable PostgreSQL records.
 
 ### Test 15: Speaker Attribution / Diarization Test
+
 - **Status:** `NOT CERTIFIED`
 - **Timestamp:** `2026-09-19T08:52:06.767Z`
 - **Implementation & Provider:** Deepgram Server Diarization (`spk_0`, `spk_1`)
 - **Blocking External Requirement:** Certification standard mandates a 3-human physically isolated multi-mic test cohort on distinct client hardware to verify hardware acoustic diarization without crosstalk.
 
 ### Test 16: Hard Diarization Tests
+
 - **Status:** `NOT CERTIFIED`
 - **Timestamp:** `2026-09-19T08:52:06.767Z`
 - **Implementation & Provider:** Audio Diarization Pipeline
 - **Blocking External Requirement:** Requires physical acoustic room testing with rapid switching, cross-talk, acoustic echo cancellation, and 4-5 overlapping human speakers.
 
 ### Test 17: Meeting Intelligence Test
+
 - **Status:** `PASS`
 - **Timestamp:** `2026-09-19T08:52:18.455Z`
 - **Implementation & Provider:** `deepseek-v4.1-flash` Intelligence Extraction Harness
 - **Evidence & Measurements:** Meeting transcript turns processed via AI: extracted 12 structured operations categorized into decisions, actions, questions, and risks with provenance linking each back to the exact meeting turn.
 
 ### Test 18: Cross-Meeting Intelligence Test
+
 - **Status:** `PASS`
 - **Timestamp:** `2026-09-19T08:52:18.455Z`
 - **Implementation & Provider:** Lucent Statement Engine (`supersedes` pointer)
 - **Evidence & Measurements:** Meeting 2 decision referenced and superseded a prior Meeting 1 decision (`supersedes: [id]`). Graph traversal confirmed provenance intact; context retrieval returned both with superseding resolution.
 
 ### Test 19: Meeting -> Board Test
+
 - **Status:** `PASS`
 - **Timestamp:** `2026-09-19T08:52:18.455Z`
 - **Implementation & Provider:** MeetingEngine -> AI -> Operation Reducer -> Board
 - **Evidence & Measurements:** Audio transcript -> semantic extraction -> diagram intent -> validated operations -> layout engine -> board canvas verified unbroken. Zero manual copy-pasting required.
 
 ### Test 20: Meeting Modes Test
+
 - **Status:** `PASS`
 - **Timestamp:** `2026-09-19T08:52:18.455Z`
 - **Implementation & Provider:** Lucent Meeting Mode Governor
 - **Evidence & Measurements:** All 4 meeting modes certified:
-  - *Capture/Record:* Silent listener, zero speech emission.
-  - *Intelligence:* Semantic extraction active, zero voice output.
-  - *Assistant:* Speaks only when addressed via "Lucent" wake word.
-  - *Participant:* Active conversational lease with automated turn-taking.
+  - _Capture/Record:_ Silent listener, zero speech emission.
+  - _Intelligence:_ Semantic extraction active, zero voice output.
+  - _Assistant:_ Speaks only when addressed via "Lucent" wake word.
+  - _Participant:_ Active conversational lease with automated turn-taking.
 
 ### Test 21: Agent Speaking Test
+
 - **Status:** `PASS`
 - **Timestamp:** `2026-09-19T08:52:18.455Z`
 - **Implementation & Provider:** Deepgram Live Synthesis (`POST /api/tts/speak`)
 - **Evidence & Measurements:** Voice agent speaking lifecycle verified: TTS synthesis produces valid `audio/mpeg` stream; aborting session instantly terminates downstream audio buffer.
 
 ### Test 22: Barge-in / Interruption Test
+
 - **Status:** `PASS`
 - **Timestamp:** `2026-09-19T08:52:18.455Z`
 - **Implementation & Provider:** `meeting-voice.ts` VAD Ingress Handler
 - **Evidence & Measurements:** Incoming VAD speech onset event triggers immediate abort on active TTS audio output; zero overlapping speech allowed.
 
 ### Test 23: Voice Hallucination Test
+
 - **Status:** `PASS`
 - **Timestamp:** `2026-09-19T08:52:22.692Z`
 - **Implementation & Provider:** `deepseek-v4.1-flash` with Ground-Truth Constraint Prompts
 - **Evidence & Measurements:** Queried regarding an unmentioned architecture topic (Kubernetes deployment decision). Model returned explicit factual refusal without fabricating nonexistent decisions.
 
 ### Test 24: Agent Tool-Use Test
+
 - **Status:** `PASS`
 - **Timestamp:** `2026-09-19T08:52:22.692Z`
 - **Implementation & Provider:** `@lucent/core` Tool Derivation Module
 - **Evidence & Measurements:** Agent tools derived strictly from core Zod schema (`apply_canvas_operations`, `get_board`, `list_external_links`, `reset_board`). Prevents hallucinated tool calls.
 
 ### Test 25: MCP End-to-End Test
+
 - **Status:** `PASS`
 - **Timestamp:** `2026-09-19T08:52:23.144Z`
 - **Implementation & Provider:** `@lucent/mcp` stdio JSON-RPC Client + `RemoteBoardSession`
@@ -231,6 +257,7 @@ The entire certification suite was executed over the public network against the 
   - Canvas read and operation submission verified.
 
 ### Test 26: External Integration Test
+
 - **Status:** `PARTIAL`
 - **Timestamp:** `2026-09-19T08:52:25.456Z`
 - **Implementation & Provider:** Lucent GitHub Integration (`LUCENT_GITHUB_CERT_TOKEN`)
@@ -238,78 +265,91 @@ The entire certification suite was executed over the public network against the 
 - **Blocking External Requirement:** Inbound webhook synchronization requires public webhook callback URL endpoint routing configured on the target repository.
 
 ### Test 27: External Meeting Test
+
 - **Status:** `NOT CERTIFIED`
 - **Timestamp:** `2026-09-19T08:52:25.456Z`
 - **Implementation & Provider:** External OAuth Meeting Connectors (Zoom / Meet / Teams)
 - **Blocking External Requirement:** Requires approved enterprise vendor marketplace application credentials (Zoom App Marketplace / Microsoft Azure App Registration / Google Workspace Marketplace). Native Lucent WebRTC meetings are certified and first-class.
 
 ### Test 28: Confidential Meeting Test
+
 - **Status:** `PASS`
 - **Timestamp:** `2026-09-19T08:52:25.456Z`
 - **Implementation & Provider:** Lucent Security Classification Policy
 - **Evidence & Measurements:** Confidential and Restricted meeting classifications block external AI provider dispatch pre-spend; audit event logged to database, private processing preserved.
 
 ### Test 29: Data Leakage Test
+
 - **Status:** `PASS`
 - **Timestamp:** `2026-09-19T08:52:36.022Z`
 - **Implementation & Provider:** Lucent Log Sanitizer & Prometheus Metric Filter
 - **Evidence & Measurements:** Secret token `TEST_SECRET_89371` injected into request payload. Audited Prometheus metrics `/metrics/prometheus`, telemetry logs, and error responses: zero secret leakage, redacted across all observability feeds.
 
 ### Test 30: Retention Test
+
 - **Status:** `PASS`
 - **Timestamp:** `2026-09-19T08:52:36.022Z`
 - **Implementation & Provider:** `packages/server/src/sweeps.ts` Retention Worker
 - **Evidence & Measurements:** Scheduled hourly retention sweep cleans up expired transcript records while preserving extracted semantic nodes, decisions, and audit log entries.
 
 ### Test 31: Failure Tests
+
 - **Status:** `PASS`
 - **Timestamp:** `2026-09-19T08:52:36.022Z`
 - **Implementation & Provider:** Error Handling & Graceful Degradation Middleware
 - **Evidence & Measurements:** Missing STT keys return `503 Service Unavailable`; upstream provider failures return `502 Bad Gateway` with zero token debit; DB timeouts return `500 Internal Server Error` with `x-request-id` and zero state corruption.
 
 ### Test 32: Browser / Device Matrix
+
 - **Status:** `PASS`
 - **Timestamp:** `2026-09-19T08:52:36.022Z`
 - **Implementation & Provider:** Chromium (Playwright headless) over HTTPS
 - **Evidence & Measurements:** Tested with WebRTC audio/video media streams granted on Windows. Responsive canvas rendering, gesture handling, and audio capture verified.
 
 ### Test 33: Network Tests
+
 - **Status:** `PASS`
 - **Timestamp:** `2026-09-19T08:52:36.022Z`
 - **Implementation & Provider:** WebSocket Heartbeat & Sync Protocol
 - **Evidence & Measurements:** 30s ping/pong keepalive verified; automatic reconnection upon network disruption; `lastSeenSeq` deduplication prevents duplicated operations.
 
 ### Test 34: Load Test
+
 - **Status:** `PASS`
 - **Timestamp:** `2026-09-19T08:52:37.140Z`
 - **Implementation & Provider:** Caddy + PM2 4-Worker Cluster
 - **Evidence & Measurements:** 20 concurrent HTTP requests across 4 PM2 cluster workers completed in `1118ms` (average `55.9ms` per request). 100% `200 OK`, zero dropped connections.
 
 ### Test 35: Long-Running Meeting Test
+
 - **Status:** `NOT CERTIFIED`
 - **Timestamp:** `2026-09-19T08:52:37.140Z`
 - **Implementation & Provider:** WebRTC Audio Pipeline
 - **Blocking External Requirement:** 2-hour continuous multi-party WebRTC audio meeting requires multi-hour human soak run. 10-minute automated sessions verified stable.
 
 ### Test 36: Large-Board + Meeting Test
+
 - **Status:** `PASS`
 - **Timestamp:** `2026-09-19T08:52:37.201Z`
 - **Implementation & Provider:** `@lucent/core/layout` + Canvas Culling
 - **Evidence & Measurements:** 300-node semantic graph layout placed 300 nodes in `7.2ms`. Viewport culling active for >=300 objects; zero canvas frame lockup.
 
 ### Test 37: Concurrent AI + Human Actions
+
 - **Status:** `PASS`
 - **Timestamp:** `2026-09-19T08:52:37.201Z`
 - **Implementation & Provider:** Lucent Server Authority Engine
 - **Evidence & Measurements:** Human authority preserved: when a human modifies node positions or labels, AI cannot override manual coordinates. Server rejects AI `MOVE_NODE` on agent surface (`422 Unprocessable Entity`).
 
 ### Test 38: History / Undo / Provenance Test
+
 - **Status:** `PASS`
 - **Timestamp:** `2026-09-19T08:52:38.613Z`
 - **Implementation & Provider:** `OperationHistory` Inverse Operation Engine
 - **Evidence & Measurements:** Board history log tracks every operation with author, timestamp, sequence number, and provenance. Inverse operations permit deterministic undo without state corruption.
 
 ### Test 39: Security Penetration-Style Tests
+
 - **Status:** `PASS`
 - **Timestamp:** `2026-09-19T08:52:41.125Z`
 - **Implementation & Provider:** Lucent Security Isolation Middleware
@@ -319,30 +359,35 @@ The entire certification suite was executed over the public network against the 
   - Zero unauthorized data leaked.
 
 ### Test 40: Production Observability Test
+
 - **Status:** `PASS`
 - **Timestamp:** `2026-09-19T08:52:42.665Z`
 - **Implementation & Provider:** Prometheus Metric Exporter
 - **Evidence & Measurements:** Metric exposition live: exposes process, HTTP requests, and WebSocket connection metrics over `/metrics/prometheus` (`31450 bytes`). `x-request-id` propagated across all HTTP response headers.
 
 ### Test 41: Cost / Usage Test
+
 - **Status:** `PASS`
 - **Timestamp:** `2026-09-19T08:52:42.665Z`
 - **Implementation & Provider:** Lucent Usage Metering Store
 - **Evidence & Measurements:** Usage allowance and rate metering verified: voice minutes metered at floored 800 chars/min; sub-minute sessions free; failed provider calls bill 0 tokens.
 
 ### Test 42: Production Deployment Test
+
 - **Status:** `PASS`
 - **Timestamp:** `2026-09-19T08:52:42.665Z`
 - **Implementation & Provider:** PM2 Cluster Reload
 - **Evidence & Measurements:** PM2 zero-downtime cluster reload certified: 4 cluster instances update without dropping in-flight HTTP connections or corrupting PostgreSQL sequence.
 
 ### Test 43: Canary with Actual Users
+
 - **Status:** `NOT CERTIFIED`
 - **Timestamp:** `2026-09-19T08:52:42.665Z`
 - **Implementation & Provider:** Production Release Cohort
 - **Blocking External Requirement:** Production staging is fully prepared. Pilot rollout with 5–10 trusted external design partners is scheduled post-certification.
 
 ### Test 44: Final "Golden Path" Test
+
 - **Status:** `PASS`
 - **Timestamp:** `2026-09-19T08:52:59.044Z`
 - **Implementation & Provider:** End-to-End Production Chain
@@ -353,25 +398,26 @@ The entire certification suite was executed over the public network against the 
   4. Persisted across board reload; all nodes intact.
 
 ### Test 45: Decision Rule & Release Ledger
+
 - **Status:** Certified (39 PASS, 1 PARTIAL, 5 NOT CERTIFIED, 0 FAIL)
 
 ---
 
 ## 4. Formal Release Gates Audit (Gates A through K)
 
-| Gate | Description | Status | Evidence Summary |
-|---|---|:---:|---|
-| **GATE A** | **Infrastructure** | **PASS** | Caddy TLS ingress, 4 PM2 cluster replicas, PostgreSQL 16 on Supabase pooler, Prometheus metrics live. |
-| **GATE B** | **Core** | **PASS** | Validated operations, canonical state, Git-like history, undo/redo, deterministic 150-node layout. |
-| **GATE C** | **Realtime** | **PASS** | Multi-user sequenced op-log over `wss://`, presence frames, `fromSeq` catchup recovery. |
-| **GATE D** | **AI** | **PASS** | `deepseek-v4.1-flash`, 0 authoritative coordinates, strict schema validation, policy routing. |
-| **GATE E** | **Meetings** | **PASS** | Native WebRTC rooms on LiveKit Cloud, JWT token generation, audio/video channels. |
-| **GATE F** | **Voice** | **PARTIAL** | Deepgram live STT session + Deepgram TTS MP3 audio verified. Multi-speaker hardware diarization marked NOT CERTIFIED per strict human rule. |
-| **GATE G** | **Intelligence** | **PASS** | Meeting turns extract decisions, actions, questions, risks with turn provenance and `supersedes` support. |
-| **GATE H** | **Agents** | **PASS** | MCP stdio server running `RemoteBoardSession` against live cloud server, tools derived directly from core Zod schema. |
-| **GATE I** | **Integrations** | **PARTIAL** | Outbound GitHub integration configured with real token ref, issue creation verified. Inbound webhook awaits public callback URL. |
-| **GATE J** | **Security** | **PASS** | Internal/Confidential/Restricted classification enforcement, secret un-leaked, ticketless WS 401, cross-org masking 404. |
-| **GATE K** | **Production** | **PASS** | Burst load 20 concurrent reqs, zero-downtime PM2 cluster reload, Prometheus metrics, hourly retention sweep. |
+| Gate       | Description        |   Status    | Evidence Summary                                                                                                                            |
+| ---------- | ------------------ | :---------: | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| **GATE A** | **Infrastructure** |  **PASS**   | Caddy TLS ingress, 4 PM2 cluster replicas, PostgreSQL 16 on Supabase pooler, Prometheus metrics live.                                       |
+| **GATE B** | **Core**           |  **PASS**   | Validated operations, canonical state, Git-like history, undo/redo, deterministic 150-node layout.                                          |
+| **GATE C** | **Realtime**       |  **PASS**   | Multi-user sequenced op-log over `wss://`, presence frames, `fromSeq` catchup recovery.                                                     |
+| **GATE D** | **AI**             |  **PASS**   | `deepseek-v4.1-flash`, 0 authoritative coordinates, strict schema validation, policy routing.                                               |
+| **GATE E** | **Meetings**       |  **PASS**   | Native WebRTC rooms on LiveKit Cloud, JWT token generation, audio/video channels.                                                           |
+| **GATE F** | **Voice**          | **PARTIAL** | Deepgram live STT session + Deepgram TTS MP3 audio verified. Multi-speaker hardware diarization marked NOT CERTIFIED per strict human rule. |
+| **GATE G** | **Intelligence**   |  **PASS**   | Meeting turns extract decisions, actions, questions, risks with turn provenance and `supersedes` support.                                   |
+| **GATE H** | **Agents**         |  **PASS**   | MCP stdio server running `RemoteBoardSession` against live cloud server, tools derived directly from core Zod schema.                       |
+| **GATE I** | **Integrations**   | **PARTIAL** | Outbound GitHub integration configured with real token ref, issue creation verified. Inbound webhook awaits public callback URL.            |
+| **GATE J** | **Security**       |  **PASS**   | Internal/Confidential/Restricted classification enforcement, secret un-leaked, ticketless WS 401, cross-org masking 404.                    |
+| **GATE K** | **Production**     |  **PASS**   | Burst load 20 concurrent reqs, zero-downtime PM2 cluster reload, Prometheus metrics, hourly retention sweep.                                |
 
 ---
 
@@ -380,11 +426,11 @@ The entire certification suite was executed over the public network against the 
 During the certification run against the live cloud stack, two infrastructure and API seam issues were uncovered and immediately hardened:
 
 1. **Caddy Reverse-Proxy Path for Metrics:**
-   - *Issue:* Initial requests to `https://161.33.167.15.sslip.io/metrics/prometheus` failed with 404 because Caddy was configured with exact path match `handle /metrics` instead of wildcard `handle /metrics*`.
-   - *Resolution:* Updated `/etc/caddy/Caddyfile` on the host to route `/metrics*` to `http://127.0.0.1:4387`. Verified that unauthenticated requests receive 401 and authenticated requests return full Prometheus text exposition.
+   - _Issue:_ Initial requests to `https://161.33.167.15.sslip.io/metrics/prometheus` failed with 404 because Caddy was configured with exact path match `handle /metrics` instead of wildcard `handle /metrics*`.
+   - _Resolution:_ Updated `/etc/caddy/Caddyfile` on the host to route `/metrics*` to `http://127.0.0.1:4387`. Verified that unauthenticated requests receive 401 and authenticated requests return full Prometheus text exposition.
 2. **Upstream AI Rate Limit Handling:**
-   - *Issue:* Rapid successive generation prompts against `1412520.cyou` triggered intermittent HTTP 429 upstream, returning 502 to client.
-   - *Resolution:* Implemented exponential backoff with jitter in client generation calls. Certified zero-cost accounting when upstream returns 502.
+   - _Issue:_ Rapid successive generation prompts against `1412520.cyou` triggered intermittent HTTP 429 upstream, returning 502 to client.
+   - _Resolution:_ Implemented exponential backoff with jitter in client generation calls. Certified zero-cost accounting when upstream returns 502.
 
 ---
 

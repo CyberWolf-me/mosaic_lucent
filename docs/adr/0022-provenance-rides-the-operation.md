@@ -13,7 +13,7 @@ what that choice actually did: the stamp existed only in the extracting
 browser's React state. It was not in the ops, so it never reached the undo
 history, remote peers, the server's stored board, or the op log — and on a
 shared board, the next incoming operation's `onWorkspace` sync overwrote it.
-Worse, the Stage B3 review-gated path stamped *nobody* — not even the
+Worse, the Stage B3 review-gated path stamped _nobody_ — not even the
 proposer. Meanwhile C1's Ask digest rendered `metadata.meeting`, so the
 provenance citations C1 shipped only worked on local boards, from the one
 browser that captured the meeting.
@@ -24,7 +24,7 @@ browser that captured the meeting.
 not a second operation, and never a post-pass.**
 
 - `CREATE_NODE` gains optional `provenance: { meetingId, turnRange?,
-  turnKinds?, quote? }`; `SET_STATEMENT` embeds it in the statement (the
+turnKinds?, quote? }`; `SET_STATEMENT` embeds it in the statement (the
   evidence behind a decision). The reducer stores it to `node.provenance`
   once, and no later operation touches it.
 - The model never emits provenance — it cannot see meeting ids or turn

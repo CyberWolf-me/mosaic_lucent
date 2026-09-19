@@ -65,6 +65,7 @@ external task — pinned.
 
 **CONFLICT SEMANTICS, NAMED** (the stage's second contract, answering
 the question ADR 0032 deferred):
+
 1. Lucent is OUTBOUND-AUTHORITATIVE on explicit sync — the board's
    pushed value wins; the sync route SUPERSEDES pending inbound records
    for the fields it pushed and reports `supersededInbound: n`.
@@ -119,11 +120,11 @@ the rest without a schema break.
   the queue and the decide routes are already provider-agnostic.
 - The acceptance proves the story at the wire level: the stub fires a
   signed webhook → one pending row → accept → the node's status changed
-  + the system-actor op in the log + the link updated; a redelivery is
-  a duplicate; a newer value updates the row; the warning row refuses
-  accept with 409; the tampered signature leaves the ledger empty; the
-  explicit sync supersedes and reports; the unlinked issue is ignored;
-  the workspace blob carries no provider strings throughout.
+  - the system-actor op in the log + the link updated; a redelivery is
+    a duplicate; a newer value updates the row; the warning row refuses
+    accept with 409; the tampered signature leaves the ledger empty; the
+    explicit sync supersedes and reports; the unlinked issue is ignored;
+    the workspace blob carries no provider strings throughout.
 - The PG pairs (migration 0021) give the queue and the delivery ledger
   the same durability as the rest of the platform; the parity suites
   run the same contracts over both twins.

@@ -30,10 +30,10 @@ interface families of their own, not forced into the task abstraction.
 ## Decision
 
 **THE REFINED OUTBOUND-AUTHORITATIVE DOCTRINE** (replacing D6's
-phrasing, per the review): *Lucent is authoritative for the fields it
+phrasing, per the review): _Lucent is authoritative for the fields it
 explicitly manages; each provider must either represent those fields
 faithfully or surface an explicit loss/unsupported-field warning before
-execution.* "Lucent owns status" was misleading for GitHub — fidelity
+execution._ "Lucent owns status" was misleading for GitHub — fidelity
 is a per-provider contract now, not an assumption.
 
 **THE CAPABILITY-HONESTY LAYER** (the review's #1, the stage's core):

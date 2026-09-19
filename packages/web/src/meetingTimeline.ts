@@ -19,10 +19,7 @@ import type { Workspace } from "@lucent/core";
 const LIVE_SESSION = "live-session";
 
 /** True when a provenance record points at the given meeting's real id. */
-function pointsAt(
-  provenance: { meetingId?: string } | undefined,
-  meetingId: string,
-): boolean {
+function pointsAt(provenance: { meetingId?: string } | undefined, meetingId: string): boolean {
   // A live-session stamp has no saved transcript to jump to — the same rule
   // the canvas ✦ button applies. Those turns list nothing, honestly.
   // Stage D2: provenance may carry only createdFrom (plan evidence, no
@@ -90,7 +87,11 @@ export function objectsByTurn(
     for (const record of nodeProvenances(node)) {
       if (!pointsAt(record, meetingId)) continue;
       if (record.turnRange) {
-        for (let i = Math.max(0, record.turnRange[0]); i <= record.turnRange[1] && i < turnCount; i++) {
+        for (
+          let i = Math.max(0, record.turnRange[0]);
+          i <= record.turnRange[1] && i < turnCount;
+          i++
+        ) {
           const bucket = byTurn.get(i) ?? [];
           if (!bucket.includes(node.id)) bucket.push(node.id);
           byTurn.set(i, bucket);

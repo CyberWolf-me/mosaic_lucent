@@ -1,7 +1,8 @@
 ﻿import { chromium } from "playwright";
 import path from "node:path";
 
-const ARTIFACT_DIR = "C:\\Users\\User\\.gemini\\antigravity\\brain\\2b2c4ff7-26fe-4f14-a6eb-49607cf95d6f";
+const ARTIFACT_DIR =
+  "C:\\Users\\User\\.gemini\\antigravity\\brain\\2b2c4ff7-26fe-4f14-a6eb-49607cf95d6f";
 const BASE_URL = "https://161.33.167.15.sslip.io";
 
 async function run() {
@@ -40,7 +41,9 @@ async function run() {
     console.log("Captured:", authShot);
 
     // Switch to Sign Up
-    const signupToggle = page.locator('button:has-text("Create an account"), button:has-text("Sign up")');
+    const signupToggle = page.locator(
+      'button:has-text("Create an account"), button:has-text("Sign up")',
+    );
     if ((await signupToggle.count()) > 0) {
       console.log("Switching to Sign Up view...");
       await signupToggle.first().click();
@@ -77,7 +80,9 @@ async function run() {
     }
 
     // Dismiss empty state hero prompt if present
-    const blankBoardBtn = page.locator('button:has-text("start with a blank board"), button:has-text("blank board")');
+    const blankBoardBtn = page.locator(
+      'button:has-text("start with a blank board"), button:has-text("blank board")',
+    );
     if ((await blankBoardBtn.count()) > 0) {
       console.log("Clicking 'start with a blank board'...");
       await blankBoardBtn.first().click();
@@ -109,7 +114,9 @@ async function run() {
     await page.waitForTimeout(600);
 
     // Type text into the sticky note
-    await page.keyboard.type("Lucent Production Hardened\n✓ PM2 4-Worker Cluster\n✓ 65,535 Socket Descriptors\n✓ Conversational Lease Active");
+    await page.keyboard.type(
+      "Lucent Production Hardened\n✓ PM2 4-Worker Cluster\n✓ 65,535 Socket Descriptors\n✓ Conversational Lease Active",
+    );
     await page.waitForTimeout(500);
     await page.keyboard.press("Escape");
     await page.waitForTimeout(800);

@@ -1,13 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import {
-  ConversationalLeaseManager,
-  detectAddress,
-  detectDismissal,
-  addressesOtherPerson,
-  isMutationUtterance,
-  isContinuationUtterance,
-  isDirectAnswer,
-} from "../src/meeting-voice.js";
+import { describe, it, expect, beforeEach } from "vitest";
+import { ConversationalLeaseManager } from "../src/meeting-voice.js";
 
 describe("Conversational Lease Engine — Edge Cases", () => {
   let manager: ConversationalLeaseManager;
@@ -35,7 +27,10 @@ describe("Conversational Lease Engine — Edge Cases", () => {
     });
 
     it("recognizes 'Hey Lucent...' invocation", () => {
-      const res = manager.evaluateTurn({ speaker: "Alice", text: "Hey Lucent, who owns mobile?" }, T0);
+      const res = manager.evaluateTurn(
+        { speaker: "Alice", text: "Hey Lucent, who owns mobile?" },
+        T0,
+      );
       expect(res.action).toBe("direct_invoke");
       if (res.action === "direct_invoke") {
         expect(res.query).toBe("who owns mobile?");
@@ -60,7 +55,10 @@ describe("Conversational Lease Engine — Edge Cases", () => {
     });
 
     it("ignores 'the lucent approach seems fine'", () => {
-      const res = manager.evaluateTurn({ speaker: "Alice", text: "the lucent approach seems fine" }, T0);
+      const res = manager.evaluateTurn(
+        { speaker: "Alice", text: "the lucent approach seems fine" },
+        T0,
+      );
       expect(res.action).toBe("ignore");
       expect(manager.getState()).toBe("dormant");
     });
@@ -73,7 +71,10 @@ describe("Conversational Lease Engine — Edge Cases", () => {
       manager.evaluateTurn({ speaker: "Alice", text: "Lucent, what database did we choose?" }, T0);
       manager.onAiStartResponding();
       // TTS completes at T0 + 4,000ms
-      manager.onTtsDone("We chose PostgreSQL because it supports robust JSONB queries.", T0 + 4_000);
+      manager.onTtsDone(
+        "We chose PostgreSQL because it supports robust JSONB queries.",
+        T0 + 4_000,
+      );
     });
 
     it("allows the same speaker to ask a continuation 3s later without saying 'Lucent'", () => {
@@ -147,7 +148,10 @@ describe("Conversational Lease Engine — Edge Cases", () => {
     });
 
     it("silently ends lease on 'That's all, Lucent.'", () => {
-      const res = manager.evaluateTurn({ speaker: "Alice", text: "That's all, Lucent." }, T0 + 5_000);
+      const res = manager.evaluateTurn(
+        { speaker: "Alice", text: "That's all, Lucent." },
+        T0 + 5_000,
+      );
       expect(res.action).toBe("dismiss");
       expect(manager.getState()).toBe("dormant");
     });
@@ -162,7 +166,10 @@ describe("Conversational Lease Engine — Edge Cases", () => {
     });
 
     it("detects Alice talking to Bob ('Bob, what do you think?') and stays silent", () => {
-      const res = manager.evaluateTurn({ speaker: "Alice", text: "Bob, what do you think?" }, T0 + 6_000);
+      const res = manager.evaluateTurn(
+        { speaker: "Alice", text: "Bob, what do you think?" },
+        T0 + 6_000,
+      );
       expect(res.action).toBe("ignore");
       if (res.action === "ignore") {
         expect(res.reason).toBe("unrelated");
@@ -224,7 +231,10 @@ describe("Conversational Lease Engine — Edge Cases", () => {
     });
 
     it("classifies 'Put Stripe below payments' as a canvas mutation", () => {
-      const res = manager.evaluateTurn({ speaker: "Alice", text: "Put Stripe below payments" }, T0 + 6_000);
+      const res = manager.evaluateTurn(
+        { speaker: "Alice", text: "Put Stripe below payments" },
+        T0 + 6_000,
+      );
       expect(res.action).toBe("followup_mutation");
       if (res.action === "followup_mutation") {
         expect(res.instruction).toBe("Put Stripe below payments");
@@ -276,7 +286,10 @@ describe("Conversational Lease Engine — Edge Cases", () => {
       manager.onTtsDone("Answer 4", T0 + 14_000);
 
       // 4th follow-up exceeds cap!
-      const res = manager.evaluateTurn({ speaker: "Alice", text: "And what about Redis?" }, T0 + 16_000);
+      const res = manager.evaluateTurn(
+        { speaker: "Alice", text: "And what about Redis?" },
+        T0 + 16_000,
+      );
       expect(res.action).toBe("ignore");
       if (res.action === "ignore") {
         expect(res.reason).toBe("max_turns_exceeded");
@@ -293,7 +306,10 @@ describe("Conversational Lease Engine — Edge Cases", () => {
       manager.onTtsDone("Answer to Alice", T0 + 3_000);
 
       // Bob explicitly invokes Lucent
-      const res = manager.evaluateTurn({ speaker: "Bob", text: "Lucent, question from Bob" }, T0 + 5_000);
+      const res = manager.evaluateTurn(
+        { speaker: "Bob", text: "Lucent, question from Bob" },
+        T0 + 5_000,
+      );
       expect(res.action).toBe("direct_invoke");
       if (res.action === "direct_invoke") {
         expect(res.speakerId).toBe("Bob");

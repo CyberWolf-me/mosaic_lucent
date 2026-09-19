@@ -34,12 +34,15 @@ function board(nodes: string[], edges: Array<[string, string]>) {
 describe("route derivation", () => {
   it("a skip edge spanning layers gets exactly span-1 waypoints; adjacent edges get none", () => {
     // a → b → c → d chain, plus the a→d skip: a,b,c,d in layers 0..3.
-    const ws = board(["a", "b", "c", "d"], [
-      ["a", "b"],
-      ["b", "c"],
-      ["c", "d"],
-      ["a", "d"],
-    ]);
+    const ws = board(
+      ["a", "b", "c", "d"],
+      [
+        ["a", "b"],
+        ["b", "c"],
+        ["c", "d"],
+        ["a", "d"],
+      ],
+    );
     const { layout, routes } = computeLayoutWithRoutes(ws);
     const skip = Object.values(ws.edges).find((e) => e.source === "a" && e.target === "d")!;
     expect(skip, "the skip edge exists").toBeTruthy();
@@ -57,13 +60,16 @@ describe("route derivation", () => {
   it("waypoints thread BETWEEN the rows: each sits between its neighbours' bands", () => {
     // Two parallel two-step paths so layer 1 has two nodes the skip must
     // thread between: a → m → z with skip a→z, plus a → n → z.
-    const ws = board(["a", "m", "n", "z"], [
-      ["a", "m"],
-      ["m", "z"],
-      ["a", "n"],
-      ["n", "z"],
-      ["a", "z"],
-    ]);
+    const ws = board(
+      ["a", "m", "n", "z"],
+      [
+        ["a", "m"],
+        ["m", "z"],
+        ["a", "n"],
+        ["n", "z"],
+        ["a", "z"],
+      ],
+    );
     const { layout, routes } = computeLayoutWithRoutes(ws);
     const skip = Object.values(ws.edges).find((e) => e.source === "a" && e.target === "z")!;
     const route = routes[skip.id];
@@ -91,13 +97,16 @@ describe("route derivation", () => {
   it("a cyclic board (return edge) still layers every node — no layer-0 pileup", () => {
     // The n=300 benchmark defect: the return edge starved Kahn and 148/300
     // nodes collapsed to layer 0. Small version: a chain plus a back edge.
-    const ws = board(["a", "b", "c", "d", "e"], [
-      ["a", "b"],
-      ["b", "c"],
-      ["c", "d"],
-      ["d", "e"],
-      ["e", "a"], // the return edge — a cycle
-    ]);
+    const ws = board(
+      ["a", "b", "c", "d", "e"],
+      [
+        ["a", "b"],
+        ["b", "c"],
+        ["c", "d"],
+        ["d", "e"],
+        ["e", "a"], // the return edge — a cycle
+      ],
+    );
     const { layout } = computeLayoutWithRoutes(ws);
     // The flow axis: distinct y positions, not one row. Five nodes must not
     // share a single y.
@@ -108,13 +117,16 @@ describe("route derivation", () => {
   });
 
   it("derivation is deterministic", () => {
-    const ws = board(["a", "b", "c", "d"], [
-      ["a", "b"],
-      ["b", "c"],
-      ["c", "d"],
-      ["a", "d"],
-      ["a", "c"],
-    ]);
+    const ws = board(
+      ["a", "b", "c", "d"],
+      [
+        ["a", "b"],
+        ["b", "c"],
+        ["c", "d"],
+        ["a", "d"],
+        ["a", "c"],
+      ],
+    );
     const first = computeLayoutWithRoutes(ws);
     const second = computeLayoutWithRoutes(ws);
     expect(second.layout).toEqual(first.layout);
@@ -122,26 +134,32 @@ describe("route derivation", () => {
   });
 
   it("computeLayout output is identical with and without route derivation", () => {
-    const ws = board(["a", "b", "c", "d", "x", "y"], [
-      ["a", "b"],
-      ["b", "c"],
-      ["c", "d"],
-      ["a", "d"],
-      ["x", "y"],
-      ["a", "y"],
-    ]);
+    const ws = board(
+      ["a", "b", "c", "d", "x", "y"],
+      [
+        ["a", "b"],
+        ["b", "c"],
+        ["c", "d"],
+        ["a", "d"],
+        ["x", "y"],
+        ["a", "y"],
+      ],
+    );
     expect(computeLayout(ws)).toEqual(computeLayoutWithRoutes(ws).layout);
   });
 });
 
 describe("applyRoutes", () => {
   it("stamps routes onto exactly the named edges, clone-and-stamp", () => {
-    const ws = board(["a", "b", "c", "d"], [
-      ["a", "b"],
-      ["b", "c"],
-      ["c", "d"],
-      ["a", "d"],
-    ]);
+    const ws = board(
+      ["a", "b", "c", "d"],
+      [
+        ["a", "b"],
+        ["b", "c"],
+        ["c", "d"],
+        ["a", "d"],
+      ],
+    );
     const { routes } = computeLayoutWithRoutes(ws);
     const stamped = applyRoutes(ws, routes);
     for (const [id, route] of Object.entries(routes)) {
@@ -155,12 +173,15 @@ describe("applyRoutes", () => {
   });
 
   it("a stamped workspace round-trips through the zod schema", () => {
-    const ws = board(["a", "b", "c", "d"], [
-      ["a", "b"],
-      ["b", "c"],
-      ["c", "d"],
-      ["a", "d"],
-    ]);
+    const ws = board(
+      ["a", "b", "c", "d"],
+      [
+        ["a", "b"],
+        ["b", "c"],
+        ["c", "d"],
+        ["a", "d"],
+      ],
+    );
     const { layout, routes } = computeLayoutWithRoutes(ws);
     const stamped = applyRoutes(applyLayout(ws, layout), routes);
     const json = JSON.parse(JSON.stringify(stamped));

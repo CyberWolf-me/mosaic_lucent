@@ -40,12 +40,16 @@ const worker = new JobRunner({
 });
 
 const result = await worker.tick();
-console.log(`2. worker claimed ${result.claimed}, completed ${result.completed}, failed ${result.failed}`);
+console.log(
+  `2. worker claimed ${result.claimed}, completed ${result.completed}, failed ${result.failed}`,
+);
 
 const events = await db.db.select().from(outboxEvents);
 console.log(`3. outbox rows: ${events.length}, type=${events[0]?.type ?? "none"}`);
 const payload = (events[0]?.payload ?? {}) as Record<string, unknown>;
-console.log(`4. payload kind=${payload.kind} prompt=${String(payload.prompt)} hasBytes=${"image" in payload}`);
+console.log(
+  `4. payload kind=${payload.kind} prompt=${String(payload.prompt)} hasBytes=${"image" in payload}`,
+);
 
 // The recurring sweeps still work alongside a family job.
 await enqueueRecurring(queue);

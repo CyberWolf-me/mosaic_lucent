@@ -58,7 +58,10 @@ const DEFAULTS: Required<Omit<LayoutOptions, "strategy">> = {
  * geometry globally — primaryFlow (spine weighting) and emphasis (tier
  * promotion) are consumed by their own passes below.
  */
-function withIntentDefaults(workspace: Workspace, options: LayoutOptions): Required<Omit<LayoutOptions, "strategy">> {
+function withIntentDefaults(
+  workspace: Workspace,
+  options: LayoutOptions,
+): Required<Omit<LayoutOptions, "strategy">> {
   const merged = { ...DEFAULTS, ...options };
   const intentDirection = workspace.layoutIntent?.direction;
   if (!options.direction && intentDirection) merged.direction = intentDirection;
@@ -354,8 +357,8 @@ function layeredLayoutWithRoutes(
   // or a pair already directly connected) are harmless — one extra hop
   // reinforcing what the sweep already wants — and a pair already holding a
   // real dummy chain is skipped so the real corridor is not doubled.
-  const spine = (workspace.layoutIntent?.primaryFlow ?? []).filter((id, i, a) =>
-    layer.has(id) && a.indexOf(id) === i,
+  const spine = (workspace.layoutIntent?.primaryFlow ?? []).filter(
+    (id, i, a) => layer.has(id) && a.indexOf(id) === i,
   );
   for (let i = 0; i + 1 < spine.length; i++) {
     const a = spine[i]!;
@@ -497,7 +500,9 @@ function layeredLayoutWithRoutes(
       const ids = layers.get(l)!;
       const extent = Math.max(
         ...ids.map((id) => {
-          const s = measureNode(workspace.nodes[id]?.label ?? "", nodeSize, { extraHeight: nodeCardExtraHeight(workspace.nodes[id]) });
+          const s = measureNode(workspace.nodes[id]?.label ?? "", nodeSize, {
+            extraHeight: nodeCardExtraHeight(workspace.nodes[id]),
+          });
           return direction === "vertical" ? s.height : s.width;
         }),
         direction === "vertical" ? nodeSize.height : nodeSize.width,
@@ -525,12 +530,14 @@ function layeredLayoutWithRoutes(
   const WRAP_ROW_LAYERS = 4;
   const widestRow = Math.max(
     ...sortedLayers.map((l) =>
-      layers
-        .get(l)!
-        .reduce(
-          (sum, id) => sum + measureNode(workspace.nodes[id]?.label ?? "", nodeSize, { extraHeight: nodeCardExtraHeight(workspace.nodes[id]) }).width,
-          0,
-        ),
+      layers.get(l)!.reduce(
+        (sum, id) =>
+          sum +
+          measureNode(workspace.nodes[id]?.label ?? "", nodeSize, {
+            extraHeight: nodeCardExtraHeight(workspace.nodes[id]),
+          }).width,
+        0,
+      ),
     ),
     nodeSize.width,
   );
@@ -544,9 +551,7 @@ function layeredLayoutWithRoutes(
   // median row's node count: chains have few nodes per row; a DAG with
   // crowded rows is a normal layered board and stays vertical.
   const medianRowNodes = (() => {
-    const counts = sortedLayers
-      .map((l) => layers.get(l)!.length)
-      .sort((a, b) => a - b);
+    const counts = sortedLayers.map((l) => layers.get(l)!.length).sort((a, b) => a - b);
     return counts[Math.floor(counts.length / 2)] ?? 0;
   })();
   const shouldWrap =
@@ -570,7 +575,15 @@ function layeredLayoutWithRoutes(
       for (const l of row) {
         const ids = layers.get(l)!;
         const sizes = new Map(
-          ids.map((id) => [id, measureNode(workspace.nodes[id]?.label ?? "", nodeSize, { extraHeight: nodeCardExtraHeight(workspace.nodes[id]) })] as const),
+          ids.map(
+            (id) =>
+              [
+                id,
+                measureNode(workspace.nodes[id]?.label ?? "", nodeSize, {
+                  extraHeight: nodeCardExtraHeight(workspace.nodes[id]),
+                }),
+              ] as const,
+          ),
         );
         const crossSpan =
           ids.reduce((sum, id) => sum + sizes.get(id)!.width, 0) + (ids.length - 1) * nodeGap;
@@ -591,35 +604,43 @@ function layeredLayoutWithRoutes(
     }
     // Fall through: the shared exit derives routes against `wrapped`.
   } else {
-  for (const l of sortedLayers) {
-    const ids = layers.get(l)!;
-    const isVertical = direction === "vertical";
-    // Size each card to its label first, then lay the row out against the real
-    // widths so wide cards don't overlap their neighbours.
-    const sizes = new Map(
-      ids.map((id) => [id, measureNode(workspace.nodes[id]?.label ?? "", nodeSize, { extraHeight: nodeCardExtraHeight(workspace.nodes[id]) })] as const),
-    );
-    const crossSpan =
-      ids.reduce(
-        (sum, id) => sum + (isVertical ? sizes.get(id)!.width : sizes.get(id)!.height),
-        0,
-      ) +
-      (ids.length - 1) * nodeGap;
-    let cursor = -crossSpan / 2;
-    // Rows advance by the tallest card above them, so a wrapped two-line label
-    // can't collide with the layer below it.
-    const alongOffset = layerOffsets.get(l) ?? 0;
+    for (const l of sortedLayers) {
+      const ids = layers.get(l)!;
+      const isVertical = direction === "vertical";
+      // Size each card to its label first, then lay the row out against the real
+      // widths so wide cards don't overlap their neighbours.
+      const sizes = new Map(
+        ids.map(
+          (id) =>
+            [
+              id,
+              measureNode(workspace.nodes[id]?.label ?? "", nodeSize, {
+                extraHeight: nodeCardExtraHeight(workspace.nodes[id]),
+              }),
+            ] as const,
+        ),
+      );
+      const crossSpan =
+        ids.reduce(
+          (sum, id) => sum + (isVertical ? sizes.get(id)!.width : sizes.get(id)!.height),
+          0,
+        ) +
+        (ids.length - 1) * nodeGap;
+      let cursor = -crossSpan / 2;
+      // Rows advance by the tallest card above them, so a wrapped two-line label
+      // can't collide with the layer below it.
+      const alongOffset = layerOffsets.get(l) ?? 0;
 
-    ids.forEach((id) => {
-      const size = sizes.get(id)!;
-      const cross = cursor;
-      cursor += (isVertical ? size.width : size.height) + nodeGap;
-      const position: Position = isVertical
-        ? { x: cross, y: alongOffset }
-        : { x: alongOffset, y: cross };
-      result[id] = { position, size };
-    });
-  }
+      ids.forEach((id) => {
+        const size = sizes.get(id)!;
+        const cross = cursor;
+        cursor += (isVertical ? size.width : size.height) + nodeGap;
+        const position: Position = isVertical
+          ? { x: cross, y: alongOffset }
+          : { x: alongOffset, y: cross };
+        result[id] = { position, size };
+      });
+    }
   }
 
   // ROUTE COORDINATES (Sugiyama phase 4, the 2026-09-11 benchmark's ask):
@@ -693,9 +714,7 @@ function layeredLayoutWithRoutes(
       }
       const alongCentered = along + (layerExtents.get(l) ?? 0) / 2;
       points.push(
-        direction === "vertical"
-          ? { x: cross, y: alongCentered }
-          : { x: alongCentered, y: cross },
+        direction === "vertical" ? { x: cross, y: alongCentered } : { x: alongCentered, y: cross },
       );
     });
     if (points.length > 0) routes[edgeId] = points;
@@ -720,7 +739,15 @@ function radialLayout(
   // Without this, every node is the default size and labels clip on the outer
   // rings where two siblings sit close.
   const measured = new Map<string, Size>(
-    nodeIds.map((id) => [id, measureNode(workspace.nodes[id]?.label ?? "", nodeSize, { extraHeight: nodeCardExtraHeight(workspace.nodes[id]) })] as const),
+    nodeIds.map(
+      (id) =>
+        [
+          id,
+          measureNode(workspace.nodes[id]?.label ?? "", nodeSize, {
+            extraHeight: nodeCardExtraHeight(workspace.nodes[id]),
+          }),
+        ] as const,
+    ),
   );
 
   // Undirected adjacency: a mind map branch reads the same in either direction.
@@ -792,7 +819,10 @@ function radialLayout(
     // A ring must also be big enough that its nodes, at their measured
     // widths, fit around it: required circumference ≈ Σ widths + a gap per
     // node, so radius ≥ that ÷ 2π.
-    const totalWidth = ids.reduce((sum, id) => sum + (measured.get(id)?.width ?? nodeSize.width), 0);
+    const totalWidth = ids.reduce(
+      (sum, id) => sum + (measured.get(id)?.width ?? nodeSize.width),
+      0,
+    );
     const populationRadius = (totalWidth + ids.length * nodeGap) / (Math.PI * 2);
     // Rings are monotonically spaced: a crowded inner ring pushes the next
     // ring out rather than letting it collapse back inside.
@@ -843,7 +873,15 @@ function treeLayout(
   // each leaf, not the default (M0.5). Without this two leaves with long
   // labels overlap because the cursor advances by the default width only.
   const measured = new Map<string, Size>(
-    nodeIds.map((id) => [id, measureNode(workspace.nodes[id]?.label ?? "", nodeSize, { extraHeight: nodeCardExtraHeight(workspace.nodes[id]) })] as const),
+    nodeIds.map(
+      (id) =>
+        [
+          id,
+          measureNode(workspace.nodes[id]?.label ?? "", nodeSize, {
+            extraHeight: nodeCardExtraHeight(workspace.nodes[id]),
+          }),
+        ] as const,
+    ),
   );
 
   const children = new Map<string, string[]>();
@@ -962,7 +1000,15 @@ function swimlaneLayout(
   // column for the next node (M0.5). Without this every column is the default
   // width and the column-step carves lanes narrower than a long label needs.
   const measured = new Map<string, Size>(
-    nodeIds.map((id) => [id, measureNode(workspace.nodes[id]?.label ?? "", nodeSize, { extraHeight: nodeCardExtraHeight(workspace.nodes[id]) })] as const),
+    nodeIds.map(
+      (id) =>
+        [
+          id,
+          measureNode(workspace.nodes[id]?.label ?? "", nodeSize, {
+            extraHeight: nodeCardExtraHeight(workspace.nodes[id]),
+          }),
+        ] as const,
+    ),
   );
 
   // Column = flow depth, so a step always sits right of its predecessor even

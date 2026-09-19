@@ -162,7 +162,7 @@ describe("buildAnswerUserPrompt", () => {
   it("states the window honestly when truncated, and as full when not", () => {
     const truncated = buildAnswerUserPrompt({ ...baseRequest, historyTruncated: true });
     expect(truncated).toContain("OLDER REVISIONS EXIST");
-    expect(truncated).toContain("never as \"nothing happened\"");
+    expect(truncated).toContain('never as "nothing happened"');
 
     const full = buildAnswerUserPrompt({ ...baseRequest, historyTruncated: false });
     expect(full).toContain("full history");
@@ -267,7 +267,9 @@ describe("MockProvider.generateAnswer", () => {
       question: "why is the pricing node here?",
     });
     expect(result.answer).toContain("pricing");
-    expect(result.citations).toContainEqual(expect.objectContaining({ kind: "node", id: "pricing" }));
+    expect(result.citations).toContainEqual(
+      expect.objectContaining({ kind: "node", id: "pricing" }),
+    );
     expect(result.citations).toContainEqual({ kind: "meeting", id: "mtg_7" });
   });
 
@@ -290,13 +292,29 @@ describe("MockProvider.generateAnswer", () => {
           id: "mtg_wed",
           startedAt: Date.UTC(2026, 8, 4, 9),
           speakers: ["Sarah"],
-          turns: [{ index: 2, speaker: "Sarah", at: Date.UTC(2026, 8, 4, 9, 5), kind: "decision", text: "Fifteen a month." }],
+          turns: [
+            {
+              index: 2,
+              speaker: "Sarah",
+              at: Date.UTC(2026, 8, 4, 9, 5),
+              kind: "decision",
+              text: "Fifteen a month.",
+            },
+          ],
         },
         {
           id: "mtg_mon",
           startedAt: Date.UTC(2026, 8, 2, 9),
           speakers: ["Alex"],
-          turns: [{ index: 0, speaker: "Alex", at: Date.UTC(2026, 8, 2, 9, 5), kind: "decision", text: "Twenty works." }],
+          turns: [
+            {
+              index: 0,
+              speaker: "Alex",
+              at: Date.UTC(2026, 8, 2, 9, 5),
+              kind: "decision",
+              text: "Twenty works.",
+            },
+          ],
         },
       ],
     };
@@ -304,7 +322,10 @@ describe("MockProvider.generateAnswer", () => {
     expect(result.answer).toContain("mtg_wed");
     expect(result.answer).toContain("turn 2");
     expect(result.answer).toContain("mtg_mon");
-    expect(result.citations).toEqual([{ kind: "meeting", id: "mtg_wed" }, { kind: "meeting", id: "mtg_mon" }]);
+    expect(result.citations).toEqual([
+      { kind: "meeting", id: "mtg_wed" },
+      { kind: "meeting", id: "mtg_mon" },
+    ]);
   });
 
   it("answers a retrieval question from the retrieved turn, citing its meeting and naming the turn index", async () => {

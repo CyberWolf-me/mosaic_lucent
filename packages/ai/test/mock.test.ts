@@ -87,10 +87,15 @@ describe("MockProvider statement semantics (Stage C2)", () => {
     // supersession target the decision names).
     const ws = applyOperations(createWorkspace(), [
       { op: "CREATE_NODE", id: "pricing-proposal", nodeType: "idea", label: "Proposal: $20/month" },
-      { op: "SET_STATEMENT", id: "pricing-proposal", statement: { kind: "proposal", status: "open", topic: "pricing" } },
+      {
+        op: "SET_STATEMENT",
+        id: "pricing-proposal",
+        statement: { kind: "proposal", status: "open", topic: "pricing" },
+      },
     ]);
     const { operations } = await provider.generateOperations({
-      message: "From the meeting: Sarah: 'We decided to price it at $15/month.' The board currently shows a node proposing $20/month (id pricing-proposal).",
+      message:
+        "From the meeting: Sarah: 'We decided to price it at $15/month.' The board currently shows a node proposing $20/month (id pricing-proposal).",
       summary: summarizeWorkspace(ws),
     });
     expect(validateOperations(ws, operations)).toHaveLength(0);
@@ -98,7 +103,12 @@ describe("MockProvider statement semantics (Stage C2)", () => {
     expect(statement).toMatchObject({
       op: "SET_STATEMENT",
       id: "pricing-decision",
-      statement: { kind: "decision", status: "resolved", topic: "pricing", supersedes: ["pricing-proposal"] },
+      statement: {
+        kind: "decision",
+        status: "resolved",
+        topic: "pricing",
+        supersedes: ["pricing-proposal"],
+      },
     });
     // And applying the batch visibly supersedes the old proposal.
     const next = applyOperations(ws, operations);
@@ -108,22 +118,36 @@ describe("MockProvider statement semantics (Stage C2)", () => {
   it("a rejection flips the existing proposal's statement to rejected", async () => {
     const provider = new MockProvider();
     const ws = applyOperations(createWorkspace(), [
-      { op: "CREATE_NODE", id: "usage-pricing", nodeType: "idea", label: "Proposal: usage-based pricing" },
-      { op: "SET_STATEMENT", id: "usage-pricing", statement: { kind: "proposal", status: "open", topic: "pricing" } },
+      {
+        op: "CREATE_NODE",
+        id: "usage-pricing",
+        nodeType: "idea",
+        label: "Proposal: usage-based pricing",
+      },
+      {
+        op: "SET_STATEMENT",
+        id: "usage-pricing",
+        statement: { kind: "proposal", status: "open", topic: "pricing" },
+      },
     ]);
     const { operations } = await provider.generateOperations({
       message: "From the meeting: Lena: 'No, we're not doing usage-based pricing.'",
       summary: summarizeWorkspace(ws),
     });
     expect(validateOperations(ws, operations)).toHaveLength(0);
-    expect(operations).toContainEqual({ op: "UPDATE_STATEMENT", id: "usage-pricing", status: "rejected" });
+    expect(operations).toContainEqual({
+      op: "UPDATE_STATEMENT",
+      id: "usage-pricing",
+      status: "rejected",
+    });
   });
 
   it("a hedged suggestion is a proposal statement, open and unowned", async () => {
     const provider = new MockProvider();
     const ws = createWorkspace();
     const { operations } = await provider.generateOperations({
-      message: "From a brainstorm: Jin: 'We should probably ask Sarah about pricing at some point.'",
+      message:
+        "From a brainstorm: Jin: 'We should probably ask Sarah about pricing at some point.'",
       summary: summarizeWorkspace(ws),
     });
     expect(validateOperations(ws, operations)).toHaveLength(0);
@@ -133,7 +157,9 @@ describe("MockProvider statement semantics (Stage C2)", () => {
       statement: { kind: "proposal", status: "open", topic: "pricing" },
     });
     // And the proposal-never-a-decision rule: no resolved status anywhere.
-    expect(operations.some((o) => o.op === "SET_STATEMENT" && o.statement?.status === "resolved")).toBe(false);
+    expect(
+      operations.some((o) => o.op === "SET_STATEMENT" && o.statement?.status === "resolved"),
+    ).toBe(false);
   });
 
   it("a commitment carries an action statement alongside its owner", async () => {
@@ -157,21 +183,18 @@ describe("MockProvider plan tree (Stages D2/E1/E3)", () => {
     // The D2 acceptance fixture's statement shape: a decision,
     // requirements, risks (existing actions/proposals/questions omitted
     // for focus — the plan preserves or ignores them).
-    const ws = applyOperations(
-      createWorkspace(),
-      [
-        { op: "CREATE_NODE", id: "dec-0", nodeType: "decision", label: "Phased rollout" },
-        { op: "SET_STATEMENT", id: "dec-0", statement: { kind: "decision", status: "resolved" } },
-        { op: "CREATE_NODE", id: "req-0", nodeType: "requirement", label: "Support SSO" },
-        { op: "SET_STATEMENT", id: "req-0", statement: { kind: "requirement", status: "open" } },
-        { op: "CREATE_NODE", id: "req-1", nodeType: "requirement", label: "Add audit log" },
-        { op: "SET_STATEMENT", id: "req-1", statement: { kind: "requirement", status: "open" } },
-        { op: "CREATE_NODE", id: "rsk-0", nodeType: "risk", label: "Migration data loss" },
-        { op: "SET_STATEMENT", id: "rsk-0", statement: { kind: "risk", status: "open" } },
-        { op: "CREATE_NODE", id: "rsk-1", nodeType: "risk", label: "Cost overrun" },
-        { op: "SET_STATEMENT", id: "rsk-1", statement: { kind: "risk", status: "open" } },
-      ] as never,
-    );
+    const ws = applyOperations(createWorkspace(), [
+      { op: "CREATE_NODE", id: "dec-0", nodeType: "decision", label: "Phased rollout" },
+      { op: "SET_STATEMENT", id: "dec-0", statement: { kind: "decision", status: "resolved" } },
+      { op: "CREATE_NODE", id: "req-0", nodeType: "requirement", label: "Support SSO" },
+      { op: "SET_STATEMENT", id: "req-0", statement: { kind: "requirement", status: "open" } },
+      { op: "CREATE_NODE", id: "req-1", nodeType: "requirement", label: "Add audit log" },
+      { op: "SET_STATEMENT", id: "req-1", statement: { kind: "requirement", status: "open" } },
+      { op: "CREATE_NODE", id: "rsk-0", nodeType: "risk", label: "Migration data loss" },
+      { op: "SET_STATEMENT", id: "rsk-0", statement: { kind: "risk", status: "open" } },
+      { op: "CREATE_NODE", id: "rsk-1", nodeType: "risk", label: "Cost overrun" },
+      { op: "SET_STATEMENT", id: "rsk-1", statement: { kind: "risk", status: "open" } },
+    ] as never);
     const { operations } = await provider.generateOperations({
       message: "Create the work from these decisions.",
       summary: summarizeWorkspace(ws),
@@ -191,7 +214,12 @@ describe("MockProvider plan tree (Stages D2/E1/E3)", () => {
     expect(engineering).toMatchObject({ label: "Engineering" });
     expect(qa).toMatchObject({ label: "QA" });
     expect(research!.kind).toBeUndefined(); // kindless: a container, not a lens
-    const workstreamIds = [...research!.children, ...design!.children, ...engineering!.children, ...qa!.children];
+    const workstreamIds = [
+      ...research!.children,
+      ...design!.children,
+      ...engineering!.children,
+      ...qa!.children,
+    ];
     expect(workstreamIds).toHaveLength(4);
     expect(new Set(workstreamIds).size).toBe(4); // each action in exactly one stream
     // The plan region keeps ALL derived nodes (plus the decisions), so the
@@ -216,13 +244,10 @@ describe("MockProvider plan tree (Stages D2/E1/E3)", () => {
 
   it("a board with no derived work grows no workstream groups", async () => {
     const provider = new MockProvider();
-    const ws = applyOperations(
-      createWorkspace(),
-      [
-        { op: "CREATE_NODE", id: "dec-0", nodeType: "decision", label: "Phased rollout" },
-        { op: "SET_STATEMENT", id: "dec-0", statement: { kind: "decision", status: "resolved" } },
-      ] as never,
-    );
+    const ws = applyOperations(createWorkspace(), [
+      { op: "CREATE_NODE", id: "dec-0", nodeType: "decision", label: "Phased rollout" },
+      { op: "SET_STATEMENT", id: "dec-0", statement: { kind: "decision", status: "resolved" } },
+    ] as never);
     const { operations } = await provider.generateOperations({
       message: "Create the work from these decisions.",
       summary: summarizeWorkspace(ws),

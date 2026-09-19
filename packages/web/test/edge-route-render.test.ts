@@ -12,7 +12,9 @@ import { applyOperations, createWorkspace, type Operation, type Workspace } from
  * contract every pre-route board depends on.
  */
 
-function board(edges: Array<{ id: string; s: string; t: string; route?: Array<{ x: number; y: number }> }>): Workspace {
+function board(
+  edges: Array<{ id: string; s: string; t: string; route?: Array<{ x: number; y: number }> }>,
+): Workspace {
   const ws = createWorkspace({ diagramKind: "flowchart" });
   const ops: Operation[] = [
     { op: "CREATE_NODE", id: "a", nodeType: "service", label: "a" },
@@ -38,7 +40,15 @@ function board(edges: Array<{ id: string; s: string; t: string; route?: Array<{ 
 describe("toScene carries routes", () => {
   it("a routed edge exposes its waypoints in scene order; route-less stays []", () => {
     const ws = board([
-      { id: "e1", s: "a", t: "b", route: [{ x: 10, y: 20 }, { x: 30, y: 40 }] },
+      {
+        id: "e1",
+        s: "a",
+        t: "b",
+        route: [
+          { x: 10, y: 20 },
+          { x: 30, y: 40 },
+        ],
+      },
       { id: "e2", s: "b", t: "a" },
     ]);
     const { edges } = toScene(ws);
@@ -78,9 +88,7 @@ describe("makePath emits the routed polyline", () => {
 
 describe("visibleEdges spans include waypoints", () => {
   it("an edge whose endpoints are off-view stays mounted when its corridor crosses the view", () => {
-    const ws = board([
-      { id: "e1", s: "a", t: "b", route: [{ x: 500, y: 500 }] },
-    ]);
+    const ws = board([{ id: "e1", s: "a", t: "b", route: [{ x: 500, y: 500 }] }]);
     const { nodes, edges } = toScene(ws);
     const byId = new Map(nodes.map((n) => [n.id, n]));
     // The view covers ONLY the waypoint, not either card.

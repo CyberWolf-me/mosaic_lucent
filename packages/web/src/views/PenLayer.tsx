@@ -66,7 +66,9 @@ export function PenLayer({
     drawing.current = true;
     try {
       svgRef.current?.setPointerCapture(e.pointerId);
-    } catch {}
+    } catch {
+      /* ignore capture error */
+    }
     const pt = toContent(e);
     setPoints([pt]);
   };
@@ -85,7 +87,9 @@ export function PenLayer({
     drawing.current = false;
     try {
       svgRef.current?.releasePointerCapture(e.pointerId);
-    } catch {}
+    } catch {
+      /* ignore release error */
+    }
     setPoints((pts) => {
       commit(pts);
       return [];
@@ -211,7 +215,10 @@ export function PenLayer({
                 height: 18,
                 borderRadius: "50%",
                 background: c.value,
-                border: penColor === c.value ? "2px solid var(--amber-2, #f59e0b)" : "1px solid var(--stroke-2)",
+                border:
+                  penColor === c.value
+                    ? "2px solid var(--amber-2, #f59e0b)"
+                    : "1px solid var(--stroke-2)",
                 boxShadow: penColor === c.value ? "0 0 0 2px var(--canvas-0)" : "none",
                 transform: penColor === c.value ? "scale(1.15)" : "scale(1)",
                 cursor: "pointer",

@@ -50,24 +50,24 @@ toolkit:
   specifics except the one genuinely new semantic: the `parallel` node type.
 - Interchange round-trips, including parallelGateway (bpmnLens.test.ts).
 
-| Advisory V-item | Status |
-| --- | --- |
-| V1 core (start/end, task, flow, XOR, parallel) | **done, Lucent-rendered** |
-| V2 (subprocess, pools, lanes, message flow) | next — lanes map to groups; subprocess maps to region-collapse |
-| V3 (timer/message/error/boundary events) | deferred — needs model semantics first |
-| V4 (data objects/stores, event subprocesses) | deferred |
-| V5 (choreography, conversation) | deferred (doc 18 always excluded it) |
+| Advisory V-item                                | Status                                                         |
+| ---------------------------------------------- | -------------------------------------------------------------- |
+| V1 core (start/end, task, flow, XOR, parallel) | **done, Lucent-rendered**                                      |
+| V2 (subprocess, pools, lanes, message flow)    | next — lanes map to groups; subprocess maps to region-collapse |
+| V3 (timer/message/error/boundary events)       | deferred — needs model semantics first                         |
+| V4 (data objects/stores, event subprocesses)   | deferred                                                       |
+| V5 (choreography, conversation)                | deferred (doc 18 always excluded it)                           |
 
 ## Supported subset (round-trips both ways)
 
-| BPMN element | Lucent mapping | Notes |
-| --- | --- | --- |
-| `startEvent` | nodeType `entry` | one per region expected, not enforced |
-| `endEvent` | nodeType `exit` | |
-| `task` | nodeType `step` | labels carry over as `name` |
-| `exclusiveGateway` | nodeType `choice` | the decision diamond |
-| `sequenceFlow` | `Edge` (relationship `then`) | `sourceRef`/`targetRef` + DI waypoints |
-| `lane` (in a `laneSet`) | plain `Group` (no kind) | membership via `flowNodeRef` → `Node.groupId` |
+| BPMN element            | Lucent mapping               | Notes                                         |
+| ----------------------- | ---------------------------- | --------------------------------------------- |
+| `startEvent`            | nodeType `entry`             | one per region expected, not enforced         |
+| `endEvent`              | nodeType `exit`              |                                               |
+| `task`                  | nodeType `step`              | labels carry over as `name`                   |
+| `exclusiveGateway`      | nodeType `choice`            | the decision diamond                          |
+| `sequenceFlow`          | `Edge` (relationship `then`) | `sourceRef`/`targetRef` + DI waypoints        |
+| `lane` (in a `laneSet`) | plain `Group` (no kind)      | membership via `flowNodeRef` → `Node.groupId` |
 
 Unknown BPMN elements are **ignored on import** (recorded in the parse
 result's `ignored` list), never guessed into Lucent semantics. Unknown

@@ -17,7 +17,9 @@ const queue = new PostgresJobQueue(db);
 
 // 1. The scheduler's pass.
 const ids = await enqueueRecurring(queue);
-console.log(`1. scheduler enqueued ${ids.length} recurring jobs (expected ${RECURRING_JOBS.length})`);
+console.log(
+  `1. scheduler enqueued ${ids.length} recurring jobs (expected ${RECURRING_JOBS.length})`,
+);
 
 // 2. A second scheduler tick must add nothing: the keys are live.
 await enqueueRecurring(queue);
@@ -47,5 +49,8 @@ console.log(`5. remaining live jobs: ${Object.values(after).reduce((x, y) => x +
 
 await db.db.delete(jobs);
 await closeDb(db);
-const ok = total === RECURRING_JOBS.length && ran.length === RECURRING_JOBS.length && new Set(ran).size === ran.length;
+const ok =
+  total === RECURRING_JOBS.length &&
+  ran.length === RECURRING_JOBS.length &&
+  new Set(ran).size === ran.length;
 console.log(ok ? "LIVE P3 VERIFIED" : "LIVE P3 FAILED");

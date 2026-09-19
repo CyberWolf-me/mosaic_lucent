@@ -43,7 +43,7 @@ Three load-bearing properties, each locked by a test:
    oldest visible revision's timestamp: a meeting's content only reaches the
    board through revisions, so a Free caller who cannot see revisions 1–5
    cannot see the meeting that produced them either. Without this, Ask would
-   be the first feature that *leaked* entitlements rather than enforcing
+   be the first feature that _leaked_ entitlements rather than enforcing
    them.
 3. **Truncation is disclosed, never silent.** The response carries
    `historyDepth`, `limit`, `hasMore`, `latestSeq`; the historian prompt tells
@@ -67,7 +67,7 @@ cannot become a single giant response, and Ask's digest caps lower still.
   (`historyWindow.ts`), shared by every history consumer that will ever be
   added (the MCP `get_board_history` tool that C1 deferred belongs behind
   the same window when it comes).
-- If a future plan tier demands enforced *deletion* (a compliance boundary,
+- If a future plan tier demands enforced _deletion_ (a compliance boundary,
   not a pricing one), that is a different mechanism with different
   guarantees — an audit record of what was destroyed — and gets its own ADR;
   it does not bend this one.

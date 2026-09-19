@@ -81,12 +81,12 @@ Reading the four triggers together, three of them name the same blocker:
 **the metrics the triggers would read are not emitted.** That is a more useful
 conclusion than any of the four items, and it is actionable:
 
-| Metric needed | What it would unlock | Status |
-| --- | --- | --- |
-| Search abandonment / failure rate | P7 §2.1 (pgvector) | not emitted |
-| Op-log size, snapshot lag | P7 §2.3 (partition/archive) | not emitted |
-| Job queue depth + claim rate | P7 §2.4 (Redis), P6 queue alerts | store supports it, not registered |
-| Primary pool saturation | P7 §2.2 (read replicas) | partially: latency exists, saturation does not |
+| Metric needed                     | What it would unlock             | Status                                         |
+| --------------------------------- | -------------------------------- | ---------------------------------------------- |
+| Search abandonment / failure rate | P7 §2.1 (pgvector)               | not emitted                                    |
+| Op-log size, snapshot lag         | P7 §2.3 (partition/archive)      | not emitted                                    |
+| Job queue depth + claim rate      | P7 §2.4 (Redis), P6 queue alerts | store supports it, not registered              |
+| Primary pool saturation           | P7 §2.2 (read replicas)          | partially: latency exists, saturation does not |
 
 **Recommendation:** the next observability increment is to register the four
 above, at which point every P7 trigger becomes observable and P6's commented

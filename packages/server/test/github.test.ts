@@ -19,25 +19,47 @@ import {
 
 /** Records every wire call; dispatches on method+path. */
 function responder(
-  route: (init: { method: string; path: string; body?: Record<string, unknown> }) => Response | null,
+  route: (init: {
+    method: string;
+    path: string;
+    body?: Record<string, unknown>;
+  }) => Response | null,
 ) {
-  const seen: Array<{ method: string; path: string; body?: Record<string, unknown>; headers: Record<string, string> }> = [];
+  const seen: Array<{
+    method: string;
+    path: string;
+    body?: Record<string, unknown>;
+    headers: Record<string, string>;
+  }> = [];
   const fetchImpl = (async (_url: string | URL | Request, init?: RequestInit) => {
     const url = new URL(String(_url));
     const method = (init?.method ?? "GET").toUpperCase();
-    const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : undefined;
+    const body = init?.body
+      ? (JSON.parse(String(init.body)) as Record<string, unknown>)
+      : undefined;
     // Headers through the Headers case-insensitivity.
     const headers: Record<string, string> = {};
     new Headers(init?.headers).forEach((v, k) => (headers[k.toLowerCase()] = v));
     seen.push({ method, path: url.pathname + url.search, body, headers });
     const answer = route({ method, path: url.pathname, body });
     if (answer) return answer;
-    return new Response(JSON.stringify({ message: `no route for ${method} ${url.pathname}` }), { status: 404 });
+    return new Response(JSON.stringify({ message: `no route for ${method} ${url.pathname}` }), {
+      status: 404,
+    });
   }) as typeof fetch;
   return { fetchImpl, seen };
 }
 
-function issueJson(over: Partial<{ number: number; title: string; body: string; state: string; state_reason: string | null; login: string }> = {}) {
+function issueJson(
+  over: Partial<{
+    number: number;
+    title: string;
+    body: string;
+    state: string;
+    state_reason: string | null;
+    login: string;
+  }> = {},
+) {
   return {
     number: over.number ?? 482,
     title: over.title ?? "Issue",
@@ -67,11 +89,17 @@ function provider(over: Partial<ConstructorParameters<typeof GithubProvider>[0]>
 describe("the wire contract", () => {
   it("sends Bearer + api-version + the mandatory User-Agent; number-as-externalId", async () => {
     const { fetchImpl, seen } = responder(({ method, path }) =>
-      method === "POST" && path === "/repos/acme/app/issues" ? json(issueJson({ number: 7 })) : null,
+      method === "POST" && path === "/repos/acme/app/issues"
+        ? json(issueJson({ number: 7 }))
+        : null,
     );
     const p = provider({ fetchImpl });
     const task = await p.createTask({ title: "T", idempotencyKey: "ext_n1" });
-    expect(task).toMatchObject({ provider: "github", externalId: "7", url: "https://github.com/acme/app/issues/7" });
+    expect(task).toMatchObject({
+      provider: "github",
+      externalId: "7",
+      url: "https://github.com/acme/app/issues/7",
+    });
     const wire = seen[0]!;
     expect(wire.headers["authorization"]).toBe("Bearer ghp_test");
     expect(wire.headers["x-github-api-version"]).toBe("2022-11-28");
@@ -173,7 +201,12 @@ describe("mapStatus — the honest vocabulary (the never-guesses rule)", () => {
 describe("capabilityWarnings — the honesty layer (ADR 0034)", () => {
   it("warns dueDate (no native field) and every non-open Lucent status; faithful fields warn nothing", () => {
     const p = provider();
-    const warned = p.capabilityWarnings!({ title: "T", assignee: "sarah", dueDate: "2026-09-20", status: "blocked" });
+    const warned = p.capabilityWarnings!({
+      title: "T",
+      assignee: "sarah",
+      dueDate: "2026-09-20",
+      status: "blocked",
+    });
     expect(warned.map((w) => w.field).sort()).toEqual(["dueDate", "status"]);
     expect(warned.find((w) => w.field === "status")!.reason).toContain("blocked");
     expect(warned.find((w) => w.field === "status")!.reason).toContain("open");
@@ -187,9 +220,7 @@ describe("capabilityWarnings — the honesty layer (ADR 0034)", () => {
     const p = provider({ fetchImpl });
     await p["resolveAssignee"]("ghost");
     const warned = p.capabilityWarnings!({ title: "T", assignee: "ghost" });
-    expect(warned).toEqual([
-      { field: "assignee", reason: expect.stringContaining("ghost") },
-    ]);
+    expect(warned).toEqual([{ field: "assignee", reason: expect.stringContaining("ghost") }]);
     const ok = p.capabilityWarnings!({ title: "T", assignee: "sarah" });
     expect(ok).toEqual([]);
   });
@@ -209,7 +240,13 @@ describe("recoverCreate — the hardened 0/1/>1 contract", () => {
       }
       return null;
     });
-    const p = provider({ fetchImpl, recoverPollMs: [5, 5, 5], sleep: async (ms) => { sleeps.push(ms); } });
+    const p = provider({
+      fetchImpl,
+      recoverPollMs: [5, 5, 5],
+      sleep: async (ms) => {
+        sleeps.push(ms);
+      },
+    });
     const found = await p.recoverCreate(marker);
     expect(found).toMatchObject({ externalId: "3" });
     expect(calls).toBe(2);
@@ -248,12 +285,19 @@ describe("the error, retry, and factory arms", () => {
     const { fetchImpl } = responder(({ method, path }) => {
       if (method === "POST" && path === "/repos/acme/app/issues") {
         calls += 1;
-        if (calls === 1) return new Response(JSON.stringify({ message: "rate limited" }), { status: 429 });
+        if (calls === 1)
+          return new Response(JSON.stringify({ message: "rate limited" }), { status: 429 });
         return new Response(JSON.stringify({ message: "Validation Failed" }), { status: 422 });
       }
       return null;
     });
-    const p = provider({ fetchImpl, maxAttempts: 3, sleep: async () => { slept += 1; } });
+    const p = provider({
+      fetchImpl,
+      maxAttempts: 3,
+      sleep: async () => {
+        slept += 1;
+      },
+    });
     await expect(p.createTask({ title: "T" })).rejects.toThrow(/Validation Failed/);
     expect(calls).toBe(2); // one retry for the 429, then the 422 stops it
     expect(slept).toBe(1);
@@ -262,13 +306,22 @@ describe("the error, retry, and factory arms", () => {
   it("the factory refuses: unset env credential, missing repo, malformed repo (path traversal)", async () => {
     const factory = githubConnectionFactory();
     delete process.env.GH_TEST_TOKEN;
-    expect(() => factory({ credentialRef: "GH_TEST_TOKEN", config: { repo: "acme/app" } })).toThrow(/not set in the environment/);
+    expect(() => factory({ credentialRef: "GH_TEST_TOKEN", config: { repo: "acme/app" } })).toThrow(
+      /not set in the environment/,
+    );
     process.env.GH_TEST_TOKEN = "ghp_x";
     expect(() => factory({ credentialRef: "GH_TEST_TOKEN" })).toThrow(/missing config\.repo/);
-    expect(() => factory({ credentialRef: "GH_TEST_TOKEN", config: { repo: "../../etc" } })).toThrow(/owner\/repo/);
-    expect(() => factory({ credentialRef: "GH_TEST_TOKEN", config: { repo: "acme" } })).toThrow(/owner\/repo/);
     expect(() =>
-      factory({ credentialRef: "GH_TEST_TOKEN", config: { repo: "acme/app", baseUrl: "http://evil.example/api" } }),
+      factory({ credentialRef: "GH_TEST_TOKEN", config: { repo: "../../etc" } }),
+    ).toThrow(/owner\/repo/);
+    expect(() => factory({ credentialRef: "GH_TEST_TOKEN", config: { repo: "acme" } })).toThrow(
+      /owner\/repo/,
+    );
+    expect(() =>
+      factory({
+        credentialRef: "GH_TEST_TOKEN",
+        config: { repo: "acme/app", baseUrl: "http://evil.example/api" },
+      }),
     ).toThrow(/only https/);
     delete process.env.GH_TEST_TOKEN;
   });

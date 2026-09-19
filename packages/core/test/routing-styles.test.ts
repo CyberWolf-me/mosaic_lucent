@@ -42,12 +42,18 @@ describe("routedVertices — the one drawn-truth derivation", () => {
   const b = { x: 100, y: 300 };
 
   it("polyline passes the anchors and waypoints through untouched", () => {
-    const w = [{ x: 50, y: 100 }, { x: 50, y: 200 }];
+    const w = [
+      { x: 50, y: 100 },
+      { x: 50, y: 200 },
+    ];
     expect(routedVertices(a, b, w, "polyline")).toEqual([a, ...w, b]);
   });
 
   it("spline shares polyline's skeleton (curvature is the renderer's stroke)", () => {
-    const w = [{ x: 50, y: 100 }, { x: 50, y: 200 }];
+    const w = [
+      { x: 50, y: 100 },
+      { x: 50, y: 200 },
+    ];
     expect(routedVertices(a, b, w, "spline")).toEqual(routedVertices(a, b, w, "polyline"));
   });
 
@@ -71,7 +77,10 @@ describe("routedVertices — the one drawn-truth derivation", () => {
   });
 
   it("already-aligned segments pass through unsquared; diagonals still square", () => {
-    const w = [{ x: 0, y: 100 }, { x: 0, y: 200 }];
+    const w = [
+      { x: 0, y: 100 },
+      { x: 0, y: 200 },
+    ];
     // The two a→w hops are axis-aligned and pass through; the final
     // w→b diagonal (0,200)→(100,300) squares vertical-first (|dy|≥|dx|):
     // the elbow drops to b's row at w's column, then runs right.
@@ -89,7 +98,11 @@ describe("routedVertices — the one drawn-truth derivation", () => {
     // multiplied dense-board crossings 2.4×. The fixed rule's every vertex
     // stays within the segment's own bounding box: no vertex's y exceeds
     // max(u.y, v.y) of the segment that produced it.
-    const w = [{ x: 30, y: 90 }, { x: 70, y: 180 }, { x: 90, y: 260 }];
+    const w = [
+      { x: 30, y: 90 },
+      { x: 70, y: 180 },
+      { x: 90, y: 260 },
+    ];
     const v = routedVertices(a, b, w, "ortho");
     for (let i = 1; i + 1 < v.length; i++) {
       // Every interior vertex lies in the union box of its neighbours…
@@ -125,7 +138,11 @@ describe("the benchmark measures the drawn style", () => {
     ]);
     const { layout, routes } = computeLayoutWithRoutes(ws);
     const laid = applyRoutes(applyLayout(ws, layout), routes);
-    return { laid, layout, routed: Object.values(laid.edges).find((e) => e.route && e.route.length > 0) };
+    return {
+      laid,
+      layout,
+      routed: Object.values(laid.edges).find((e) => e.route && e.route.length > 0),
+    };
   }
 
   it("a spanning edge exists on the fixture and carries a route", () => {

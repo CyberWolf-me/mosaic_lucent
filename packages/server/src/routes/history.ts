@@ -1,9 +1,5 @@
 import type { RegisterRoutes } from "./context.js";
-import {
-  actorNamesFor,
-  historyItems,
-  loadVisibleLog,
-} from "../historyView.js";
+import { actorNamesFor, historyItems, loadVisibleLog } from "../historyView.js";
 import { MAX_HISTORY_WINDOW } from "../historyWindow.js";
 
 /**

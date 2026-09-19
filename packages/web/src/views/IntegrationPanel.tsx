@@ -59,19 +59,22 @@ export function IntegrationPanel({
   const [ackWarnings, setAckWarnings] = useState(false);
   /** The 409's warnings when an un-acked approve was refused — rendered so
    * the Send anyway choice is informed, never a blind click. */
-  const [refusedWarnings, setRefusedWarnings] = useState<Array<{ nodeId: string; field: string; reason: string }> | null>(null);
+  const [refusedWarnings, setRefusedWarnings] = useState<Array<{
+    nodeId: string;
+    field: string;
+    reason: string;
+  }> | null>(null);
 
   const connection = connections.find((c) => c.provider === provider);
   // The provider-specific config label: Linear shows the team, GitHub the
   // repo, Jira the project — the connection layer's own detail.
-  const configLabel =
-    connection?.config?.teamId
-      ? t("integrations.team", locale, { team: connection.config.teamId })
-      : connection?.config?.repo
-        ? t("integrations.repo", locale, { repo: connection.config.repo })
-        : connection?.config?.projectKey
-          ? t("integrations.project", locale, { project: connection.config.projectKey })
-          : "";
+  const configLabel = connection?.config?.teamId
+    ? t("integrations.team", locale, { team: connection.config.teamId })
+    : connection?.config?.repo
+      ? t("integrations.repo", locale, { repo: connection.config.repo })
+      : connection?.config?.projectKey
+        ? t("integrations.project", locale, { project: connection.config.projectKey })
+        : "";
 
   const propose = async () => {
     if (!boardId) return;
@@ -136,7 +139,8 @@ export function IntegrationPanel({
       // Send anyway choice instead of a bare error string.
       if (Array.isArray((result as { warnings?: unknown }).warnings)) {
         setRefusedWarnings(
-          ((result as { warnings?: Array<{ nodeId: string; field: string; reason: string }> }).warnings) ?? [],
+          (result as { warnings?: Array<{ nodeId: string; field: string; reason: string }> })
+            .warnings ?? [],
         );
       } else {
         setError(result.error ?? "decision failed");
@@ -166,7 +170,13 @@ export function IntegrationPanel({
   const header = (text: string): React.ReactNode => (
     <div
       className="mono"
-      style={{ fontSize: 10, letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--ink-3)", padding: "10px 12px 4px" }}
+      style={{
+        fontSize: 10,
+        letterSpacing: "0.08em",
+        textTransform: "uppercase",
+        color: "var(--ink-3)",
+        padding: "10px 12px 4px",
+      }}
     >
       {text}
     </div>
@@ -225,17 +235,26 @@ export function IntegrationPanel({
           {/* The connection-state UX (the review's ask): never pretend the
               feature is self-service when the admin route is API-only. */}
           {!connection && (
-            <div className="mono" style={{ padding: 24, fontSize: 12, color: "var(--ink-3)", textAlign: "center" }}>
+            <div
+              className="mono"
+              style={{ padding: 24, fontSize: 12, color: "var(--ink-3)", textAlign: "center" }}
+            >
               {t("integrations.not_connected", locale, { provider })}
             </div>
           )}
           {connection && connection.status !== "active" && (
-            <div className="mono" style={{ padding: 24, fontSize: 12, color: "var(--sig-red)", textAlign: "center" }}>
+            <div
+              className="mono"
+              style={{ padding: 24, fontSize: 12, color: "var(--sig-red)", textAlign: "center" }}
+            >
               {t("integrations.connection_disabled", locale, { provider })}
             </div>
           )}
           {connection && connection.status === "active" && !preview && !results && (
-            <div className="mono" style={{ padding: 24, fontSize: 12, color: "var(--ink-3)", textAlign: "center" }}>
+            <div
+              className="mono"
+              style={{ padding: 24, fontSize: 12, color: "var(--ink-3)", textAlign: "center" }}
+            >
               {t("integrations.panel.hint", locale)}
             </div>
           )}
@@ -243,7 +262,14 @@ export function IntegrationPanel({
           {preview && (
             <>
               {header(t("integrations.preview.statement", locale))}
-              <div style={{ padding: "6px 12px", fontSize: 12, color: "var(--ink-1)", lineHeight: 1.5 }}>
+              <div
+                style={{
+                  padding: "6px 12px",
+                  fontSize: 12,
+                  color: "var(--ink-1)",
+                  lineHeight: 1.5,
+                }}
+              >
                 {preview.preview.statement}
               </div>
               {/* Stage D9, the AI-origin preview: the CONCRETE SELECTION
@@ -264,12 +290,15 @@ export function IntegrationPanel({
                     })}
                   </div>
                 )}
-              {preview.preview.creates.length > 0 && header(
-                t("integrations.preview.creates", locale, { n: preview.preview.creates.length }),
-              )}
+              {preview.preview.creates.length > 0 &&
+                header(
+                  t("integrations.preview.creates", locale, { n: preview.preview.creates.length }),
+                )}
               {preview.preview.creates.map((c) => (
                 <div key={c.nodeId} style={entryStyle(false)}>
-                  <span className="mono" style={{ fontSize: 10, color: "var(--sig-green)" }}>＋</span>
+                  <span className="mono" style={{ fontSize: 10, color: "var(--sig-green)" }}>
+                    ＋
+                  </span>
                   <div style={{ minWidth: 0 }}>
                     <div style={{ fontSize: 12.5, color: "var(--ink-0)" }}>{c.title}</div>
                     <div className="mono" style={{ fontSize: 10, color: "var(--ink-3)" }}>
@@ -279,26 +308,37 @@ export function IntegrationPanel({
                         CANNOT represent faithfully for this item. Never a
                         silent drop; approve requires the explicit ack. */}
                     {c.warnings?.map((w) => (
-                      <div key={w.field} className="mono" style={{ fontSize: 10, color: "var(--amber-2)", marginTop: 1 }}>
+                      <div
+                        key={w.field}
+                        className="mono"
+                        style={{ fontSize: 10, color: "var(--amber-2)", marginTop: 1 }}
+                      >
                         ⚠ {w.reason}
                       </div>
                     ))}
                   </div>
                 </div>
               ))}
-              {preview.preview.updates.length > 0 && header(
-                t("integrations.preview.updates", locale, { n: preview.preview.updates.length }),
-              )}
+              {preview.preview.updates.length > 0 &&
+                header(
+                  t("integrations.preview.updates", locale, { n: preview.preview.updates.length }),
+                )}
               {preview.preview.updates.map((u) => (
                 <div key={u.nodeId} style={entryStyle(false)}>
-                  <span className="mono" style={{ fontSize: 10, color: "var(--amber-2)" }}>↺</span>
+                  <span className="mono" style={{ fontSize: 10, color: "var(--amber-2)" }}>
+                    ↺
+                  </span>
                   <div style={{ minWidth: 0 }}>
                     <div style={{ fontSize: 12.5, color: "var(--ink-0)" }}>{u.title}</div>
                     <div className="mono" style={{ fontSize: 10, color: "var(--ink-3)" }}>
                       {[u.externalId, u.status].filter(Boolean).join(" · ")}
                     </div>
                     {u.warnings?.map((w) => (
-                      <div key={w.field} className="mono" style={{ fontSize: 10, color: "var(--amber-2)", marginTop: 1 }}>
+                      <div
+                        key={w.field}
+                        className="mono"
+                        style={{ fontSize: 10, color: "var(--amber-2)", marginTop: 1 }}
+                      >
                         ⚠ {w.reason}
                       </div>
                     ))}
@@ -310,14 +350,20 @@ export function IntegrationPanel({
                   user typed rides beside it: the draft's provenance. */}
               {preview.action.origin === "ai" && preview.preview.explanation && (
                 <div style={{ padding: "8px 12px 4px" }}>
-                  <div className="mono" style={{ fontSize: 10, color: "var(--ink-3)", marginBottom: 2 }}>
+                  <div
+                    className="mono"
+                    style={{ fontSize: 10, color: "var(--ink-3)", marginBottom: 2 }}
+                  >
                     {t("integrations.ai.rationale", locale)}
                   </div>
                   <div style={{ fontSize: 11.5, color: "var(--ink-2)", lineHeight: 1.5 }}>
                     “{preview.preview.explanation}”
                   </div>
                   {preview.action.provenance?.request && (
-                    <div className="mono" style={{ fontSize: 10, color: "var(--ink-3)", marginTop: 4 }}>
+                    <div
+                      className="mono"
+                      style={{ fontSize: 10, color: "var(--ink-3)", marginTop: 4 }}
+                    >
                       {t("integrations.ai.requested", locale, {
                         request: preview.action.provenance.request,
                       })}
@@ -330,7 +376,12 @@ export function IntegrationPanel({
                 <div
                   key={i}
                   className="mono"
-                  style={{ padding: "2px 12px", fontSize: 10, color: "var(--amber-2)", lineHeight: 1.5 }}
+                  style={{
+                    padding: "2px 12px",
+                    fontSize: 10,
+                    color: "var(--amber-2)",
+                    lineHeight: 1.5,
+                  }}
                 >
                   ⚠ {w}
                 </div>
@@ -351,7 +402,13 @@ export function IntegrationPanel({
               </div>
               {results.results?.map((r, i) => (
                 <div key={i} style={entryStyle(false)}>
-                  <span className="mono" style={{ fontSize: 10, color: r.action === "failed" ? "var(--sig-red)" : "var(--sig-green)" }}>
+                  <span
+                    className="mono"
+                    style={{
+                      fontSize: 10,
+                      color: r.action === "failed" ? "var(--sig-red)" : "var(--sig-green)",
+                    }}
+                  >
                     {r.action === "failed" ? "✕" : "✓"}
                   </span>
                   <div style={{ minWidth: 0 }}>
@@ -381,7 +438,10 @@ export function IntegrationPanel({
           )}
 
           {error && (
-            <div className="mono" style={{ padding: "10px 12px", fontSize: 11, color: "var(--sig-red)" }}>
+            <div
+              className="mono"
+              style={{ padding: "10px 12px", fontSize: 11, color: "var(--sig-red)" }}
+            >
               {error}
             </div>
           )}
@@ -391,11 +451,18 @@ export function IntegrationPanel({
               consenting to before the button exists. */}
           {refusedWarnings && !results && (
             <div style={{ padding: "10px 12px" }}>
-              <div className="mono" style={{ fontSize: 10, color: "var(--amber-2)", marginBottom: 4 }}>
+              <div
+                className="mono"
+                style={{ fontSize: 10, color: "var(--amber-2)", marginBottom: 4 }}
+              >
                 {t("integrations.warnings.title", locale)}
               </div>
               {refusedWarnings.map((w, i) => (
-                <div key={i} className="mono" style={{ fontSize: 10.5, color: "var(--amber-2)", lineHeight: 1.5 }}>
+                <div
+                  key={i}
+                  className="mono"
+                  style={{ fontSize: 10.5, color: "var(--amber-2)", lineHeight: 1.5 }}
+                >
                   ⚠ {w.reason}
                 </div>
               ))}
@@ -404,7 +471,14 @@ export function IntegrationPanel({
         </div>
 
         {connection && connection.status === "active" && (
-          <div style={{ display: "flex", gap: 8, padding: "10px 14px", borderTop: "1px solid var(--stroke-1)" }}>
+          <div
+            style={{
+              display: "flex",
+              gap: 8,
+              padding: "10px 14px",
+              borderTop: "1px solid var(--stroke-1)",
+            }}
+          >
             {!preview && !results && (
               <>
                 {/* Stage D9: Ask Lucent to draft — the narrowing agent. The
@@ -426,17 +500,32 @@ export function IntegrationPanel({
                 >
                   {busy ? "…" : t("integrations.ai.draft", locale)}
                 </button>
-                <button className="btn amber" style={{ height: 28, fontSize: 12 }} disabled={busy} onClick={propose}>
+                <button
+                  className="btn amber"
+                  style={{ height: 28, fontSize: 12 }}
+                  disabled={busy}
+                  onClick={propose}
+                >
                   {t("integrations.panel.propose", locale)}
                 </button>
               </>
             )}
             {preview && !results && !refusedWarnings && (
               <>
-                <button className="btn amber" style={{ height: 28, fontSize: 12 }} disabled={busy} onClick={() => decide("approve")}>
+                <button
+                  className="btn amber"
+                  style={{ height: 28, fontSize: 12 }}
+                  disabled={busy}
+                  onClick={() => decide("approve")}
+                >
                   {busy ? "…" : t("integrations.panel.approve", locale)}
                 </button>
-                <button className="btn" style={{ height: 28, fontSize: 12 }} disabled={busy} onClick={() => decide("reject")}>
+                <button
+                  className="btn"
+                  style={{ height: 28, fontSize: 12 }}
+                  disabled={busy}
+                  onClick={() => decide("reject")}
+                >
                   {t("integrations.panel.reject", locale)}
                 </button>
               </>
@@ -458,7 +547,11 @@ export function IntegrationPanel({
                 >
                   {t("integrations.panel.sendAnyway", locale)}
                 </button>
-                <button className="btn" style={{ height: 28, fontSize: 12 }} onClick={() => setRefusedWarnings(null)}>
+                <button
+                  className="btn"
+                  style={{ height: 28, fontSize: 12 }}
+                  onClick={() => setRefusedWarnings(null)}
+                >
                   {t("integrations.panel.cancel", locale)}
                 </button>
               </>
@@ -484,7 +577,14 @@ export function IntegrationPanel({
           lineHeight: 1.6,
         }}
       >
-        <div style={{ fontSize: 13, color: "var(--ink-0)", fontVariationSettings: "'wght' 550", marginBottom: 10 }}>
+        <div
+          style={{
+            fontSize: 13,
+            color: "var(--ink-0)",
+            fontVariationSettings: "'wght' 550",
+            marginBottom: 10,
+          }}
+        >
           {t("integrations.context.title", locale)}
         </div>
         <p>{t("integrations.context.body", locale)}</p>

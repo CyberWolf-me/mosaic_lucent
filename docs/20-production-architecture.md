@@ -22,7 +22,7 @@
 > yet emitted rather than on missing infrastructure.
 >
 > **Two items carried forward honestly** (see their entries below): a named
-> staging *environment*, and registering the P3 queue metrics so P6's
+> staging _environment_, and registering the P3 queue metrics so P6's
 > commented queue rules can be enabled. Both are recorded rather than claimed.
 >
 > **Freeze legality (docs/17).** Everything in P0–P6 is production safety,
@@ -59,38 +59,38 @@ four areas, and the phases follow them in dependency order:
 
 ## 2. Coverage audit — advisory section → code
 
-| Advisory | What it asks | Status | Where |
-| --- | --- | --- | --- |
-| §1, §34, §39 | Modular monolith; the not-build list; split only on evidence | **Already the shape** | npm workspaces, six packages; ADR 0001 (no CRDT), 0004 (pg_notify over Redis); nothing on the not-build list is present |
-| §2 | Canonical / derived / ephemeral state separation | **True in code, unwritten as doctrine** | Canonical = op log + snapshots (`store/pg-boards.ts`), meetings, ledger; derived = intelligence/search projections (ADR 0026, `retrieval.ts` — "the seam is `retrieve(query, corpus)`"); ephemeral = presence/cursors. The taxonomy itself has no ADR → P0 |
-| §3–§5 | Operation protocol order (persist before broadcast); no CRDT/Kafka | **Shipped (Stage B)** | `room.ts` commit path; `boardSync.ts` resync-on-reconnect; ADRs 0001/0009/0016 |
-| §4, §20 | Realtime in three layers; notify = `{boardId, seq}` not payloads | **Shipped (M3)** | `store/pg-fanout.ts` (LISTEN on a dedicated client, resync-on-reconnect, `FANOUT_MAX_PAYLOAD_BYTES` guard) — the message shape is exactly the advisory's |
-| §6 | AI orchestrator boundary; model outside the mutation boundary | **Shipped** | `generate.ts` pipeline (context → provider → schema → semantic validation → repair); ops validated before commit; ADR 0005 |
-| §7 | Expensive AI becomes a job | **Gap** | `/api/generate`, `/api/generate/stream`, `/api/image` all run on the request path → P3/P4 |
-| §8 | Three worker families | **Gap** (nothing async exists yet) | → P3 (substrate) then P4 (families) |
-| §9 | Sweeps leave the API process | **Gap** | `main.ts:551–807`: four `setInterval` arms (usage/limiter/ticket prune, Stripe sweep, execution-ledger sweep + link GC, webhook sweep, op-log prune) → P3 |
-| §10, §11 | One Postgres, logical domains; scale order indexes→replicas | **Already so** | 38 distinct tables across exactly the advisory's identity/workspace/meetings/execution/integrations/platform domains; pool `max: 10` (`db/client.ts`); no premature sharding |
-| §12 | Redis only on measured need | **Stance already held** | None installed. But the in-memory `Limiter`/`UsageTracker` are the honest multi-instance gap → P5 |
-| §13 | FTS + pgvector before Elasticsearch, behind the seam | **Seam exists** | ADR 0024: one retrieval boundary; pgvector is an implementation detail behind it → P7 |
-| §14 | Assets: bytes in object storage, metadata in Postgres | **Shipped (M7)** | `assets.ts` blob backend (memory/disk/S3) + `pg-assets.ts`; no blob columns in the DB |
-| §15 | Identity → session → org → board → action authorization | **Shipped** | `routes/context.ts` `RouteServices` is designed around exactly this: guards are functions, not stores, so a route cannot re-derive authorization wrong |
-| §16 | Tenant isolation as invariant, tested through every surface | **Mostly shipped** | `crossTenant.test.ts` (REST, WS, share links, members, deletes); audit arm: MCP/assets/exports/webhooks paths → P5 extends the test matrix |
-| §17 | Provider factory + exactly-once ledger + human-gated inbound | **Shipped (D4–D8)** | `integrations/provider.ts`, `ledger.ts`, `inbound.ts`; ADRs 0030–0036 |
-| §18, §19 | Domain events + transactional outbox | **Gap** | Only `telemetry.subscribe` (metrics) exists; no outbox anywhere → P2 |
-| §21 | One correlation ID per request, domain IDs where applicable | **Partial** | `requestId` per request (`app.ts` `requestIdOf`, `x-request-id` echoed, in error bodies) but it does not flow into telemetry events, generate outcomes, or the ledger's `providerRequestId` → P1 |
-| §22 | Mandatory metrics | **Mostly shipped** | `/metrics/prometheus`; generate outcome ledger, product counters, AI p50/p95 (`telemetry.ts`); missing only queue/worker metrics, which arrive with P3 |
-| §23 | Alerts mapped to runbooks | **Prose only** | SLOs + burn alerts written in `docs/reliability/slo.md`; runbooks exist (`docs/runbooks/`); no PrometheusRule manifests in the chart → P6 |
-| §24 | CI → image → registry → staging → smoke → prod | **Mostly shipped** | `ci.yml` (PG service, typecheck, tests, build), `codeql.yml`, scheduled k6 `load.yml`, `release.yml`, image pinned by sha, deploy/rollback runbooks. No staging definition → P6 |
-| §25, §35 | Kubernetes as orchestrator; split criteria | **Stance held** | Helm chart, PDB, ServiceMonitor; replicaCount 2. One chart defect found in audit → P0 |
-| §26 | Stateless API servers | **Partial** | Durable state is in PG ✓; rooms documented as live projections ✓; but in-memory `Limiter`, `UsageTracker`, `InMemoryTicketStore` are process-local → P5 (note: `gateMonthly` entitlements ARE Postgres-backed — only the sliding-window/day counters are not) |
-| §27 | Room = live projection, resync on reconnect | **Shipped** | `realtime.ts`, `boardSync.ts` lastSeenSeq catch-up, fanout resync replay |
-| §28 | Layout as its own subsystem, heavy layout off the main thread | **Shipped past the advisory** | `core/src/layout.ts` engines + `DiagramLayoutEngine` boundary; ELK in a nested Web Worker with respawn and fallback (ADRs 0038/0039) |
-| §29 | MCP through the same backend, never a second one | **Shipped** | `packages/mcp` → `POST /api/boards/:id/ops` + `RemoteBoardSession`; same validator, same authorization |
-| §30–§33 | Request/meeting/execution/inbound lifecycles | **Shipped** | §30 = generate pipeline end to end; §31 = meeting routes + transcripts + provenance; §32/§33 = ledger claim/recovery + human-gated inbound queue |
-| §36 | Company-scale picture | Reference | Nothing to build; the P0 diagrams are its present-day form |
-| §37 | The priority list (Now/Next/Later) | **The input to this doc** | P0–P7 below are its 18 items re-sequenced by dependency |
-| §38 | One mutation path invariant | **True, unpinned** | Every surface converges on the validated op log. Deserves an ADR so it survives future contributors → P0 |
-| §39 | Two diagrams: logical + runtime | **Gap** | §3 and §4 below close it |
+| Advisory     | What it asks                                                       | Status                                  | Where                                                                                                                                                                                                                                                         |
+| ------------ | ------------------------------------------------------------------ | --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| §1, §34, §39 | Modular monolith; the not-build list; split only on evidence       | **Already the shape**                   | npm workspaces, six packages; ADR 0001 (no CRDT), 0004 (pg_notify over Redis); nothing on the not-build list is present                                                                                                                                       |
+| §2           | Canonical / derived / ephemeral state separation                   | **True in code, unwritten as doctrine** | Canonical = op log + snapshots (`store/pg-boards.ts`), meetings, ledger; derived = intelligence/search projections (ADR 0026, `retrieval.ts` — "the seam is `retrieve(query, corpus)`"); ephemeral = presence/cursors. The taxonomy itself has no ADR → P0    |
+| §3–§5        | Operation protocol order (persist before broadcast); no CRDT/Kafka | **Shipped (Stage B)**                   | `room.ts` commit path; `boardSync.ts` resync-on-reconnect; ADRs 0001/0009/0016                                                                                                                                                                                |
+| §4, §20      | Realtime in three layers; notify = `{boardId, seq}` not payloads   | **Shipped (M3)**                        | `store/pg-fanout.ts` (LISTEN on a dedicated client, resync-on-reconnect, `FANOUT_MAX_PAYLOAD_BYTES` guard) — the message shape is exactly the advisory's                                                                                                      |
+| §6           | AI orchestrator boundary; model outside the mutation boundary      | **Shipped**                             | `generate.ts` pipeline (context → provider → schema → semantic validation → repair); ops validated before commit; ADR 0005                                                                                                                                    |
+| §7           | Expensive AI becomes a job                                         | **Gap**                                 | `/api/generate`, `/api/generate/stream`, `/api/image` all run on the request path → P3/P4                                                                                                                                                                     |
+| §8           | Three worker families                                              | **Gap** (nothing async exists yet)      | → P3 (substrate) then P4 (families)                                                                                                                                                                                                                           |
+| §9           | Sweeps leave the API process                                       | **Gap**                                 | `main.ts:551–807`: four `setInterval` arms (usage/limiter/ticket prune, Stripe sweep, execution-ledger sweep + link GC, webhook sweep, op-log prune) → P3                                                                                                     |
+| §10, §11     | One Postgres, logical domains; scale order indexes→replicas        | **Already so**                          | 38 distinct tables across exactly the advisory's identity/workspace/meetings/execution/integrations/platform domains; pool `max: 10` (`db/client.ts`); no premature sharding                                                                                  |
+| §12          | Redis only on measured need                                        | **Stance already held**                 | None installed. But the in-memory `Limiter`/`UsageTracker` are the honest multi-instance gap → P5                                                                                                                                                             |
+| §13          | FTS + pgvector before Elasticsearch, behind the seam               | **Seam exists**                         | ADR 0024: one retrieval boundary; pgvector is an implementation detail behind it → P7                                                                                                                                                                         |
+| §14          | Assets: bytes in object storage, metadata in Postgres              | **Shipped (M7)**                        | `assets.ts` blob backend (memory/disk/S3) + `pg-assets.ts`; no blob columns in the DB                                                                                                                                                                         |
+| §15          | Identity → session → org → board → action authorization            | **Shipped**                             | `routes/context.ts` `RouteServices` is designed around exactly this: guards are functions, not stores, so a route cannot re-derive authorization wrong                                                                                                        |
+| §16          | Tenant isolation as invariant, tested through every surface        | **Mostly shipped**                      | `crossTenant.test.ts` (REST, WS, share links, members, deletes); audit arm: MCP/assets/exports/webhooks paths → P5 extends the test matrix                                                                                                                    |
+| §17          | Provider factory + exactly-once ledger + human-gated inbound       | **Shipped (D4–D8)**                     | `integrations/provider.ts`, `ledger.ts`, `inbound.ts`; ADRs 0030–0036                                                                                                                                                                                         |
+| §18, §19     | Domain events + transactional outbox                               | **Gap**                                 | Only `telemetry.subscribe` (metrics) exists; no outbox anywhere → P2                                                                                                                                                                                          |
+| §21          | One correlation ID per request, domain IDs where applicable        | **Partial**                             | `requestId` per request (`app.ts` `requestIdOf`, `x-request-id` echoed, in error bodies) but it does not flow into telemetry events, generate outcomes, or the ledger's `providerRequestId` → P1                                                              |
+| §22          | Mandatory metrics                                                  | **Mostly shipped**                      | `/metrics/prometheus`; generate outcome ledger, product counters, AI p50/p95 (`telemetry.ts`); missing only queue/worker metrics, which arrive with P3                                                                                                        |
+| §23          | Alerts mapped to runbooks                                          | **Prose only**                          | SLOs + burn alerts written in `docs/reliability/slo.md`; runbooks exist (`docs/runbooks/`); no PrometheusRule manifests in the chart → P6                                                                                                                     |
+| §24          | CI → image → registry → staging → smoke → prod                     | **Mostly shipped**                      | `ci.yml` (PG service, typecheck, tests, build), `codeql.yml`, scheduled k6 `load.yml`, `release.yml`, image pinned by sha, deploy/rollback runbooks. No staging definition → P6                                                                               |
+| §25, §35     | Kubernetes as orchestrator; split criteria                         | **Stance held**                         | Helm chart, PDB, ServiceMonitor; replicaCount 2. One chart defect found in audit → P0                                                                                                                                                                         |
+| §26          | Stateless API servers                                              | **Partial**                             | Durable state is in PG ✓; rooms documented as live projections ✓; but in-memory `Limiter`, `UsageTracker`, `InMemoryTicketStore` are process-local → P5 (note: `gateMonthly` entitlements ARE Postgres-backed — only the sliding-window/day counters are not) |
+| §27          | Room = live projection, resync on reconnect                        | **Shipped**                             | `realtime.ts`, `boardSync.ts` lastSeenSeq catch-up, fanout resync replay                                                                                                                                                                                      |
+| §28          | Layout as its own subsystem, heavy layout off the main thread      | **Shipped past the advisory**           | `core/src/layout.ts` engines + `DiagramLayoutEngine` boundary; ELK in a nested Web Worker with respawn and fallback (ADRs 0038/0039)                                                                                                                          |
+| §29          | MCP through the same backend, never a second one                   | **Shipped**                             | `packages/mcp` → `POST /api/boards/:id/ops` + `RemoteBoardSession`; same validator, same authorization                                                                                                                                                        |
+| §30–§33      | Request/meeting/execution/inbound lifecycles                       | **Shipped**                             | §30 = generate pipeline end to end; §31 = meeting routes + transcripts + provenance; §32/§33 = ledger claim/recovery + human-gated inbound queue                                                                                                              |
+| §36          | Company-scale picture                                              | Reference                               | Nothing to build; the P0 diagrams are its present-day form                                                                                                                                                                                                    |
+| §37          | The priority list (Now/Next/Later)                                 | **The input to this doc**               | P0–P7 below are its 18 items re-sequenced by dependency                                                                                                                                                                                                       |
+| §38          | One mutation path invariant                                        | **True, unpinned**                      | Every surface converges on the validated op log. Deserves an ADR so it survives future contributors → P0                                                                                                                                                      |
+| §39          | Two diagrams: logical + runtime                                    | **Gap**                                 | §3 and §4 below close it                                                                                                                                                                                                                                      |
 
 ## 3. Logical architecture (the first diagram)
 
@@ -295,12 +295,12 @@ when scaling demands it (`lucent-ai-worker × M` etc.).
 
 - [x] **AI worker** — the family with a real workload today:
   - [x] `/api/image` becomes a job when the provider is not the mock:
-      POST returns `{jobId}` + status endpoint; progress rides the P2 outbox
-      → WS/notifications; result commits as an operation (image shape) or
-      asset link, never a direct canvas write. **Owner-decision flag:** this
-      changes a shipped synchronous contract — the freeze amendment records
-      the justification (request-slot exhaustion is production safety, but
-      the client change is user-visible).
+        POST returns `{jobId}` + status endpoint; progress rides the P2 outbox
+        → WS/notifications; result commits as an operation (image shape) or
+        asset link, never a direct canvas write. **Owner-decision flag:** this
+        changes a shipped synchronous contract — the freeze amendment records
+        the justification (request-slot exhaustion is production safety, but
+        the client change is user-visible).
   - [x] Large `/api/generate` (node count over a measured threshold) opts
         into the same path; small generations stay streaming-sync — the
         advisory's §7 distinction, and the streaming UX depends on it.
@@ -340,8 +340,7 @@ states do not:
       interface and the in-memory store's test shape carry over).
 - [x] **Ingress**: sticky annotation documented in `charts/lucent/README.md`
       if (b) was chosen; if (a), note that the ingress stays stateless.
-- [x] **Extend the rehearsal:** `deploy-rehearsal.ts` gains a third instance
-      + a worker; assertions: rate limit enforced across instances (hit A
+- [x] **Extend the rehearsal:** `deploy-rehearsal.ts` gains a third instance + a worker; assertions: rate limit enforced across instances (hit A
       and B alternately, total = limit), ticket mint on A / upgrade on B
       connects.
 - [x] **Tenant-isolation audit arm** (advisory §16): the crossTenant matrix
@@ -370,7 +369,7 @@ missing is the wiring.
       `LUCENT_ROLE` split this plan built is what a staging definition needs
       (a staging deploy runs `api` + `worker` against a staging database), and
       `docs/runbooks/deploy.md` covers image pinning and rollback. What is NOT
-      done: a named staging *environment* — provider, DNS, separate secret
+      done: a named staging _environment_ — provider, DNS, separate secret
       store. That is an infrastructure decision with a cost, not a chart
       change, so it is carried forward rather than claimed.
 - [x] **Acceptance:** `helm template` emits the rules; each rule annotation

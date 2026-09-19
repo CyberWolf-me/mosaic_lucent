@@ -18,7 +18,12 @@ import {
 describe("FakeProvider", () => {
   it("creates deterministic tasks with urls, mapping the D1 status to the fake vocabulary", async () => {
     const fake = new FakeProvider();
-    const t1 = await fake.createTask({ title: "Prepare launch brief", assignee: "David", dueDate: "2026-09-11", status: "assigned" });
+    const t1 = await fake.createTask({
+      title: "Prepare launch brief",
+      assignee: "David",
+      dueDate: "2026-09-11",
+      status: "assigned",
+    });
     const t2 = await fake.createTask({ title: "QA pass", status: "in_progress" });
     expect(t1.externalId).toBe("fake-1");
     expect(t1.url).toBe("https://fake.example.com/task/fake-1");
@@ -94,7 +99,13 @@ describe("InMemoryIntegrationStore", () => {
     );
     expect(first.status).toBe("active");
     const second = await store.putConnection(
-      { orgId: "org1", provider: "fake", credentialRef: "LUCENT_FAKE_KEY_V2", scopes: ["tasks:write"], createdBy: "u1" },
+      {
+        orgId: "org1",
+        provider: "fake",
+        credentialRef: "LUCENT_FAKE_KEY_V2",
+        scopes: ["tasks:write"],
+        createdBy: "u1",
+      },
       LATER,
     );
     // One connection per (org, provider): the second PUT replaced, not stacked.
@@ -108,7 +119,10 @@ describe("InMemoryIntegrationStore", () => {
 
   it("connections are org-scoped; another org sees none", async () => {
     const store = new InMemoryIntegrationStore();
-    await store.putConnection({ orgId: "org1", provider: "fake", credentialRef: "R", createdBy: "u" }, NOW);
+    await store.putConnection(
+      { orgId: "org1", provider: "fake", credentialRef: "R", createdBy: "u" },
+      NOW,
+    );
     expect(await store.connectionsForOrg("org2")).toEqual([]);
     expect(await store.connection("org2", "fake")).toBeUndefined();
     expect(await store.connection("org1", "fake")).toBeDefined();
@@ -116,7 +130,10 @@ describe("InMemoryIntegrationStore", () => {
 
   it("setConnectionStatus disables without deleting — the reference survives the audit trail", async () => {
     const store = new InMemoryIntegrationStore();
-    await store.putConnection({ orgId: "org1", provider: "fake", credentialRef: "R", createdBy: "u" }, NOW);
+    await store.putConnection(
+      { orgId: "org1", provider: "fake", credentialRef: "R", createdBy: "u" },
+      NOW,
+    );
     expect(await store.setConnectionStatus("org1", "fake", "disabled", LATER)).toBe(true);
     const c = await store.connection("org1", "fake");
     expect(c!.status).toBe("disabled");
@@ -127,11 +144,26 @@ describe("InMemoryIntegrationStore", () => {
   it("linkTask upserts by (board, node, provider) — re-link replaces, never stacks", async () => {
     const store = new InMemoryIntegrationStore();
     const l1 = await store.linkTask(
-      { orgId: "org1", boardId: "b1", nodeId: "n1", provider: "fake", externalId: "fake-1", url: "u", lastSyncedStatus: "todo" },
+      {
+        orgId: "org1",
+        boardId: "b1",
+        nodeId: "n1",
+        provider: "fake",
+        externalId: "fake-1",
+        url: "u",
+        lastSyncedStatus: "todo",
+      },
       NOW,
     );
     await store.linkTask(
-      { orgId: "org1", boardId: "b1", nodeId: "n1", provider: "fake", externalId: "fake-9", lastSyncedStatus: "done" },
+      {
+        orgId: "org1",
+        boardId: "b1",
+        nodeId: "n1",
+        provider: "fake",
+        externalId: "fake-9",
+        lastSyncedStatus: "done",
+      },
       LATER,
     );
     const links = await store.linksForNode("b1", "n1");
@@ -146,14 +178,28 @@ describe("InMemoryIntegrationStore", () => {
   it("links are board-scoped; another board's link list does not leak", async () => {
     const store = new InMemoryIntegrationStore();
     await store.linkTask(
-      { orgId: "org1", boardId: "b1", nodeId: "n1", provider: "fake", externalId: "fake-1", lastSyncedStatus: "todo" },
+      {
+        orgId: "org1",
+        boardId: "b1",
+        nodeId: "n1",
+        provider: "fake",
+        externalId: "fake-1",
+        lastSyncedStatus: "todo",
+      },
       NOW,
     );
     expect(await store.linksForBoard("b2")).toEqual([]);
     expect(await store.linksForNode("b2", "n1")).toEqual([]);
     // Same node id on another board is a DIFFERENT link (board+node is the key).
     await store.linkTask(
-      { orgId: "org1", boardId: "b2", nodeId: "n1", provider: "fake", externalId: "fake-2", lastSyncedStatus: "todo" },
+      {
+        orgId: "org1",
+        boardId: "b2",
+        nodeId: "n1",
+        provider: "fake",
+        externalId: "fake-2",
+        lastSyncedStatus: "todo",
+      },
       NOW,
     );
     expect((await store.linksForBoard("b1")).map((l) => l.externalId)).toEqual(["fake-1"]);
@@ -162,8 +208,28 @@ describe("InMemoryIntegrationStore", () => {
 
   it("unlink drops exactly the (board, node, provider) link", async () => {
     const store = new InMemoryIntegrationStore();
-    await store.linkTask({ orgId: "o", boardId: "b1", nodeId: "n1", provider: "fake", externalId: "fake-1", lastSyncedStatus: "todo" }, NOW);
-    await store.linkTask({ orgId: "o", boardId: "b1", nodeId: "n1", provider: "linear", externalId: "LIN-1", lastSyncedStatus: "todo" }, NOW);
+    await store.linkTask(
+      {
+        orgId: "o",
+        boardId: "b1",
+        nodeId: "n1",
+        provider: "fake",
+        externalId: "fake-1",
+        lastSyncedStatus: "todo",
+      },
+      NOW,
+    );
+    await store.linkTask(
+      {
+        orgId: "o",
+        boardId: "b1",
+        nodeId: "n1",
+        provider: "linear",
+        externalId: "LIN-1",
+        lastSyncedStatus: "todo",
+      },
+      NOW,
+    );
     expect(await store.unlink("b1", "n1", "fake")).toBe(true);
     expect(await store.linksForNode("b1", "n1")).toHaveLength(1); // linear stays
     expect(await store.unlink("b1", "n1", "fake")).toBe(false); // already gone
@@ -171,7 +237,12 @@ describe("InMemoryIntegrationStore", () => {
 
   it("normalizeConnection rejects unknown providers and bad references", () => {
     expect(() =>
-      normalizeConnection({ orgId: "o", provider: "linearz" as never, credentialRef: "R", createdBy: "u" }),
+      normalizeConnection({
+        orgId: "o",
+        provider: "linearz" as never,
+        credentialRef: "R",
+        createdBy: "u",
+      }),
     ).toThrow(/unknown provider/);
     expect(() =>
       normalizeConnection({ orgId: "o", provider: "fake", credentialRef: "   ", createdBy: "u" }),
@@ -197,7 +268,12 @@ describe("InMemoryIntegrationStore", () => {
   it("the admin view fingerprints the reference, never echoes it in full", async () => {
     const store = new InMemoryIntegrationStore();
     const c = await store.putConnection(
-      { orgId: "org1", provider: "fake", credentialRef: "LUCENT_VERY_LONG_REFERENCE_NAME_FOR_ADMIN", createdBy: "u1" },
+      {
+        orgId: "org1",
+        provider: "fake",
+        credentialRef: "LUCENT_VERY_LONG_REFERENCE_NAME_FOR_ADMIN",
+        createdBy: "u1",
+      },
       NOW,
     );
     const view = connectionView(c);

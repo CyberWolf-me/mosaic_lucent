@@ -57,7 +57,10 @@ export interface DiagramLayoutEngine {
     workspace: Workspace,
     groupId: string,
     options?: LayoutOptions,
-  ): { layout: LayoutResult; routes: EdgeRoutes } | null | Promise<{ layout: LayoutResult; routes: EdgeRoutes } | null>;
+  ):
+    | { layout: LayoutResult; routes: EdgeRoutes }
+    | null
+    | Promise<{ layout: LayoutResult; routes: EdgeRoutes } | null>;
 }
 
 /**

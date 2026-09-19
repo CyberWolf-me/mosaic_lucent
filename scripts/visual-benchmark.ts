@@ -56,7 +56,9 @@ async function runRoutingSweep(): Promise<void> {
     "eMean".padStart(7),
     "policy".padStart(9),
   ].join("");
-  console.log(`Routing-style sweep — engine: ${engine.id} (layout fixed; the DRAWN style varies)\n`);
+  console.log(
+    `Routing-style sweep — engine: ${engine.id} (layout fixed; the DRAWN style varies)\n`,
+  );
   console.log(header);
   console.log("-".repeat(header.length));
   for (const factory of BOARD_FACTORIES) {

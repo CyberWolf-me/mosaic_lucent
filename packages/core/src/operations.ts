@@ -84,10 +84,10 @@ export const provenanceFieldsSchema = z
   .object({
     meetingId: z.string().min(1).max(120).optional(),
     /** Stable index range into the meeting's turns, inclusive. */
-    turnRange: z.tuple([z.number().int().min(0), z.number().int().min(0)]).refine(
-      (range) => range[1] >= range[0],
-      "turnRange end must be at least its start",
-    ).optional(),
+    turnRange: z
+      .tuple([z.number().int().min(0), z.number().int().min(0)])
+      .refine((range) => range[1] >= range[0], "turnRange end must be at least its start")
+      .optional(),
     /** The meeting loop's classification of the source turns, in turn order. */
     turnKinds: z.array(z.string().min(1)).max(8).optional(),
     /** The words that produced this node, capped like the old stamp was. */
@@ -97,9 +97,7 @@ export const provenanceFieldsSchema = z
     createdFrom: z.array(z.string().min(1)).max(20).optional(),
   })
   .refine(
-    (p) =>
-      p.meetingId !== undefined ||
-      (p.createdFrom !== undefined && p.createdFrom.length > 0),
+    (p) => p.meetingId !== undefined || (p.createdFrom !== undefined && p.createdFrom.length > 0),
     "provenance needs meeting evidence or source statements (createdFrom)",
   );
 
@@ -580,7 +578,7 @@ export function sanitizeRawOperations(raw: unknown): unknown {
   const normalized: Array<Record<string, unknown>> = [];
   for (const item of raw) {
     if (!item || typeof item !== "object") {
-      normalized.push(item as any);
+      normalized.push(item as unknown as Record<string, unknown>);
       continue;
     }
     const copy = { ...item } as Record<string, unknown>;

@@ -18,7 +18,7 @@ import type { Workspace } from "./model.js";
 export interface Composition {
   /**
    * The board's main subject: the highest-degree node (in + out edges),
- * tie-broken by declaration order. A board with no edges has no subject.
+   * tie-broken by declaration order. A board with no edges has no subject.
    */
   mainSubject: string | null;
   /**
@@ -130,9 +130,7 @@ export function compositionLine(workspace: Workspace): string {
   const c = deriveComposition(workspace);
   if (!c.mainSubject) return "";
   const subjectLabel = workspace.nodes[c.mainSubject]?.label ?? c.mainSubject;
-  const flowLabels = c.primaryFlow
-    .slice(0, 5)
-    .map((id) => workspace.nodes[id]?.label ?? id);
+  const flowLabels = c.primaryFlow.slice(0, 5).map((id) => workspace.nodes[id]?.label ?? id);
   const parts: string[] = [];
   if (flowLabels.length > 1) {
     parts.push(`The main story: ${flowLabels.join(" → ")}`);

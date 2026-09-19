@@ -87,7 +87,9 @@ describe("SET_LAYOUT_INTENT — the op contract", () => {
 
   it("undo restores the prior intent exactly, including absent", () => {
     const before = diamond();
-    const setIntent: Operation[] = [{ op: "SET_LAYOUT_INTENT", direction: "vertical", emphasis: ["a"] }];
+    const setIntent: Operation[] = [
+      { op: "SET_LAYOUT_INTENT", direction: "vertical", emphasis: ["a"] },
+    ];
     const after = applyOperations(before, setIntent);
     const undone = applyOperations(after, inverseOperations(setIntent, before));
     expect(undone.layoutIntent).toBeUndefined();

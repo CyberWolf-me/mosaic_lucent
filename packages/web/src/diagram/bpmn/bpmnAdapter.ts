@@ -174,7 +174,11 @@ export function fromBpmnXml(xml: string): BpmnImport {
   const doc = parseXml(xml);
   const process = find(doc, "bpmn:process");
   if (!process) throw new Error("no bpmn:process element found");
-  const ws = createWorkspace({ id: "bpmn-import", name: "Imported process", diagramKind: "process" });
+  const ws = createWorkspace({
+    id: "bpmn-import",
+    name: "Imported process",
+    diagramKind: "process",
+  });
   const ignored: string[] = [];
 
   // Lanes are parsed FIRST (their refs are ids, valid regardless of whether

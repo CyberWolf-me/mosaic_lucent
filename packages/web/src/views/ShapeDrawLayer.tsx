@@ -59,7 +59,9 @@ export function ShapeDrawLayer({
     active.current = true;
     try {
       containerRef.current?.setPointerCapture(e.pointerId);
-    } catch {}
+    } catch {
+      /* ignore capture error */
+    }
     const p = toContent(e);
     setRect({ x0: p.x, y0: p.y, x1: p.x, y1: p.y });
   };
@@ -81,7 +83,9 @@ export function ShapeDrawLayer({
     active.current = false;
     try {
       containerRef.current?.releasePointerCapture(e.pointerId);
-    } catch {}
+    } catch {
+      /* ignore release error */
+    }
     const w = Math.abs(rect.x1 - rect.x0);
     const h = Math.abs(rect.y1 - rect.y0);
     const drawn = w > 8 && h > 8;

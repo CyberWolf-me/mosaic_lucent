@@ -137,11 +137,7 @@ export class LinearProvider implements ExecutionProvider {
           signal: AbortSignal.timeout(this.timeoutMs),
         });
         if (res.status === 429 || res.status >= 500) {
-          lastError = new LinearError(
-            `linear responded ${res.status}`,
-            res.status,
-            true,
-          );
+          lastError = new LinearError(`linear responded ${res.status}`, res.status, true);
           continue;
         }
         if (!res.ok) {
@@ -199,13 +195,9 @@ export class LinearProvider implements ExecutionProvider {
       users: { nodes: Array<{ id: string; name: string; email?: string }> };
     }>(`query { users(first: 50) { nodes { id name email } } }`, {});
     const nodes = data.users.nodes;
-    const byEmail = nodes.find(
-      (u) => u.email?.toLowerCase() === needle,
-    );
+    const byEmail = nodes.find((u) => u.email?.toLowerCase() === needle);
     const byName = nodes.find((u) => u.name.trim().toLowerCase() === needle);
-    const partials = nodes.filter((u) =>
-      u.name.trim().toLowerCase().includes(needle),
-    );
+    const partials = nodes.filter((u) => u.name.trim().toLowerCase().includes(needle));
     let resolved: string | undefined;
     if (byEmail) {
       resolved = byEmail.id;
@@ -398,9 +390,10 @@ export class LinearProvider implements ExecutionProvider {
  * config (teamId is REQUIRED; the honest 400 at connect time, not a
  * runtime surprise).
  */
-export function linearConnectionFactory(): (
-  connection: { credentialRef: string; config?: Record<string, string> },
-) => ExecutionProvider {
+export function linearConnectionFactory(): (connection: {
+  credentialRef: string;
+  config?: Record<string, string>;
+}) => ExecutionProvider {
   return (connection) => {
     const apiKey = process.env[connection.credentialRef];
     if (!apiKey) {
@@ -412,11 +405,7 @@ export function linearConnectionFactory(): (
     }
     const teamId = connection.config?.teamId;
     if (!teamId) {
-      throw new LinearError(
-        "the linear connection is missing config.teamId",
-        0,
-        false,
-      );
+      throw new LinearError("the linear connection is missing config.teamId", 0, false);
     }
     return new LinearProvider({
       apiKey,
@@ -440,7 +429,10 @@ export function linearConnectionFactory(): (
  */
 export function resolveCustomBaseUrl(candidate: string, what: string): string {
   const checked = assertSafeOutboundUrl(candidate, `${what} config.baseUrl`);
-  if (process.env["NODE_ENV"] === "production" && process.env["LUCENT_ALLOW_CUSTOM_INTEGRATION_URL"] !== "1") {
+  if (
+    process.env["NODE_ENV"] === "production" &&
+    process.env["LUCENT_ALLOW_CUSTOM_INTEGRATION_URL"] !== "1"
+  ) {
     throw new LinearError(
       `${what} config.baseUrl is disabled in production (set LUCENT_ALLOW_CUSTOM_INTEGRATION_URL=1 to allow self-hosted proxies)`,
       0,

@@ -15,7 +15,11 @@ import {
 } from "../src/index.js";
 import { createWorkspace } from "../src/model.js";
 
-function board(nodes: string[], edges: Array<[string, string]>, groups?: Array<{ id: string; label: string; children: string[]; kind?: string }>) {
+function board(
+  nodes: string[],
+  edges: Array<[string, string]>,
+  groups?: Array<{ id: string; label: string; children: string[]; kind?: string }>,
+) {
   const ws = createWorkspace({ diagramKind: "flowchart" });
   const ops: Operation[] = nodes.map((id) => ({
     op: "CREATE_NODE" as const,
@@ -27,7 +31,13 @@ function board(nodes: string[], edges: Array<[string, string]>, groups?: Array<{
     ops.push({ op: "CONNECT_NODES" as const, source: s, target: t, relationship: "calls" });
   }
   for (const g of groups ?? []) {
-    ops.push({ op: "CREATE_GROUP" as const, id: g.id, label: g.label, children: g.children, ...(g.kind ? { kind: g.kind as never } : {}) });
+    ops.push({
+      op: "CREATE_GROUP" as const,
+      id: g.id,
+      label: g.label,
+      children: g.children,
+      ...(g.kind ? { kind: g.kind as never } : {}),
+    });
   }
   return applyOperations(ws, ops);
 }

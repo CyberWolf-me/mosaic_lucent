@@ -163,9 +163,7 @@ describe("OpenAI-compatible streaming", () => {
     // point of the test is that exactly ONE upstream call was made (no retry
     // ladder once bytes have flowed).
     const frames = [
-      "data: " +
-        JSON.stringify({ choices: [{ delta: { content: "partial" } }] }) +
-        "\n\n",
+      "data: " + JSON.stringify({ choices: [{ delta: { content: "partial" } }] }) + "\n\n",
       "data: [DONE]\n\n",
     ];
     let calls = 0;

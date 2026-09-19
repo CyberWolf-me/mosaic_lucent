@@ -31,7 +31,8 @@ function isPrivateIpv4(a: number, b: number): boolean {
 /** The private/link-local/loopback ranges refused as hostname literals. */
 function isPrivateAddress(hostname: string): boolean {
   // Normalize brackets off IPv6 literals.
-  const bare = hostname.startsWith("[") && hostname.endsWith("]") ? hostname.slice(1, -1) : hostname;
+  const bare =
+    hostname.startsWith("[") && hostname.endsWith("]") ? hostname.slice(1, -1) : hostname;
   const kind = isIP(bare);
   if (kind === 6) {
     const lower = bare.toLowerCase();
@@ -75,7 +76,9 @@ function isPrivateAddress(hostname: string): boolean {
   return false;
 }
 
-export function isSafeOutboundUrl(candidate: string): { ok: true; url: URL } | { ok: false; reason: string } {
+export function isSafeOutboundUrl(
+  candidate: string,
+): { ok: true; url: URL } | { ok: false; reason: string } {
   let url: URL;
   try {
     url = new URL(candidate);
@@ -93,7 +96,10 @@ export function isSafeOutboundUrl(candidate: string): { ok: true; url: URL } | {
     return { ok: false, reason: "localhost is not an allowed outbound target" };
   }
   if (isPrivateAddress(host)) {
-    return { ok: false, reason: "private/loopback/link-local addresses are not allowed outbound targets" };
+    return {
+      ok: false,
+      reason: "private/loopback/link-local addresses are not allowed outbound targets",
+    };
   }
   return { ok: true, url };
 }

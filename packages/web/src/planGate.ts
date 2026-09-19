@@ -43,9 +43,10 @@ export interface GatedOp {
  * them to the chat reply's skippedNote so the user sees what the gate
  * refused, never a silent drop.
  */
-export function gatePlanOps(
-  ops: readonly Operation[],
-): { allowed: Operation[]; skipped: GatedOp[] } {
+export function gatePlanOps(ops: readonly Operation[]): {
+  allowed: Operation[];
+  skipped: GatedOp[];
+} {
   const allowed: Operation[] = [];
   const skipped: GatedOp[] = [];
   for (const op of ops) {

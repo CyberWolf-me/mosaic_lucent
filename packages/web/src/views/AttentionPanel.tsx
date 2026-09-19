@@ -15,9 +15,7 @@ export function AttentionPanel({ items: provided }: { items?: AttentionItem[] })
     const skippedCount =
       [...chat].reverse().find((e) => (e.skippedOps?.length ?? 0) > 0)?.skippedOps?.length ?? 0;
     return buildAttention(workspace, {
-      proposal: proposal
-        ? { operations: proposal.operations, request: proposal.request }
-        : null,
+      proposal: proposal ? { operations: proposal.operations, request: proposal.request } : null,
       skippedCount,
       disconnected: false,
     });

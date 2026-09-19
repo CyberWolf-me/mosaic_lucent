@@ -112,8 +112,7 @@ export function repairOperations(ops: Operation[]): Operation[] {
     const targets = supersedeTargets(op);
     if (targets?.length) statementTargets.set(op.id, [...targets]);
   }
-  const setterIndex = (target: string): number =>
-    statementOps.findIndex((o) => o.id === target);
+  const setterIndex = (target: string): number => statementOps.findIndex((o) => o.id === target);
   const effectiveOf = new Map<string, number>();
   const computeEffective = (op: StatementOp, seen = new Set<string>()): number => {
     const cached = effectiveOf.get(op.id);
@@ -136,17 +135,19 @@ export function repairOperations(ops: Operation[]): Operation[] {
   for (const op of statementOps) {
     effective.set(ops.indexOf(op), computeEffective(op));
   }
-  return ops
-    .map((op, i) => {
-      const key = isCreate(op) ? entityKey(op) : undefined;
-      // A create preceded by a delete of the same entity is a recreate: pinning
-      // it to the trailing bucket leaves it exactly where the caller put it.
-      const isRecreate = key !== undefined && (destroyedAt.get(key) ?? Infinity) < i;
-      return { op, i, b: isRecreate ? TRAILING_BUCKET : bucket(op) };
-    })
-    // Effective index replaces original index as the within-bucket order, so
-    // a superseding statement lands after its target's setter; ops with no
-    // dependencies keep their own index and the stable original order.
-    .sort((a, b) => a.b - b.b || (effective.get(a.i) ?? a.i) - (effective.get(b.i) ?? b.i))
-    .map((x) => x.op);
+  return (
+    ops
+      .map((op, i) => {
+        const key = isCreate(op) ? entityKey(op) : undefined;
+        // A create preceded by a delete of the same entity is a recreate: pinning
+        // it to the trailing bucket leaves it exactly where the caller put it.
+        const isRecreate = key !== undefined && (destroyedAt.get(key) ?? Infinity) < i;
+        return { op, i, b: isRecreate ? TRAILING_BUCKET : bucket(op) };
+      })
+      // Effective index replaces original index as the within-bucket order, so
+      // a superseding statement lands after its target's setter; ops with no
+      // dependencies keep their own index and the stable original order.
+      .sort((a, b) => a.b - b.b || (effective.get(a.i) ?? a.i) - (effective.get(b.i) ?? b.i))
+      .map((x) => x.op)
+  );
 }

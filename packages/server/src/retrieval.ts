@@ -275,11 +275,13 @@ export function buildSearchCorpus(input: SearchCorpusInput): SearchCorpus {
     if (statement) {
       const topic = field(WEIGHTS.statementTopic, statement.topic);
       if (topic) fields.push(topic);
-      const kindStatus = field(WEIGHTS.statementKindStatus, `${statement.kind} ${statement.status}`);
+      const kindStatus = field(
+        WEIGHTS.statementKindStatus,
+        `${statement.kind} ${statement.status}`,
+      );
       if (kindStatus) fields.push(kindStatus);
     }
-    const quote =
-      node.provenance?.quote ?? node.statement?.provenance?.quote ?? undefined;
+    const quote = node.provenance?.quote ?? node.statement?.provenance?.quote ?? undefined;
     const quoteField = field(WEIGHTS.provenanceQuote, quote);
     if (quoteField) fields.push(quoteField);
     if (!fields.length) continue;
@@ -326,9 +328,7 @@ export function buildSearchCorpus(input: SearchCorpusInput): SearchCorpus {
     const actor = entry.actor;
     const actorId = actor?.actorId ?? entry.by;
     const actorName =
-      actor?.actorType === "ai"
-        ? "Lucent"
-        : (input.actorNames?.get(actorId) ?? undefined);
+      actor?.actorType === "ai" ? "Lucent" : (input.actorNames?.get(actorId) ?? undefined);
     items.push({
       kind: "revision",
       seq: entry.seq,

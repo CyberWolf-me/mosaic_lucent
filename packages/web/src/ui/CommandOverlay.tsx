@@ -42,19 +42,29 @@ export function CommandOverlay({
   onClose: () => void;
   onOpenSettings?: (section?: string) => void;
 }) {
-  const { setView, send, workspace, undo, redo, newProject, boardId, ask, setPillMode, onCitation } =
-    useWorkspace() as unknown as {
-      setView: WorkspaceState["setView"];
-      send: WorkspaceState["send"];
-      workspace: Workspace;
-      undo: () => void;
-      redo: () => void;
-      newProject: () => void;
-      boardId: string | null;
-      ask: WorkspaceState["ask"];
-      setPillMode: WorkspaceState["setPillMode"];
-      onCitation: WorkspaceState["onCitation"];
-    };
+  const {
+    setView,
+    send,
+    workspace,
+    undo,
+    redo,
+    newProject,
+    boardId,
+    ask,
+    setPillMode,
+    onCitation,
+  } = useWorkspace() as unknown as {
+    setView: WorkspaceState["setView"];
+    send: WorkspaceState["send"];
+    workspace: Workspace;
+    undo: () => void;
+    redo: () => void;
+    newProject: () => void;
+    boardId: string | null;
+    ask: WorkspaceState["ask"];
+    setPillMode: WorkspaceState["setPillMode"];
+    onCitation: WorkspaceState["onCitation"];
+  };
   const [q, setQ] = useState("");
   const [active, setActive] = useState(0);
   /** Server search results for the current query (null: nothing fetched yet). */
@@ -221,8 +231,7 @@ export function CommandOverlay({
     () => ({
       ...buildResults(items, boardHits, q),
       search: grouped,
-      total:
-        buildResults(items, boardHits, q).total + (useLocalScan ? 0 : grouped.total),
+      total: buildResults(items, boardHits, q).total + (useLocalScan ? 0 : grouped.total),
     }),
     [items, boardHits, q, grouped, useLocalScan],
   );
@@ -375,8 +384,19 @@ export function CommandOverlay({
       onMouseEnter={() => setActive(index)}
       style={entryStyle(index === active)}
     >
-      {iconBox(hit.kind === "node" ? <Ico.Grid /> : hit.kind === "turn" ? <Ico.Journey /> : <Ico.History />)}
-      {labelBlock(searchHitTitle(hit), `${searchHitHint(hit)} · ${t("palette.matched", locale, { q: hit.matched.join(", ") })}`)}
+      {iconBox(
+        hit.kind === "node" ? (
+          <Ico.Grid />
+        ) : hit.kind === "turn" ? (
+          <Ico.Journey />
+        ) : (
+          <Ico.History />
+        ),
+      )}
+      {labelBlock(
+        searchHitTitle(hit),
+        `${searchHitHint(hit)} · ${t("palette.matched", locale, { q: hit.matched.join(", ") })}`,
+      )}
     </button>
   );
 
@@ -544,13 +564,20 @@ export function CommandOverlay({
                     </button>
                   );
                 })}
-              {!useLocalScan && grouped.nodes.length > 0 && header(t("palette.group.nodes", locale))}
               {!useLocalScan &&
-                grouped.nodes.map((hit, i) => searchRow(hit, searchOffset + i))}
-              {!useLocalScan && grouped.turns.length > 0 && header(t("palette.group.transcript", locale))}
+                grouped.nodes.length > 0 &&
+                header(t("palette.group.nodes", locale))}
+              {!useLocalScan && grouped.nodes.map((hit, i) => searchRow(hit, searchOffset + i))}
               {!useLocalScan &&
-                grouped.turns.map((hit, i) => searchRow(hit, searchOffset + grouped.nodes.length + i))}
-              {!useLocalScan && grouped.revisions.length > 0 && header(t("palette.group.revisions", locale))}
+                grouped.turns.length > 0 &&
+                header(t("palette.group.transcript", locale))}
+              {!useLocalScan &&
+                grouped.turns.map((hit, i) =>
+                  searchRow(hit, searchOffset + grouped.nodes.length + i),
+                )}
+              {!useLocalScan &&
+                grouped.revisions.length > 0 &&
+                header(t("palette.group.revisions", locale))}
               {!useLocalScan &&
                 grouped.revisions.map((hit, i) =>
                   searchRow(hit, searchOffset + grouped.nodes.length + grouped.turns.length + i),
@@ -569,7 +596,9 @@ export function CommandOverlay({
                   className="mono"
                   style={{ padding: "10px 12px", fontSize: 10.5, color: "var(--ink-3)" }}
                 >
-                  {t("palette.window.truncated", locale, { depth: String(search.historyDepth ?? "—") })}
+                  {t("palette.window.truncated", locale, {
+                    depth: String(search.historyDepth ?? "—"),
+                  })}
                 </div>
               )}
             </>

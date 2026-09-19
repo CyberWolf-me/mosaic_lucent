@@ -237,7 +237,8 @@ function AuthForms({
               style={{ color: "var(--accent, #7aa2ff)", textDecoration: "underline" }}
             >
               Privacy Policy
-            </a>. Your boards live on this Lucent server; how prompts are handled depends on the AI
+            </a>
+            . Your boards live on this Lucent server; how prompts are handled depends on the AI
             provider it's configured with.
           </p>
         )}

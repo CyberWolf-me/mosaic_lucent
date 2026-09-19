@@ -367,9 +367,9 @@ describe("the topic fold at the room boundary (Stage C5, ADR 0025)", () => {
     expect(result.ok).toBe(true);
     const entry = result.entry;
     const setOp = entry?.ops.find((o) => o.op === "SET_STATEMENT");
-    expect(
-      setOp && setOp.op === "SET_STATEMENT" ? setOp.statement?.topic : undefined,
-    ).toBe("pricing");
+    expect(setOp && setOp.op === "SET_STATEMENT" ? setOp.statement?.topic : undefined).toBe(
+      "pricing",
+    );
   });
 
   it("a user-actor batch NEVER folds: the human's topic survives exactly as typed", async () => {
@@ -392,9 +392,9 @@ describe("the topic fold at the room boundary (Stage C5, ADR 0025)", () => {
     );
     expect(result.ok).toBe(true);
     const setOp = result.entry?.ops.find((o) => o.op === "SET_STATEMENT");
-    expect(
-      setOp && setOp.op === "SET_STATEMENT" ? setOp.statement?.topic : undefined,
-    ).toBe("pricing-model");
+    expect(setOp && setOp.op === "SET_STATEMENT" ? setOp.statement?.topic : undefined).toBe(
+      "pricing-model",
+    );
   });
 
   it("an actorless batch (a plain human submit) never folds either", async () => {
@@ -409,8 +409,8 @@ describe("the topic fold at the room boundary (Stage C5, ADR 0025)", () => {
     ]);
     expect(result.ok).toBe(true);
     const setOp = result.entry?.ops.find((o) => o.op === "SET_STATEMENT");
-    expect(
-      setOp && setOp.op === "SET_STATEMENT" ? setOp.statement?.topic : undefined,
-    ).toBe("pricing-model");
+    expect(setOp && setOp.op === "SET_STATEMENT" ? setOp.statement?.topic : undefined).toBe(
+      "pricing-model",
+    );
   });
 });

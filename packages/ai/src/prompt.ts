@@ -73,8 +73,7 @@ const BOARD_HISTORIAN = getPrompt("board-historian");
 export const ANSWER_SYSTEM_PROMPT: string = BOARD_HISTORIAN.systemPrompt;
 
 /** Deliberately empty: the historian may not emit any canvas operation. */
-export const ANSWER_SYSTEM_PROMPT_VOCABULARY: readonly string[] =
-  BOARD_HISTORIAN.vocabulary;
+export const ANSWER_SYSTEM_PROMPT_VOCABULARY: readonly string[] = BOARD_HISTORIAN.vocabulary;
 export const ANSWER_SYSTEM_PROMPT_ID: string = BOARD_HISTORIAN.id;
 export const ANSWER_SYSTEM_PROMPT_VERSION: number = BOARD_HISTORIAN.version;
 

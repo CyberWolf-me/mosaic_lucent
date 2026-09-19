@@ -43,12 +43,12 @@ regions render the plan.
    re-emits provenance verbatim, verified).
 2. **PLAN_SAFE_OPS makes the acceptance rule mechanical.** A plan request
    (SendAttachments.plan) filters the model's ops against the allowlist:
-   creation and organization only — CREATE_NODE, SET_STATEMENT, SET_ISSUE,
+   creation and organization only — CREATE*NODE, SET_STATEMENT, SET_ISSUE,
    UPDATE_ISSUE, CREATE_GROUP, CONNECT_NODES, SET_GROUP_KIND.
    Mechanically absent: UPDATE_STATEMENT (the one op that converts a
    proposal into confirmed work — a plan can never resolve a question or
    confirm a proposal; only a human does, visibly, through the HUD),
-   DELETE_* (a plan never destroys), CHANGE_TEXT (a plan never rewrites).
+   DELETE*\* (a plan never destroys), CHANGE_TEXT (a plan never rewrites).
    Skipped ops join the reply's skippedNote — the gate is honest about
    what it refused, never a silent drop.
 3. **The B3 pipeline is the plan's approval.** No new gate, no plan kind

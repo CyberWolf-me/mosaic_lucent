@@ -120,9 +120,7 @@ describe("UPDATE_STATEMENT", () => {
       },
     ]);
     expect(ws.nodes.sep!.statement!.status).toBe("superseded");
-    ws = applyOperations(ws, [
-      { op: "UPDATE_STATEMENT", id: "oct", topic: null, supersedes: [] },
-    ]);
+    ws = applyOperations(ws, [{ op: "UPDATE_STATEMENT", id: "oct", topic: null, supersedes: [] }]);
     expect(ws.nodes.oct!.statement!.topic).toBeUndefined();
     expect(ws.nodes.oct!.statement!.supersedes).toEqual([]);
   });
@@ -318,10 +316,14 @@ describe("statement undo", () => {
     const undone = applyOperations(after, inverseOperations(ops, before));
     const canon = (ws: Workspace) =>
       JSON.stringify(ws, (_k, v) =>
-        typeof v === "object" && v !== null ? Object.keys(v).sort().reduce((acc: Record<string, unknown>, key) => {
-          acc[key] = (v as Record<string, unknown>)[key];
-          return acc;
-        }, {}) : v,
+        typeof v === "object" && v !== null
+          ? Object.keys(v)
+              .sort()
+              .reduce((acc: Record<string, unknown>, key) => {
+                acc[key] = (v as Record<string, unknown>)[key];
+                return acc;
+              }, {})
+          : v,
       );
     expect(canon(undone)).toBe(canon(before));
   };
@@ -335,13 +337,16 @@ describe("statement undo", () => {
         statement: { kind: "question", status: "open", topic: "pricing" },
       },
     ]);
-    expectRoundTrip(applyOperations(before, [
-      {
-        op: "SET_STATEMENT",
-        id: "plain",
-        statement: { kind: "question", status: "open" },
-      },
-    ]), [{ op: "SET_STATEMENT", id: "plain", statement: null }]);
+    expectRoundTrip(
+      applyOperations(before, [
+        {
+          op: "SET_STATEMENT",
+          id: "plain",
+          statement: { kind: "question", status: "open" },
+        },
+      ]),
+      [{ op: "SET_STATEMENT", id: "plain", statement: null }],
+    );
   });
 
   it("UPDATE_STATEMENT round-trips via the full prior statement", () => {
@@ -422,7 +427,7 @@ describe("safeParseProgrammaticOperations", () => {
     ]);
     expect(result.success).toBe(false);
     if (!result.success) {
-      expect(result.error.issues[0]!.message).toContain("unknown key \"patch\"");
+      expect(result.error.issues[0]!.message).toContain('unknown key "patch"');
     }
     // The flat shape is the contract and still parses.
     expect(

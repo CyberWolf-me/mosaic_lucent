@@ -1,5 +1,11 @@
 import { safeParseOperations, type Operation } from "@lucent/core";
-import type { GenerateRequest, GenerateResult, LLMProvider, StreamCallbacks, WorkspaceSummary } from "../provider.js";
+import type {
+  GenerateRequest,
+  GenerateResult,
+  LLMProvider,
+  StreamCallbacks,
+  WorkspaceSummary,
+} from "../provider.js";
 import type { AnswerCitation, AnswerRequest, AnswerResult } from "../answer.js";
 import {
   MAX_AI_SELECTED_ACTIONS,
@@ -127,9 +133,7 @@ const scripts: Script[] = [
     build: (req) => {
       // The real prerequisite node if the summary names one; else a
       // design-approval node the script creates.
-      const named = req.summary.nodes.find((n) =>
-        /design|approv/i.test(n.label),
-      );
+      const named = req.summary.nodes.find((n) => /design|approv/i.test(n.label));
       const targetId = named?.id ?? "design-approval";
       const ops: Operation[] = named
         ? []
@@ -555,7 +559,8 @@ const scripts: Script[] = [
     // resolved, superseding the $20 proposal the board already carries.
     // Matches the decided verb plus a 15/fifteen anywhere after it — the
     // golden phrasing is "decided to price it at $15/month".
-    match: (m) => /decided\b[^.]*\b(15|fifteen)\b/i.test(m) || /\b(15|fifteen)\b[^.]*\/month/i.test(m),
+    match: (m) =>
+      /decided\b[^.]*\b(15|fifteen)\b/i.test(m) || /\b(15|fifteen)\b[^.]*\/month/i.test(m),
     build: () => ({
       explanation:
         "The team decided $15/month: a decision node, born resolved, superseding the $20 proposal.",
@@ -868,8 +873,7 @@ const answerScripts: AnswerScript[] = [
           citations: [],
         };
       }
-      const turnText =
-        turnHit.turnIndex !== undefined ? ` (turn ${turnHit.turnIndex})` : "";
+      const turnText = turnHit.turnIndex !== undefined ? ` (turn ${turnHit.turnIndex})` : "";
       return {
         answer:
           `The retrieved evidence finds it in meeting ${turnHit.id}${turnText}: ` +
@@ -893,7 +897,8 @@ const answerScripts: AnswerScript[] = [
       const meetings = request.meetings;
       if (meetings.length < 2) {
         return {
-          answer: "I can only see one meeting in the visible window, so I can't trace a change across meetings.",
+          answer:
+            "I can only see one meeting in the visible window, so I can't trace a change across meetings.",
           citations: [],
         };
       }
@@ -963,7 +968,10 @@ const answerScripts: AnswerScript[] = [
     match: (q) => /\bwhy\b.*\b(node|here|this)\b|\bwhy\b/i.test(q),
     build: (request) => {
       const named = request.nodeIndex.find((n) => {
-        const words = n.label.toLowerCase().split(/\s+/).filter((w) => w.length > 3);
+        const words = n.label
+          .toLowerCase()
+          .split(/\s+/)
+          .filter((w) => w.length > 3);
         return words.some((w) => request.question.toLowerCase().includes(w));
       });
       const node = named ?? request.nodeIndex[0];
@@ -973,7 +981,11 @@ const answerScripts: AnswerScript[] = [
       const meeting = request.meetings[0];
       const provenance = meeting
         ? ` It traces to meeting ${meeting.id} (${meeting.turns[0]?.speaker ?? "the team"}: "${
-            meeting.turns.find((t) => t.text.toLowerCase().includes(node.label.toLowerCase().split(" ")[0] ?? "§"))?.text.slice(0, 80) ??
+            meeting.turns
+              .find((t) =>
+                t.text.toLowerCase().includes(node.label.toLowerCase().split(" ")[0] ?? "§"),
+              )
+              ?.text.slice(0, 80) ??
             meeting.turns[0]?.text.slice(0, 80) ??
             "discussed"
           }").`

@@ -191,7 +191,12 @@ describe("Stage C4 definition of done — the continuous scenario", () => {
         // the sentence C4 exists to make reachable.
         { speaker: "Maya", at: mondayAt + 60_000, text: "Maybe $20 for the pro tier?" },
         // index 1: classified — the extracts carry this one.
-        { speaker: "Tom", at: mondayAt + 120_000, text: "Agreed, pricing settled.", kind: "decision" },
+        {
+          speaker: "Tom",
+          at: mondayAt + 120_000,
+          text: "Agreed, pricing settled.",
+          kind: "decision",
+        },
       ],
       createdBy: alice.id,
       createdAt: mondayAt,
@@ -205,7 +210,12 @@ describe("Stage C4 definition of done — the continuous scenario", () => {
         id: "pricing-decision",
         nodeType: "decision",
         label: "Pricing decision $15",
-        provenance: { meetingId: monday.id, turnRange: [1, 1], turnKinds: ["decision"], quote: "Agreed, pricing settled." },
+        provenance: {
+          meetingId: monday.id,
+          turnRange: [1, 1],
+          turnKinds: ["decision"],
+          quote: "Agreed, pricing settled.",
+        },
       },
       {
         op: "SET_STATEMENT",
@@ -314,7 +324,11 @@ describe("Stage C4 definition of done — the continuous scenario", () => {
     const pricingNodes = pricingSearch.body.results.filter((r: any) => r.kind === "node");
     expect(pricingNodes.map((n: any) => n.id)).toContain("pricing-decision");
     const pricingHit = pricingNodes.find((n: any) => n.id === "pricing-decision");
-    expect(pricingHit?.statement).toEqual({ kind: "decision", status: "resolved", topic: "pricing" });
+    expect(pricingHit?.statement).toEqual({
+      kind: "decision",
+      status: "resolved",
+      topic: "pricing",
+    });
 
     // …and the "retro" query finds ONLY content inside the window: the old
     // revision (seq below the Free floor) is NOT in the results.
@@ -343,9 +357,7 @@ describe("Stage C4 definition of done — the continuous scenario", () => {
     // meeting id and stable turn index — evidence the digest never shows.
     const captured = h.provider.requests.at(-1);
     expect(captured).toBeDefined();
-    const capturedTurn = captured?.retrieved?.find(
-      (r) => r.kind === "turn" && r.turnIndex === 0,
-    );
+    const capturedTurn = captured?.retrieved?.find((r) => r.kind === "turn" && r.turnIndex === 0);
     expect(capturedTurn?.id).toBe(monday.id);
     expect(capturedTurn?.label).toContain("Maya");
 

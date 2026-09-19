@@ -141,8 +141,7 @@ export class ElkLayoutEngine implements DiagramLayoutEngine {
     // engine applies — explicit option > stored intent > vertical. Both
     // engines must read one intent or the async refinement would flip a
     // horizontal board back to vertical.
-    const effectiveDirection =
-      options.direction ?? workspace.layoutIntent?.direction ?? "vertical";
+    const effectiveDirection = options.direction ?? workspace.layoutIntent?.direction ?? "vertical";
     const direction = effectiveDirection === "horizontal" ? "RIGHT" : "DOWN";
     const kind = workspace.diagramKind;
     const algorithm = ALGORITHM_FOR_KIND[kind];

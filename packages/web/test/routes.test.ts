@@ -351,4 +351,3 @@ describe("view/lens query and navigation history", () => {
     expect(replaceCalls[0]).toContain("view=history");
   });
 });
-

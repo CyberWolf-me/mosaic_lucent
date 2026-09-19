@@ -56,7 +56,6 @@ export function completionMeta(
   };
 }
 
-
 function toResult(parsed: ToolArgs, source: string, meta?: CompletionMeta): GenerateResult {
   const result = safeParseOperations(sanitizeRawOperations(parsed.operations ?? []));
   if (!result.success) {
@@ -135,7 +134,10 @@ function toAnswerResult(parsed: AnswerArgs, source: string, meta?: CompletionMet
 }
 
 /** Parse the answer tool's call arguments (a JSON string or an object). */
-export function parseAnswerToolArguments(raw: string | object, meta?: CompletionMeta): AnswerResult {
+export function parseAnswerToolArguments(
+  raw: string | object,
+  meta?: CompletionMeta,
+): AnswerResult {
   let parsed: AnswerArgs;
   if (typeof raw === "string") {
     try {

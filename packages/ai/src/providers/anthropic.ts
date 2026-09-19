@@ -1,15 +1,9 @@
 import { anthropicToolDefinition, TOOL_NAME } from "@lucent/core";
 import type { GenerateRequest, GenerateResult, LLMProvider, StreamCallbacks } from "../provider.js";
 import type { AnswerRequest, AnswerResult } from "../answer.js";
-import {
-  ANSWER_TOOL_NAME,
-  anthropicAnswerToolDefinition,
-} from "../answer.js";
+import { ANSWER_TOOL_NAME, anthropicAnswerToolDefinition } from "../answer.js";
 import type { ExternalPlanRequest, ExternalPlanResult } from "../externalPlan.js";
-import {
-  EXTERNAL_PLAN_TOOL_NAME,
-  anthropicExternalPlanToolDefinition,
-} from "../externalPlan.js";
+import { EXTERNAL_PLAN_TOOL_NAME, anthropicExternalPlanToolDefinition } from "../externalPlan.js";
 import {
   ANSWER_SYSTEM_PROMPT,
   EXTERNAL_PLAN_SYSTEM_PROMPT,

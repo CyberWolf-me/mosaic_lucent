@@ -83,7 +83,10 @@ describe("tier classification", () => {
   it("cross-region edges are secondary; a missing endpoint never reads primary", () => {
     const ws = board(
       [{ id: "a", groupId: "g1" }, { id: "b", groupId: "g2" }, { id: "c" }],
-      [{ s: "a", t: "b" }, { s: "a", t: "c" }],
+      [
+        { s: "a", t: "b" },
+        { s: "a", t: "c" },
+      ],
     );
     expect(edgeTier(ws, edgeOf(ws, "a", "b"))).toBe("secondary");
     expect(edgeTier(ws, edgeOf(ws, "a", "c"))).toBe("secondary"); // grouped → ungrouped
@@ -115,8 +118,14 @@ describe("tier classification", () => {
 
   it("derivation is deterministic", () => {
     const ws = board(
-      [{ id: "a", groupId: "g" }, { id: "b", groupId: "g" }],
-      [{ s: "a", t: "b" }, { s: "b", t: "a", relationship: "blocks" }],
+      [
+        { id: "a", groupId: "g" },
+        { id: "b", groupId: "g" },
+      ],
+      [
+        { s: "a", t: "b" },
+        { s: "b", t: "a", relationship: "blocks" },
+      ],
     );
     expect(edgeTiers(ws)).toEqual(edgeTiers(ws));
   });

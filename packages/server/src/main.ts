@@ -16,7 +16,15 @@ import { Limiter } from "./limiter.js";
 import { PostgresRateLimiter } from "./rateStore.js";
 import { InMemoryTicketStore } from "./realtimeTicket.js";
 import { InMemoryJobQueue, JobRunner, PostgresJobQueue, type JobQueue } from "./jobs.js";
-import { enqueueRecurring, familiesFor, parseRole, runsJobs, runsScheduler, servesHttp, workerId } from "./roles.js";
+import {
+  enqueueRecurring,
+  familiesFor,
+  parseRole,
+  runsJobs,
+  runsScheduler,
+  servesHttp,
+  workerId,
+} from "./roles.js";
 import { buildAiHandlers } from "./workers/ai.js";
 import { buildMediaHandlers } from "./workers/media.js";
 import { buildIntegrationHandlers } from "./workers/integration.js";
@@ -47,7 +55,10 @@ import { InMemoryProposalStore } from "./proposals.js";
 import { PostgresProposalStore } from "./store/pg-proposals.js";
 import { PostgresAssetStore } from "./store/pg-assets.js";
 import { InMemorySsoStore } from "./ssoStore.js";
-import { InMemoryIntegrationActionStore, InMemoryIntegrationStore } from "./integrations/integrations.js";
+import {
+  InMemoryIntegrationActionStore,
+  InMemoryIntegrationStore,
+} from "./integrations/integrations.js";
 import { InMemoryExecutionLedger } from "./integrations/ledger.js";
 import { InMemoryIntegrationWebhookEventStore } from "./integrations/webhook.js";
 import { InMemoryInboundChangeStore, ingestInboundChange } from "./integrations/inbound.js";
@@ -190,16 +201,22 @@ function makeStores(databaseUrl: string | undefined): {
       integrations: {
         store: new InMemoryIntegrationStore(),
         providers: new Map<string, import("./integrations/provider.js").ExecutionProviderFactory>([
-        // ONE instance, like every other store in main: the fake's wire is
-        // its own memory, so a per-resolution instance would hand every
-        // request a fresh (amnesiac) external system — links would dangle
-        // and the recovery contract would be undemonstrable live (found
-        // by the D10 live pass).
-        ['fake', (() => { const fake = new FakeProvider(); return () => fake; })()],
-        ['linear', linearConnectionFactory()],
-        ['github', githubConnectionFactory()],
-        ['jira', jiraConnectionFactory()],
-      ]),
+          // ONE instance, like every other store in main: the fake's wire is
+          // its own memory, so a per-resolution instance would hand every
+          // request a fresh (amnesiac) external system — links would dangle
+          // and the recovery contract would be undemonstrable live (found
+          // by the D10 live pass).
+          [
+            "fake",
+            (() => {
+              const fake = new FakeProvider();
+              return () => fake;
+            })(),
+          ],
+          ["linear", linearConnectionFactory()],
+          ["github", githubConnectionFactory()],
+          ["jira", jiraConnectionFactory()],
+        ]),
         actions: new InMemoryIntegrationActionStore(),
         ledger: new InMemoryExecutionLedger(),
         // Stage D7: the webhook delivery ledger + the inbound queue.
@@ -235,10 +252,16 @@ function makeStores(databaseUrl: string | undefined): {
       store: new PostgresIntegrationStore(target.db),
       providers: new Map<string, import("./integrations/provider.js").ExecutionProviderFactory>([
         // Same one-instance rule as the in-memory path (see the note there).
-        ['fake', (() => { const fake = new FakeProvider(); return () => fake; })()],
-        ['linear', linearConnectionFactory()],
-        ['github', githubConnectionFactory()],
-        ['jira', jiraConnectionFactory()],
+        [
+          "fake",
+          (() => {
+            const fake = new FakeProvider();
+            return () => fake;
+          })(),
+        ],
+        ["linear", linearConnectionFactory()],
+        ["github", githubConnectionFactory()],
+        ["jira", jiraConnectionFactory()],
       ]),
       actions: new PostgresIntegrationActionStore(target.db),
       ledger: new PostgresExecutionLedger(target.db),
@@ -699,13 +722,15 @@ async function sweepIntegration(): Promise<void> {
           const recovered = await provider.recoverCreate(
             `<!-- lucent-action:${item.idempotencyKey} -->`,
           );
-          task = recovered ?? (await provider.createTask({
-            title: item.title,
-            ...(item.assignee ? { assignee: item.assignee } : {}),
-            ...(item.dueDate ? { dueDate: item.dueDate } : {}),
-            status: item.status,
-            idempotencyKey: item.idempotencyKey,
-          }));
+          task =
+            recovered ??
+            (await provider.createTask({
+              title: item.title,
+              ...(item.assignee ? { assignee: item.assignee } : {}),
+              ...(item.dueDate ? { dueDate: item.dueDate } : {}),
+              status: item.status,
+              idempotencyKey: item.idempotencyKey,
+            }));
         } else if (item.action === "update") {
           task = await provider.updateTask(item.externalId!, {
             title: item.title,

@@ -89,22 +89,18 @@ function instance(name: "A" | "B", port: number): Instance {
     base,
     ws: `ws://127.0.0.1:${port}`,
     async start() {
-      proc = spawn(
-        process.execPath,
-        [SERVER_DIST.pathname],
-        {
-          env: {
-            ...process.env,
-            LUCENT_DATABASE_URL: DATABASE_URL,
-            LUCENT_PORT: String(port),
-            LUCENT_HOST: "127.0.0.1",
-            // The rehearsal uses its own throwaway orgs; auth on, provider mock.
-            LUCENT_REQUIRE_AUTH: "1",
-            LUCENT_AI_PROVIDER: "mock",
-          },
-          stdio: ["ignore", "ignore", "ignore"],
+      proc = spawn(process.execPath, [SERVER_DIST.pathname], {
+        env: {
+          ...process.env,
+          LUCENT_DATABASE_URL: DATABASE_URL,
+          LUCENT_PORT: String(port),
+          LUCENT_HOST: "127.0.0.1",
+          // The rehearsal uses its own throwaway orgs; auth on, provider mock.
+          LUCENT_REQUIRE_AUTH: "1",
+          LUCENT_AI_PROVIDER: "mock",
         },
-      );
+        stdio: ["ignore", "ignore", "ignore"],
+      });
       self.proc = proc;
       // Wait for the health endpoint; the migrations run on boot.
       for (let i = 0; i < 60; i++) {
@@ -128,7 +124,11 @@ function instance(name: "A" | "B", port: number): Instance {
   return self;
 }
 
-async function api(base: string, path: string, init: RequestInit & { token?: string; csrf?: string } = {}) {
+async function api(
+  base: string,
+  path: string,
+  init: RequestInit & { token?: string; csrf?: string } = {},
+) {
   const { token, csrf, ...rest } = init;
   const res = await fetch(`${base}${path}`, {
     ...rest,
@@ -154,7 +154,11 @@ async function main() {
     // --- ARM 1: cross-instance seed ---
     const signup = await api(a.base, "/api/auth/signup", {
       method: "POST",
-      body: JSON.stringify({ email: `rehearsal+${Date.now()}@example.com`, password: "rehearsal-pass-1", name: "Rehearsal" }),
+      body: JSON.stringify({
+        email: `rehearsal+${Date.now()}@example.com`,
+        password: "rehearsal-pass-1",
+        name: "Rehearsal",
+      }),
     });
     const token = (signup.body as { token?: string }).token;
     arm("signup on A", signup.status === 201 && Boolean(token));
@@ -180,7 +184,11 @@ async function main() {
     const nodesB = Object.keys(
       (seenOnB.body.workspace as { nodes?: Record<string, unknown> } | undefined)?.nodes ?? {},
     );
-    arm("1. cross-instance seed — A's write visible on B", seenOnB.status === 200 && nodesB.includes("node-a"), `B sees: ${nodesB.join(", ") || "nothing"}`);
+    arm(
+      "1. cross-instance seed — A's write visible on B",
+      seenOnB.status === 200 && nodesB.includes("node-a"),
+      `B sees: ${nodesB.join(", ") || "nothing"}`,
+    );
 
     // --- ARM 2: cross-instance write ---
     await api(b.base, `/api/boards/${boardId}/ops`, {
@@ -195,7 +203,11 @@ async function main() {
     const nodesA = Object.keys(
       (seenOnA.body.workspace as { nodes?: Record<string, unknown> } | undefined)?.nodes ?? {},
     );
-    arm("2. cross-instance write — B's write visible on A", nodesA.includes("node-b"), `A sees: ${nodesA.join(", ") || "nothing"}`);
+    arm(
+      "2. cross-instance write — B's write visible on A",
+      nodesA.includes("node-b"),
+      `A sees: ${nodesA.join(", ") || "nothing"}`,
+    );
 
     // --- ARM 3: instance kill ---
     await a.kill();
@@ -206,11 +218,14 @@ async function main() {
     await a.start();
     const aAfterRestart = await api(a.base, `/api/boards/${boardId}`, { token });
     const nodesRestarted = Object.keys(
-      (aAfterRestart.body.workspace as { nodes?: Record<string, unknown> } | undefined)?.nodes ?? {},
+      (aAfterRestart.body.workspace as { nodes?: Record<string, unknown> } | undefined)?.nodes ??
+        {},
     );
     arm(
       "4. restart persistence — A restarts and every write survives",
-      aAfterRestart.status === 200 && nodesRestarted.includes("node-a") && nodesRestarted.includes("node-b"),
+      aAfterRestart.status === 200 &&
+        nodesRestarted.includes("node-a") &&
+        nodesRestarted.includes("node-b"),
       `restarted A sees: ${nodesRestarted.join(", ") || "nothing"}`,
     );
 
@@ -243,7 +258,10 @@ async function main() {
       const target = attempts % 2 === 0 ? a.base : b.base;
       const res = await api(target, "/api/auth/login", {
         method: "POST",
-        body: JSON.stringify({ email: "rehearsal-limiter@example.com", password: "wrong-password" }),
+        body: JSON.stringify({
+          email: "rehearsal-limiter@example.com",
+          password: "wrong-password",
+        }),
       });
       if (res.status === 429) {
         refused = true;
@@ -263,7 +281,11 @@ async function main() {
     await a.kill();
   }
 
-  console.log(failures === 0 ? "\nDEPLOYMENT REHEARSAL: ALL PASS" : `\nDEPLOYMENT REHEARSAL: ${failures} FAILURE(S)`);
+  console.log(
+    failures === 0
+      ? "\nDEPLOYMENT REHEARSAL: ALL PASS"
+      : `\nDEPLOYMENT REHEARSAL: ${failures} FAILURE(S)`,
+  );
   process.exit(failures === 0 ? 0 : 1);
 }
 

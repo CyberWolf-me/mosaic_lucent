@@ -116,9 +116,9 @@ saved searches, analytics, cross-org search.
 - The local palette scan survives unchanged for local boards; server
   search is additive, gated on a shared board being open.
 - Weights and folds are tuning knobs, not architecture. What must hold:
-   the seam signature, the corpus contract (caller-windowed only), the
-   three-kind citation mapping, and the deterministic ranking (the offline
-   eval and the golden gate depend on reproducibility).
+  the seam signature, the corpus contract (caller-windowed only), the
+  three-kind citation mapping, and the deterministic ranking (the offline
+  eval and the golden gate depend on reproducibility).
 - `matched` tokens are part of the public hit shape: the palette renders
   them, so changing the normalization rules changes what users see on
   every row — the explainability contract.

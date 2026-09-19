@@ -63,7 +63,10 @@ async function main() {
 
     // 2. Metrics check: verify that unauthenticated /metrics is protected (401)
     const unauthMetricsRes = await fetch(`${base}/metrics`);
-    if (unauthMetricsRes.status !== 401) throw new Error(`/metrics should return 401 when unauthenticated, got ${unauthMetricsRes.status}`);
+    if (unauthMetricsRes.status !== 401)
+      throw new Error(
+        `/metrics should return 401 when unauthenticated, got ${unauthMetricsRes.status}`,
+      );
     console.log(`[3] /metrics security gate verified (unauthenticated request rejected with 401)`);
 
     // 3. CSRF token
@@ -87,19 +90,25 @@ async function main() {
         name: "Elena Vance",
       }),
     });
-    if (!signupRes.ok) throw new Error(`Signup failed (${signupRes.status}): ${await signupRes.text()}`);
+    if (!signupRes.ok)
+      throw new Error(`Signup failed (${signupRes.status}): ${await signupRes.text()}`);
     const signupData = await signupRes.json();
     const bearerToken = signupData.token;
     const orgId = signupData.memberships[0]?.orgId;
-    console.log(`[5] User registered: ${signupData.user.name} (${signupData.user.email}), Org ID: ${orgId}`);
+    console.log(
+      `[5] User registered: ${signupData.user.name} (${signupData.user.email}), Org ID: ${orgId}`,
+    );
 
     // Authenticated metrics check
     const authMetricsRes = await fetch(`${base}/metrics`, {
       headers: { Authorization: `Bearer ${bearerToken}` },
     });
-    if (!authMetricsRes.ok) throw new Error(`Authenticated /metrics returned ${authMetricsRes.status}`);
+    if (!authMetricsRes.ok)
+      throw new Error(`Authenticated /metrics returned ${authMetricsRes.status}`);
     const metricsData = await authMetricsRes.json();
-    console.log(`[5b] Authenticated /metrics OK: provider=${metricsData.provider}, telemetry errors=${metricsData.recentErrors.length}`);
+    console.log(
+      `[5b] Authenticated /metrics OK: provider=${metricsData.provider}, telemetry errors=${metricsData.recentErrors.length}`,
+    );
 
     // 5. Board creation
     const initialWorkspace = createWorkspace({ name: "Launch Architecture" });
@@ -178,7 +187,9 @@ async function main() {
         } else if (msg.type === "op") {
           const hasGatewayNode = msg.entry?.ops?.some((o: any) => o.id === "node_gateway");
           if (hasGatewayNode) {
-            console.log(`[11] Realtime WebSocket op committed and broadcasted (seq: ${msg.entry.seq})`);
+            console.log(
+              `[11] Realtime WebSocket op committed and broadcasted (seq: ${msg.entry.seq})`,
+            );
             clearTimeout(timeout);
             ws.close();
             resolve();

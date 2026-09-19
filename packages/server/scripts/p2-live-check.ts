@@ -15,14 +15,33 @@ await migrate(db);
 await db.db.delete(outboxEvents);
 
 const now = Date.now();
-await db.db.insert(organizations).values({ id: "org-live", name: "Live", createdAt: now }).onConflictDoNothing();
+await db.db
+  .insert(organizations)
+  .values({ id: "org-live", name: "Live", createdAt: now })
+  .onConflictDoNothing();
 await db.db
   .insert(users)
-  .values({ id: "u-live", email: "live@x.com", name: "L", passwordHash: "x", tokenVersion: 0, createdAt: now, updatedAt: now })
+  .values({
+    id: "u-live",
+    email: "live@x.com",
+    name: "L",
+    passwordHash: "x",
+    tokenVersion: 0,
+    createdAt: now,
+    updatedAt: now,
+  })
   .onConflictDoNothing();
 await db.db
   .insert(boards)
-  .values({ id: "b-live", orgId: "org-live", ownerId: "u-live", name: "B", workspace: createWorkspace(), createdAt: now, updatedAt: now })
+  .values({
+    id: "b-live",
+    orgId: "org-live",
+    ownerId: "u-live",
+    name: "B",
+    workspace: createWorkspace(),
+    createdAt: now,
+    updatedAt: now,
+  })
   .onConflictDoNothing();
 
 const boardStore = new PostgresBoardStore(db);
@@ -46,7 +65,9 @@ const dispatcher = new OutboxDispatcher({
     BoardOperationCommitted: [
       (e) => {
         seen.push(e.id);
-        console.log(`3. DELIVERED type=${e.type} board=${e.boardId} seq=${(e.payload as { seq: number }).seq} org=${e.orgId}`);
+        console.log(
+          `3. DELIVERED type=${e.type} board=${e.boardId} seq=${(e.payload as { seq: number }).seq} org=${e.orgId}`,
+        );
       },
     ],
   },

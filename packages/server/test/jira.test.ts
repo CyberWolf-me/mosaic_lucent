@@ -18,24 +18,46 @@ import { isSafeOutboundUrl } from "../src/integrations/outboundUrl.js";
  */
 
 function responder(
-  route: (init: { method: string; path: string; body?: Record<string, unknown> }) => Response | null,
+  route: (init: {
+    method: string;
+    path: string;
+    body?: Record<string, unknown>;
+  }) => Response | null,
 ) {
-  const seen: Array<{ method: string; path: string; body?: Record<string, unknown>; headers: Record<string, string> }> = [];
+  const seen: Array<{
+    method: string;
+    path: string;
+    body?: Record<string, unknown>;
+    headers: Record<string, string>;
+  }> = [];
   const fetchImpl = (async (_url: string | URL | Request, init?: RequestInit) => {
     const url = new URL(String(_url));
     const method = (init?.method ?? "GET").toUpperCase();
-    const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : undefined;
+    const body = init?.body
+      ? (JSON.parse(String(init.body)) as Record<string, unknown>)
+      : undefined;
     const headers: Record<string, string> = {};
     new Headers(init?.headers).forEach((v, k) => (headers[k.toLowerCase()] = v));
     seen.push({ method, path: url.pathname + url.search, body, headers });
     const answer = route({ method, path: url.pathname, body });
     if (answer) return answer;
-    return new Response(JSON.stringify({ errorMessages: [`no route for ${method} ${url.pathname}`] }), { status: 404 });
+    return new Response(
+      JSON.stringify({ errorMessages: [`no route for ${method} ${url.pathname}`] }),
+      { status: 404 },
+    );
   }) as typeof fetch;
   return { fetchImpl, seen };
 }
 
-function issueJson(over: Partial<{ key: string; summary: string; status: string; accountId: string; duedate: string | null }> = {}): { key: string; fields: Record<string, unknown> } {
+function issueJson(
+  over: Partial<{
+    key: string;
+    summary: string;
+    status: string;
+    accountId: string;
+    duedate: string | null;
+  }> = {},
+): { key: string; fields: Record<string, unknown> } {
   return {
     key: over.key ?? "LAUNCH-482",
     fields: {
@@ -43,7 +65,11 @@ function issueJson(over: Partial<{ key: string; summary: string; status: string;
       description: { type: "doc", version: 1, content: [] },
       status: { name: over.status ?? "To Do" },
       assignee: over.accountId
-        ? { accountId: over.accountId, displayName: "Sarah Chen", emailAddress: "sarah@example.com" }
+        ? {
+            accountId: over.accountId,
+            displayName: "Sarah Chen",
+            emailAddress: "sarah@example.com",
+          }
         : null,
       duedate: over.duedate ?? null,
     },
@@ -73,14 +99,26 @@ describe("the wire contract", () => {
       if (method === "POST" && path === "/rest/api/3/issue") return json({ key: "LAUNCH-1" });
       // The read-back echoes the duedate the create sent (what Jira would
       // have stored), so the ExternalTask carries it.
-      if (path === "/rest/api/3/issue/LAUNCH-1") return json(issueJson({ key: "LAUNCH-1", status: "To Do", duedate: "2026-09-20" }));
+      if (path === "/rest/api/3/issue/LAUNCH-1")
+        return json(issueJson({ key: "LAUNCH-1", status: "To Do", duedate: "2026-09-20" }));
       return null;
     });
     const p = provider({ fetchImpl });
-    const task = await p.createTask({ title: "Prepare brief", dueDate: "2026-09-20", idempotencyKey: "ext_n1" });
-    expect(task).toMatchObject({ provider: "jira", externalId: "LAUNCH-1", status: "To Do", dueDate: "2026-09-20" });
+    const task = await p.createTask({
+      title: "Prepare brief",
+      dueDate: "2026-09-20",
+      idempotencyKey: "ext_n1",
+    });
+    expect(task).toMatchObject({
+      provider: "jira",
+      externalId: "LAUNCH-1",
+      status: "To Do",
+      dueDate: "2026-09-20",
+    });
     const create = seen[0]!;
-    expect(create.headers["authorization"]).toBe(`Basic ${Buffer.from("dev@example.com:token").toString("base64")}`);
+    expect(create.headers["authorization"]).toBe(
+      `Basic ${Buffer.from("dev@example.com:token").toString("base64")}`,
+    );
     const fields = create.body!.fields as Record<string, unknown>;
     expect(fields.project).toEqual({ key: "LAUNCH" });
     expect(fields.issuetype).toEqual({ name: "Task" });
@@ -92,7 +130,8 @@ describe("the wire contract", () => {
 
   it("updateTask PUTs the fields, then moves status ONLY through the matching transition", async () => {
     const { fetchImpl, seen } = responder(({ method, path, body }) => {
-      if (method === "PUT" && path === "/rest/api/3/issue/LAUNCH-1") return new Response(null, { status: 204 });
+      if (method === "PUT" && path === "/rest/api/3/issue/LAUNCH-1")
+        return new Response(null, { status: 204 });
       if (path === "/rest/api/3/issue/LAUNCH-1/transitions") {
         if (method === "GET") {
           return json({
@@ -106,7 +145,8 @@ describe("the wire contract", () => {
         expect(body?.transition).toEqual({ id: "31" });
         return new Response(null, { status: 204 });
       }
-      if (path === "/rest/api/3/issue/LAUNCH-1") return json(issueJson({ key: "LAUNCH-1", status: "Done" }));
+      if (path === "/rest/api/3/issue/LAUNCH-1")
+        return json(issueJson({ key: "LAUNCH-1", status: "Done" }));
       return null;
     });
     const p = provider({ fetchImpl });
@@ -187,7 +227,9 @@ describe("mapStatus — conservative by design (the never-guesses showcase)", ()
 });
 
 describe("the assignee ladder — email > name > unique partial, resolving to accountId", () => {
-  function ladder(users: Array<{ accountId: string; emailAddress?: string; displayName?: string }>) {
+  function ladder(
+    users: Array<{ accountId: string; emailAddress?: string; displayName?: string }>,
+  ) {
     const { fetchImpl, seen } = responder(({ path }) => {
       if (path === "/rest/api/3/user/assignable/search") return json(users);
       return null;
@@ -204,7 +246,9 @@ describe("the assignee ladder — email > name > unique partial, resolving to ac
     expect(await p["resolveAssignee"]("Sarah Chen")).toMatchObject({ accountId: "a1" });
     expect(await p["resolveAssignee"]("Sarah Liu")).toMatchObject({ accountId: "a2" });
     // Ambiguous: "sarah" matches both.
-    await expect(p["resolveAssignee"]("sarah")).rejects.toThrow(/uniquely resolve assignee "sarah"/);
+    await expect(p["resolveAssignee"]("sarah")).rejects.toThrow(
+      /uniquely resolve assignee "sarah"/,
+    );
     // One search per instance.
     expect(seen.filter((c) => c.path.includes("assignable")).length).toBe(1);
     // Not-found returns null → the create/update omits the assignee quietly
@@ -227,7 +271,13 @@ describe("recoverCreate — the hardened contract, JQL-scoped", () => {
       }
       return null;
     });
-    const p = provider({ fetchImpl, recoverPollMs: [5], sleep: async (ms) => { sleeps.push(ms); } });
+    const p = provider({
+      fetchImpl,
+      recoverPollMs: [5],
+      sleep: async (ms) => {
+        sleeps.push(ms);
+      },
+    });
     const found = await p.recoverCreate("lucent-action:ext_n1");
     expect(found).toMatchObject({ externalId: "LAUNCH-9" });
     expect(sleeps).toEqual([5]);
@@ -242,7 +292,9 @@ describe("recoverCreate — the hardened contract, JQL-scoped", () => {
     const p = provider({ fetchImpl, recoverPollMs: [1, 1] });
     expect(await p.recoverCreate("lucent-action:ext_n1")).toBeUndefined();
     const jqlCall = seen[0]!;
-    expect(jqlCall.path).toContain(encodeURIComponent('text ~ "lucent-action:ext_n1" AND project = LAUNCH'));
+    expect(jqlCall.path).toContain(
+      encodeURIComponent('text ~ "lucent-action:ext_n1" AND project = LAUNCH'),
+    );
   });
 });
 
@@ -264,21 +316,47 @@ describe("the SSRF-safe site policy (ADR 0034)", () => {
   });
 
   it("the constructor enforces the policy too (the boundary is authoritative both ways)", () => {
-    expect(() => provider({ site: "https://localhost" })).toThrow(/localhost is not an allowed outbound target/);
+    expect(() => provider({ site: "https://localhost" })).toThrow(
+      /localhost is not an allowed outbound target/,
+    );
     expect(() => provider({ site: "http://acme.atlassian.net" })).toThrow(/only https/);
   });
 
   it("the factory refuses: unset/malformed credential, unsafe site, missing/bad projectKey", () => {
     const factory = jiraConnectionFactory();
     delete process.env.JIRA_TEST_CRED;
-    expect(() => factory({ credentialRef: "JIRA_TEST_CRED", config: { site: "https://acme.atlassian.net", projectKey: "LAUNCH" } })).toThrow(/not set in the environment/);
+    expect(() =>
+      factory({
+        credentialRef: "JIRA_TEST_CRED",
+        config: { site: "https://acme.atlassian.net", projectKey: "LAUNCH" },
+      }),
+    ).toThrow(/not set in the environment/);
     process.env.JIRA_TEST_CRED = "only-email";
-    expect(() => factory({ credentialRef: "JIRA_TEST_CRED", config: { site: "https://acme.atlassian.net", projectKey: "LAUNCH" } })).toThrow(/email:api_token/);
+    expect(() =>
+      factory({
+        credentialRef: "JIRA_TEST_CRED",
+        config: { site: "https://acme.atlassian.net", projectKey: "LAUNCH" },
+      }),
+    ).toThrow(/email:api_token/);
     process.env.JIRA_TEST_CRED = "dev@example.com:token";
-    expect(() => factory({ credentialRef: "JIRA_TEST_CRED", config: { projectKey: "LAUNCH" } })).toThrow(/missing config\.site/);
-    expect(() => factory({ credentialRef: "JIRA_TEST_CRED", config: { site: "https://192.168.0.9", projectKey: "LAUNCH" } })).toThrow(/not allowed outbound/);
-    expect(() => factory({ credentialRef: "JIRA_TEST_CRED", config: { site: "https://acme.atlassian.net" } })).toThrow(/missing config\.projectKey/);
-    expect(() => factory({ credentialRef: "JIRA_TEST_CRED", config: { site: "https://acme.atlassian.net", projectKey: "launch" } })).toThrow(/uppercase/);
+    expect(() =>
+      factory({ credentialRef: "JIRA_TEST_CRED", config: { projectKey: "LAUNCH" } }),
+    ).toThrow(/missing config\.site/);
+    expect(() =>
+      factory({
+        credentialRef: "JIRA_TEST_CRED",
+        config: { site: "https://192.168.0.9", projectKey: "LAUNCH" },
+      }),
+    ).toThrow(/not allowed outbound/);
+    expect(() =>
+      factory({ credentialRef: "JIRA_TEST_CRED", config: { site: "https://acme.atlassian.net" } }),
+    ).toThrow(/missing config\.projectKey/);
+    expect(() =>
+      factory({
+        credentialRef: "JIRA_TEST_CRED",
+        config: { site: "https://acme.atlassian.net", projectKey: "launch" },
+      }),
+    ).toThrow(/uppercase/);
     delete process.env.JIRA_TEST_CRED;
   });
 

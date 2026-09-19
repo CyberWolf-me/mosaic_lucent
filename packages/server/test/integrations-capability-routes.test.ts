@@ -40,7 +40,9 @@ function scriptGithubWire() {
   const fetchImpl = (async (_url: string | URL | Request, init?: RequestInit) => {
     const url = new URL(String(_url));
     const method = (init?.method ?? "GET").toUpperCase();
-    const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : undefined;
+    const body = init?.body
+      ? (JSON.parse(String(init.body)) as Record<string, unknown>)
+      : undefined;
     wires.push({ method, path: url.pathname, body });
     if (url.pathname === "/repos/acme/app/assignees") {
       return new Response(JSON.stringify([{ login: "sarah-dev" }]), { status: 200 });
@@ -48,7 +50,8 @@ function scriptGithubWire() {
     if (method === "POST" && url.pathname === "/repos/acme/app/issues") {
       return new Response(
         JSON.stringify({
-          number: wires.filter((w) => w.method === "POST" && w.path === "/repos/acme/app/issues").length,
+          number: wires.filter((w) => w.method === "POST" && w.path === "/repos/acme/app/issues")
+            .length,
           title: String(body?.title ?? ""),
           body: String(body?.body ?? ""),
           state: "open",
@@ -112,14 +115,23 @@ async function makeHarness() {
     boardStore,
     actions,
     wires,
-    close: async () => { await close(); },
+    close: async () => {
+      await close();
+    },
   };
 }
 
 let open: Awaited<ReturnType<typeof makeHarness>> | null = null;
-afterEach(async () => { await open?.close(); open = null; });
+afterEach(async () => {
+  await open?.close();
+  open = null;
+});
 
-async function api(h: NonNullable<typeof open>, path: string, init: RequestInit & { token?: string; csrf?: string } = {}) {
+async function api(
+  h: NonNullable<typeof open>,
+  path: string,
+  init: RequestInit & { token?: string; csrf?: string } = {},
+) {
   const { token, csrf, ...rest } = init;
   const res = await fetch(`${h.base}${path}`, {
     ...rest,
@@ -150,18 +162,30 @@ async function signup(h: NonNullable<typeof open>, email: string) {
  * cannot represent faithfully (the review's capability-loss example). */
 const LOSSY_OPS: Operation[] = [
   { op: "CREATE_NODE", id: "nd_brief", nodeType: "action", label: "Prepare launch brief" },
-  { op: "SET_STATEMENT", id: "nd_brief", statement: { kind: "action", status: "open", topic: "d8" } },
-  { op: "SET_ISSUE", id: "nd_brief", issue: { type: "task", status: "blocked", assignee: "sarah-dev", dueDate: "2026-09-20" } },
+  {
+    op: "SET_STATEMENT",
+    id: "nd_brief",
+    statement: { kind: "action", status: "open", topic: "d8" },
+  },
+  {
+    op: "SET_ISSUE",
+    id: "nd_brief",
+    issue: { type: "task", status: "blocked", assignee: "sarah-dev", dueDate: "2026-09-20" },
+  },
 ];
 
 async function seedBoard(h: NonNullable<typeof open>, token: string): Promise<string> {
   const created = await api(h, "/api/boards", {
-    method: "POST", token, body: JSON.stringify({ name: "D8 board", workspace: createWorkspace() }),
+    method: "POST",
+    token,
+    body: JSON.stringify({ name: "D8 board", workspace: createWorkspace() }),
   });
   expect(created.status).toBe(201);
   const boardId = created.body.id as string;
   const seeded = await api(h, `/api/boards/${boardId}/ops`, {
-    method: "POST", token, body: JSON.stringify({ ops: LOSSY_OPS, label: "seed" }),
+    method: "POST",
+    token,
+    body: JSON.stringify({ ops: LOSSY_OPS, label: "seed" }),
   });
   expect(seeded.status).toBe(200);
   return boardId;
@@ -174,7 +198,9 @@ describe("the capability-honesty seam at the route level", () => {
     const orgId = (await h.userStore.membershipsFor(user.id))[0]!.orgId;
     process.env.GH_TEST_TOKEN = "ghp_test";
     const put = await api(h, `/api/orgs/${orgId}/integrations/github`, {
-      method: "PUT", token: user.token, csrf: "csrf",
+      method: "PUT",
+      token: user.token,
+      csrf: "csrf",
       body: JSON.stringify({ credentialRef: "GH_TEST_TOKEN", config: { repo: "acme/app" } }),
     });
     expect(put.status).toBe(201);
@@ -182,7 +208,9 @@ describe("the capability-honesty seam at the route level", () => {
 
     // PROPOSE: the preview carries the dueDate + blocked warnings.
     const propose = await api(h, `/api/boards/${boardId}/integrations/github/propose`, {
-      method: "POST", token: user.token, csrf: "csrf",
+      method: "POST",
+      token: user.token,
+      csrf: "csrf",
     });
     expect(propose.status).toBe(201);
     const item = propose.body.preview.creates[0];
@@ -197,21 +225,35 @@ describe("the capability-honesty seam at the route level", () => {
 
     // APPROVE WITHOUT THE ACK → the honest 409, the warnings echoed, zero
     // wire mutations.
-    const refused = await api(h, `/api/boards/${boardId}/integrations/actions/${propose.body.action.id}/approve`, {
-      method: "POST", token: user.token, csrf: "csrf",
-    });
+    const refused = await api(
+      h,
+      `/api/boards/${boardId}/integrations/actions/${propose.body.action.id}/approve`,
+      {
+        method: "POST",
+        token: user.token,
+        csrf: "csrf",
+      },
+    );
     expect(refused.status).toBe(409);
     expect(refused.body.warnings).toHaveLength(2);
     expect(refused.body.acknowledgeWarnings).toBe(true);
-    expect(h.wires.filter((w) => w.method === "POST" && w.path === "/repos/acme/app/issues")).toHaveLength(0);
+    expect(
+      h.wires.filter((w) => w.method === "POST" && w.path === "/repos/acme/app/issues"),
+    ).toHaveLength(0);
 
     // APPROVE WITH THE ACK → executes; GitHub receives the title + the
     // assignee, no dueDate field at all (the loss is now CONSENTED), and
     // the body carries the recovery marker.
-    const approved = await api(h, `/api/boards/${boardId}/integrations/actions/${propose.body.action.id}/approve`, {
-      method: "POST", token: user.token, csrf: "csrf",
-      body: JSON.stringify({ acknowledgeWarnings: true }),
-    });
+    const approved = await api(
+      h,
+      `/api/boards/${boardId}/integrations/actions/${propose.body.action.id}/approve`,
+      {
+        method: "POST",
+        token: user.token,
+        csrf: "csrf",
+        body: JSON.stringify({ acknowledgeWarnings: true }),
+      },
+    );
     expect(approved.status).toBe(200);
     expect(approved.body.applied).toBe(1);
     const wire = h.wires.find((w) => w.method === "POST" && w.path === "/repos/acme/app/issues");
@@ -227,21 +269,29 @@ describe("the capability-honesty seam at the route level", () => {
     const orgId = (await h.userStore.membershipsFor(user.id))[0]!.orgId;
     process.env.GH_TEST_TOKEN = "ghp_test";
     await api(h, `/api/orgs/${orgId}/integrations/github`, {
-      method: "PUT", token: user.token, csrf: "csrf",
+      method: "PUT",
+      token: user.token,
+      csrf: "csrf",
       body: JSON.stringify({ credentialRef: "GH_TEST_TOKEN", config: { repo: "acme/app" } }),
     });
     const boardId = await seedBoard(h, user.token);
     const propose = await api(h, `/api/boards/${boardId}/integrations/github/propose`, {
-      method: "POST", token: user.token, csrf: "csrf",
+      method: "POST",
+      token: user.token,
+      csrf: "csrf",
     });
     const actionId = propose.body.action.id;
     await api(h, `/api/boards/${boardId}/integrations/actions/${actionId}/approve`, {
-      method: "POST", token: user.token, csrf: "csrf",
+      method: "POST",
+      token: user.token,
+      csrf: "csrf",
       body: JSON.stringify({ acknowledgeWarnings: true }),
     });
     const before = h.wires.filter((w) => w.method === "POST").length;
     const dup = await api(h, `/api/boards/${boardId}/integrations/actions/${actionId}/approve`, {
-      method: "POST", token: user.token, csrf: "csrf",
+      method: "POST",
+      token: user.token,
+      csrf: "csrf",
       body: JSON.stringify({ acknowledgeWarnings: true }),
     });
     expect(dup.body.duplicate).toBe(true);

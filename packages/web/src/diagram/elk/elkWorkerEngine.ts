@@ -152,12 +152,10 @@ export class WorkerElkEngine implements DiagramLayoutEngine {
   }
 
   async layout({ workspace, options }: DiagramLayoutRequest): Promise<DiagramLayoutResult> {
-    return this.post<DiagramLayoutResult>({ kind: "layout", workspace, options }).then(
-      (out) => {
-        if (!out) throw new Error("layout worker declined a board layout");
-        return out;
-      },
-    );
+    return this.post<DiagramLayoutResult>({ kind: "layout", workspace, options }).then((out) => {
+      if (!out) throw new Error("layout worker declined a board layout");
+      return out;
+    });
   }
 
   relayoutRegion(

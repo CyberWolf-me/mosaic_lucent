@@ -450,12 +450,7 @@ export class PostgresJobQueue implements JobQueue {
   async prune(olderThanMs: number, now: number = Date.now()): Promise<number> {
     const removed = await this.db.db
       .delete(jobs)
-      .where(
-        and(
-          inArray(jobs.status, ["done", "failed"]),
-          lte(jobs.finishedAt, now - olderThanMs),
-        ),
-      )
+      .where(and(inArray(jobs.status, ["done", "failed"]), lte(jobs.finishedAt, now - olderThanMs)))
       .returning({ id: jobs.id });
     return removed.length;
   }
@@ -530,7 +525,11 @@ export class JobRunner {
     let completed = 0;
     let failed = 0;
     try {
-      const claimed = await this.options.queue.claim(this.families, this.options.workerId, this.batchSize);
+      const claimed = await this.options.queue.claim(
+        this.families,
+        this.options.workerId,
+        this.batchSize,
+      );
       for (const job of claimed) {
         const handler = this.options.handlers[job.type];
         if (!handler) {

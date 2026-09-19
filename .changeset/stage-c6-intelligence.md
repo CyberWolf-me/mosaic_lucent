@@ -25,4 +25,4 @@ Stage C6: the Intelligence view — the current semantic workspace, surfaced as 
   human edit — only the explicit click applies a recommendation. Keep
   dismisses change-aware-ephemerally: an unchanged pair stays suppressed
   for the session; any statement change re-arms the question.
-- **Spec (`@lucent/i18n`)**: the full intel.* string family, en + hu.
+- **Spec (`@lucent/i18n`)**: the full intel.\* string family, en + hu.

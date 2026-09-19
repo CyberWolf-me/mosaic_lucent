@@ -19,11 +19,11 @@ function fixedProvider(operations: Operation[], explanation?: string) {
     async generateAnswer() {
       throw new Error("fixed provider cannot answer questions");
     },
-  // Stage D9 made generateExternalPlan part of the interface; the
-      // selector is not under test here.
-      async generateExternalPlan() {
-        throw new Error("this stub cannot select external actions");
-      },
+    // Stage D9 made generateExternalPlan part of the interface; the
+    // selector is not under test here.
+    async generateExternalPlan() {
+      throw new Error("this stub cannot select external actions");
+    },
   };
 }
 
@@ -66,7 +66,9 @@ describe("handleGenerate", () => {
     expect(result.status).toBe(200);
     const body = result.body as { operations: Operation[] };
     expect(body.operations).toHaveLength(3);
-    const connectOp = body.operations.find((o) => o.op === "CONNECT_NODES") as { relationship: string };
+    const connectOp = body.operations.find((o) => o.op === "CONNECT_NODES") as {
+      relationship: string;
+    };
     expect(connectOp.relationship).toBe("");
   });
 });
@@ -441,9 +443,9 @@ describe("the topic fold at the generate boundary (Stage C5)", () => {
     expect(result.status).toBe(200);
     const ops = (result.body as { operations: Operation[] }).operations;
     const setOp = ops.find((o) => o.op === "SET_STATEMENT");
-    expect(
-      setOp && setOp.op === "SET_STATEMENT" ? setOp.statement?.topic : undefined,
-    ).toBe("launch-date");
+    expect(setOp && setOp.op === "SET_STATEMENT" ? setOp.statement?.topic : undefined).toBe(
+      "launch-date",
+    );
   });
 
   it("a novel topic passes through untouched — the fold never mints", async () => {
@@ -469,9 +471,9 @@ describe("the topic fold at the generate boundary (Stage C5)", () => {
     expect(result.status).toBe(200);
     const ops = (result.body as { operations: Operation[] }).operations;
     const setOp = ops.find((o) => o.op === "SET_STATEMENT");
-    expect(
-      setOp && setOp.op === "SET_STATEMENT" ? setOp.statement?.topic : undefined,
-    ).toBe("onboarding");
+    expect(setOp && setOp.op === "SET_STATEMENT" ? setOp.statement?.topic : undefined).toBe(
+      "onboarding",
+    );
   });
 
   it("a semantic non-variant stays apart — monetization is never folded into pricing", async () => {
@@ -497,8 +499,8 @@ describe("the topic fold at the generate boundary (Stage C5)", () => {
     expect(result.status).toBe(200);
     const ops = (result.body as { operations: Operation[] }).operations;
     const setOp = ops.find((o) => o.op === "SET_STATEMENT");
-    expect(
-      setOp && setOp.op === "SET_STATEMENT" ? setOp.statement?.topic : undefined,
-    ).toBe("monetization");
+    expect(setOp && setOp.op === "SET_STATEMENT" ? setOp.statement?.topic : undefined).toBe(
+      "monetization",
+    );
   });
 });

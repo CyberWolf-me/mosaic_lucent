@@ -76,7 +76,10 @@ const summarySchema = z.object({
             // workspace must carry them or a plan would validate against a
             // board that lost its deadlines (the five-place rule's summary
             // arm; ADR 0027).
-            dueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+            dueDate: z
+              .string()
+              .regex(/^\d{4}-\d{2}-\d{2}$/)
+              .optional(),
             description: z.string().max(2000).optional(),
           })
           .optional(),

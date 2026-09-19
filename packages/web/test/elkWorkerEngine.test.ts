@@ -12,7 +12,10 @@
 import { describe, expect, it, vi } from "vitest";
 import { createWorkspace, layeredBoard } from "@lucent/core";
 import { WorkerElkEngine } from "../src/diagram/elk/elkWorkerEngine.js";
-import type { LayoutWorkerRequest, LayoutWorkerResponse } from "../src/diagram/elk/layoutWorkerProtocol.js";
+import type {
+  LayoutWorkerRequest,
+  LayoutWorkerResponse,
+} from "../src/diagram/elk/layoutWorkerProtocol.js";
 
 /** A scriptable fake worker: queue requests, reply when the test decides. */
 class FakeWorker {
@@ -79,9 +82,9 @@ describe("the worker proxy (doc 18 Phase 4)", () => {
 
   it("rejects when the worker cannot spawn — the service's fallback answers", async () => {
     const engine = new WorkerElkEngine(() => null);
-    await expect(
-      engine.layout({ workspace: layeredBoard(20), options: {} }),
-    ).rejects.toThrow(/unavailable/);
+    await expect(engine.layout({ workspace: layeredBoard(20), options: {} })).rejects.toThrow(
+      /unavailable/,
+    );
   });
 
   it("fails outstanding calls when the worker dies; the next call re-spawns", async () => {

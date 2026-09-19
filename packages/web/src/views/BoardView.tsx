@@ -233,8 +233,12 @@ function IssueCard({
     `${node.label} — ${issue.type}, ${issue.status}` +
     (issue.assignee ? `, assigned to ${issue.assignee}` : "") +
     (issue.dueDate ? `, due ${issue.dueDate}` : "") +
-    (derived && derived.blockedBy.length > 0 ? `, blocked by ${derived.blockedBy.join(", ")}` : "") +
-    (derived && derived.atRiskBy.length > 0 ? `, at risk from ${derived.atRiskBy.join(", ")}` : "") +
+    (derived && derived.blockedBy.length > 0
+      ? `, blocked by ${derived.blockedBy.join(", ")}`
+      : "") +
+    (derived && derived.atRiskBy.length > 0
+      ? `, at risk from ${derived.atRiskBy.join(", ")}`
+      : "") +
     (decisions && decisions.length > 0 ? `, driven by ${decisions.join(", ")}` : "") +
     (issue.storyPoints !== undefined ? `, ${issue.storyPoints} points` : "");
   // The due date is overdue when past today and the work isn't finished —

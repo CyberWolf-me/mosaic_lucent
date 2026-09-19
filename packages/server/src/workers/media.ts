@@ -34,7 +34,9 @@ export interface MediaWorkerDeps {
  * pretends to render would be worse than an empty lane — it would make the
  * queue look like it does work it does not do.
  */
-export function buildMediaHandlers(deps: MediaWorkerDeps): Record<string, (job: Job) => Promise<void>> {
+export function buildMediaHandlers(
+  deps: MediaWorkerDeps,
+): Record<string, (job: Job) => Promise<void>> {
   return {
     /**
      * Reserved: heavy export rendering. Registered so the family has a real

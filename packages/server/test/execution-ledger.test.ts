@@ -5,9 +5,7 @@ import {
   isReclaimable,
   type ExecutionRecord,
 } from "../src/integrations/ledger.js";
-import {
-  InMemoryIntegrationActionStore,
-} from "../src/integrations/integrations.js";
+import { InMemoryIntegrationActionStore } from "../src/integrations/integrations.js";
 
 /**
  * The exactly-once machinery (Stage D5, ADR 0031). The ledger mirrors the
@@ -19,15 +17,25 @@ import {
  * asserted together below.
  */
 
-const CLAIM = { boardId: "b1", provider: "fake", requestId: "r1", lucentActionId: "act_1", nodeId: "n1" };
+const CLAIM = {
+  boardId: "b1",
+  provider: "fake",
+  requestId: "r1",
+  lucentActionId: "act_1",
+  nodeId: "n1",
+};
 
 function withClock(store: InMemoryExecutionLedger, base: number) {
   let now = base;
   const origNow = Date.now;
   Date.now = () => now;
   return {
-    advance: (ms: number) => { now += ms; },
-    restore: () => { Date.now = origNow; },
+    advance: (ms: number) => {
+      now += ms;
+    },
+    restore: () => {
+      Date.now = origNow;
+    },
   };
 }
 
@@ -109,8 +117,17 @@ describe("InMemoryExecutionLedger — the claim triad", () => {
   it("isReclaimable: failed always; received only past the window; applied never", () => {
     const now = 10_000;
     const received: ExecutionRecord = {
-      boardId: "b", provider: "fake", requestId: "r", lucentActionId: "a", nodeId: "n",
-      status: "received", attempts: 1, error: null, beganAt: now - 5_000, appliedAt: null, externalId: null,
+      boardId: "b",
+      provider: "fake",
+      requestId: "r",
+      lucentActionId: "a",
+      nodeId: "n",
+      status: "received",
+      attempts: 1,
+      error: null,
+      beganAt: now - 5_000,
+      appliedAt: null,
+      externalId: null,
     };
     // beganAt 5s ago, staleAfter 1s → stale → reclaimable.
     expect(isReclaimable(received, now, 1_000)).toBe(true);
@@ -139,24 +156,60 @@ describe("InMemoryExecutionLedger — the claim triad", () => {
 
 describe("InMemoryIntegrationActionStore — the B3 pattern, new kind", () => {
   const ITEM = (nodeId: string) => ({
-    nodeId, action: "create" as const, title: `Task ${nodeId}`, status: "open", idempotencyKey: `ext_${nodeId}_act_1`,
+    nodeId,
+    action: "create" as const,
+    title: `Task ${nodeId}`,
+    status: "open",
+    idempotencyKey: `ext_${nodeId}_act_1`,
   });
 
   it("one pending per (board, provider): a new proposal supersedes", async () => {
     const store = new InMemoryIntegrationActionStore();
-    const first = await store.propose({ orgId: "o", boardId: "b1", provider: "fake", connectionId: "int_1", items: [ITEM("n1")], createdBy: "u", now: 1 });
-    const second = await store.propose({ orgId: "o", boardId: "b1", provider: "fake", connectionId: "int_1", items: [ITEM("n2")], createdBy: "u", now: 2 });
+    const first = await store.propose({
+      orgId: "o",
+      boardId: "b1",
+      provider: "fake",
+      connectionId: "int_1",
+      items: [ITEM("n1")],
+      createdBy: "u",
+      now: 1,
+    });
+    const second = await store.propose({
+      orgId: "o",
+      boardId: "b1",
+      provider: "fake",
+      connectionId: "int_1",
+      items: [ITEM("n2")],
+      createdBy: "u",
+      now: 2,
+    });
     expect(second.supersededId).toBe(first.record.id);
     const history = await store.actionsForBoard("b1");
     expect(history.map((r) => r.status).sort()).toEqual(["pending", "superseded"]);
     // A DIFFERENT provider gets its own pending slot.
-    const other = await store.propose({ orgId: "o", boardId: "b1", provider: "linear" as never, connectionId: "int_2", items: [ITEM("n3")], createdBy: "u", now: 3 });
+    const other = await store.propose({
+      orgId: "o",
+      boardId: "b1",
+      provider: "linear" as never,
+      connectionId: "int_2",
+      items: [ITEM("n3")],
+      createdBy: "u",
+      now: 3,
+    });
     expect(other.supersededId).toBeNull();
   });
 
   it("decided once: the second decide is a no-op returning the current state", async () => {
     const store = new InMemoryIntegrationActionStore();
-    const { record } = await store.propose({ orgId: "o", boardId: "b1", provider: "fake", connectionId: "int_1", items: [ITEM("n1")], createdBy: "u", now: 1 });
+    const { record } = await store.propose({
+      orgId: "o",
+      boardId: "b1",
+      provider: "fake",
+      connectionId: "int_1",
+      items: [ITEM("n1")],
+      createdBy: "u",
+      now: 1,
+    });
     const first = await store.decide("b1", record.id, "approved", "u", 2);
     expect(first!.status).toBe("approved");
     const second = await store.decide("b1", record.id, "rejected", "u", 3);
@@ -167,7 +220,15 @@ describe("InMemoryIntegrationActionStore — the B3 pattern, new kind", () => {
 
   it("board-scoped: a leaked id from another board is not a read", async () => {
     const store = new InMemoryIntegrationActionStore();
-    const { record } = await store.propose({ orgId: "o", boardId: "b1", provider: "fake", connectionId: "int_1", items: [ITEM("n1")], createdBy: "u", now: 1 });
+    const { record } = await store.propose({
+      orgId: "o",
+      boardId: "b1",
+      provider: "fake",
+      connectionId: "int_1",
+      items: [ITEM("n1")],
+      createdBy: "u",
+      now: 1,
+    });
     expect(await store.action("b2", record.id)).toBeUndefined();
     expect(await store.action("b1", record.id)).toBeDefined();
     expect(await store.decide("b2", record.id, "approved", "u", 2)).toBeUndefined();
@@ -208,7 +269,9 @@ describe("FakeProvider — the D5 hooks", () => {
     const fake = new FakeProvider();
     fake.hangNext();
     let settled = false;
-    const p = fake.createTask({ title: "A" }).then(() => { settled = true; });
+    const p = fake.createTask({ title: "A" }).then(() => {
+      settled = true;
+    });
     await new Promise((r) => setTimeout(r, 20));
     expect(settled).toBe(false);
     // The next call works (the hang was one-shot).

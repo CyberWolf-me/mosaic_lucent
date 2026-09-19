@@ -42,9 +42,9 @@ The owner's decisions, with two refinements that shaped the contract:
    ai actor, and the web client's send/proposal paths. The board converges
    on the key IT already uses — never a system-preferred spelling.
 2. **Human-authored text is never silently rewritten.** The precise
-   invariant: *human-authored semantic fields are immutable by automatic
+   invariant: _human-authored semantic fields are immutable by automatic
    canonicalization; AI and system recommendations may propose changes, but
-   only an explicit user action may apply them.* Machine-ops-only by
+   only an explicit user action may apply them._ Machine-ops-only by
    placement, not by flag: the room folds `actor.actorType === "ai"`
    batches and nothing else; `applyManual` (the HUD's path) has no fold
    call at all. The superseded carve-out, so the invariant is honest: the

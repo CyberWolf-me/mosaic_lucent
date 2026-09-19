@@ -143,9 +143,7 @@ describe("foldStatementTopics — the op boundary", () => {
     // Order-stable: the reverse batch folds to the same representative.
     const reversed = foldStatementTopics([...batch].reverse(), []);
     expect(
-      reversed.every(
-        (op) => op.op !== "SET_STATEMENT" || op.statement?.topic === "prices",
-      ),
+      reversed.every((op) => op.op !== "SET_STATEMENT" || op.statement?.topic === "prices"),
     ).toBe(true);
   });
 
@@ -189,9 +187,7 @@ describe("the workspace-derived surfaces", () => {
           kind: "decision",
           status: "open",
           ...(s.topic ? { topic: s.topic } : {}),
-          ...(s.meetingId
-            ? { provenance: { meetingId: s.meetingId, turnRange: [0, 0] } }
-            : {}),
+          ...(s.meetingId ? { provenance: { meetingId: s.meetingId, turnRange: [0, 0] } } : {}),
         },
       });
     }
@@ -235,10 +231,16 @@ describe("the workspace-derived surfaces", () => {
 
   it("a unified or unrelated board produces nothing", () => {
     // Unified: one authored key, however many statements.
-    expect(possibleDuplicateTopics(boardWith({ id: "a", topic: "pricing" }, { id: "b", topic: "pricing" }))).toEqual([]);
+    expect(
+      possibleDuplicateTopics(
+        boardWith({ id: "a", topic: "pricing" }, { id: "b", topic: "pricing" }),
+      ),
+    ).toEqual([]);
     // Unrelated: variant logic doesn't reach semantic aliasing.
     expect(
-      possibleDuplicateTopics(boardWith({ id: "a", topic: "monetization" }, { id: "b", topic: "pricing" })),
+      possibleDuplicateTopics(
+        boardWith({ id: "a", topic: "monetization" }, { id: "b", topic: "pricing" }),
+      ),
     ).toEqual([]);
   });
 

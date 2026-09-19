@@ -188,11 +188,11 @@ describe("Stage C3 definition of done — the continuous scenario", () => {
     // the floor and exclude the meeting that produced it).
     const preMonday = await h.boardStore.appendOp({
       boardId,
-      ops: [{ op: 'CREATE_NODE', id: 'seed-node', nodeType: 'step', label: 'Seed' }],
+      ops: [{ op: "CREATE_NODE", id: "seed-node", nodeType: "step", label: "Seed" }],
       by: alice.id,
-      label: 'board created',
+      label: "board created",
       at: Date.now() - 3 * 24 * 3_600_000,
-      actor: { actorType: 'user', actorId: alice.id, initiatedBy: alice.id },
+      actor: { actorType: "user", actorId: alice.id, initiatedBy: alice.id },
     });
     expect(preMonday.ok).toBe(true);
 
@@ -223,7 +223,12 @@ describe("Stage C3 definition of done — the continuous scenario", () => {
         id: "pricing-old",
         nodeType: "decision",
         label: "Pricing at $20/month",
-        provenance: { meetingId: monday.id, turnRange: [0, 0], turnKinds: ["decision"], quote: "Twenty a month works." },
+        provenance: {
+          meetingId: monday.id,
+          turnRange: [0, 0],
+          turnKinds: ["decision"],
+          quote: "Twenty a month works.",
+        },
       },
       {
         op: "SET_STATEMENT",
@@ -236,7 +241,7 @@ describe("Stage C3 definition of done — the continuous scenario", () => {
         },
       },
     ];
-    
+
     // Monday's extraction, committed at Monday's time so the meeting sits
     // inside the window the revisions define (the ops route stamps 'now',
     // which would push Monday's meeting outside its own window).
@@ -244,14 +249,14 @@ describe("Stage C3 definition of done — the continuous scenario", () => {
       boardId,
       ops: mondayOps,
       by: alice.id,
-      label: 'Monday extraction',
+      label: "Monday extraction",
       at: monday.startedAt + 1,
-      actor: { actorType: 'user', actorId: alice.id, initiatedBy: alice.id },
+      actor: { actorType: "user", actorId: alice.id, initiatedBy: alice.id },
     });
     expect(mondayAppend.ok).toBe(true);
     // appendOp logs the entry; the stored board is a projection the route
     // applies separately — mirror that (the ops route's own ordering).
-    const { applyOperations } = await import('@lucent/core');
+    const { applyOperations } = await import("@lucent/core");
     const mondayBoard = await h.boardStore.get(boardId);
     await h.boardStore.put({
       ...mondayBoard!,
@@ -283,7 +288,12 @@ describe("Stage C3 definition of done — the continuous scenario", () => {
         id: "pricing-new",
         nodeType: "decision",
         label: "Pricing at $15/month",
-        provenance: { meetingId: wednesday.id, turnRange: [0, 0], turnKinds: ["decision"], quote: "fifteen a month" },
+        provenance: {
+          meetingId: wednesday.id,
+          turnRange: [0, 0],
+          turnKinds: ["decision"],
+          quote: "fifteen a month",
+        },
       },
       {
         op: "SET_STATEMENT",
@@ -297,14 +307,14 @@ describe("Stage C3 definition of done — the continuous scenario", () => {
         },
       },
     ];
-    
+
     const wednesdayAppend = await h.boardStore.appendOp({
       boardId,
       ops: wednesdayOps,
       by: alice.id,
-      label: 'Wednesday correction',
+      label: "Wednesday correction",
       at: wednesday.startedAt + 1,
-      actor: { actorType: 'user', actorId: alice.id, initiatedBy: alice.id },
+      actor: { actorType: "user", actorId: alice.id, initiatedBy: alice.id },
     });
     expect(wednesdayAppend.ok).toBe(true);
     const wednesdayBoard = await h.boardStore.get(boardId);

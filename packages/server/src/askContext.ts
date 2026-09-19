@@ -1,6 +1,11 @@
 import type { AnswerRequest, AnswerMeetingSummary, AnswerRetrievalHit } from "@lucent/ai";
 import type { Node, ProvenanceFields, Workspace } from "@lucent/core";
-import { canonicalizeTopic, decisionDriveGraph, derivedExecution, topicsAreVariants } from "@lucent/core";
+import {
+  canonicalizeTopic,
+  decisionDriveGraph,
+  derivedExecution,
+  topicsAreVariants,
+} from "@lucent/core";
 import type { LoggedOpEntry } from "./boards.js";
 import type { MeetingTranscript } from "./meetings.js";
 import { buildSearchCorpus, retrieve, SEARCH_LIMITS } from "./retrieval.js";
@@ -176,7 +181,9 @@ export function renderBoardDigest(input: AskContextInput): string {
       if (node.groupId) parts.push(`[group: ${node.groupId}]`);
       const issue = node.issue;
       if (issue) {
-        parts.push(`[issue: ${issue.type} · ${issue.status}${issue.assignee ? ` · @${issue.assignee}` : ""}]`);
+        parts.push(
+          `[issue: ${issue.type} · ${issue.status}${issue.assignee ? ` · @${issue.assignee}` : ""}]`,
+        );
       }
       // The derived execution truth (Stage D3): computed per digest read —
       // blockedBy/atRiskBy from the dependency graph, so "what's blocking
@@ -277,13 +284,11 @@ export function renderBoardDigest(input: AskContextInput): string {
       const origin = (p: ProvenanceFields | undefined): string => {
         if (!p) return "";
         const meeting = p.meetingId ? `, from meeting ${p.meetingId}` : "";
-        const planned = p.createdFrom?.length
-          ? `, planned from ${p.createdFrom.join(", ")}`
-          : "";
+        const planned = p.createdFrom?.length ? `, planned from ${p.createdFrom.join(", ")}` : "";
         return meeting + planned;
       };
-      const targets = n.statement.supersedes!
-        .map((id) => {
+      const targets = n.statement
+        .supersedes!.map((id) => {
           const t = ws.nodes[id];
           if (!t?.statement) return `  (unknown: ${id})`;
           return `  replacing ${t.id} (${t.statement.kind} · ${t.statement.status}${
@@ -333,22 +338,20 @@ export function renderBoardDigest(input: AskContextInput): string {
       });
     }
   }
-  const topicSections = topicGroups
-    .slice(0, ASK_DIGEST_LIMITS.topics)
-    .map((g) => {
-      const authored = [...g.authored];
-      // The representative the fold would choose: shortest, then
-      // lexicographic — the grouping and the fold converge on the same key.
-      const representative = [...authored]
-        .map(canonicalizeTopic)
-        .sort((x, y) => x.length - y.length || x.localeCompare(y))[0]!;
-      const note =
-        authored.length > 1 || authored[0] !== representative
-          ? ` (authored: ${authored.join(", ")})`
-          : "";
-      const rows = g.statements.map((s) => `  ${s.id}: ${s.kind} · ${s.status}`);
-      return `topic ${representative}${note}:\n${rows.join("\n")}`;
-    });
+  const topicSections = topicGroups.slice(0, ASK_DIGEST_LIMITS.topics).map((g) => {
+    const authored = [...g.authored];
+    // The representative the fold would choose: shortest, then
+    // lexicographic — the grouping and the fold converge on the same key.
+    const representative = [...authored]
+      .map(canonicalizeTopic)
+      .sort((x, y) => x.length - y.length || x.localeCompare(y))[0]!;
+    const note =
+      authored.length > 1 || authored[0] !== representative
+        ? ` (authored: ${authored.join(", ")})`
+        : "";
+    const rows = g.statements.map((s) => `  ${s.id}: ${s.kind} · ${s.status}`);
+    return `topic ${representative}${note}:\n${rows.join("\n")}`;
+  });
   if (topicSections.length) {
     lines.push(
       `Statements by topic (each topic's statements grouped — the answer to "what happened with X?" is one section):\n${topicSections.join("\n")}`,
@@ -368,15 +371,17 @@ export function renderBoardDigest(input: AskContextInput): string {
  * space, the same judgment the "statements on nodes" decision made about
  * board objects.
  */
-export function projectMeetings(
-  meetings: MeetingTranscript[],
-): AnswerMeetingSummary[] {
+export function projectMeetings(meetings: MeetingTranscript[]): AnswerMeetingSummary[] {
   return meetings.slice(0, ASK_DIGEST_LIMITS.meetings).map((m) => {
     const classified = m.turns
       .map((t, index) => ({ t, index }))
       .filter(
-        (entry): entry is { t: typeof entry.t & { kind: NonNullable<typeof entry.t.kind> }; index: number } =>
-          Boolean(entry.t.kind),
+        (
+          entry,
+        ): entry is {
+          t: typeof entry.t & { kind: NonNullable<typeof entry.t.kind> };
+          index: number;
+        } => Boolean(entry.t.kind),
       )
       .slice(0, ASK_DIGEST_LIMITS.meetingTurns)
       .map(({ t, index }) => ({
@@ -400,10 +405,7 @@ export function projectMeetings(
  * the model cites through the existing three kinds; the snippet, not the
  * whole turn, is what the answer budget can afford.
  */
-export function projectRetrieval(
-  question: string,
-  input: AskContextInput,
-): AnswerRetrievalHit[] {
+export function projectRetrieval(question: string, input: AskContextInput): AnswerRetrievalHit[] {
   const corpus = buildSearchCorpus({
     workspace: input.workspace,
     meetings: input.meetings,

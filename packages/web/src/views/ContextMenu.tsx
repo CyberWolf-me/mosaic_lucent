@@ -27,9 +27,7 @@ export function ContextMenu({
   // Viewport clamp: keep the ~240px-wide menu on screen; rows are ~32px tall.
   const hasWindow = typeof window !== "undefined";
   const clampedX = hasWindow ? Math.max(8, Math.min(x, window.innerWidth - 240)) : x;
-  const clampedY = hasWindow
-    ? Math.max(8, Math.min(y, window.innerHeight - items.length * 32))
-    : y;
+  const clampedY = hasWindow ? Math.max(8, Math.min(y, window.innerHeight - items.length * 32)) : y;
 
   const btnRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const [active, setActive] = useState(() => {

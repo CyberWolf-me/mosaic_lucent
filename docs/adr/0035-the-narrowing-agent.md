@@ -40,7 +40,7 @@ its output is the only path from a model selection to a proposal item.
 deterministically deduplicated server-side, first-occurrence order
 (counts stay honest); unknown ids → dropped with a visible warning
 (the citation-validation discipline — model output is untrusted input
-validated against real state); **oversized selections (> MAX_AI_
+validated against real state); **oversized selections (> MAX*AI*
 SELECTED_ACTIONS = 10, D5's batch shape) → the honest 422 "Lucent
 selected N actions, but external proposals are limited to 10" — never
 a silent truncate, never a silent reinterpretation of the model**; the

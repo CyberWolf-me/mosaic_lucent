@@ -10,7 +10,10 @@ import { describe, expect, it } from "vitest";
 import { createWorkspace, layeredBoard, type Operation, type Workspace } from "@lucent/core";
 import { ElkLayoutEngine } from "../src/diagram/elk/elkLayoutEngine.js";
 import { handleLayoutRequest } from "../src/diagram/elk/layoutWorkerCore.js";
-import type { LayoutWorkerRequest, LayoutWorkerResponse } from "../src/diagram/elk/layoutWorkerProtocol.js";
+import type {
+  LayoutWorkerRequest,
+  LayoutWorkerResponse,
+} from "../src/diagram/elk/layoutWorkerProtocol.js";
 
 describe("the layout worker core (doc 18 Phase 4)", () => {
   it("answers a board layout with the correlated result", async () => {
@@ -24,11 +27,11 @@ describe("the layout worker core (doc 18 Phase 4)", () => {
     expect(out.kind).toBe("layout-done");
     if (out.kind !== "layout-done") return;
     expect(out.id).toBe(7);
-    expect(
-      Object.keys(out.layout as Record<string, unknown>),
-    ).toHaveLength(20);
+    expect(Object.keys(out.layout as Record<string, unknown>)).toHaveLength(20);
     // Every node finite — the structural invariant the Phase 2 pins hold too.
-    for (const entry of Object.values(out.layout as Record<string, { position: { x: number; y: number } }>)) {
+    for (const entry of Object.values(
+      out.layout as Record<string, { position: { x: number; y: number } }>,
+    )) {
       expect(Number.isFinite(entry.position.x)).toBe(true);
       expect(Number.isFinite(entry.position.y)).toBe(true);
     }
@@ -72,9 +75,7 @@ describe("the layout worker core (doc 18 Phase 4)", () => {
     if (out.kind !== "layout-done") return;
     expect(out.id).toBe(11);
     // outside nodes restated
-    expect(
-      Object.keys(out.layout as Record<string, unknown>),
-    ).toHaveLength(30);
+    expect(Object.keys(out.layout as Record<string, unknown>)).toHaveLength(30);
   });
 
   it("reports a crash as a correlated error, never a throw", async () => {

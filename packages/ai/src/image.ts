@@ -173,10 +173,7 @@ export class OpenAIImageProvider implements ImageProvider {
   }
 
   async generateImage(request: ImageRequest): Promise<ImageResult> {
-    const candidateModels = [
-      this.model,
-      ...this.fallbackModels.filter((m) => m !== this.model),
-    ];
+    const candidateModels = [this.model, ...this.fallbackModels.filter((m) => m !== this.model)];
     let lastError: Error | null = null;
     for (const modelToUse of candidateModels) {
       try {
@@ -188,7 +185,10 @@ export class OpenAIImageProvider implements ImageProvider {
     throw lastError ?? new Error("Image provider request failed");
   }
 
-  private async executeGenerateImage(request: ImageRequest, modelToUse: string): Promise<ImageResult> {
+  private async executeGenerateImage(
+    request: ImageRequest,
+    modelToUse: string,
+  ): Promise<ImageResult> {
     const response = await this.fetchImpl(this.baseUrl, {
       method: "POST",
       headers: {

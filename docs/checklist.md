@@ -2243,8 +2243,7 @@ The nine-phase plan, executed against the benchmark:
       `vad_events` onset rides `speech`, interim dropped by rule,
       socket death throws (route 502s, never empty-finals). Shared
       `groupWordsIntoUtterances` with the REST path so the two mappings
-      cannot disagree. 7 strict tests over a local WS stub (real wire)
-      + live run on the owner key (mid-stream `spk_01` final, two onset
+      cannot disagree. 7 strict tests over a local WS stub (real wire) + live run on the owner key (mid-stream `spk_01` final, two onset
       events, close flush). Selected by `LUCENT_STT_STREAMING=1`;
       default stays buffer-at-close until soak — enabling fleet-wide
       is a deployment decision, not smuggled in. Server suite now
@@ -2275,8 +2274,7 @@ The nine-phase plan, executed against the benchmark:
       Meetings: create/mode/turns/append/end all live; `zoom` import →
       400 `available: mock`; mock unknown ref → 502. Governance:
       confidential → share 403, restricted+boardId → generate 403
-      pre-spend; board-agnostic generate ungoverned by design. Web 200
-      + proxy 401 unauthenticated. MCP stdio lists 4 tools. STT/TTS
+      pre-spend; board-agnostic generate ungoverned by design. Web 200 + proxy 401 unauthenticated. MCP stdio lists 4 tools. STT/TTS
       503 standby without keys. Prod mock connector ships zero scripts,
       so import-success is test-only.
 - [~] Gated items: 3-human physical hardware audio diarization (requires physical acoustic cohort), 2-hour continuous WebRTC soak, enterprise OAuth marketplace apps (Zoom/Meet/Teams), and external canary partner rollout. All native Lucent components (LiveKit WebRTC, Deepgram STT/TTS, DeepSeek AI, WebSocket rooms, PostgreSQL 16, MCP, GitHub outbound) certified live.
@@ -2325,8 +2323,8 @@ The nine-phase plan, executed against the benchmark:
 - [x] **Test 12: Meeting creation test — PASS.** Native meeting created, LiveKit token minted with audio/video/screen permissions against LiveKit Cloud (`wss://lucent-bjeymvze.livekit.cloud`).
 - [x] **Test 13: STT provider certification — PASS.** Server Deepgram STT certified: session `stt_mu85fdyurdrkfqz7`, live mode, owner API key, sentence/vocabulary mapping contract verified.
 - [x] **Test 14: SpeechEvent test — PASS.** SpeechEvent lifecycle ordering verified: `speech_started` -> `interim*` -> `final` -> `speech_stopped`. Strict `participantId` & `speakerId` tracking, no fabricated speaker names, interim events never leak to durable records.
-- [ ] **Test 15: Speaker attribution / diarization test — NOT CERTIFIED.** Deepgram server diarization active with speaker tags (`spk_0`, `spk_1`). *Blocking external requirement:* True 3-human physically isolated multi-mic verification requires a human cohort on separate hardware per strict certification runbook.
-- [ ] **Test 16: Hard diarization tests — NOT CERTIFIED.** *Blocking external requirement:* Rapid switching, cross-talk, acoustic echo cancellation, and 4-5 overlapping speakers require multi-party physical acoustic chamber test.
+- [ ] **Test 15: Speaker attribution / diarization test — NOT CERTIFIED.** Deepgram server diarization active with speaker tags (`spk_0`, `spk_1`). _Blocking external requirement:_ True 3-human physically isolated multi-mic verification requires a human cohort on separate hardware per strict certification runbook.
+- [ ] **Test 16: Hard diarization tests — NOT CERTIFIED.** _Blocking external requirement:_ Rapid switching, cross-talk, acoustic echo cancellation, and 4-5 overlapping speakers require multi-party physical acoustic chamber test.
 - [x] **Test 17: Meeting intelligence test — PASS.** Meeting turns processed through `deepseek-v4.1-flash`: extracted 12 structured operations with semantic types (`decision`, `action`, `question`, `risk`).
 - [x] **Test 18: Cross-meeting intelligence test — PASS.** Statement nodes carry `supersedes: [id]` pointer. Meeting 2 decision supersedes Meeting 1 decision with provenance intact; context retrieval returns both with resolution.
 - [x] **Test 19: Meeting -> board test — PASS.** Meeting discussion -> transcript -> semantic intelligence -> diagram intent -> validated operations -> layout -> board verified live. Zero manual copy-pasting required.
@@ -2336,8 +2334,8 @@ The nine-phase plan, executed against the benchmark:
 - [x] **Test 23: Voice hallucination test — PASS.** Model queried on unmentioned topic (Kubernetes/Sarah decision): returned refusal without fabricating false decisions, provenance ground truth respected.
 - [x] **Test 24: Agent tool-use test — PASS.** Agent tool derivation verified from `@lucent/core` schema: tools include `apply_canvas_operations`, `get_board`, `list_external_links`, `reset_board`. Strict schema prevents hallucinated tools.
 - [x] **Test 25: MCP end-to-end test — PASS.** Real MCP process communicated over stdio JSON-RPC with `RemoteBoardSession` against `https://161.33.167.15.sslip.io`: initialize OK, `tools/list` returned 4 validated core tools derived directly from Zod schema.
-- [~] **Test 26: External integration test — PARTIAL.** Outbound GitHub integration configured with `credentialRef` (`LUCENT_GITHUB_CERT_TOKEN`, never echoed). Issue creation and idempotency markers certified. *Limitation:* Inbound webhooks require a public domain webhook routing callback.
-- [ ] **Test 27: External meeting test — NOT CERTIFIED.** *Blocking external requirement:* Zoom/Meet/Teams enterprise OAuth applications require active vendor tenant marketplace credentials. Native Lucent meetings are first-class.
+- [~] **Test 26: External integration test — PARTIAL.** Outbound GitHub integration configured with `credentialRef` (`LUCENT_GITHUB_CERT_TOKEN`, never echoed). Issue creation and idempotency markers certified. _Limitation:_ Inbound webhooks require a public domain webhook routing callback.
+- [ ] **Test 27: External meeting test — NOT CERTIFIED.** _Blocking external requirement:_ Zoom/Meet/Teams enterprise OAuth applications require active vendor tenant marketplace credentials. Native Lucent meetings are first-class.
 - [x] **Test 28: Confidential meeting test — PASS.** Confidential & Restricted meeting classifications block external AI provider dispatch pre-spend; audit event logged to database, private processing preserved.
 - [x] **Test 29: Data leakage test — PASS.** Secret `TEST_SECRET_89371` injected into generation payload. Audited Prometheus metrics, telemetry logs, and error responses: 0 secret leakage, redacted in observability feeds.
 - [x] **Test 30: Retention test — PASS.** Scheduled hourly retention sweep cleans up expired transcript records while preserving extracted semantic nodes, decisions, and audit log entries.
@@ -2345,7 +2343,7 @@ The nine-phase plan, executed against the benchmark:
 - [x] **Test 32: Browser / device matrix — PASS.** Headless Chromium / WebRTC media stream verified over HTTPS on Windows. Permissions for microphone and camera granted, responsive layout certified.
 - [x] **Test 33: Network tests — PASS.** WebSocket heartbeat ping/pong (30s) keep-alive verified, automatic reconnect on packet loss or socket closure, `lastSeenSeq` deduplication prevents duplicates.
 - [x] **Test 34: Load test — PASS.** 20 concurrent HTTP requests across 4 PM2 cluster workers completed in 1,118ms (avg 55.9ms/req). 100% 200 OK.
-- [ ] **Test 35: Long-running meeting test — NOT CERTIFIED.** *Blocking external requirement:* Full 2-hour continuous multi-party WebRTC audio meeting requires multi-hour human soak run. 10-minute automated sessions verified stable.
+- [ ] **Test 35: Long-running meeting test — NOT CERTIFIED.** _Blocking external requirement:_ Full 2-hour continuous multi-party WebRTC audio meeting requires multi-hour human soak run. 10-minute automated sessions verified stable.
 - [x] **Test 36: Large-board + meeting test — PASS.** 300-node semantic graph layout placed 300 nodes in 7.2ms. Viewport culling active for >=300 objects, 0 canvas frame lockup.
 - [x] **Test 37: Concurrent AI + human actions — PASS.** Human authority preserved: when human modifies a node position or label, AI cannot override manual coordinates. Server rejects AI `MOVE_NODE` on agent surface (422).
 - [x] **Test 38: History / undo / provenance test — PASS.** Board history log tracks every operation with author, timestamp, sequence number, and provenance. Inverse operations permit deterministic undo without state corruption.
@@ -2353,7 +2351,7 @@ The nine-phase plan, executed against the benchmark:
 - [x] **Test 40: Production observability test — PASS.** Prometheus metrics exposition live: exposes process, HTTP requests, and WebSocket connection metrics over `/metrics/prometheus`. `x-request-id` propagated across all HTTP headers.
 - [x] **Test 41: Cost / usage test — PASS.** Usage allowance and rate metering verified: voice minutes metered at floored 800 chars/min, sub-minute sessions free, failed provider calls bill 0 tokens.
 - [x] **Test 42: Production deployment test — PASS.** PM2 zero-downtime cluster reload certified: 4 cluster instances update without dropping in-flight HTTP connections or corrupting PostgreSQL sequence.
-- [ ] **Test 43: Canary with actual users — NOT CERTIFIED.** *Blocking external requirement:* Production staging ready. Pilot rollout with 5-10 trusted external design partners scheduled post-certification.
+- [ ] **Test 43: Canary with actual users — NOT CERTIFIED.** _Blocking external requirement:_ Production staging ready. Pilot rollout with 5-10 trusted external design partners scheduled post-certification.
 - [x] **Test 44: Final 'Golden Path' test — PASS.** Golden Path completed unbroken on live cloud stack: User created board -> `deepseek-v4.1-flash` generated architecture diagram -> manual edit added Redis Cache (seq 1) -> persisted across reload. Total nodes intact.
 - [x] **Test 45: Decision rule & release summary — CERTIFIED.** Total: 39 PASS, 1 PARTIAL, 5 NOT CERTIFIED, 0 FAIL. Zero regressions detected.
 
@@ -2372,5 +2370,3 @@ The nine-phase plan, executed against the benchmark:
 - [~] **GATE I — Integrations: PARTIAL.** Outbound GitHub integration configured with real token ref, issue creation verified. Inbound webhook awaits public callback URL.
 - [x] **GATE J — Security: PASS.** Internal/Confidential/Restricted classification enforcement, secret `TEST_SECRET_89371` un-leaked, ticketless WS 401, cross-org masking 404.
 - [x] **GATE K — Production: PASS.** Burst load 20 concurrent requests, zero-downtime PM2 cluster reload, Prometheus metrics, hourly retention sweep.
-
-

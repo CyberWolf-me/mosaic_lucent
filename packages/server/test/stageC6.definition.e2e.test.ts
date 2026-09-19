@@ -129,13 +129,23 @@ function storyOps(): Operation[] {
         provenance: { meetingId: "mtg_mon", turnRange: [0, 0] },
       },
     },
-    { op: "CREATE_NODE", id: "university-proposal", nodeType: "decision", label: "Maybe target universities" },
+    {
+      op: "CREATE_NODE",
+      id: "university-proposal",
+      nodeType: "decision",
+      label: "Maybe target universities",
+    },
     {
       op: "SET_STATEMENT",
       id: "university-proposal",
       statement: { kind: "proposal", status: "open", topic: "targeting" },
     },
-    { op: "CREATE_NODE", id: "billing-question", nodeType: "decision", label: "Monthly or annual pricing?" },
+    {
+      op: "CREATE_NODE",
+      id: "billing-question",
+      nodeType: "decision",
+      label: "Monthly or annual pricing?",
+    },
     {
       op: "SET_STATEMENT",
       id: "billing-question",
@@ -152,14 +162,23 @@ function storyOps(): Operation[] {
         provenance: { meetingId: "mtg_wed", turnRange: [2, 2] },
       },
     },
-    { op: "SET_ISSUE", id: "launch-brief", issue: { type: "task", status: "To Do", statusCategory: "todo", assignee: "sarah" } },
+    {
+      op: "SET_ISSUE",
+      id: "launch-brief",
+      issue: { type: "task", status: "To Do", statusCategory: "todo", assignee: "sarah" },
+    },
     { op: "CREATE_NODE", id: "sso-requirement", nodeType: "decision", label: "Support SSO" },
     {
       op: "SET_STATEMENT",
       id: "sso-requirement",
       statement: { kind: "requirement", status: "resolved", topic: "auth" },
     },
-    { op: "CREATE_NODE", id: "appstore-risk", nodeType: "decision", label: "App Store review delay" },
+    {
+      op: "CREATE_NODE",
+      id: "appstore-risk",
+      nodeType: "decision",
+      label: "App Store review delay",
+    },
     {
       op: "SET_STATEMENT",
       id: "appstore-risk",
@@ -172,7 +191,12 @@ function storyOps(): Operation[] {
       id: "pricing-decision",
       statement: { kind: "decision", status: "resolved", topic: "pricing" },
     },
-    { op: "CREATE_NODE", id: "pricing-model-risk", nodeType: "decision", label: "Pricing model complexity" },
+    {
+      op: "CREATE_NODE",
+      id: "pricing-model-risk",
+      nodeType: "decision",
+      label: "Pricing model complexity",
+    },
     {
       op: "SET_STATEMENT",
       id: "pricing-model-risk",
@@ -287,8 +311,6 @@ describe("Stage C6 definition of done — the continuous scenario", () => {
     // state — exactly how undo rebuilds the prior world.
     const inverse = inverseOperations(mergeBatch, storyWorkspace);
     const restored = applyOperations(afterMerge!.workspace, inverse);
-    expect(
-      restored.nodes["pricing-model-risk"]?.statement?.topic,
-    ).toBe("pricing-model");
+    expect(restored.nodes["pricing-model-risk"]?.statement?.topic).toBe("pricing-model");
   });
 });

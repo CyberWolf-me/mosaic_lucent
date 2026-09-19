@@ -414,9 +414,7 @@ export function summarizeWorkspace(workspace: Workspace, selection?: string[]): 
               // preserve deadlines the way it sees assignees (ADR 0027's D1
               // fields reaching the model surface).
               ...(n.issue.dueDate ? { dueDate: n.issue.dueDate } : {}),
-              ...(n.issue.description
-                ? { description: n.issue.description.slice(0, 240) }
-                : {}),
+              ...(n.issue.description ? { description: n.issue.description.slice(0, 240) } : {}),
             },
           }
         : {}),
@@ -426,9 +424,7 @@ export function summarizeWorkspace(workspace: Workspace, selection?: string[]): 
               kind: n.statement.kind,
               status: n.statement.status,
               ...(n.statement.topic ? { topic: n.statement.topic } : {}),
-              ...(n.statement.supersedes?.length
-                ? { supersedes: n.statement.supersedes }
-                : {}),
+              ...(n.statement.supersedes?.length ? { supersedes: n.statement.supersedes } : {}),
             },
           }
         : {}),

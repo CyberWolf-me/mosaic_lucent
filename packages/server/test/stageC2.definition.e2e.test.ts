@@ -2,12 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { AddressInfo } from "node:net";
 import { MockImageProvider, summarizeWorkspace } from "@lucent/ai";
 import type { AnswerRequest, AnswerResult, LLMProvider } from "@lucent/ai";
-import {
-  applyOperations,
-  createWorkspace,
-  validateOperations,
-  type Operation,
-} from "@lucent/core";
+import { applyOperations, createWorkspace, validateOperations, type Operation } from "@lucent/core";
 import { createApp } from "../src/app.js";
 import { InMemoryUserStore } from "../src/accounts.js";
 import { InMemoryBoardStore } from "../src/boards.js";
@@ -191,7 +186,12 @@ describe("Stage C2 definition of done — the continuous scenario", () => {
       startedAt: Date.now() - 60_000,
       endedAt: null,
       turns: [
-        { speaker: "Sarah", at: Date.now() - 50_000, text: "Let's price it at $15/month.", kind: "decision" },
+        {
+          speaker: "Sarah",
+          at: Date.now() - 50_000,
+          text: "Let's price it at $15/month.",
+          kind: "decision",
+        },
       ],
       createdBy: alice.id,
       createdAt: Date.now() - 60_000,
@@ -208,8 +208,18 @@ describe("Stage C2 definition of done — the continuous scenario", () => {
         id: "pricing-proposal",
         statement: { kind: "proposal", status: "open", topic: "pricing" },
       },
-      { op: "CREATE_NODE", id: "pricing-decision", nodeType: "decision", label: "Pricing at $15/month",
-        provenance: { meetingId: meeting.id, turnRange: [0, 0], turnKinds: ["decision"], quote: "Let's price it at $15/month." } },
+      {
+        op: "CREATE_NODE",
+        id: "pricing-decision",
+        nodeType: "decision",
+        label: "Pricing at $15/month",
+        provenance: {
+          meetingId: meeting.id,
+          turnRange: [0, 0],
+          turnKinds: ["decision"],
+          quote: "Let's price it at $15/month.",
+        },
+      },
       {
         op: "SET_STATEMENT",
         id: "pricing-decision",
@@ -218,7 +228,12 @@ describe("Stage C2 definition of done — the continuous scenario", () => {
           status: "resolved",
           topic: "pricing",
           supersedes: ["pricing-proposal"],
-          provenance: { meetingId: meeting.id, turnRange: [0, 0], turnKinds: ["decision"], quote: "Let's price it at $15/month." },
+          provenance: {
+            meetingId: meeting.id,
+            turnRange: [0, 0],
+            turnKinds: ["decision"],
+            quote: "Let's price it at $15/month.",
+          },
         },
       },
     ];
@@ -239,7 +254,11 @@ describe("Stage C2 definition of done — the continuous scenario", () => {
     // answer to "why is this node here?" on every machine now.)
     const board = await h.boardStore.get(boardId);
     const decision = board?.workspace.nodes["pricing-decision"];
-    expect(decision?.statement).toMatchObject({ kind: "decision", status: "resolved", topic: "pricing" });
+    expect(decision?.statement).toMatchObject({
+      kind: "decision",
+      status: "resolved",
+      topic: "pricing",
+    });
     expect(decision?.provenance).toEqual({
       meetingId: meeting.id,
       turnRange: [0, 0],
@@ -305,7 +324,12 @@ describe("Stage C2 definition of done — the continuous scenario", () => {
       token: alice.token,
       body: JSON.stringify({
         operations: [
-          { op: "CREATE_NODE", id: "onboarding-decision", nodeType: "decision", label: "3-step onboarding" },
+          {
+            op: "CREATE_NODE",
+            id: "onboarding-decision",
+            nodeType: "decision",
+            label: "3-step onboarding",
+          },
           {
             op: "SET_STATEMENT",
             id: "onboarding-decision",
@@ -332,7 +356,9 @@ describe("Stage C2 definition of done — the continuous scenario", () => {
     });
 
     // -- The identity rule: a relabel preserves meaning + evidence -----------
-    const relabel: Operation[] = [{ op: "CHANGE_TEXT", id: "pricing-decision", text: "$15/mo (final)" }];
+    const relabel: Operation[] = [
+      { op: "CHANGE_TEXT", id: "pricing-decision", text: "$15/mo (final)" },
+    ];
     const relabeled = await api(h, `/api/boards/${boardId}/ops`, {
       method: "POST",
       token: alice.token,
@@ -346,18 +372,23 @@ describe("Stage C2 definition of done — the continuous scenario", () => {
     expect(relabeled2?.provenance).toEqual(decision?.provenance);
 
     // -- The guardrail: a manual cycle attempt is refused --------------------
-    const cycleBoard = applyOperations(
-      (await h.boardStore.get(boardId))!.workspace,
-      [
-        { op: "CREATE_NODE", id: "x", nodeType: "decision", label: "X" },
-        { op: "SET_STATEMENT", id: "x", statement: { kind: "decision", status: "resolved", supersedes: ["pricing-decision"] } },
-      ],
-    );
+    const cycleBoard = applyOperations((await h.boardStore.get(boardId))!.workspace, [
+      { op: "CREATE_NODE", id: "x", nodeType: "decision", label: "X" },
+      {
+        op: "SET_STATEMENT",
+        id: "x",
+        statement: { kind: "decision", status: "resolved", supersedes: ["pricing-decision"] },
+      },
+    ]);
     // x → pricing-decision; a statement on pricing-decision superseding x
     // closes the loop. The HUD's picker would not offer it — and the
     // validator refuses it regardless of who asks.
     const cycle: Operation[] = [
-      { op: "SET_STATEMENT", id: "pricing-decision", statement: { kind: "decision", status: "resolved", supersedes: ["x"] } },
+      {
+        op: "SET_STATEMENT",
+        id: "pricing-decision",
+        statement: { kind: "decision", status: "resolved", supersedes: ["x"] },
+      },
     ];
     expect(validateOperations(cycleBoard, cycle)).toHaveLength(1);
     expect(validateOperations(cycleBoard, cycle)[0]!.message).toContain("cycle");
@@ -385,7 +416,11 @@ describe("Stage C2 definition of done — the continuous scenario", () => {
     const boardId = created.body.id as string;
     const ws = applyOperations(createWorkspace(), [
       { op: "CREATE_NODE", id: "d", nodeType: "decision", label: "Decided thing" },
-      { op: "SET_STATEMENT", id: "d", statement: { kind: "decision", status: "resolved", topic: "pricing" } },
+      {
+        op: "SET_STATEMENT",
+        id: "d",
+        statement: { kind: "decision", status: "resolved", topic: "pricing" },
+      },
     ]);
     const request = buildAnswerRequest({
       question: "what did we decide?",

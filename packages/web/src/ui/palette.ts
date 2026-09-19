@@ -122,7 +122,7 @@ export function searchHitHint(hit: BoardSearchHit): string {
     const statement = hit.statement
       ? ` · ${hit.statement.status}${hit.statement.topic ? ` · ${hit.statement.topic}` : ""}`
       : "";
-    return `Node · ${(hit.nodeType ?? "object")}${statement}`;
+    return `Node · ${hit.nodeType ?? "object"}${statement}`;
   }
   if (hit.kind === "turn") {
     const turn = hit.turnIndex !== undefined ? ` · turn ${hit.turnIndex}` : "";

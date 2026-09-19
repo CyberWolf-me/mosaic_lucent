@@ -39,7 +39,12 @@ function issueUpdate(identifier: string, stateName: string): string {
     action: "update",
     type: "Issue",
     created_at: "2026-09-06T00:00:00.000Z",
-    data: { id: "uuid-x", identifier, name: "Some issue", state: { name: stateName, type: "started" } },
+    data: {
+      id: "uuid-x",
+      identifier,
+      name: "Some issue",
+      state: { name: stateName, type: "started" },
+    },
     url: "https://linear.test/issue/" + identifier,
   });
 }
@@ -99,7 +104,11 @@ describe("verifyLinearSignature — the signature is the org resolution", () => 
 
 describe("parseLinearWebhook — verified bytes to a change", () => {
   it("reduces an issue update to the ExternalTaskChange shape", () => {
-    const parsed = parseLinearWebhook("linear", Buffer.from(issueUpdate("LIN-9", "In Progress")), 123);
+    const parsed = parseLinearWebhook(
+      "linear",
+      Buffer.from(issueUpdate("LIN-9", "In Progress")),
+      123,
+    );
     expect(parsed).toEqual({
       kind: "change",
       change: { provider: "linear", externalId: "LIN-9", status: "In Progress", at: 123 },
@@ -119,7 +128,13 @@ describe("parseLinearWebhook — verified bytes to a change", () => {
     for (const action of ["create", "remove"]) {
       const parsed = parseLinearWebhook(
         "linear",
-        Buffer.from(JSON.stringify({ action, type: "Issue", data: { identifier: "LIN-1", state: { name: "Todo" } } })),
+        Buffer.from(
+          JSON.stringify({
+            action,
+            type: "Issue",
+            data: { identifier: "LIN-1", state: { name: "Todo" } },
+          }),
+        ),
         123,
       );
       expect(parsed).toMatchObject({ kind: "ignored", reason: expect.stringContaining(action) });
@@ -139,7 +154,10 @@ describe("parseLinearWebhook — verified bytes to a change", () => {
 describe("the receiver — the Stripe protocol, Linear's scheme", () => {
   function harness() {
     const events = new InMemoryIntegrationWebhookEventStore();
-    const changes: Array<{ change: { provider: string; externalId: string; status: string; at: number }; orgId: string }> = [];
+    const changes: Array<{
+      change: { provider: string; externalId: string; status: string; at: number };
+      orgId: string;
+    }> = [];
     const receiver = createIntegrationWebhookReceiver({
       provider: "linear",
       scheme: linearWebhookScheme,
@@ -162,7 +180,10 @@ describe("the receiver — the Stripe protocol, Linear's scheme", () => {
     });
     expect(result).toMatchObject({ status: 200, outcome: "processed" });
     expect(h.changes).toEqual([
-      { change: { provider: "linear", externalId: "LIN-1", status: "Done", at: 1_000 }, orgId: ORG_A },
+      {
+        change: { provider: "linear", externalId: "LIN-1", status: "Done", at: 1_000 },
+        orgId: ORG_A,
+      },
     ]);
   });
 
@@ -170,7 +191,10 @@ describe("the receiver — the Stripe protocol, Linear's scheme", () => {
     const h = harness();
     const body = issueUpdate("LIN-1", "Done");
     const tampered = body.replace("Done", "Todo");
-    const result = await h.receiver.receive({ payload: Buffer.from(tampered), signature: sign(body, SECRET_A) });
+    const result = await h.receiver.receive({
+      payload: Buffer.from(tampered),
+      signature: sign(body, SECRET_A),
+    });
     expect(result).toMatchObject({ status: 400, outcome: "invalid_signature" });
     expect((await h.events.pending(0, 1_000, 10)).length).toBe(0);
   });
@@ -185,8 +209,15 @@ describe("the receiver — the Stripe protocol, Linear's scheme", () => {
       onChange: async () => {},
     });
     const body = issueUpdate("LIN-1", "Done");
-    const result = await receiver.receive({ payload: Buffer.from(body), signature: sign(body, "whatever") });
-    expect(result).toMatchObject({ status: 400, outcome: "invalid_signature", body: { error: "no_candidate_secrets" } });
+    const result = await receiver.receive({
+      payload: Buffer.from(body),
+      signature: sign(body, "whatever"),
+    });
+    expect(result).toMatchObject({
+      status: 400,
+      outcome: "invalid_signature",
+      body: { error: "no_candidate_secrets" },
+    });
   });
 
   it("a redelivery of the SAME bytes is a duplicate — one change, one row", async () => {
@@ -217,7 +248,14 @@ describe("the receiver — the Stripe protocol, Linear's scheme", () => {
       now: () => 1_000,
       staleAfterMs: 60_000,
     });
-    await events2.claim({ id, provider: "linear", orgId: ORG_A, externalId: "LIN-1", now: 900, staleAfterMs: 60_000 });
+    await events2.claim({
+      id,
+      provider: "linear",
+      orgId: ORG_A,
+      externalId: "LIN-1",
+      now: 900,
+      staleAfterMs: 60_000,
+    });
     const result = await receiver2.receive(delivery);
     expect(result).toMatchObject({ status: 409, outcome: "in_flight" });
   });
@@ -225,7 +263,10 @@ describe("the receiver — the Stripe protocol, Linear's scheme", () => {
   it("ignores an entity Lucent does not sync inbound (200 ignored, no change)", async () => {
     const h = harness();
     const body = JSON.stringify({ action: "update", type: "Comment", data: { id: "c1" } });
-    const result = await h.receiver.receive({ payload: Buffer.from(body), signature: sign(body, SECRET_B) });
+    const result = await h.receiver.receive({
+      payload: Buffer.from(body),
+      signature: sign(body, SECRET_B),
+    });
     expect(result).toMatchObject({ status: 200, outcome: "ignored" });
     expect(h.changes).toHaveLength(0);
   });
@@ -246,7 +287,10 @@ describe("the receiver — the Stripe protocol, Linear's scheme", () => {
       staleAfterMs: 100,
     });
     const body = issueUpdate("LIN-2", "Done");
-    const result = await receiver.receive({ payload: Buffer.from(body), signature: sign(body, SECRET_A) });
+    const result = await receiver.receive({
+      payload: Buffer.from(body),
+      signature: sign(body, SECRET_A),
+    });
     expect(result).toMatchObject({ status: 500, outcome: "failed" });
     // Not yet stale (claimed at t=1000, stale window 100ms): the sweeper
     // at t=1050 sees nothing.
@@ -291,7 +335,11 @@ describe("ingest — the verified change into the human-gated queue", () => {
 
   it("queues one pending record per link, translated through mapStatus", async () => {
     const h = harness();
-    const outcome = await ingestInboundChange(h.deps, { provider: "linear", externalId: "LIN-1", status: "Done" }, ORG_A);
+    const outcome = await ingestInboundChange(
+      h.deps,
+      { provider: "linear", externalId: "LIN-1", status: "Done" },
+      ORG_A,
+    );
     expect(outcome).toEqual({ outcome: "queued", count: 2 });
     const records = await h.inbound.forBoard("brd_1");
     expect(records).toHaveLength(1);
@@ -309,26 +357,50 @@ describe("ingest — the verified change into the human-gated queue", () => {
 
   it("a record whose live board value already equals the mapped value is NOT queued", async () => {
     const h = harness({ nodeStatus: "completed" });
-    const outcome = await ingestInboundChange(h.deps, { provider: "linear", externalId: "LIN-1", status: "Done" }, ORG_A);
+    const outcome = await ingestInboundChange(
+      h.deps,
+      { provider: "linear", externalId: "LIN-1", status: "Done" },
+      ORG_A,
+    );
     expect(outcome).toEqual({ outcome: "queued", count: 0 });
     expect(await h.inbound.forBoard("brd_1")).toHaveLength(0);
   });
 
   it("an untranslatable word produces the WARNING record — mappedValue undefined", async () => {
     const h = harness();
-    await ingestInboundChange(h.deps, { provider: "linear", externalId: "LIN-1", status: "In QA" }, ORG_A);
+    await ingestInboundChange(
+      h.deps,
+      { provider: "linear", externalId: "LIN-1", status: "In QA" },
+      ORG_A,
+    );
     const records = await h.inbound.forBoard("brd_2");
-    expect(records[0]).toMatchObject({ externalValue: "In QA", mappedValue: undefined, status: "pending" });
+    expect(records[0]).toMatchObject({
+      externalValue: "In QA",
+      mappedValue: undefined,
+      status: "pending",
+    });
   });
 
   it("the queue-level dedupe: same value refreshes, new value updates — never a second row", async () => {
     const h = harness();
-    await ingestInboundChange(h.deps, { provider: "linear", externalId: "LIN-1", status: "Done" }, ORG_A);
-    await ingestInboundChange(h.deps, { provider: "linear", externalId: "LIN-1", status: "Done" }, ORG_A);
+    await ingestInboundChange(
+      h.deps,
+      { provider: "linear", externalId: "LIN-1", status: "Done" },
+      ORG_A,
+    );
+    await ingestInboundChange(
+      h.deps,
+      { provider: "linear", externalId: "LIN-1", status: "Done" },
+      ORG_A,
+    );
     let records = await h.inbound.forBoard("brd_1");
     expect(records).toHaveLength(1);
     expect(records[0]?.detectedAt).toBe(1_000);
-    await ingestInboundChange(h.deps, { provider: "linear", externalId: "LIN-1", status: "In Progress" }, ORG_A);
+    await ingestInboundChange(
+      h.deps,
+      { provider: "linear", externalId: "LIN-1", status: "In Progress" },
+      ORG_A,
+    );
     records = await h.inbound.forBoard("brd_1");
     expect(records).toHaveLength(1);
     expect(records[0]).toMatchObject({ externalValue: "In Progress", mappedValue: "in_progress" });
@@ -336,13 +408,21 @@ describe("ingest — the verified change into the human-gated queue", () => {
 
   it("an issue no org linked is unlinked — no record, no noise", async () => {
     const h = harness();
-    const outcome = await ingestInboundChange(h.deps, { provider: "linear", externalId: "LIN-999", status: "Done" }, ORG_A);
+    const outcome = await ingestInboundChange(
+      h.deps,
+      { provider: "linear", externalId: "LIN-999", status: "Done" },
+      ORG_A,
+    );
     expect(outcome).toEqual({ outcome: "unlinked", count: 0 });
   });
 
   it("a webhook resolved to one org never writes another org's board", async () => {
     const h = harness({ orgs: [ORG_A, ORG_B] });
-    const outcome = await ingestInboundChange(h.deps, { provider: "linear", externalId: "LIN-1", status: "Done" }, ORG_A);
+    const outcome = await ingestInboundChange(
+      h.deps,
+      { provider: "linear", externalId: "LIN-1", status: "Done" },
+      ORG_A,
+    );
     expect(outcome.count).toBe(2); // only org A's two links
     const b = await h.inbound.forBoard("brd_1");
     expect(b).toHaveLength(1);
@@ -352,7 +432,11 @@ describe("ingest — the verified change into the human-gated queue", () => {
   it("a node with no issue fields is nothing to compare — the record still queues", async () => {
     const h = harness({ nodeStatus: "todo" });
     const deps = { ...h.deps, boardNodeStatus: async () => null };
-    const outcome = await ingestInboundChange(deps, { provider: "linear", externalId: "LIN-1", status: "Done" }, ORG_A);
+    const outcome = await ingestInboundChange(
+      deps,
+      { provider: "linear", externalId: "LIN-1", status: "Done" },
+      ORG_A,
+    );
     expect(outcome.count).toBe(2);
   });
 });
@@ -367,7 +451,10 @@ describe("the github scheme — X-Hub-Signature-256, the composed words (D8)", (
 
   function ghHarness() {
     const events = new InMemoryIntegrationWebhookEventStore();
-    const changes: Array<{ change: { provider: string; externalId: string; status: string; at: number }; orgId: string }> = [];
+    const changes: Array<{
+      change: { provider: string; externalId: string; status: string; at: number };
+      orgId: string;
+    }> = [];
     const receiver = createIntegrationWebhookReceiver({
       provider: "github",
       scheme: githubWebhookScheme,
@@ -381,7 +468,10 @@ describe("the github scheme — X-Hub-Signature-256, the composed words (D8)", (
     return { receiver, events, changes };
   }
 
-  function issueEvent(action: string, over: { number: number; state: string; state_reason?: string | null }): string {
+  function issueEvent(
+    action: string,
+    over: { number: number; state: string; state_reason?: string | null },
+  ): string {
     return JSON.stringify({
       action,
       issue: {
@@ -395,8 +485,15 @@ describe("the github scheme — X-Hub-Signature-256, the composed words (D8)", (
 
   it("verifies the sha256= prefixed signature and resolves the org", async () => {
     const h = ghHarness();
-    const body = issueEvent("closed", { number: 482, state: "closed", state_reason: "not_planned" });
-    const result = await h.receiver.receive({ payload: Buffer.from(body), signature: ghSign(body) });
+    const body = issueEvent("closed", {
+      number: 482,
+      state: "closed",
+      state_reason: "not_planned",
+    });
+    const result = await h.receiver.receive({
+      payload: Buffer.from(body),
+      signature: ghSign(body),
+    });
     expect(result).toMatchObject({ status: 200, outcome: "processed" });
     expect(h.changes).toEqual([
       {
@@ -411,7 +508,11 @@ describe("the github scheme — X-Hub-Signature-256, the composed words (D8)", (
     const body = issueEvent("opened", { number: 1, state: "open" });
     const bare = ghSign(body).slice("sha256=".length);
     const result = await h.receiver.receive({ payload: Buffer.from(body), signature: bare });
-    expect(result).toMatchObject({ status: 400, outcome: "invalid_signature", body: { error: "malformed_header" } });
+    expect(result).toMatchObject({
+      status: 400,
+      outcome: "invalid_signature",
+      body: { error: "malformed_header" },
+    });
     expect(h.changes).toHaveLength(0);
   });
 
@@ -419,7 +520,10 @@ describe("the github scheme — X-Hub-Signature-256, the composed words (D8)", (
     const h = ghHarness();
     const body = issueEvent("closed", { number: 9, state: "closed", state_reason: "completed" });
     const tampered = issueEvent("opened", { number: 9, state: "open" });
-    const result = await h.receiver.receive({ payload: Buffer.from(tampered), signature: ghSign(body) });
+    const result = await h.receiver.receive({
+      payload: Buffer.from(tampered),
+      signature: ghSign(body),
+    });
     expect(result).toMatchObject({ status: 400, outcome: "invalid_signature" });
     expect((await h.events.pending(0, 1_000 + 1, 10)).length).toBe(0);
   });
@@ -431,7 +535,10 @@ describe("the github scheme — X-Hub-Signature-256, the composed words (D8)", (
     const edited = issueEvent("edited", { number: 2, state: "open" });
     await h.receiver.receive({ payload: Buffer.from(opened), signature: ghSign(opened) });
     await h.receiver.receive({ payload: Buffer.from(reopened), signature: ghSign(reopened) });
-    const editedResult = await h.receiver.receive({ payload: Buffer.from(edited), signature: ghSign(edited) });
+    const editedResult = await h.receiver.receive({
+      payload: Buffer.from(edited),
+      signature: ghSign(edited),
+    });
     expect(editedResult).toMatchObject({ status: 200, outcome: "ignored" });
     // opened + reopened processed; edited ignored — two changes only.
     expect(h.changes).toHaveLength(2);

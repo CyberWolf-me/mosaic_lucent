@@ -189,7 +189,12 @@ export function AIPill({
             mutates, Ask reads. Rendered as the app's established segmented
             control, only for mounts that own a mode. */}
         {hasMode && !readOnly && (
-          <div className="segmented" style={{ flexShrink: 0 }} role="radiogroup" aria-label="Build or Ask mode">
+          <div
+            className="segmented"
+            style={{ flexShrink: 0 }}
+            role="radiogroup"
+            aria-label="Build or Ask mode"
+          >
             <button
               className={mode === "build" ? "active" : ""}
               onClick={() => onModeChange("build")}

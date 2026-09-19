@@ -136,7 +136,14 @@ async function signup(h: Harness, email: string): Promise<{ token: string; id: s
 /** One action node: create + statement + issue, with the D1 execution fields. */
 function actionOps(
   n: number,
-  fields: { assignee?: string; dueDate?: string; description?: string; status: string; topic?: string; provenance?: boolean },
+  fields: {
+    assignee?: string;
+    dueDate?: string;
+    description?: string;
+    status: string;
+    topic?: string;
+    provenance?: boolean;
+  },
 ): Operation[] {
   return [
     { op: "CREATE_NODE", id: `act-${n}`, nodeType: "action", label: `Action ${n}` },
@@ -178,14 +185,7 @@ describe("Stage D1 definition of done — the 20-action acceptance gate", () => 
     expect(created.status).toBe(201);
     const boardId = created.body.id as string;
 
-    const STATUSES = [
-      "open",
-      "assigned",
-      "in_progress",
-      "blocked",
-      "completed",
-      "cancelled",
-    ];
+    const STATUSES = ["open", "assigned", "in_progress", "blocked", "completed", "cancelled"];
     const submit = async (ops: Operation[], label: string) => {
       const res = await api(h, `/api/boards/${boardId}/ops`, {
         method: "POST",
@@ -239,11 +239,23 @@ describe("Stage D1 definition of done — the 20-action acceptance gate", () => 
     // Path 4 — AI via the generate pipeline (the mock's launch-brief doctrine,
     // driven through handleGenerate's store path: the board owner, AI ops).
     const aiOps: Operation[] = [
-      ...actionOps(16, { status: "assigned", assignee: "David", dueDate: "2026-09-11", description: "The final launch brief covering messaging and timeline.", topic: "launch" }),
+      ...actionOps(16, {
+        status: "assigned",
+        assignee: "David",
+        dueDate: "2026-09-11",
+        description: "The final launch brief covering messaging and timeline.",
+        topic: "launch",
+      }),
       ...actionOps(17, { status: "assigned", assignee: "sarah", topic: "pricing" }),
       ...actionOps(18, { status: "open", topic: "pricing" }),
       ...actionOps(19, { status: "completed", assignee: "alex", topic: "auth" }),
-      ...actionOps(20, { status: "cancelled", assignee: "bo", topic: "auth", dueDate: "2026-09-25", description: "Cancelled auth audit" }),
+      ...actionOps(20, {
+        status: "cancelled",
+        assignee: "bo",
+        topic: "auth",
+        dueDate: "2026-09-25",
+        description: "Cancelled auth audit",
+      }),
     ];
     await submit(aiOps, "ai generated actions");
 
@@ -256,7 +268,9 @@ describe("Stage D1 definition of done — the 20-action acceptance gate", () => 
       expect(nodes[id], `node ${id} persisted`).toBeDefined();
       expect(nodes[id].statement?.kind, `${id} carries the action statement`).toBe("action");
       expect(nodes[id].issue, `${id} carries execution metadata`).toBeDefined();
-      expect(typeof nodes[id].issue.dueDate === "string" || nodes[id].issue.dueDate === undefined).toBe(true);
+      expect(
+        typeof nodes[id].issue.dueDate === "string" || nodes[id].issue.dueDate === undefined,
+      ).toBe(true);
     }
     // The D1 fields round-tripped: the dated ones carry ISO, described ones text.
     expect(nodes["act-1"]?.issue?.dueDate).toBe("2026-09-11");
@@ -266,7 +280,10 @@ describe("Stage D1 definition of done — the 20-action acceptance gate", () => 
     expect(nodes["act-16"]?.issue?.dueDate).toBe("2026-09-11");
     expect(nodes["act-16"]?.issue?.status).toBe("assigned");
     // The meeting path kept provenance: the chain (meeting → turn → action).
-    expect(nodes["act-6"]?.statement?.provenance).toEqual({ meetingId: "mtg_d1", turnRange: [6, 6] });
+    expect(nodes["act-6"]?.statement?.provenance).toEqual({
+      meetingId: "mtg_d1",
+      turnRange: [6, 6],
+    });
 
     // -- 20/20 synchronized: every creation act is one sequenced log entry ----
     // (15 individual submissions + the 5-action AI batch = 16 entries; the
@@ -325,7 +342,9 @@ describe("Stage D1 definition of done — the 20-action acceptance gate", () => 
     expect(edited.status).toBe(200);
     const afterEdit = await h.boardStore.get(boardId);
     expect(afterEdit?.workspace.nodes["act-2"]?.issue?.status).toBe("blocked");
-    expect(afterEdit?.workspace.nodes["act-2"]?.issue?.description).toBe("Blocked on the design review");
+    expect(afterEdit?.workspace.nodes["act-2"]?.issue?.description).toBe(
+      "Blocked on the design review",
+    );
 
     // -- The status sweep: all six canonical statuses are live on the board ----
     const liveStatuses = new Set(

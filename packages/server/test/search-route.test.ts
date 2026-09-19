@@ -200,11 +200,9 @@ describe("GET /api/boards/:id/search", () => {
       createdAt: inside,
     });
 
-    const res = await api(
-      h,
-      `/api/boards/${boardId}/search?q=${encodeURIComponent("pricing")}`,
-      { token: alice.token },
-    );
+    const res = await api(h, `/api/boards/${boardId}/search?q=${encodeURIComponent("pricing")}`, {
+      token: alice.token,
+    });
     expect(res.status).toBe(200);
     expect(res.body.historyDepth).toBe(25);
     expect(res.body.windowTruncated).toBe(true);
@@ -317,11 +315,9 @@ describe("GET /api/boards/:id/search", () => {
     );
 
     // Free: the matching old revision is outside the window — not found.
-    const before = await api(
-      h,
-      `/api/boards/${boardId}/search?q=${encodeURIComponent("retro")}`,
-      { token: alice.token },
-    );
+    const before = await api(h, `/api/boards/${boardId}/search?q=${encodeURIComponent("retro")}`, {
+      token: alice.token,
+    });
     expect(before.status).toBe(200);
     expect(before.body.results).toHaveLength(0);
     expect(before.body.windowTruncated).toBe(true);
@@ -346,11 +342,9 @@ describe("GET /api/boards/:id/search", () => {
       updatedAt: now,
     });
 
-    const after = await api(
-      h,
-      `/api/boards/${boardId}/search?q=${encodeURIComponent("retro")}`,
-      { token: alice.token },
-    );
+    const after = await api(h, `/api/boards/${boardId}/search?q=${encodeURIComponent("retro")}`, {
+      token: alice.token,
+    });
     expect(after.status).toBe(200);
     expect(after.body.historyDepth).toBe(500);
     expect(after.body.windowTruncated).toBe(false);
@@ -369,11 +363,9 @@ describe("GET /api/boards/:id/search", () => {
       Array.from({ length: 40 }, (_, i) => ({ label: `pricing change ${i}` })),
     );
 
-    const res = await api(
-      h,
-      `/api/boards/${boardId}/search?q=${encodeURIComponent("pricing")}`,
-      { token: alice.token },
-    );
+    const res = await api(h, `/api/boards/${boardId}/search?q=${encodeURIComponent("pricing")}`, {
+      token: alice.token,
+    });
     expect(res.status).toBe(200);
     expect(res.body.results.length).toBe(20);
     expect(res.body.windowTruncated).toBe(true);

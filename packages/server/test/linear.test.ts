@@ -32,7 +32,16 @@ function gqlResponse(data: unknown, status = 200): Response {
   return new Response(JSON.stringify({ data }), { status });
 }
 
-function linearIssue(over: Partial<{ id: string; identifier: string; title: string; state: string; assignee: string; dueDate: string }> = {}) {
+function linearIssue(
+  over: Partial<{
+    id: string;
+    identifier: string;
+    title: string;
+    state: string;
+    assignee: string;
+    dueDate: string;
+  }> = {},
+) {
   return {
     id: over.id ?? "uuid-1",
     identifier: over.identifier ?? "LIN-482",
@@ -161,13 +170,17 @@ describe("the assignee resolution ladder", () => {
     const { fetchImpl } = responder(route);
     const p = provider(fetchImpl);
     // Email.
-    expect(await p.createTask({ title: "A", assignee: "sarah@example.com", idempotencyKey: "k1" })).toBeDefined();
+    expect(
+      await p.createTask({ title: "A", assignee: "sarah@example.com", idempotencyKey: "k1" }),
+    ).toBeDefined();
     // Exact normalized name.
-    expect(await p.createTask({ title: "B", assignee: "Sarah Chen", idempotencyKey: "k2" })).toBeDefined();
+    expect(
+      await p.createTask({ title: "B", assignee: "Sarah Chen", idempotencyKey: "k2" }),
+    ).toBeDefined();
     // Unique partial: only one Alex… wait, TWO Alexes — the ambiguous case.
-    await expect(p.createTask({ title: "C", assignee: "Alex", idempotencyKey: "k3" })).rejects.toThrow(
-      /uniquely resolve assignee "Alex"/,
-    );
+    await expect(
+      p.createTask({ title: "C", assignee: "Alex", idempotencyKey: "k3" }),
+    ).rejects.toThrow(/uniquely resolve assignee "Alex"/);
   });
 
   it("the resolution is cached per provider instance", async () => {
@@ -222,11 +235,14 @@ describe("recoverCreate — the ambiguous-outcome reconciliation", () => {
 
 describe("the error, retry, and timeout arms", () => {
   it("the GraphQL error envelope surfaces as LinearError, not a silent data undefined", async () => {
-    const { fetchImpl } = responder(() =>
-      new Response(JSON.stringify({ errors: [{ message: "team not found" }] }), { status: 200 }),
+    const { fetchImpl } = responder(
+      () =>
+        new Response(JSON.stringify({ errors: [{ message: "team not found" }] }), { status: 200 }),
     );
     const p = provider(fetchImpl);
-    await expect(p.createTask({ title: "A", idempotencyKey: "k" })).rejects.toThrow(/team not found/);
+    await expect(p.createTask({ title: "A", idempotencyKey: "k" })).rejects.toThrow(
+      /team not found/,
+    );
   });
 
   it("429 retries then succeeds; non-retryable status throws immediately", async () => {
@@ -260,9 +276,9 @@ describe("the error, retry, and timeout arms", () => {
     const factory = linearConnectionFactory();
     const saved = process.env.LUCENT_LINEAR_TEST_KEY;
     delete process.env.LUCENT_LINEAR_TEST_KEY;
-    expect(() => factory({ credentialRef: "LUCENT_LINEAR_TEST_KEY", config: { teamId: "t" } })).toThrow(
-      /not set in the environment/,
-    );
+    expect(() =>
+      factory({ credentialRef: "LUCENT_LINEAR_TEST_KEY", config: { teamId: "t" } }),
+    ).toThrow(/not set in the environment/);
     process.env.LUCENT_LINEAR_TEST_KEY = saved;
     if (saved) {
       expect(() => factory({ credentialRef: "LUCENT_LINEAR_TEST_KEY" })).toThrow(/config.teamId/);
@@ -276,10 +292,16 @@ describe("the error, retry, and timeout arms", () => {
     process.env.LUCENT_LINEAR_TEST_KEY = "lin_test_key";
     try {
       expect(() =>
-        factory({ credentialRef: "LUCENT_LINEAR_TEST_KEY", config: { teamId: "t", baseUrl: "http://evil.example/webhook" } }),
+        factory({
+          credentialRef: "LUCENT_LINEAR_TEST_KEY",
+          config: { teamId: "t", baseUrl: "http://evil.example/webhook" },
+        }),
       ).toThrow(/only https/);
       expect(() =>
-        factory({ credentialRef: "LUCENT_LINEAR_TEST_KEY", config: { teamId: "t", baseUrl: "https://192.168.0.9/hook" } }),
+        factory({
+          credentialRef: "LUCENT_LINEAR_TEST_KEY",
+          config: { teamId: "t", baseUrl: "https://192.168.0.9/hook" },
+        }),
       ).toThrow(/private\/loopback/);
     } finally {
       if (saved === undefined) delete process.env.LUCENT_LINEAR_TEST_KEY;

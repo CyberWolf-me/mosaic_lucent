@@ -431,7 +431,10 @@ export async function streamGenerate(
   history?: ChatEntry[],
   attachments?: { images?: ImageAttachment[]; documents?: DocumentAttachment[] },
   externalSignal?: AbortSignal,
-  onPhase?: (phase: "understanding" | "constructing" | "validating" | "applying", message?: string) => void,
+  onPhase?: (
+    phase: "understanding" | "constructing" | "validating" | "applying",
+    message?: string,
+  ) => void,
 ): Promise<GenerateResponse> {
   const controller = new AbortController();
   // UX-2: user cancellation shares the abort path with the activity timeout.

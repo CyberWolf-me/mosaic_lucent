@@ -97,7 +97,9 @@ async function makeHarness() {
     webhookEvents,
     inbound,
     fake,
-    close: async () => { await close(); },
+    close: async () => {
+      await close();
+    },
   };
 }
 
@@ -108,7 +110,11 @@ afterEach(async () => {
   delete process.env.D10_FAKE_CRED;
 });
 
-async function api(h: NonNullable<typeof open>, path: string, init: RequestInit & { token?: string; csrf?: string } = {}) {
+async function api(
+  h: NonNullable<typeof open>,
+  path: string,
+  init: RequestInit & { token?: string; csrf?: string } = {},
+) {
   const { token, csrf, ...rest } = init;
   const res = await fetch(`${h.base}${path}`, {
     ...rest,
@@ -149,21 +155,29 @@ describe("THE LINK-GC RECOVERY INVARIANT (the review's exact scenario)", () => {
     const user = await signup(h, "d10@example.com");
     const orgId = (await h.userStore.membershipsFor(user.id))[0]!.orgId;
     const put = await api(h, `/api/orgs/${orgId}/integrations/fake`, {
-      method: "PUT", token: user.token, csrf: "csrf",
+      method: "PUT",
+      token: user.token,
+      csrf: "csrf",
       body: JSON.stringify({ credentialRef: "D10_FAKE_CRED" }),
     });
     expect(put.status).toBe(201);
     const created = await api(h, "/api/boards", {
-      method: "POST", token: user.token, body: JSON.stringify({ name: "D10 board", workspace: createWorkspace() }),
+      method: "POST",
+      token: user.token,
+      body: JSON.stringify({ name: "D10 board", workspace: createWorkspace() }),
     });
     const boardId = created.body.id as string;
     await api(h, `/api/boards/${boardId}/ops`, {
-      method: "POST", token: user.token, body: JSON.stringify({ ops: actionOps("nd_brief"), label: "seed" }),
+      method: "POST",
+      token: user.token,
+      body: JSON.stringify({ ops: actionOps("nd_brief"), label: "seed" }),
     });
 
     // 1. SYNC: the task is created, the link exists.
     const sync1 = await api(h, `/api/boards/${boardId}/integrations/fake/sync`, {
-      method: "POST", token: user.token, csrf: "csrf",
+      method: "POST",
+      token: user.token,
+      csrf: "csrf",
     });
     expect(sync1.body.created).toBe(1);
     const links1 = await api(h, `/api/boards/${boardId}/integrations/links`, { token: user.token });
@@ -172,7 +186,9 @@ describe("THE LINK-GC RECOVERY INVARIANT (the review's exact scenario)", () => {
 
     // 2. DELETE the node.
     await api(h, `/api/boards/${boardId}/ops`, {
-      method: "POST", token: user.token, body: JSON.stringify({ ops: [{ op: "DELETE_NODE", id: "nd_brief" }], label: "delete" }),
+      method: "POST",
+      token: user.token,
+      body: JSON.stringify({ ops: [{ op: "DELETE_NODE", id: "nd_brief" }], label: "delete" }),
     });
 
     // 3. THE GC: the link's node is gone → collected (the sweep's own logic,
@@ -185,7 +201,9 @@ describe("THE LINK-GC RECOVERY INVARIANT (the review's exact scenario)", () => {
     // 4. RECREATE the action with the SAME id (the restore/undo case —
     // the marker ext_nd_brief is stable across the recreation).
     await api(h, `/api/boards/${boardId}/ops`, {
-      method: "POST", token: user.token, body: JSON.stringify({ ops: actionOps("nd_brief"), label: "recreate" }),
+      method: "POST",
+      token: user.token,
+      body: JSON.stringify({ ops: actionOps("nd_brief"), label: "recreate" }),
     });
 
     // 5. SYNC AGAIN: the node is unlinked — the RECOVERY runs BEFORE the
@@ -195,7 +213,9 @@ describe("THE LINK-GC RECOVERY INVARIANT (the review's exact scenario)", () => {
     // does. THE INVARIANT: RELINKED at the ORIGINAL external id, ZERO new
     // creates on the provider.
     const sync2 = await api(h, `/api/boards/${boardId}/integrations/fake/sync`, {
-      method: "POST", token: user.token, csrf: "csrf",
+      method: "POST",
+      token: user.token,
+      csrf: "csrf",
     });
     const relinked = sync2.body.results.find((r: any) => r.action === "relinked");
     expect(relinked).toBeDefined();
@@ -212,12 +232,21 @@ describe("THE LINK-GC RECOVERY INVARIANT (the review's exact scenario)", () => {
     const user = await signup(h, "d10b@example.com");
     const orgId = (await h.userStore.membershipsFor(user.id))[0]!.orgId;
     await api(h, `/api/orgs/${orgId}/integrations/fake`, {
-      method: "PUT", token: user.token, csrf: "csrf",
+      method: "PUT",
+      token: user.token,
+      csrf: "csrf",
       body: JSON.stringify({ credentialRef: "D10_FAKE_CRED" }),
     });
     // A link to a board that no longer exists in the store.
     await h.store.linkTask(
-      { orgId, boardId: "brd_gone", nodeId: "n1", provider: "fake", externalId: "fake-9", lastSyncedStatus: "todo" },
+      {
+        orgId,
+        boardId: "brd_gone",
+        nodeId: "n1",
+        provider: "fake",
+        externalId: "fake-9",
+        lastSyncedStatus: "todo",
+      },
       1,
     );
     // The GC's own check (the sweep arm's logic, exercised directly):
@@ -233,8 +262,19 @@ describe("THE TERMINAL-ROW PRUNE (the complete sets, the safe cutoff)", () => {
     const h = (open = await makeHarness());
     const OLD = 1_000_000_000_000;
     const NEW = Date.now();
-    const mk = async (id: string, status: "processed" | "ignored" | "failed" | "received", at: number) => {
-      await h.webhookEvents.claim({ id, provider: "fake", orgId: "o", externalId: null, now: at - 1, staleAfterMs: 1 });
+    const mk = async (
+      id: string,
+      status: "processed" | "ignored" | "failed" | "received",
+      at: number,
+    ) => {
+      await h.webhookEvents.claim({
+        id,
+        provider: "fake",
+        orgId: "o",
+        externalId: null,
+        now: at - 1,
+        staleAfterMs: 1,
+      });
       if (status === "failed") await h.webhookEvents.markFailed(id, "boom", at);
       else if (status === "processed") await h.webhookEvents.markProcessed(id, "o", at);
       else if (status === "ignored") await h.webhookEvents.markIgnored(id, at);
@@ -261,15 +301,32 @@ describe("THE TERMINAL-ROW PRUNE (the complete sets, the safe cutoff)", () => {
     const h = (open = await makeHarness());
     const OLD = 1_000_000_000_000;
     const base = {
-      orgId: "o", boardId: "b", provider: "fake" as const, nodeId: "n",
-      externalId: "E1", field: "status" as const, externalValue: "done", mappedValue: "completed" as const,
+      orgId: "o",
+      boardId: "b",
+      provider: "fake" as const,
+      nodeId: "n",
+      externalId: "E1",
+      field: "status" as const,
+      externalValue: "done",
+      mappedValue: "completed" as const,
     };
-    const put = (id: string) =>
-      h.inbound.put({ ...base, nodeId: id }, "webhook", OLD);
+    const put = (id: string) => h.inbound.put({ ...base, nodeId: id }, "webhook", OLD);
     await put("p1"); // stays pending — never pruned
     await put("p2");
-    await h.inbound.decide("b", (await h.inbound.forBoard("b")).find((r) => r.nodeId === "p1")!.id, "applied", "u", OLD);
-    await h.inbound.decide("b", (await h.inbound.forBoard("b")).find((r) => r.nodeId === "p2")!.id, "dismissed", "u", Date.now());
+    await h.inbound.decide(
+      "b",
+      (await h.inbound.forBoard("b")).find((r) => r.nodeId === "p1")!.id,
+      "applied",
+      "u",
+      OLD,
+    );
+    await h.inbound.decide(
+      "b",
+      (await h.inbound.forBoard("b")).find((r) => r.nodeId === "p2")!.id,
+      "dismissed",
+      "u",
+      Date.now(),
+    );
     const pruned = await h.inbound.pruneTerminal(Date.now() - 1000, 100);
     expect(pruned).toBe(1); // p1 (decided OLD); p2 decided NOW survives
     const rows = await h.inbound.forBoard("b");
@@ -284,15 +341,30 @@ describe("THE PRUNE-REPLAY RULE (the second barrier is semantic)", () => {
     // The link + board state: the node's status equals the webhook's word.
     const board = { ...createWorkspace() };
     board.nodes["n1"] = {
-      id: "n1", nodeType: "action", label: "N",
+      id: "n1",
+      nodeType: "action",
+      label: "N",
       statement: { kind: "action", status: "open" },
       issue: { type: "task", status: "completed", statusCategory: "done" },
     };
     await h.boardStore.put({
-      id: "b", orgId: "o", ownerId: "u", name: "b", createdAt: 1, updatedAt: 1, workspace: board,
+      id: "b",
+      orgId: "o",
+      ownerId: "u",
+      name: "b",
+      createdAt: 1,
+      updatedAt: 1,
+      workspace: board,
     });
     await h.store.linkTask(
-      { orgId: "o", boardId: "b", nodeId: "n1", provider: "fake", externalId: "fake-1", lastSyncedStatus: "done" },
+      {
+        orgId: "o",
+        boardId: "b",
+        nodeId: "n1",
+        provider: "fake",
+        externalId: "fake-1",
+        lastSyncedStatus: "done",
+      },
       1,
     );
     // THE FIRST DELIVERY (processed): "Done" → the board already says
@@ -304,17 +376,29 @@ describe("THE PRUNE-REPLAY RULE (the second barrier is semantic)", () => {
       store: h.inbound,
       provider: h.fake,
     };
-    const first = await ingestInboundChange(deps, { provider: "fake", externalId: "fake-1", status: "done" }, "o");
+    const first = await ingestInboundChange(
+      deps,
+      { provider: "fake", externalId: "fake-1", status: "done" },
+      "o",
+    );
     expect(first.count).toBe(0);
     // THE PRUNE (any rows vanish) — then the REPLAY of the same semantic
     // event: the board is unchanged → still no row. The dedupe barrier is
     // the board's live value, not the pruned ledger row.
     await h.inbound.pruneTerminal(0, 100);
-    const replay = await ingestInboundChange(deps, { provider: "fake", externalId: "fake-1", status: "done" }, "o");
+    const replay = await ingestInboundChange(
+      deps,
+      { provider: "fake", externalId: "fake-1", status: "done" },
+      "o",
+    );
     expect(replay.count).toBe(0);
     // But a NEW value (the provider moved again) still queues — the barrier
     // is dedupe, not a lock.
-    const moved = await ingestInboundChange(deps, { provider: "fake", externalId: "fake-1", status: "todo" }, "o");
+    const moved = await ingestInboundChange(
+      deps,
+      { provider: "fake", externalId: "fake-1", status: "todo" },
+      "o",
+    );
     expect(moved.count).toBe(1);
   });
 });

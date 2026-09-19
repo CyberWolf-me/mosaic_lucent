@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it } from "vitest";
 import type { AddressInfo } from "node:net";
-import { MockImageProvider, type ExternalPlanRequest, type ExternalPlanResult, type LLMProvider } from "@lucent/ai";
+import {
+  MockImageProvider,
+  type ExternalPlanRequest,
+  type ExternalPlanResult,
+  type LLMProvider,
+} from "@lucent/ai";
 import { createWorkspace, stampAuthorship, type Operation } from "@lucent/core";
 import { createApp } from "../src/app.js";
 import { InMemoryUserStore } from "../src/accounts.js";
@@ -35,14 +40,28 @@ const SECRET = "e3-acceptance-secret-0123456789";
 
 /** The GitHub wire (the D8 stub's shape, reused). */
 class GithubWire {
-  readonly issues: Array<{ number: number; title: string; body: string; state: string; state_reason: string | null }> = [];
+  readonly issues: Array<{
+    number: number;
+    title: string;
+    body: string;
+    state: string;
+    state_reason: string | null;
+  }> = [];
   private next = 100;
 
   readonly fetchImpl = (async (_url: string | URL | Request, init?: RequestInit) => {
     const url = new URL(String(_url));
     const method = (init?.method ?? "GET").toUpperCase();
-    const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : undefined;
-    const issueJson = (issue: { number: number; title: string; body: string; state: string; state_reason: string | null }) => ({
+    const body = init?.body
+      ? (JSON.parse(String(init.body)) as Record<string, unknown>)
+      : undefined;
+    const issueJson = (issue: {
+      number: number;
+      title: string;
+      body: string;
+      state: string;
+      state_reason: string | null;
+    }) => ({
       ...issue,
       html_url: `https://github.test/issues/${issue.number}`,
       assignees: [],
@@ -52,7 +71,13 @@ class GithubWire {
     }
     if (method === "POST" && url.pathname === "/repos/acme/app/issues") {
       const number = this.next++;
-      const issue = { number, title: String(body?.title ?? ""), body: String(body?.body ?? ""), state: "open", state_reason: null };
+      const issue = {
+        number,
+        title: String(body?.title ?? ""),
+        body: String(body?.body ?? ""),
+        state: "open",
+        state_reason: null,
+      };
       this.issues.push(issue);
       return new Response(JSON.stringify(issueJson(issue)), { status: 201 });
     }
@@ -128,9 +153,10 @@ async function makeHarness() {
     tickets: new InMemoryTicketStore(60_000),
     integrations: {
       store,
-      providers: new Map<string, import("../src/integrations/provider.js").ExecutionProviderFactory>([
-        ["github", () => github],
-      ]),
+      providers: new Map<
+        string,
+        import("../src/integrations/provider.js").ExecutionProviderFactory
+      >([["github", () => github]]),
       actions,
       ledger: new InMemoryExecutionLedger(),
     },
@@ -146,7 +172,9 @@ async function makeHarness() {
     actions,
     wire,
     selector,
-    close: async () => { await close(); },
+    close: async () => {
+      await close();
+    },
   };
 }
 
@@ -157,7 +185,11 @@ afterEach(async () => {
   delete process.env.E3_GH_KEY;
 });
 
-async function api(h: NonNullable<typeof open>, path: string, init: RequestInit & { token?: string; csrf?: string } = {}) {
+async function api(
+  h: NonNullable<typeof open>,
+  path: string,
+  init: RequestInit & { token?: string; csrf?: string } = {},
+) {
   const { token, csrf, ...rest } = init;
   const res = await fetch(`${h.base}${path}`, {
     ...rest,
@@ -195,18 +227,48 @@ function planBoard(): Operation[] {
     { op: "SET_STATEMENT", id: "rsk-1", statement: { kind: "risk", status: "open" } },
     // The plan region + workstreams (the mock's emitted shape, stamped the
     // send path's way: createdFrom on every derived node).
-    { op: "CREATE_GROUP", id: "plan-region", label: "Launch plan", children: [...derivedIds, "dec-0"], kind: "process" },
+    {
+      op: "CREATE_GROUP",
+      id: "plan-region",
+      label: "Launch plan",
+      children: [...derivedIds, "dec-0"],
+      kind: "process",
+    },
   ];
   for (const id of derivedIds) {
-    ops.push({ op: "CREATE_NODE", id, nodeType: "action", label: `Address: ${id.replace("-action", "")}` });
+    ops.push({
+      op: "CREATE_NODE",
+      id,
+      nodeType: "action",
+      label: `Address: ${id.replace("-action", "")}`,
+    });
     // Provenance nests inside the statement (attachProvenance's rule), not
     // at the op's top level — the strict programmatic parse refuses the
     // latter, which is exactly what it is for.
-    ops.push({ op: "SET_STATEMENT", id, statement: { kind: "action", status: "open", topic: "plan", provenance: { createdFrom: ["dec-0"] } } });
+    ops.push({
+      op: "SET_STATEMENT",
+      id,
+      statement: {
+        kind: "action",
+        status: "open",
+        topic: "plan",
+        provenance: { createdFrom: ["dec-0"] },
+      },
+    });
     ops.push({ op: "SET_ISSUE", id, issue: { type: "task", status: "open" } });
   }
-  ops.push({ op: "CREATE_GROUP", id: "plan-ws-research", label: "Research", children: ["req-0-action", "req-1-action"] });
-  ops.push({ op: "CREATE_GROUP", id: "plan-ws-engineering", label: "Engineering", children: ["rsk-0-action", "rsk-1-action"] });
+  ops.push({
+    op: "CREATE_GROUP",
+    id: "plan-ws-research",
+    label: "Research",
+    children: ["req-0-action", "req-1-action"],
+  });
+  ops.push({
+    op: "CREATE_GROUP",
+    id: "plan-ws-engineering",
+    label: "Engineering",
+    children: ["rsk-0-action", "rsk-1-action"],
+  });
   // Two pre-existing plain actions OUTSIDE the plan.
   ops.push({ op: "CREATE_NODE", id: "old-0", nodeType: "action", label: "Old work" });
   ops.push({ op: "SET_STATEMENT", id: "old-0", statement: { kind: "action", status: "open" } });
@@ -230,26 +292,34 @@ describe("Stage E3 definition of done — the create-the-work bridge, end to end
     const token: string = signup.body.token;
     const orgId = (await h.userStore.membershipsFor(signup.body.user.id))[0]!.orgId;
     const put = await api(h, `/api/orgs/${orgId}/integrations/github`, {
-      method: "PUT", token, csrf: "csrf",
+      method: "PUT",
+      token,
+      csrf: "csrf",
       body: JSON.stringify({ credentialRef: "E3_GH_KEY", config: { repo: "acme/app" } }),
     });
     expect(put.status).toBe(201);
 
     // The plan-shaped board.
     const created = await api(h, "/api/boards", {
-      method: "POST", token, body: JSON.stringify({ name: "E3 board", workspace: createWorkspace() }),
+      method: "POST",
+      token,
+      body: JSON.stringify({ name: "E3 board", workspace: createWorkspace() }),
     });
     expect(created.status).toBe(201);
     const boardId = created.body.id as string;
     const seeded = await api(h, `/api/boards/${boardId}/ops`, {
-      method: "POST", token, body: JSON.stringify({ ops: planBoard(), label: "the plan" }),
+      method: "POST",
+      token,
+      body: JSON.stringify({ ops: planBoard(), label: "the plan" }),
     });
     expect(seeded.status).toBe(200);
 
     // THE BRIDGE: the plan's four derived ids + one ghost, named by the
     // surface — the selector model is never asked.
     const proposed = await api(h, `/api/boards/${boardId}/integrations/github/propose-ai`, {
-      method: "POST", token, csrf: "csrf",
+      method: "POST",
+      token,
+      csrf: "csrf",
       body: JSON.stringify({
         request: "Send the plan's derived actions",
         nodeIds: ["req-0-action", "req-1-action", "rsk-0-action", "rsk-1-action", "ghost-id"],
@@ -264,13 +334,15 @@ describe("Stage E3 definition of done — the create-the-work bridge, end to end
     // executable actions.
     expect(proposed.body.action).toMatchObject({ origin: "ai" });
     expect(proposed.body.action.provenance.nodeIds).toEqual([
-      "req-0-action", "req-1-action", "rsk-0-action", "rsk-1-action", "ghost-id",
+      "req-0-action",
+      "req-1-action",
+      "rsk-0-action",
+      "rsk-1-action",
+      "ghost-id",
     ]);
     expect(proposed.body.preview.selectedCount).toBe(4);
     expect(proposed.body.preview.totalCandidates).toBe(6);
-    expect(proposed.body.preview.warnings).toEqual([
-      expect.stringContaining("ghost-id"),
-    ]);
+    expect(proposed.body.preview.warnings).toEqual([expect.stringContaining("ghost-id")]);
     const createIds = proposed.body.preview.creates.map((c: any) => c.nodeId).sort();
     expect(createIds).toEqual(["req-0-action", "req-1-action", "rsk-0-action", "rsk-1-action"]);
     // The plain pre-existing actions did NOT ride along.
@@ -288,10 +360,16 @@ describe("Stage E3 definition of done — the create-the-work bridge, end to end
 
     // THE HUMAN GATE: approve (no warnings here — the derived actions
     // carry no dueDates, so nothing to ack) → exactly the plan on the wire.
-    const approved = await api(h, `/api/boards/${boardId}/integrations/actions/${proposed.body.action.id}/approve`, {
-      method: "POST", token, csrf: "csrf",
-      body: JSON.stringify({}),
-    });
+    const approved = await api(
+      h,
+      `/api/boards/${boardId}/integrations/actions/${proposed.body.action.id}/approve`,
+      {
+        method: "POST",
+        token,
+        csrf: "csrf",
+        body: JSON.stringify({}),
+      },
+    );
     expect(approved.status).toBe(200);
     expect(approved.body.applied).toBe(4);
     expect(h.wire.issues).toHaveLength(4);
@@ -300,17 +378,25 @@ describe("Stage E3 definition of done — the create-the-work bridge, end to end
     }
 
     // DUPLICATE APPROVAL: the decided-once guard — the ledger holds.
-    const dup = await api(h, `/api/boards/${boardId}/integrations/actions/${proposed.body.action.id}/approve`, {
-      method: "POST", token, csrf: "csrf",
-      body: JSON.stringify({}),
-    });
+    const dup = await api(
+      h,
+      `/api/boards/${boardId}/integrations/actions/${proposed.body.action.id}/approve`,
+      {
+        method: "POST",
+        token,
+        csrf: "csrf",
+        body: JSON.stringify({}),
+      },
+    );
     expect(dup.body.duplicate).toBe(true);
     expect(h.wire.issues).toHaveLength(4);
 
     // THE EMPTY SELECTION: nodeIds naming nothing executable → the honest
     // 422, zero wire mutations, still no selector call.
     const empty = await api(h, `/api/boards/${boardId}/integrations/github/propose-ai`, {
-      method: "POST", token, csrf: "csrf",
+      method: "POST",
+      token,
+      csrf: "csrf",
       body: JSON.stringify({ request: "send nothing real", nodeIds: ["nope-1", "nope-2"] }),
     });
     expect(empty.status).toBe(422);

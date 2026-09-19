@@ -144,14 +144,10 @@ export function topicDuplicateHint(
   if (existingTopics(workspace).includes(value)) return undefined;
   const matches = existingTopics(workspace)
     .map((topic) => {
-      const nodes = Object.values(workspace.nodes).filter(
-        (n) => n.statement?.topic === topic,
-      );
+      const nodes = Object.values(workspace.nodes).filter((n) => n.statement?.topic === topic);
       return { topic, statements: nodes.length };
     })
-    .filter(({ topic }) =>
-      topicsAreVariants(canonicalizeTopic(topic), canonicalizeTopic(value)),
-    );
+    .filter(({ topic }) => topicsAreVariants(canonicalizeTopic(topic), canonicalizeTopic(value)));
   if (matches.length !== 1) return undefined;
   return { existing: matches[0]!.topic, statements: matches[0]!.statements };
 }

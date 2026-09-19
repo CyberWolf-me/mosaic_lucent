@@ -424,10 +424,14 @@ describe("Stage C2: approval enriches the ops with the proposal's evidence (ADR 
       }),
     });
     expect(plain.status).toBe(201);
-    const approved = await api(h, `/api/boards/${boardId}/proposals/${plain.body.proposal.id}/approve`, {
-      method: "POST",
-      token: alice.token,
-    });
+    const approved = await api(
+      h,
+      `/api/boards/${boardId}/proposals/${plain.body.proposal.id}/approve`,
+      {
+        method: "POST",
+        token: alice.token,
+      },
+    );
     expect(approved.status).toBe(200);
     const board = await h.boardStore.get(boardId);
     expect(board?.workspace.nodes["n1"]?.provenance).toBeUndefined();

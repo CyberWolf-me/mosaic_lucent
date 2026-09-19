@@ -56,16 +56,21 @@ const PROVIDER_DISPLAY_NAME: Record<string, string> = {
  * new truth, mutate state without approval, or replace History as the
  * source for temporal analysis.
  */
-export function IntelligenceView({ onOpenSettings }: { onOpenSettings: (section?: string) => void }) {
-  const { workspace, onCitation, applyManual, send, boardId, projectName, setView } = useWorkspace() as unknown as {
-    workspace: Workspace;
-    onCitation: WorkspaceState["onCitation"];
-    applyManual: WorkspaceState["applyManual"];
-    send: WorkspaceState["send"];
-    boardId: string | null;
-    projectName: string;
-    setView: WorkspaceState["setView"];
-  };
+export function IntelligenceView({
+  onOpenSettings,
+}: {
+  onOpenSettings: (section?: string) => void;
+}) {
+  const { workspace, onCitation, applyManual, send, boardId, projectName, setView } =
+    useWorkspace() as unknown as {
+      workspace: Workspace;
+      onCitation: WorkspaceState["onCitation"];
+      applyManual: WorkspaceState["applyManual"];
+      send: WorkspaceState["send"];
+      boardId: string | null;
+      projectName: string;
+      setView: WorkspaceState["setView"];
+    };
   const locale = useMemo(() => resolveLocale(navigator.language), []);
 
   const sections = useMemo(() => intelligenceSections(workspace), [workspace]);
@@ -124,7 +129,12 @@ export function IntelligenceView({ onOpenSettings }: { onOpenSettings: (section?
    * connections (the Sync button's honest states) + the panel. */
   const [links, setLinks] = useState<IntegrationLink[]>([]);
   const [connections, setConnections] = useState<
-    Array<{ provider: string; status: string; config?: Record<string, string>; supportsInbound?: boolean }>
+    Array<{
+      provider: string;
+      status: string;
+      config?: Record<string, string>;
+      supportsInbound?: boolean;
+    }>
   >([]);
   const [panelProvider, setPanelProvider] = useState<string | null>(null);
   /** Stage D7: the inbound queue (the External changes section). */
@@ -133,7 +143,7 @@ export function IntelligenceView({ onOpenSettings }: { onOpenSettings: (section?
   const [decidingInbound, setDecidingInbound] = useState<string | null>(null);
   const pendingInbound = pendingInboundCount(inbound);
 
-  const refreshInbound = async () => {
+  const _refreshInbound = async () => {
     if (!boardId) return;
     setInbound(await fetchInboundChanges(boardId));
   };
@@ -238,7 +248,9 @@ export function IntelligenceView({ onOpenSettings }: { onOpenSettings: (section?
 
   const rowHint = (row: IntelligenceRow, kind: StatementKind): string =>
     `${row.status}${row.assignee ? ` · ${t("intel.row.assignee", locale, { name: row.assignee })}` : ""}${
-      row.supersedes?.length ? ` · ${t("intel.row.supersedes", locale, { n: row.supersedes.length })}` : ""
+      row.supersedes?.length
+        ? ` · ${t("intel.row.supersedes", locale, { n: row.supersedes.length })}`
+        : ""
     }${row.dueDate ? ` · ${t("intel.row.due", locale, { date: row.dueDate })}` : ""}${
       row.executionStatus ? ` · ${row.executionStatus}` : ""
     }${row.topic ? ` · ${row.topic}` : ""} · ${sectionHeader(kind)}`;
@@ -340,538 +352,620 @@ export function IntelligenceView({ onOpenSettings }: { onOpenSettings: (section?
 
         {/* Main Grid */}
         <div className="intel-main-grid">
-      {/* — The sections: the six kinds, open first, settled dimmed — */}
-      <div
-        style={{
-          background: "oklch(from var(--canvas-2) l c h / 0.75)",
-          border: "1px solid var(--stroke-1)",
-          borderRadius: 16,
-          overflow: "hidden",
-          display: "flex",
-          flexDirection: "column",
-        }}
-      >
-        <div
-          style={{
-            padding: "14px 18px",
-            borderBottom: "1px solid var(--stroke-1)",
-            display: "flex",
-            alignItems: "center",
-            gap: 10,
-          }}
-        >
-          <Ico.Sparkle style={{ color: "var(--amber-2)" }} />
-          <div style={{ fontSize: 13, fontVariationSettings: "'wght' 550" }}>
-            {t("intel.title", locale)}
-          </div>
-          <span className="mono" style={{ fontSize: 10, color: "var(--ink-3)" }}>
-            {totalStatements} statement{totalStatements === 1 ? "" : "s"}
-          </span>
-          <span style={{ flex: 1 }} />
-          {checked.size > 0 && (
-            <button
-              className="btn amber"
-              style={{ height: 24, fontSize: 11 }}
-              onClick={planFromSelection}
+          {/* — The sections: the six kinds, open first, settled dimmed — */}
+          <div
+            style={{
+              background: "oklch(from var(--canvas-2) l c h / 0.75)",
+              border: "1px solid var(--stroke-1)",
+              borderRadius: 16,
+              overflow: "hidden",
+              display: "flex",
+              flexDirection: "column",
+            }}
+          >
+            <div
+              style={{
+                padding: "14px 18px",
+                borderBottom: "1px solid var(--stroke-1)",
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+              }}
             >
-              {t("intel.plan.from", locale, { n: checked.size })}
-            </button>
-          )}
-          {/* Stage D8: one button per ACTIVE connection, generated from the
+              <Ico.Sparkle style={{ color: "var(--amber-2)" }} />
+              <div style={{ fontSize: 13, fontVariationSettings: "'wght' 550" }}>
+                {t("intel.title", locale)}
+              </div>
+              <span className="mono" style={{ fontSize: 10, color: "var(--ink-3)" }}>
+                {totalStatements} statement{totalStatements === 1 ? "" : "s"}
+              </span>
+              <span style={{ flex: 1 }} />
+              {checked.size > 0 && (
+                <button
+                  className="btn amber"
+                  style={{ height: 24, fontSize: 11 }}
+                  onClick={planFromSelection}
+                >
+                  {t("intel.plan.from", locale, { n: checked.size })}
+                </button>
+              )}
+              {/* Stage D8: one button per ACTIVE connection, generated from the
               connections — the label follows the architecture: "Sync with"
               when the provider has inbound (supportsInbound), "Send to"
               when outbound-only. The D7 pending badge rides the button of
               the provider whose queue it is (per-provider, pendingInbound
               counts all for now — the queue view is shared). */}
-          {connections
-            .filter((c) => c.status === "active")
-            .map((c) => {
-              const name = PROVIDER_DISPLAY_NAME[c.provider] ?? c.provider;
-              return (
-                <button
-                  key={c.provider}
-                  className="btn"
-                  style={{ height: 24, fontSize: 11, display: "flex", alignItems: "center", gap: 6 }}
-                  title={t("integrations.sync.title", locale)}
-                  onClick={() => setPanelProvider(c.provider)}
-                >
-                  {t(
-                    c.supportsInbound ? "integrations.sync.with" : "integrations.send.to",
-                    locale,
-                    { provider: name },
-                  )}
-                  {/* Stage D7: the pending-inbound badge — the queue is one
-                      click away from the Sync it relates to. */}
-                  {c.supportsInbound && pendingInbound > 0 && (
-                    <span
-                      className="mono"
-                      aria-label={`${pendingInbound} external changes across providers`}
+              {connections
+                .filter((c) => c.status === "active")
+                .map((c) => {
+                  const name = PROVIDER_DISPLAY_NAME[c.provider] ?? c.provider;
+                  return (
+                    <button
+                      key={c.provider}
+                      className="btn"
                       style={{
-                        fontSize: 10,
-                        padding: "1px 6px",
-                        borderRadius: 999,
-                        background: "var(--sig-amber, #d29922)",
-                        color: "#fff",
+                        height: 24,
+                        fontSize: 11,
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 6,
                       }}
+                      title={t("integrations.sync.title", locale)}
+                      onClick={() => setPanelProvider(c.provider)}
                     >
-                      {pendingInbound}
-                    </span>
-                  )}
-                </button>
-              );
-            })}
-          {connections.length > 0 && connections.every((c) => c.status !== "active") && (
-            <span className="mono" style={{ fontSize: 10, color: "var(--ink-3)" }}>
-              {t("integrations.not_connected", locale, {
-                provider: PROVIDER_DISPLAY_NAME[connections[0]!.provider] ?? connections[0]!.provider,
-              })}
-            </span>
-          )}
-        </div>
-        <div className="panel-body" style={{ overflowY: "auto", padding: 6 }}>
-          {totalStatements === 0 || (filteredSections.length === 0 && filterCategory !== "inbound") ? (
-            <div className="view-empty" style={{ position: "static", padding: "40px 20px" }}>
-              <div className="view-empty-icon">
-                <Ico.Sparkle />
-              </div>
-              <h2>{totalStatements === 0 ? t("intel.empty.view", locale) : "No statements in this category"}</h2>
-              <p>{totalStatements === 0 ? t("intel.empty.view.hint", locale) : "Try selecting 'All Intelligence' or another category filter above."}</p>
+                      {t(
+                        c.supportsInbound ? "integrations.sync.with" : "integrations.send.to",
+                        locale,
+                        { provider: name },
+                      )}
+                      {/* Stage D7: the pending-inbound badge — the queue is one
+                      click away from the Sync it relates to. */}
+                      {c.supportsInbound && pendingInbound > 0 && (
+                        <span
+                          className="mono"
+                          aria-label={`${pendingInbound} external changes across providers`}
+                          style={{
+                            fontSize: 10,
+                            padding: "1px 6px",
+                            borderRadius: 999,
+                            background: "var(--sig-amber, #d29922)",
+                            color: "#fff",
+                          }}
+                        >
+                          {pendingInbound}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              {connections.length > 0 && connections.every((c) => c.status !== "active") && (
+                <span className="mono" style={{ fontSize: 10, color: "var(--ink-3)" }}>
+                  {t("integrations.not_connected", locale, {
+                    provider:
+                      PROVIDER_DISPLAY_NAME[connections[0]!.provider] ?? connections[0]!.provider,
+                  })}
+                </span>
+              )}
             </div>
-          ) : (
-            filteredSections.map((section) => {
-              const isCollapsed = collapsed.has(section.kind);
-              return (
-                <div key={section.kind} style={{ padding: "4px 6px" }}>
-                  <button
-                    onClick={() => toggle(section.kind)}
-                    aria-expanded={!isCollapsed}
+            <div className="panel-body" style={{ overflowY: "auto", padding: 6 }}>
+              {totalStatements === 0 ||
+              (filteredSections.length === 0 && filterCategory !== "inbound") ? (
+                <div className="view-empty" style={{ position: "static", padding: "40px 20px" }}>
+                  <div className="view-empty-icon">
+                    <Ico.Sparkle />
+                  </div>
+                  <h2>
+                    {totalStatements === 0
+                      ? t("intel.empty.view", locale)
+                      : "No statements in this category"}
+                  </h2>
+                  <p>
+                    {totalStatements === 0
+                      ? t("intel.empty.view.hint", locale)
+                      : "Try selecting 'All Intelligence' or another category filter above."}
+                  </p>
+                </div>
+              ) : (
+                filteredSections.map((section) => {
+                  const isCollapsed = collapsed.has(section.kind);
+                  return (
+                    <div key={section.kind} style={{ padding: "4px 6px" }}>
+                      <button
+                        onClick={() => toggle(section.kind)}
+                        aria-expanded={!isCollapsed}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 8,
+                          width: "100%",
+                          padding: "8px 8px",
+                          borderRadius: 8,
+                          background: "transparent",
+                          border: "none",
+                          cursor: "pointer",
+                          textAlign: "left",
+                          color: KIND_TINT[section.kind],
+                        }}
+                      >
+                        <span className="mono" style={{ fontSize: 11 }}>
+                          {KIND_GLYPH[section.kind]}
+                        </span>
+                        <span
+                          className="mono"
+                          style={{
+                            fontSize: 10,
+                            letterSpacing: "0.08em",
+                            textTransform: "uppercase",
+                            flex: 1,
+                          }}
+                        >
+                          {sectionHeader(section.kind)}
+                        </span>
+                        {/* Counts are ALWAYS visible — collapsed or not. */}
+                        <span className="mono" style={{ fontSize: 10.5, color: "var(--ink-3)" }}>
+                          {section.rows.length}
+                        </span>
+                        <Ico.Down
+                          style={{
+                            color: "var(--ink-3)",
+                            transform: isCollapsed ? "rotate(-90deg)" : "none",
+                            transition: "transform 0.15s",
+                          }}
+                        />
+                      </button>
+                      {!isCollapsed &&
+                        (section.rows.length === 0 ? (
+                          <div
+                            className="mono"
+                            style={{
+                              padding: "6px 10px 10px 28px",
+                              fontSize: 10.5,
+                              color: "var(--ink-3)",
+                            }}
+                          >
+                            {t("intel.empty.section", locale, {
+                              kind: sectionHeader(section.kind).toLowerCase(),
+                            })}
+                          </div>
+                        ) : (
+                          section.rows.map((row) => (
+                            <div
+                              key={row.id}
+                              style={{
+                                display: "flex",
+                                alignItems: "center",
+                                gap: 10,
+                                padding: "7px 10px 7px 28px",
+                                borderRadius: 8,
+                                opacity: isSettled(row.status) ? 0.55 : 1,
+                                // Stage D1: the overdue tint — rendered, computed
+                                // from today, never persisted.
+                                ...(isOverdue(row.dueDate, row.executionStatus, Date.now())
+                                  ? { boxShadow: "inset 2px 0 0 0 var(--sig-red)" }
+                                  : {}),
+                              }}
+                            >
+                              {/* Stage D2: the plan-selection checkbox — every
+                              statement row is a candidate plan source. */}
+                              <input
+                                type="checkbox"
+                                aria-label={`Select ${row.label} for planning`}
+                                checked={checked.has(row.id)}
+                                onChange={() => toggleChecked(row.id)}
+                                style={{ marginLeft: 2, flexShrink: 0 }}
+                              />
+                              <button
+                                title={rowHint(row, section.kind)}
+                                onClick={() => onCitation({ kind: "node", id: row.id })}
+                                style={{
+                                  flex: 1,
+                                  minWidth: 0,
+                                  textAlign: "left",
+                                  background: "transparent",
+                                  border: "none",
+                                  cursor: "pointer",
+                                  padding: 0,
+                                }}
+                              >
+                                <div
+                                  style={{
+                                    fontSize: 12.5,
+                                    color: "var(--ink-0)",
+                                    fontVariationSettings: "'wght' 500",
+                                    whiteSpace: "nowrap",
+                                    overflow: "hidden",
+                                    textOverflow: "ellipsis",
+                                  }}
+                                >
+                                  {row.label}
+                                </div>
+                                <div
+                                  className="mono"
+                                  style={{ fontSize: 10, color: "var(--ink-3)", marginTop: 1 }}
+                                >
+                                  {row.status}
+                                  {row.assignee
+                                    ? ` · ${t("intel.row.assignee", locale, { name: row.assignee })}`
+                                    : ""}
+                                  {row.supersedes?.length
+                                    ? ` · ${t("intel.row.supersedes", locale, { n: row.supersedes.length })}`
+                                    : ""}
+                                  {row.dueDate
+                                    ? ` · ${t("intel.row.due", locale, { date: row.dueDate })}`
+                                    : ""}
+                                  {row.executionStatus ? ` · ${row.executionStatus}` : ""}
+                                  {row.drivesActions
+                                    ? ` · ${t("intel.row.drives", locale, { n: row.drivesActions })}`
+                                    : ""}
+                                  {row.topic ? ` · ${row.topic}` : ""}
+                                </div>
+                                {/* Stage D3: the derived lines — computed project
+                                truth beside the manual state, never merged. */}
+                                {row.blockedBy?.length ? (
+                                  <div
+                                    className="mono"
+                                    style={{ fontSize: 10, color: "var(--sig-red)", marginTop: 1 }}
+                                  >
+                                    ⚠ {t("intel.row.blocked", locale, { n: row.blockedBy.length })}
+                                    : {row.blockedBy.join(", ")}
+                                  </div>
+                                ) : null}
+                                {row.atRiskBy?.length ? (
+                                  <div
+                                    className="mono"
+                                    style={{ fontSize: 10, color: "var(--amber-2)", marginTop: 1 }}
+                                  >
+                                    ⌛ {t("intel.row.atrisk", locale, { n: row.atRiskBy.length })}:{" "}
+                                    {row.atRiskBy.join(", ")}
+                                  </div>
+                                ) : null}
+                              </button>
+                              {row.provenance && (
+                                <button
+                                  className="mono"
+                                  title="meeting evidence"
+                                  onClick={() =>
+                                    onCitation({
+                                      kind: "meeting",
+                                      id: row.provenance!.meetingId,
+                                      ...(row.provenance!.turnRange
+                                        ? { turnRange: row.provenance!.turnRange }
+                                        : {}),
+                                    })
+                                  }
+                                  style={{
+                                    color: "var(--amber-2)",
+                                    background: "transparent",
+                                    border: "none",
+                                    cursor: "pointer",
+                                    fontSize: 12,
+                                    padding: "2px 6px",
+                                  }}
+                                >
+                                  ✦
+                                </button>
+                              )}
+                              {/* Stage D6: the ↗ chip — the board's external link
+                              for this row, straight from the link registry. */}
+                              {(() => {
+                                const link = linksByNode.get(row.id);
+                                if (!link) return null;
+                                return (
+                                  <a
+                                    href={link.url ?? "#"}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="mono"
+                                    title={t("integrations.chip.title", locale, {
+                                      at: new Date(link.syncedAt).toISOString().slice(0, 10),
+                                      // D8: the provider's raw word — the user
+                                      // can see what the external system shows.
+                                      ...(link.status ? { external: link.status } : {}),
+                                    })}
+                                    style={{
+                                      fontSize: 11,
+                                      color: "var(--amber-2)",
+                                      textDecoration: "none",
+                                      flexShrink: 0,
+                                    }}
+                                  >
+                                    ↗ {link.externalId}
+                                  </a>
+                                );
+                              })()}
+                            </div>
+                          ))
+                        ))}
+                    </div>
+                  );
+                })
+              )}
+              {/* — Stage D7: External changes — the human-gated inbound queue.
+              Pending rows offer Accept/Keep-ours; a warning row (no
+              translation) offers Keep-ours only — Accept would require
+              guessing a status; decided rows dim with their outcome. — */}
+              {inbound.length > 0 && (filterCategory === "all" || filterCategory === "inbound") && (
+                <div style={{ padding: "4px 6px 12px" }}>
+                  <div
                     style={{
                       display: "flex",
                       alignItems: "center",
                       gap: 8,
-                      width: "100%",
-                      padding: "8px 8px",
-                      borderRadius: 8,
-                      background: "transparent",
-                      border: "none",
-                      cursor: "pointer",
-                      textAlign: "left",
-                      color: KIND_TINT[section.kind],
+                      padding: "8px 10px 4px",
                     }}
                   >
-                    <span className="mono" style={{ fontSize: 11 }}>
-                      {KIND_GLYPH[section.kind]}
-                    </span>
                     <span
                       className="mono"
                       style={{
-                        fontSize: 10,
+                        fontSize: 10.5,
                         letterSpacing: "0.08em",
                         textTransform: "uppercase",
                         flex: 1,
                       }}
                     >
-                      {sectionHeader(section.kind)}
+                      {t("integrations.inbound.title", locale)}
                     </span>
-                    {/* Counts are ALWAYS visible — collapsed or not. */}
                     <span className="mono" style={{ fontSize: 10.5, color: "var(--ink-3)" }}>
-                      {section.rows.length}
+                      {pendingInbound}
                     </span>
-                    <Ico.Down
-                      style={{
-                        color: "var(--ink-3)",
-                        transform: isCollapsed ? "rotate(-90deg)" : "none",
-                        transition: "transform 0.15s",
-                      }}
-                    />
-                  </button>
-                  {!isCollapsed &&
-                    (section.rows.length === 0 ? (
+                  </div>
+                  <div
+                    className="mono"
+                    style={{ fontSize: 10, color: "var(--ink-3)", padding: "2px 10px 6px" }}
+                  >
+                    {t("integrations.inbound.hint", locale)}
+                  </div>
+                  {inbound.map((row) => {
+                    const actions = inboundRowActions(row);
+                    const busy = decidingInbound === row.id;
+                    return (
                       <div
-                        className="mono"
+                        key={row.id}
                         style={{
-                          padding: "6px 10px 10px 28px",
-                          fontSize: 10.5,
-                          color: "var(--ink-3)",
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 10,
+                          padding: "7px 10px",
+                          borderRadius: 8,
+                          opacity: row.status === "pending" ? 1 : 0.55,
+                          ...(row.status === "pending" && !inboundRowIsWarning(row)
+                            ? { boxShadow: "inset 2px 0 0 0 var(--amber-2)" }
+                            : {}),
                         }}
                       >
-                        {t("intel.empty.section", locale, { kind: sectionHeader(section.kind).toLowerCase() })}
-                      </div>
-                    ) : (
-                      section.rows.map((row) => (
-                        <div
-                          key={row.id}
+                        <button
+                          onClick={() => onCitation({ kind: "node", id: row.nodeId })}
                           style={{
-                            display: "flex",
-                            alignItems: "center",
-                            gap: 10,
-                            padding: "7px 10px 7px 28px",
-                            borderRadius: 8,
-                            opacity: isSettled(row.status) ? 0.55 : 1,
-                            // Stage D1: the overdue tint — rendered, computed
-                            // from today, never persisted.
-                            ...(isOverdue(row.dueDate, row.executionStatus, Date.now())
-                              ? { boxShadow: "inset 2px 0 0 0 var(--sig-red)" }
-                              : {}),
+                            flex: 1,
+                            minWidth: 0,
+                            textAlign: "left",
+                            background: "transparent",
+                            border: "none",
+                            cursor: "pointer",
+                            padding: 0,
                           }}
                         >
-                          {/* Stage D2: the plan-selection checkbox — every
-                              statement row is a candidate plan source. */}
-                          <input
-                            type="checkbox"
-                            aria-label={`Select ${row.label} for planning`}
-                            checked={checked.has(row.id)}
-                            onChange={() => toggleChecked(row.id)}
-                            style={{ marginLeft: 2, flexShrink: 0 }}
-                          />
-                          <button
-                            title={rowHint(row, section.kind)}
-                            onClick={() => onCitation({ kind: "node", id: row.id })}
+                          <div style={{ fontSize: 12.5, color: "var(--ink-0)" }}>
+                            {row.nodeLabel}
+                          </div>
+                          <div className="mono" style={{ fontSize: 10.5, color: "var(--ink-3)" }}>
+                            {inboundRowIsWarning(row)
+                              ? t("integrations.inbound.warning", locale, {
+                                  provider: row.provider,
+                                  value: row.externalValue,
+                                })
+                              : row.resolved
+                                ? t("integrations.inbound.resolved", locale, {
+                                    value: row.mappedValue ?? "",
+                                  })
+                                : t("integrations.inbound.row", locale, {
+                                    provider: row.provider,
+                                    external: row.externalValue,
+                                    board: row.boardValue ?? "—",
+                                  })}
+                          </div>
+                          {row.status !== "pending" && (
+                            <div
+                              className="mono"
+                              style={{ fontSize: 10, color: "var(--ink-3)", marginTop: 1 }}
+                            >
+                              {row.status === "applied"
+                                ? t("integrations.inbound.applied", locale)
+                                : row.status === "dismissed"
+                                  ? t("integrations.inbound.dismissed", locale)
+                                  : t("integrations.inbound.superseded", locale)}
+                            </div>
+                          )}
+                        </button>
+                        {row.url && (
+                          <a
+                            href={row.url}
+                            target="_blank"
+                            rel="noreferrer"
+                            title={t("integrations.chip.title", locale, {
+                              at: new Date(row.detectedAt).toLocaleString(),
+                            })}
+                            className="mono"
                             style={{
-                              flex: 1,
-                              minWidth: 0,
-                              textAlign: "left",
-                              background: "transparent",
-                              border: "none",
-                              cursor: "pointer",
-                              padding: 0,
+                              fontSize: 11,
+                              color: "var(--amber-2)",
+                              padding: "2px 6px",
+                              flexShrink: 0,
                             }}
                           >
-                            <div
-                              style={{
-                                fontSize: 12.5,
-                                color: "var(--ink-0)",
-                                fontVariationSettings: "'wght' 500",
-                                whiteSpace: "nowrap",
-                                overflow: "hidden",
-                                textOverflow: "ellipsis",
-                              }}
-                            >
-                              {row.label}
-                            </div>
-                            <div className="mono" style={{ fontSize: 10, color: "var(--ink-3)", marginTop: 1 }}>
-                              {row.status}
-                              {row.assignee
-                                ? ` · ${t("intel.row.assignee", locale, { name: row.assignee })}`
-                                : ""}
-                              {row.supersedes?.length
-                                ? ` · ${t("intel.row.supersedes", locale, { n: row.supersedes.length })}`
-                                : ""}
-                              {row.dueDate ? ` · ${t("intel.row.due", locale, { date: row.dueDate })}` : ""}
-                              {row.executionStatus ? ` · ${row.executionStatus}` : ""}
-                              {row.drivesActions
-                                ? ` · ${t("intel.row.drives", locale, { n: row.drivesActions })}`
-                                : ""}
-                              {row.topic ? ` · ${row.topic}` : ""}
-                            </div>
-                            {/* Stage D3: the derived lines — computed project
-                                truth beside the manual state, never merged. */}
-                            {row.blockedBy?.length ? (
-                              <div
-                                className="mono"
-                                style={{ fontSize: 10, color: "var(--sig-red)", marginTop: 1 }}
-                              >
-                                ⚠ {t("intel.row.blocked", locale, { n: row.blockedBy.length })}: {row.blockedBy.join(", ")}
-                              </div>
-                            ) : null}
-                            {row.atRiskBy?.length ? (
-                              <div className="mono" style={{ fontSize: 10, color: "var(--amber-2)", marginTop: 1 }}>
-                                ⌛ {t("intel.row.atrisk", locale, { n: row.atRiskBy.length })}: {row.atRiskBy.join(", ")}
-                              </div>
-                            ) : null}
+                            ↗ {row.externalId}
+                          </a>
+                        )}
+                        {actions.canAccept && (
+                          <button
+                            className="btn amber"
+                            style={{ height: 22, fontSize: 10.5, flexShrink: 0 }}
+                            disabled={busy}
+                            onClick={() => void decideInbound(row.id, "accept")}
+                          >
+                            {t("integrations.inbound.accept", locale)}
                           </button>
-                          {row.provenance && (
-                            <button
-                              className="mono"
-                              title="meeting evidence"
-                              onClick={() =>
-                                onCitation({
-                                  kind: "meeting",
-                                  id: row.provenance!.meetingId,
-                                  ...(row.provenance!.turnRange
-                                    ? { turnRange: row.provenance!.turnRange }
-                                    : {}),
-                                })
-                              }
-                              style={{
-                                color: "var(--amber-2)",
-                                background: "transparent",
-                                border: "none",
-                                cursor: "pointer",
-                                fontSize: 12,
-                                padding: "2px 6px",
-                              }}
-                            >
-                              ✦
-                            </button>
-                          )}
-                          {/* Stage D6: the ↗ chip — the board's external link
-                              for this row, straight from the link registry. */}
-                          {(() => {
-                            const link = linksByNode.get(row.id);
-                            if (!link) return null;
-                            return (
-                              <a
-                                href={link.url ?? "#"}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="mono"
-                                title={t("integrations.chip.title", locale, {
-                                  at: new Date(link.syncedAt).toISOString().slice(0, 10),
-                                  // D8: the provider's raw word — the user
-                                  // can see what the external system shows.
-                                  ...(link.status ? { external: link.status } : {}),
-                                })}
-                                style={{ fontSize: 11, color: "var(--amber-2)", textDecoration: "none", flexShrink: 0 }}
-                              >
-                                ↗ {link.externalId}
-                              </a>
-                            );
-                          })()}
-                        </div>
-                      ))
-                    ))}
-                </div>
-              );
-            })
-          )}
-          {/* — Stage D7: External changes — the human-gated inbound queue.
-              Pending rows offer Accept/Keep-ours; a warning row (no
-              translation) offers Keep-ours only — Accept would require
-              guessing a status; decided rows dim with their outcome. — */}
-          {inbound.length > 0 && (filterCategory === "all" || filterCategory === "inbound") && (
-            <div style={{ padding: "4px 6px 12px" }}>
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 8,
-                  padding: "8px 10px 4px",
-                }}
-              >
-                <span
-                  className="mono"
-                  style={{ fontSize: 10.5, letterSpacing: "0.08em", textTransform: "uppercase", flex: 1 }}
-                >
-                  {t("integrations.inbound.title", locale)}
-                </span>
-                <span className="mono" style={{ fontSize: 10.5, color: "var(--ink-3)" }}>
-                  {pendingInbound}
-                </span>
-              </div>
-              <div className="mono" style={{ fontSize: 10, color: "var(--ink-3)", padding: "2px 10px 6px" }}>
-                {t("integrations.inbound.hint", locale)}
-              </div>
-              {inbound.map((row) => {
-                const actions = inboundRowActions(row);
-                const busy = decidingInbound === row.id;
-                return (
-                  <div
-                    key={row.id}
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 10,
-                      padding: "7px 10px",
-                      borderRadius: 8,
-                      opacity: row.status === "pending" ? 1 : 0.55,
-                      ...(row.status === "pending" && !inboundRowIsWarning(row)
-                        ? { boxShadow: "inset 2px 0 0 0 var(--amber-2)" }
-                        : {}),
-                    }}
-                  >
-                    <button
-                      onClick={() => onCitation({ kind: "node", id: row.nodeId })}
-                      style={{ flex: 1, minWidth: 0, textAlign: "left", background: "transparent", border: "none", cursor: "pointer", padding: 0 }}
-                    >
-                      <div style={{ fontSize: 12.5, color: "var(--ink-0)" }}>{row.nodeLabel}</div>
-                      <div className="mono" style={{ fontSize: 10.5, color: "var(--ink-3)" }}>
-                        {inboundRowIsWarning(row)
-                          ? t("integrations.inbound.warning", locale, { provider: row.provider, value: row.externalValue })
-                          : row.resolved
-                            ? t("integrations.inbound.resolved", locale, { value: row.mappedValue ?? "" })
-                            : t("integrations.inbound.row", locale, { provider: row.provider, external: row.externalValue, board: row.boardValue ?? "—" })}
+                        )}
+                        {actions.canDismiss && (
+                          <button
+                            className="btn"
+                            style={{ height: 22, fontSize: 10.5, flexShrink: 0 }}
+                            disabled={busy}
+                            onClick={() => void decideInbound(row.id, "dismiss")}
+                          >
+                            {t("integrations.inbound.dismiss", locale)}
+                          </button>
+                        )}
                       </div>
-                      {row.status !== "pending" && (
-                        <div className="mono" style={{ fontSize: 10, color: "var(--ink-3)", marginTop: 1 }}>
-                          {row.status === "applied"
-                            ? t("integrations.inbound.applied", locale)
-                            : row.status === "dismissed"
-                              ? t("integrations.inbound.dismissed", locale)
-                              : t("integrations.inbound.superseded", locale)}
-                        </div>
-                      )}
-                    </button>
-                    {row.url && (
-                      <a
-                        href={row.url}
-                        target="_blank"
-                        rel="noreferrer"
-                        title={t("integrations.chip.title", locale, { at: new Date(row.detectedAt).toLocaleString() })}
-                        className="mono"
-                        style={{ fontSize: 11, color: "var(--amber-2)", padding: "2px 6px", flexShrink: 0 }}
-                      >
-                        ↗ {row.externalId}
-                      </a>
-                    )}
-                    {actions.canAccept && (
-                      <button
-                        className="btn amber"
-                        style={{ height: 22, fontSize: 10.5, flexShrink: 0 }}
-                        disabled={busy}
-                        onClick={() => void decideInbound(row.id, "accept")}
-                      >
-                        {t("integrations.inbound.accept", locale)}
-                      </button>
-                    )}
-                    {actions.canDismiss && (
-                      <button
-                        className="btn"
-                        style={{ height: 22, fontSize: 10.5, flexShrink: 0 }}
-                        disabled={busy}
-                        onClick={() => void decideInbound(row.id, "dismiss")}
-                      >
-                        {t("integrations.inbound.dismiss", locale)}
-                      </button>
-                    )}
-                  </div>
-                );
-              })}
+                    );
+                  })}
+                </div>
+              )}
             </div>
-          )}
-        </div>
-      </div>
-
-      {/* — The recommendation inbox: detection → recommendation → human
-            decision → validated operation (ADR 0025's first consumer) — */}
-      <div
-        style={{
-          background: "oklch(from var(--canvas-2) l c h / 0.75)",
-          border: "1px solid var(--stroke-1)",
-          borderRadius: 16,
-          overflow: "hidden",
-          display: "flex",
-          flexDirection: "column",
-        }}
-      >
-        <div
-          style={{
-            padding: "14px 18px",
-            borderBottom: "1px solid var(--stroke-1)",
-            display: "flex",
-            alignItems: "center",
-            gap: 10,
-          }}
-        >
-          <div style={{ fontSize: 13, fontVariationSettings: "'wght' 550" }}>
-            {t("intel.inbox.title", locale)}
           </div>
-          <span className="mono" style={{ fontSize: 10, color: "var(--ink-3)" }}>
-            {visibleInbox.length} open
-          </span>
-        </div>
-        <div className="panel-body" style={{ overflowY: "auto", padding: 12, display: "grid", gap: 10 }}>
-          {visibleInbox.length === 0 ? (
-            <div className="mono" style={{ padding: 24, textAlign: "center", fontSize: 12, color: "var(--ink-3)" }}>
-              {t("intel.inbox.empty", locale)}
+
+          {/* — The recommendation inbox: detection → recommendation → human
+            decision → validated operation (ADR 0025's first consumer) — */}
+          <div
+            style={{
+              background: "oklch(from var(--canvas-2) l c h / 0.75)",
+              border: "1px solid var(--stroke-1)",
+              borderRadius: 16,
+              overflow: "hidden",
+              display: "flex",
+              flexDirection: "column",
+            }}
+          >
+            <div
+              style={{
+                padding: "14px 18px",
+                borderBottom: "1px solid var(--stroke-1)",
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+              }}
+            >
+              <div style={{ fontSize: 13, fontVariationSettings: "'wght' 550" }}>
+                {t("intel.inbox.title", locale)}
+              </div>
+              <span className="mono" style={{ fontSize: 10, color: "var(--ink-3)" }}>
+                {visibleInbox.length} open
+              </span>
             </div>
-          ) : (
-            visibleInbox.map((item) => {
-              const preview = previewing === item.id ? mergePreview(workspace, item) : null;
-              return (
+            <div
+              className="panel-body"
+              style={{ overflowY: "auto", padding: 12, display: "grid", gap: 10 }}
+            >
+              {visibleInbox.length === 0 ? (
                 <div
-                  key={item.id}
-                  style={{
-                    border: "1px solid var(--amber-2)",
-                    borderRadius: 12,
-                    padding: 12,
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: 8,
-                  }}
+                  className="mono"
+                  style={{ padding: 24, textAlign: "center", fontSize: 12, color: "var(--ink-3)" }}
                 >
-                  <div style={{ fontSize: 12.5, color: "var(--ink-0)" }}>
-                    {t("intel.inbox.dup", locale, { dup: item.dup, existing: item.existing })}
-                  </div>
-                  {/* Evidence (rule 4): counts and meetings, never "looks similar". */}
-                  <div className="mono" style={{ fontSize: 10.5, color: "var(--ink-3)" }}>
-                    {t("intel.inbox.evidence", locale, {
-                      existing: item.existing,
-                      dup: item.dup,
-                      a: item.existingStatements,
-                      b: item.dupStatements,
-                      m: item.meetings.length,
-                    })}
-                  </div>
-                  {preview ? (
-                    <>
-                      <div className="mono" style={{ fontSize: 10.5, color: "var(--ink-1)", lineHeight: 1.5 }}>
-                        {t("intel.inbox.merge.preview", locale, {
-                          dup: item.dup,
+                  {t("intel.inbox.empty", locale)}
+                </div>
+              ) : (
+                visibleInbox.map((item) => {
+                  const preview = previewing === item.id ? mergePreview(workspace, item) : null;
+                  return (
+                    <div
+                      key={item.id}
+                      style={{
+                        border: "1px solid var(--amber-2)",
+                        borderRadius: 12,
+                        padding: 12,
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 8,
+                      }}
+                    >
+                      <div style={{ fontSize: 12.5, color: "var(--ink-0)" }}>
+                        {t("intel.inbox.dup", locale, { dup: item.dup, existing: item.existing })}
+                      </div>
+                      {/* Evidence (rule 4): counts and meetings, never "looks similar". */}
+                      <div className="mono" style={{ fontSize: 10.5, color: "var(--ink-3)" }}>
+                        {t("intel.inbox.evidence", locale, {
                           existing: item.existing,
-                          n: preview.statementCount,
+                          dup: item.dup,
+                          a: item.existingStatements,
+                          b: item.dupStatements,
+                          m: item.meetings.length,
                         })}
                       </div>
-                      {mergeError && (
-                        <div className="mono" style={{ fontSize: 10.5, color: "var(--sig-red)" }}>
-                          {mergeError}
+                      {preview ? (
+                        <>
+                          <div
+                            className="mono"
+                            style={{ fontSize: 10.5, color: "var(--ink-1)", lineHeight: 1.5 }}
+                          >
+                            {t("intel.inbox.merge.preview", locale, {
+                              dup: item.dup,
+                              existing: item.existing,
+                              n: preview.statementCount,
+                            })}
+                          </div>
+                          {mergeError && (
+                            <div
+                              className="mono"
+                              style={{ fontSize: 10.5, color: "var(--sig-red)" }}
+                            >
+                              {mergeError}
+                            </div>
+                          )}
+                          <div style={{ display: "flex", gap: 8 }}>
+                            <button
+                              className="btn amber"
+                              style={{ height: 26, fontSize: 11.5 }}
+                              onClick={() => confirmMerge(item)}
+                            >
+                              {t("intel.inbox.merge.confirm", locale)}
+                            </button>
+                            <button
+                              className="btn"
+                              style={{ height: 26, fontSize: 11.5 }}
+                              onClick={() => {
+                                setPreviewing(null);
+                                setMergeError(null);
+                              }}
+                            >
+                              {t("intel.inbox.merge.cancel", locale)}
+                            </button>
+                          </div>
+                        </>
+                      ) : (
+                        <div style={{ display: "flex", gap: 8 }}>
+                          <button
+                            className="btn amber"
+                            style={{ height: 26, fontSize: 11.5 }}
+                            onClick={() => setPreviewing(item.id)}
+                          >
+                            {t("intel.inbox.merge", locale)}
+                          </button>
+                          <button
+                            className="btn"
+                            style={{ height: 26, fontSize: 11.5 }}
+                            onClick={() => keepSeparate(item)}
+                          >
+                            {t("intel.inbox.keep", locale)}
+                          </button>
                         </div>
                       )}
-                      <div style={{ display: "flex", gap: 8 }}>
-                        <button
-                          className="btn amber"
-                          style={{ height: 26, fontSize: 11.5 }}
-                          onClick={() => confirmMerge(item)}
-                        >
-                          {t("intel.inbox.merge.confirm", locale)}
-                        </button>
-                        <button
-                          className="btn"
-                          style={{ height: 26, fontSize: 11.5 }}
-                          onClick={() => {
-                            setPreviewing(null);
-                            setMergeError(null);
-                          }}
-                        >
-                          {t("intel.inbox.merge.cancel", locale)}
-                        </button>
-                      </div>
-                    </>
-                  ) : (
-                    <div style={{ display: "flex", gap: 8 }}>
-                      <button
-                        className="btn amber"
-                        style={{ height: 26, fontSize: 11.5 }}
-                        onClick={() => setPreviewing(item.id)}
-                      >
-                        {t("intel.inbox.merge", locale)}
-                      </button>
-                      <button
-                        className="btn"
-                        style={{ height: 26, fontSize: 11.5 }}
-                        onClick={() => keepSeparate(item)}
-                      >
-                        {t("intel.inbox.keep", locale)}
-                      </button>
                     </div>
-                  )}
-                </div>
-              );
-            })
-          )}
+                  );
+                })
+              )}
+            </div>
+          </div>
         </div>
-      </div>
-      </div>
-      {panelProvider && (
-        <IntegrationPanel
-          provider={panelProvider}
-          connections={connections}
-          onClose={() => setPanelProvider(null)}
-          onLinksChanged={() => {
-            if (boardId) void fetchIntegrationLinks(boardId).then(setLinks);
-          }}
-        />
-      )}
+        {panelProvider && (
+          <IntegrationPanel
+            provider={panelProvider}
+            connections={connections}
+            onClose={() => setPanelProvider(null)}
+            onLinksChanged={() => {
+              if (boardId) void fetchIntegrationLinks(boardId).then(setLinks);
+            }}
+          />
+        )}
       </div>
     </div>
   );

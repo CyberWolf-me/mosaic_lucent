@@ -27,16 +27,16 @@ workspaces' tests green (the branch's uncommitted streaming tests included).
 
 ## The scorecard (§38)
 
-| Capability | Score | Evidence |
-| --- | --- | --- |
-| AI understanding (semantics of what's said) | **96** | All 10 prompts' content correct incl. the failure loop T1 invented and T10's ambiguity; §6 corrections update-in-place exactly |
-| Visual correctness (structure/connectors) | **88** | Zero dangling edges across 10 boards; T6 sequence numbered; T2/T7 hierarchy right |
-| Visual readability (layout) | **58** | The V2 wrap defect on flowcharts (T1/T3), sequence edge-label clipping (T6), ER column (T7), ≥80-node label collapse |
-| Execution model (deps, rollup, external) | **93** | Cycle rejected with the path named; transitive blocking + unblock recovery exact; rollup exact; fake-wire propose→approve→5 links with translated statuses |
-| Collaboration (rooms, roles, presence) | **85** | Sarah joined via invite as editor; commits broadcast; converged state — but the ops-API/room split (defect h) and the missed live frame (§11) subtract |
-| Trust/provenance surfaces | **90** | Statements carry meeting/turn provenance through the ws path; Intelligence/Execution/Meeting all render the ✦ chain; defect j (history window) and k (placeholder leak) subtract |
-| Provider reliability (the pass's environment) | **30** | 8/15 generate 502s, no retry for the no-tool-call class, silent UI failure; gateway hard-down by the end |
-| Time-to-useful-board (§35) | **PASS at scale, FAIL at the tail** | 10–35s when the provider answers; ~50% of attempts needed 1–3 retries because of provider failures |
+| Capability                                    | Score                               | Evidence                                                                                                                                                                         |
+| --------------------------------------------- | ----------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| AI understanding (semantics of what's said)   | **96**                              | All 10 prompts' content correct incl. the failure loop T1 invented and T10's ambiguity; §6 corrections update-in-place exactly                                                   |
+| Visual correctness (structure/connectors)     | **88**                              | Zero dangling edges across 10 boards; T6 sequence numbered; T2/T7 hierarchy right                                                                                                |
+| Visual readability (layout)                   | **58**                              | The V2 wrap defect on flowcharts (T1/T3), sequence edge-label clipping (T6), ER column (T7), ≥80-node label collapse                                                             |
+| Execution model (deps, rollup, external)      | **93**                              | Cycle rejected with the path named; transitive blocking + unblock recovery exact; rollup exact; fake-wire propose→approve→5 links with translated statuses                       |
+| Collaboration (rooms, roles, presence)        | **85**                              | Sarah joined via invite as editor; commits broadcast; converged state — but the ops-API/room split (defect h) and the missed live frame (§11) subtract                           |
+| Trust/provenance surfaces                     | **90**                              | Statements carry meeting/turn provenance through the ws path; Intelligence/Execution/Meeting all render the ✦ chain; defect j (history window) and k (placeholder leak) subtract |
+| Provider reliability (the pass's environment) | **30**                              | 8/15 generate 502s, no retry for the no-tool-call class, silent UI failure; gateway hard-down by the end                                                                         |
+| Time-to-useful-board (§35)                    | **PASS at scale, FAIL at the tail** | 10–35s when the provider answers; ~50% of attempts needed 1–3 retries because of provider failures                                                                               |
 
 ## Defects found (the pass's real output)
 
@@ -160,9 +160,9 @@ patches.
 The protocol's own arithmetic — frequency × severity × user value — points at
 one cluster: **platform coherence (B+C above) before any new feature**. The
 execution layer's engine is in excellent shape (rollup/blocking/drives/external
-wire all exact under test); what the live pass exposed is that the *seams
-between* the four write paths (generate, ops API, ws room, snapshot/eviction)
-and the *read windows* (history/search/ask) disagree, and that the layout
+wire all exact under test); what the live pass exposed is that the _seams
+between_ the four write paths (generate, ops API, ws room, snapshot/eviction)
+and the _read windows_ (history/search/ask) disagree, and that the layout
 renderer gives back unreadable boards exactly when the content is right. Neither
 finding is in the roadmap's remaining bullets (Slack/Figma/Lattice/OAuth) —
 which is precisely the point of the pass: the measured failures, not the

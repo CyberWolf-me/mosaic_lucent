@@ -26,17 +26,17 @@ biggest product gap" into numbers a layout change can be judged by.
 
 ## The baseline (median of 3, 2026-09-11)
 
-| board | nodes | edges | crossings | overlaps | eMean | eP95 | e/n | layout ms |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| layered (flowchart/arch) | 20 | 24 | **25** | 0 | 524 | 1199 | 26.2 | 0.5 |
-| layered | 40 | 55 | **139** | 0 | 578 | 1398 | 14.5 | 0.8 |
-| layered | 80 | 124 | **425** | 0 | 2140 | 4373 | 26.7 | 0.9 |
-| layered | 150 | 239 | **1563** | 0 | 863 | 2529 | 5.8 | 3.3 |
-| layered | 300 | 512 | **2950** | 0 | 8342 | 2444 | 27.8 | 2.3 |
-| layered | 500 | 844 | **10871** | 0 | 1321 | 3352 | 2.6 | 6.9 |
-| radial (mind map) | 20→500 | 19–499 | 0 | 0 | 361–398 | 300–666 | 0.8–18.6 | 0.1–0.7 |
-| tree (decision/org) | 20→500 | 19–499 | 0 | 0 | 342–613 | 805–1883 | 1.2–17.1 | 0.1–0.7 |
-| swimlane (process) | 20→500 | 21–627 | 0 | 0 | 405–3111 | 1140–21281 | 6.2–20.2 | 0.1–0.9 |
+| board                    | nodes  | edges  | crossings | overlaps | eMean    | eP95       | e/n      | layout ms |
+| ------------------------ | ------ | ------ | --------- | -------- | -------- | ---------- | -------- | --------- |
+| layered (flowchart/arch) | 20     | 24     | **25**    | 0        | 524      | 1199       | 26.2     | 0.5       |
+| layered                  | 40     | 55     | **139**   | 0        | 578      | 1398       | 14.5     | 0.8       |
+| layered                  | 80     | 124    | **425**   | 0        | 2140     | 4373       | 26.7     | 0.9       |
+| layered                  | 150    | 239    | **1563**  | 0        | 863      | 2529       | 5.8      | 3.3       |
+| layered                  | 300    | 512    | **2950**  | 0        | 8342     | 2444       | 27.8     | 2.3       |
+| layered                  | 500    | 844    | **10871** | 0        | 1321     | 3352       | 2.6      | 6.9       |
+| radial (mind map)        | 20→500 | 19–499 | 0         | 0        | 361–398  | 300–666    | 0.8–18.6 | 0.1–0.7   |
+| tree (decision/org)      | 20→500 | 19–499 | 0         | 0        | 342–613  | 805–1883   | 1.2–17.1 | 0.1–0.7   |
+| swimlane (process)       | 20→500 | 21–627 | 0         | 0        | 405–3111 | 1140–21281 | 6.2–20.2 | 0.1–0.9   |
 
 (Radial/tree/swimlane rows condensed: every scale held **0 crossings and
 0 overlaps** — full table via the runner.)
@@ -99,15 +99,15 @@ the acceptance gate:
 ## Before → after (crossings, the routed ladder vs the baseline)
 
 | nodes | edges | before | after | eMean before → after |
-| --- | --- | --- | --- | --- |
-| 20 | 24 | 25 | 36* | 524 → 345 |
-| 40 | 55 | 139 | 24 | 578 → 225 |
-| 80 | 124 | 425 | 119 | 2140 → 298 |
-| 150 | 239 | 1563 | 240 | 863 → 320 |
-| 300 | 512 | 2950 | 571 | 8342 → 323 |
-| 500 | 844 | 10871 | 902 | 1321 → 318 |
+| ----- | ----- | ------ | ----- | -------------------- |
+| 20    | 24    | 25     | 36\*  | 524 → 345            |
+| 40    | 55    | 139    | 24    | 578 → 225            |
+| 80    | 124   | 425    | 119   | 2140 → 298           |
+| 150   | 239   | 1563   | 240   | 863 → 320            |
+| 300   | 512   | 2950   | 571   | 8342 → 323           |
+| 500   | 844   | 10871  | 902   | 1321 → 318           |
 
-*The n=20 uptick is the tiny-board deep-chain wrap (a 5-layer chain of
+\*The n=20 uptick is the tiny-board deep-chain wrap (a 5-layer chain of
 1–2-node rows legitimately wraps); the crossing increase there is band
 seams, not diagonals — accepted with the numbers on record.
 

@@ -9,7 +9,7 @@
 Lucent has accumulated several kinds of state across its stores, caches,
 projections, and process-local maps. Each kind already behaves correctly in
 isolation — the op log is authoritative, the Intelligence view recomputes,
-presence is in-memory — but the *classes* were never written down as a rule.
+presence is in-memory — but the _classes_ were never written down as a rule.
 That is the kind of gap that closes badly: the first contributor who "just
 persists the search index for speed" or "just caches the plan in the
 database" has created a second source of truth, and nothing in review names
@@ -59,7 +59,7 @@ process that holds it:
 The rules, each with a concrete refusal:
 
 1. **A cache never becomes truth.** If a cached value (e.g. a limiter's
-   window) is needed cross-instance, the fix is to move the *decision* to a
+   window) is needed cross-instance, the fix is to move the _decision_ to a
    durable store behind the same interface — not to pretend the per-process
    map is shared. The PgTicketStore over the TicketStore seam is the worked
    example.

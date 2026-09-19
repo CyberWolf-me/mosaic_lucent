@@ -23,7 +23,11 @@ import type {
   LinkTaskInput,
   NewIntegrationConnection,
 } from "../integrations/integrations.js";
-import { newIntegrationId, normalizeConnection, normalizeLink } from "../integrations/integrations.js";
+import {
+  newIntegrationId,
+  normalizeConnection,
+  normalizeLink,
+} from "../integrations/integrations.js";
 import type {
   ExecutionClaim,
   ExecutionLedger as ExecutionLedgerStore,
@@ -142,10 +146,7 @@ export class PostgresIntegrationStore implements IntegrationStore {
       .select()
       .from(integrationConnections)
       .where(
-        and(
-          eq(integrationConnections.orgId, orgId),
-          eq(integrationConnections.provider, provider),
-        ),
+        and(eq(integrationConnections.orgId, orgId), eq(integrationConnections.provider, provider)),
       );
     return row ? rowToConnection(row) : undefined;
   }
@@ -174,10 +175,7 @@ export class PostgresIntegrationStore implements IntegrationStore {
       .update(integrationConnections)
       .set({ status, updatedAt: now })
       .where(
-        and(
-          eq(integrationConnections.orgId, orgId),
-          eq(integrationConnections.provider, provider),
-        ),
+        and(eq(integrationConnections.orgId, orgId), eq(integrationConnections.provider, provider)),
       )
       .returning();
     return updated.length > 0;
@@ -298,7 +296,9 @@ function rowToAction(row: DbActionRow): IntegrationActionRecord {
     // Stage D9: origin/provenance/sourceSeq (null-safe — pre-D9 rows read
     // as origin "user" by the callers' default).
     ...(row.origin !== null ? { origin: row.origin as "user" | "ai" } : {}),
-    ...(row.provenance !== null ? { provenance: row.provenance as { request: string; explanation: string } } : {}),
+    ...(row.provenance !== null
+      ? { provenance: row.provenance as { request: string; explanation: string } }
+      : {}),
     ...(row.sourceSeq !== null ? { sourceSeq: row.sourceSeq } : {}),
   };
 }
@@ -430,9 +430,7 @@ function rowToExecution(row: typeof executionLedger.$inferSelect): ExecutionReco
 }
 
 /** The WHERE clause that restates isReclaimable — the re-claim guard. */
-function reclaimGuard(
-  staleAfterMs: number,
-): ReturnType<typeof sql> {
+function reclaimGuard(staleAfterMs: number): ReturnType<typeof sql> {
   return sql`(${executionLedger.status} = 'failed' OR (${executionLedger.status} = 'received' AND ${executionLedger.beganAt} <= ${Date.now() - staleAfterMs}))`;
 }
 
@@ -470,11 +468,7 @@ export class PostgresExecutionLedger implements ExecutionLedgerStore {
         beganAt: now,
       })
       .onConflictDoNothing({
-        target: [
-          executionLedger.boardId,
-          executionLedger.provider,
-          executionLedger.requestId,
-        ],
+        target: [executionLedger.boardId, executionLedger.provider, executionLedger.requestId],
       })
       .returning();
     if (inserted.length > 0) {

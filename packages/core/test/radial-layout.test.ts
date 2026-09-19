@@ -25,8 +25,12 @@ function mindMap() {
 // Center distance reads the ACTUAL laid-out size — hardcoding the base 64px
 // height broke when the layout began reserving the NodeCard's sub/chip rows
 // (the center then sat 7.5px off per node, angle-dependent).
-const dist = (box: { position: { x: number; y: number }; size: { width: number; height: number } } | undefined) =>
-  box ? Math.hypot(box.position.x + box.size.width / 2, box.position.y + box.size.height / 2) : Number.NaN;
+const dist = (
+  box: { position: { x: number; y: number }; size: { width: number; height: number } } | undefined,
+) =>
+  box
+    ? Math.hypot(box.position.x + box.size.width / 2, box.position.y + box.size.height / 2)
+    : Number.NaN;
 
 describe("radial layout for mind maps", () => {
   it("is selected automatically for a mindmap workspace", () => {

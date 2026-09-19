@@ -36,7 +36,11 @@ const TEST_URL = process.env.LUCENT_TEST_DATABASE_URL;
 describe("the in-memory outbox (the no-database dev path)", () => {
   it("appends, lists in order, and marks dispatched once", async () => {
     const store = new InMemoryOutbox();
-    const first = await store.append({ type: "BoardOperationCommitted", boardId: "b1", payload: { seq: 1 } });
+    const first = await store.append({
+      type: "BoardOperationCommitted",
+      boardId: "b1",
+      payload: { seq: 1 },
+    });
     const second = await store.append({ type: "MeetingEnded", orgId: "o1" });
 
     const pending = await store.pending(10);

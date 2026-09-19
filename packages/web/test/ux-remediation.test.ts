@@ -36,8 +36,6 @@ describe("UX remediation: attention + threshold + live provenance", () => {
   it("live provenance includes live-session turns", () => {
     expect(isLiveProvenance("live-session")).toBe(true);
     expect(isLiveProvenance("saved-id")).toBe(false);
-    expect(
-      pointsAtLive({ meetingId: "live-session" }, "live-session"),
-    ).toBe(true);
+    expect(pointsAtLive({ meetingId: "live-session" }, "live-session")).toBe(true);
   });
 });

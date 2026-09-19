@@ -54,12 +54,27 @@ class ScriptedLinearWire {
   readonly calls: Array<{ query: string; variables: Record<string, unknown> }> = [];
   /** The "database" of issues the wire holds — the create LANDED here even
    * when its response hangs. */
-  readonly issues: Array<{ id: string; identifier: string; title: string; description: string; state: string; assignee?: string; dueDate?: string; url: string }> = [];
+  readonly issues: Array<{
+    id: string;
+    identifier: string;
+    title: string;
+    description: string;
+    state: string;
+    assignee?: string;
+    dueDate?: string;
+    url: string;
+  }> = [];
   private nextIssue = 1;
   hangNextCreate = false;
   failNextCreate = false;
 
-  private issue(over: { title: string; description: string; assignee?: string; dueDate?: string; state: string }) {
+  private issue(over: {
+    title: string;
+    description: string;
+    assignee?: string;
+    dueDate?: string;
+    state: string;
+  }) {
     const identifier = `LIN-${this.nextIssue}`;
     this.nextIssue += 1;
     const row = {
@@ -77,21 +92,34 @@ class ScriptedLinearWire {
   }
 
   readonly fetchImpl = (async (_url: string | URL | Request, init?: RequestInit) => {
-    const body = JSON.parse(String(init?.body)) as { query: string; variables: Record<string, unknown> };
+    const body = JSON.parse(String(init?.body)) as {
+      query: string;
+      variables: Record<string, unknown>;
+    };
     this.calls.push(body);
     if (body.query.includes("workflowStates")) {
-      return respond({ workflowStates: { nodes: [
-        { id: "st-todo", name: "Todo" }, { id: "st-progress", name: "In Progress" },
-        { id: "st-done", name: "Done" }, { id: "st-canceled", name: "Canceled" },
-      ] } });
+      return respond({
+        workflowStates: {
+          nodes: [
+            { id: "st-todo", name: "Todo" },
+            { id: "st-progress", name: "In Progress" },
+            { id: "st-done", name: "Done" },
+            { id: "st-canceled", name: "Canceled" },
+          ],
+        },
+      });
     }
     if (body.query.includes("query { users")) {
-      return respond({ users: { nodes: [{ id: "u-sarah", name: "Sarah", email: "sarah@example.com" }] } });
+      return respond({
+        users: { nodes: [{ id: "u-sarah", name: "Sarah", email: "sarah@example.com" }] },
+      });
     }
     if (body.query.includes("issueCreate")) {
       if (this.failNextCreate) {
         this.failNextCreate = false;
-        return new Response(JSON.stringify({ errors: [{ message: "linear is down" }] }), { status: 200 });
+        return new Response(JSON.stringify({ errors: [{ message: "linear is down" }] }), {
+          status: 200,
+        });
       }
       // The create LANDS on the wire (the issue is stored) — and then the
       // response is lost when hangNextCreate is armed.
@@ -141,7 +169,16 @@ function respond(data: unknown): Response {
   return new Response(JSON.stringify({ data }), { status: 200 });
 }
 
-function rowToIssue(row: { id: string; identifier: string; title: string; description: string; state: string; assignee?: string; dueDate?: string; url: string }) {
+function rowToIssue(row: {
+  id: string;
+  identifier: string;
+  title: string;
+  description: string;
+  state: string;
+  assignee?: string;
+  dueDate?: string;
+  url: string;
+}) {
   return {
     id: row.id,
     identifier: row.identifier,
@@ -191,7 +228,10 @@ async function makeHarness(wire: ScriptedLinearWire) {
       // The literal is heterogeneous (two factory types); type it as the
       // bundle expects rather than letting TS widen to the first entry.
       providers: new Map([
-        ["fake", (): import("../src/integrations/provider.js").ExecutionProvider => new FakeProvider()],
+        [
+          "fake",
+          (): import("../src/integrations/provider.js").ExecutionProvider => new FakeProvider(),
+        ],
         ["linear", (): import("../src/integrations/provider.js").ExecutionProvider => linear],
       ]),
       actions: new InMemoryIntegrationActionStore(),
@@ -202,13 +242,28 @@ async function makeHarness(wire: ScriptedLinearWire) {
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const { port } = server.address() as AddressInfo;
-  return { base: `http://127.0.0.1:${port}`, userStore, boardStore, wire, close: async () => { await close(); } };
+  return {
+    base: `http://127.0.0.1:${port}`,
+    userStore,
+    boardStore,
+    wire,
+    close: async () => {
+      await close();
+    },
+  };
 }
 
 let open: Awaited<ReturnType<typeof makeHarness>> | null = null;
-afterEach(async () => { await open?.close(); open = null; });
+afterEach(async () => {
+  await open?.close();
+  open = null;
+});
 
-async function api(h: NonNullable<typeof open>, path: string, init: RequestInit & { token?: string; csrf?: string } = {}) {
+async function api(
+  h: NonNullable<typeof open>,
+  path: string,
+  init: RequestInit & { token?: string; csrf?: string } = {},
+) {
   const { token, csrf, ...rest } = init;
   const res = await fetch(`${h.base}${path}`, {
     ...rest,
@@ -239,13 +294,24 @@ function action(id: string, fields: { assignee?: string; dueDate?: string } = {}
   return [
     { op: "CREATE_NODE", id, nodeType: "action", label: id.replace(/-/g, " ") },
     { op: "SET_STATEMENT", id, statement: { kind: "action", status: "open", topic: "d6" } },
-    { op: "SET_ISSUE", id, issue: { type: "task", status: "open", ...(fields.assignee ? { assignee: fields.assignee } : {}), ...(fields.dueDate ? { dueDate: fields.dueDate } : {}) } },
+    {
+      op: "SET_ISSUE",
+      id,
+      issue: {
+        type: "task",
+        status: "open",
+        ...(fields.assignee ? { assignee: fields.assignee } : {}),
+        ...(fields.dueDate ? { dueDate: fields.dueDate } : {}),
+      },
+    },
   ];
 }
 
 async function seedTen(h: NonNullable<typeof open>, token: string): Promise<string> {
   const created = await api(h, "/api/boards", {
-    method: "POST", token, body: JSON.stringify({ name: "D6 board", workspace: createWorkspace() }),
+    method: "POST",
+    token,
+    body: JSON.stringify({ name: "D6 board", workspace: createWorkspace() }),
   });
   expect(created.status).toBe(201);
   const boardId = created.body.id as string;
@@ -254,7 +320,9 @@ async function seedTen(h: NonNullable<typeof open>, token: string): Promise<stri
     ops.push(...action(`task-${i}`, { assignee: "Sarah", dueDate: "2026-09-20" }));
   }
   const seeded = await api(h, `/api/boards/${boardId}/ops`, {
-    method: "POST", token, body: JSON.stringify({ ops, label: "ten" }),
+    method: "POST",
+    token,
+    body: JSON.stringify({ ops, label: "ten" }),
   });
   expect(seeded.status).toBe(200);
   return boardId;
@@ -270,28 +338,44 @@ describe("Stage D6 definition of done — the real provider, end to end on a stu
 
     // The connection (config carries the teamId — the factory reads it).
     const put = await api(h, `/api/orgs/${orgId}/integrations/linear`, {
-      method: "PUT", token: alice.token, csrf: "csrf",
-      body: JSON.stringify({ credentialRef: "LUCENT_LINEAR_TEST_KEY", config: { teamId: "team_1" } }),
+      method: "PUT",
+      token: alice.token,
+      csrf: "csrf",
+      body: JSON.stringify({
+        credentialRef: "LUCENT_LINEAR_TEST_KEY",
+        config: { teamId: "team_1" },
+      }),
     });
     expect(put.status).toBe(201);
 
     // PROPOSE: the preview names the 10 creates with the right fields + the
     // corrected statement.
     const propose = await api(h, `/api/boards/${boardId}/integrations/linear/propose`, {
-      method: "POST", token: alice.token, csrf: "csrf",
+      method: "POST",
+      token: alice.token,
+      csrf: "csrf",
     });
     expect(propose.status).toBe(201);
     expect(propose.body.preview.creates).toHaveLength(10);
     expect(propose.body.preview.creates[0]).toMatchObject({
-      nodeId: "task-1", title: "task 1", assignee: "Sarah", dueDate: "2026-09-20",
+      nodeId: "task-1",
+      title: "task 1",
+      assignee: "Sarah",
+      dueDate: "2026-09-20",
     });
     expect(propose.body.preview.statement).toContain("Nothing will be deleted");
     expect(propose.body.preview.statement).toContain("explicitly shown");
 
     // APPROVE: 10/10 applied.
-    const approve = await api(h, `/api/boards/${boardId}/integrations/actions/${propose.body.action.id}/approve`, {
-      method: "POST", token: alice.token, csrf: "csrf",
-    });
+    const approve = await api(
+      h,
+      `/api/boards/${boardId}/integrations/actions/${propose.body.action.id}/approve`,
+      {
+        method: "POST",
+        token: alice.token,
+        csrf: "csrf",
+      },
+    );
     expect(approve.status).toBe(200);
     expect(approve.body.applied).toBe(10);
     expect(approve.body.failed).toBe(0);
@@ -303,7 +387,11 @@ describe("Stage D6 definition of done — the real provider, end to end on a stu
       Array.from({ length: 10 }, (_, i) => i + 1),
     );
     // Correct fields: the title, the assignee (resolved to Sarah), the due date.
-    expect(wire.issues[0]).toMatchObject({ title: "task 1", assignee: "Sarah", dueDate: "2026-09-20" });
+    expect(wire.issues[0]).toMatchObject({
+      title: "task 1",
+      assignee: "Sarah",
+      dueDate: "2026-09-20",
+    });
     // Provenance: the lucent marker in every description.
     for (const issue of wire.issues) {
       expect(issue.description).toContain("<!-- lucent-action:");
@@ -312,14 +400,22 @@ describe("Stage D6 definition of done — the real provider, end to end on a stu
     // THE LINKS: 10 in the registry, externalId = the identifier.
     const links = await api(h, `/api/boards/${boardId}/integrations/links`, { token: alice.token });
     expect(links.body.links).toHaveLength(10);
-    expect(links.body.links.map((l: any) => Number(l.externalId.slice(4))).sort((a: any, b: any) => a - b)).toEqual(
-      Array.from({ length: 10 }, (_, i) => i + 1),
-    );
+    expect(
+      links.body.links
+        .map((l: any) => Number(l.externalId.slice(4)))
+        .sort((a: any, b: any) => a - b),
+    ).toEqual(Array.from({ length: 10 }, (_, i) => i + 1));
 
     // DUPLICATE APPROVAL: re-approve → duplicate:true, ZERO new wire mutations.
-    const reapprove = await api(h, `/api/boards/${boardId}/integrations/actions/${propose.body.action.id}/approve`, {
-      method: "POST", token: alice.token, csrf: "csrf",
-    });
+    const reapprove = await api(
+      h,
+      `/api/boards/${boardId}/integrations/actions/${propose.body.action.id}/approve`,
+      {
+        method: "POST",
+        token: alice.token,
+        csrf: "csrf",
+      },
+    );
     expect(reapprove.status).toBe(200);
     expect(reapprove.body.duplicate).toBe(true);
     expect(wire.createCount("issueCreate")).toBe(10); // unchanged
@@ -339,20 +435,33 @@ describe("Stage D6 definition of done — the real provider, end to end on a stu
     const orgId = (await h.userStore.membershipsFor(alice.id))[0]!.orgId;
     const boardId = await seedTen(h, alice.token);
     await api(h, `/api/orgs/${orgId}/integrations/linear`, {
-      method: "PUT", token: alice.token, csrf: "csrf",
-      body: JSON.stringify({ credentialRef: "LUCENT_LINEAR_TEST_KEY", config: { teamId: "team_1" } }),
+      method: "PUT",
+      token: alice.token,
+      csrf: "csrf",
+      body: JSON.stringify({
+        credentialRef: "LUCENT_LINEAR_TEST_KEY",
+        config: { teamId: "team_1" },
+      }),
     });
 
     const propose = await api(h, `/api/boards/${boardId}/integrations/linear/propose`, {
-      method: "POST", token: alice.token, csrf: "csrf",
+      method: "POST",
+      token: alice.token,
+      csrf: "csrf",
     });
 
     // ARM: the FIRST create lands on the wire (LIN-1 stored) but its response
     // hangs — the executor times out. The other 9 apply normally.
     wire.hangNextCreate = true;
-    const approve = await api(h, `/api/boards/${boardId}/integrations/actions/${propose.body.action.id}/approve`, {
-      method: "POST", token: alice.token, csrf: "csrf",
-    });
+    const approve = await api(
+      h,
+      `/api/boards/${boardId}/integrations/actions/${propose.body.action.id}/approve`,
+      {
+        method: "POST",
+        token: alice.token,
+        csrf: "csrf",
+      },
+    );
     expect(approve.status).toBe(200);
     expect(approve.body.failed).toBe(1);
     expect(approve.body.applied).toBe(9);
@@ -364,7 +473,9 @@ describe("Stage D6 definition of done — the real provider, end to end on a stu
     // node re-creates. The executor's recovery-first path calls
     // recoverCreate(marker) BEFORE the create — finds LIN-1 → links it.
     const repropose = await api(h, `/api/boards/${boardId}/integrations/linear/propose`, {
-      method: "POST", token: alice.token, csrf: "csrf",
+      method: "POST",
+      token: alice.token,
+      csrf: "csrf",
     });
     expect(repropose.body.preview.creates.map((c: any) => c.nodeId)).toHaveLength(1);
 
@@ -373,8 +484,11 @@ describe("Stage D6 definition of done — the real provider, end to end on a stu
     // recovery-first discipline (the sweeper) and in recoverCreate. Assert
     // the SEAM here: recoverCreate finds the landed issue by marker.
     const linear = new LinearProvider({
-      apiKey: "lin_api_test", teamId: "team_1",
-      baseUrl: "https://linear.test/graphql", fetchImpl: wire.fetchImpl, maxAttempts: 1,
+      apiKey: "lin_api_test",
+      teamId: "team_1",
+      baseUrl: "https://linear.test/graphql",
+      fetchImpl: wire.fetchImpl,
+      maxAttempts: 1,
     });
     const failedNode = approve.body.results.find((r: any) => r.action === "failed").nodeId;
     const recovered: ExternalTask | undefined = await linear.recoverCreate(
@@ -383,7 +497,9 @@ describe("Stage D6 definition of done — the real provider, end to end on a stu
     expect(recovered?.externalId).toMatch(/^LIN-\d+$/); // found the landed issue
     expect(wire.issues).toHaveLength(10); // still 10 — the recovery did NOT re-create
     // The marker really is in the landed issue's description.
-    const landed = wire.issues.find((i) => i.description.includes(`<!-- lucent-action:ext_${failedNode} -->`));
+    const landed = wire.issues.find((i) =>
+      i.description.includes(`<!-- lucent-action:ext_${failedNode} -->`),
+    );
     expect(landed).toBeDefined();
   });
 
@@ -394,18 +510,31 @@ describe("Stage D6 definition of done — the real provider, end to end on a stu
     const orgId = (await h.userStore.membershipsFor(alice.id))[0]!.orgId;
     const boardId = await seedTen(h, alice.token);
     await api(h, `/api/orgs/${orgId}/integrations/linear`, {
-      method: "PUT", token: alice.token, csrf: "csrf",
-      body: JSON.stringify({ credentialRef: "LUCENT_LINEAR_TEST_KEY", config: { teamId: "team_1" } }),
+      method: "PUT",
+      token: alice.token,
+      csrf: "csrf",
+      body: JSON.stringify({
+        credentialRef: "LUCENT_LINEAR_TEST_KEY",
+        config: { teamId: "team_1" },
+      }),
     });
     const propose = await api(h, `/api/boards/${boardId}/integrations/linear/propose`, {
-      method: "POST", token: alice.token, csrf: "csrf",
+      method: "POST",
+      token: alice.token,
+      csrf: "csrf",
     });
 
     // Fail the 6th create (5 successes first, then the failure, then the rest).
     wire.failNextCreate = true;
-    const approve = await api(h, `/api/boards/${boardId}/integrations/actions/${propose.body.action.id}/approve`, {
-      method: "POST", token: alice.token, csrf: "csrf",
-    });
+    const approve = await api(
+      h,
+      `/api/boards/${boardId}/integrations/actions/${propose.body.action.id}/approve`,
+      {
+        method: "POST",
+        token: alice.token,
+        csrf: "csrf",
+      },
+    );
     expect(approve.status).toBe(200);
     expect(approve.body.applied).toBe(9);
     expect(approve.body.failed).toBe(1);
@@ -415,12 +544,20 @@ describe("Stage D6 definition of done — the real provider, end to end on a stu
     expect(wire.issues).toHaveLength(9);
     // The retry: the failed item re-creates (the wire failure was one-shot).
     const repropose = await api(h, `/api/boards/${boardId}/integrations/linear/propose`, {
-      method: "POST", token: alice.token, csrf: "csrf",
+      method: "POST",
+      token: alice.token,
+      csrf: "csrf",
     });
     expect(repropose.body.preview.creates).toHaveLength(1);
-    const reapprove = await api(h, `/api/boards/${boardId}/integrations/actions/${repropose.body.action.id}/approve`, {
-      method: "POST", token: alice.token, csrf: "csrf",
-    });
+    const reapprove = await api(
+      h,
+      `/api/boards/${boardId}/integrations/actions/${repropose.body.action.id}/approve`,
+      {
+        method: "POST",
+        token: alice.token,
+        csrf: "csrf",
+      },
+    );
     expect(reapprove.body.applied).toBeGreaterThanOrEqual(1);
     expect(wire.issues).toHaveLength(10); // the retry landed it
   });
@@ -432,21 +569,36 @@ describe("Stage D6 definition of done — the real provider, end to end on a stu
     const orgId = (await h.userStore.membershipsFor(alice.id))[0]!.orgId;
     const boardId = await seedTen(h, alice.token);
     await api(h, `/api/orgs/${orgId}/integrations/linear`, {
-      method: "PUT", token: alice.token, csrf: "csrf",
-      body: JSON.stringify({ credentialRef: "LUCENT_LINEAR_TEST_KEY", config: { teamId: "team_1" } }),
+      method: "PUT",
+      token: alice.token,
+      csrf: "csrf",
+      body: JSON.stringify({
+        credentialRef: "LUCENT_LINEAR_TEST_KEY",
+        config: { teamId: "team_1" },
+      }),
     });
     const propose = await api(h, `/api/boards/${boardId}/integrations/linear/propose`, {
-      method: "POST", token: alice.token, csrf: "csrf",
+      method: "POST",
+      token: alice.token,
+      csrf: "csrf",
     });
     expect(propose.status).toBe(201);
 
     // The admin disables the connection between propose and approve.
     await api(h, `/api/orgs/${orgId}/integrations/linear`, {
-      method: "DELETE", token: alice.token, csrf: "csrf",
+      method: "DELETE",
+      token: alice.token,
+      csrf: "csrf",
     });
-    const approve = await api(h, `/api/boards/${boardId}/integrations/actions/${propose.body.action.id}/approve`, {
-      method: "POST", token: alice.token, csrf: "csrf",
-    });
+    const approve = await api(
+      h,
+      `/api/boards/${boardId}/integrations/actions/${propose.body.action.id}/approve`,
+      {
+        method: "POST",
+        token: alice.token,
+        csrf: "csrf",
+      },
+    );
     expect(approve.status).toBe(409);
     expect(approve.body.error).toContain("unavailable");
     // ZERO wire mutations — nothing executed.
@@ -462,19 +614,37 @@ describe("Stage D6 definition of done — the real provider, end to end on a stu
     const _orgId = (await h.userStore.membershipsFor(alice.id))[0]!.orgId;
     const boardId = await seedTen(h, alice.token);
     const share = await api(h, `/api/boards/${boardId}/share`, {
-      method: "POST", token: alice.token, body: JSON.stringify({ role: "viewer" }),
+      method: "POST",
+      token: alice.token,
+      body: JSON.stringify({ role: "viewer" }),
     });
     await api(h, `/api/boards/${boardId}/join`, {
-      method: "POST", token: viewer.token, body: JSON.stringify({ token: share.body.token }),
+      method: "POST",
+      token: viewer.token,
+      body: JSON.stringify({ token: share.body.token }),
     });
 
     expect(
-      (await api(h, `/api/boards/${boardId}/integrations/linear/propose`, { method: "POST", token: viewer.token, csrf: "csrf" })).status,
+      (
+        await api(h, `/api/boards/${boardId}/integrations/linear/propose`, {
+          method: "POST",
+          token: viewer.token,
+          csrf: "csrf",
+        })
+      ).status,
     ).toBe(404);
     expect(
-      (await api(h, `/api/boards/${boardId}/integrations/actions/x/approve`, { method: "POST", token: viewer.token, csrf: "csrf" })).status,
+      (
+        await api(h, `/api/boards/${boardId}/integrations/actions/x/approve`, {
+          method: "POST",
+          token: viewer.token,
+          csrf: "csrf",
+        })
+      ).status,
     ).toBe(404);
     // Reads stay viewer-floor.
-    expect((await api(h, `/api/boards/${boardId}/integrations/links`, { token: viewer.token })).status).toBe(200);
+    expect(
+      (await api(h, `/api/boards/${boardId}/integrations/links`, { token: viewer.token })).status,
+    ).toBe(200);
   });
 });

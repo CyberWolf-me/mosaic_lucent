@@ -342,11 +342,9 @@ export function buildBoardSvg(workspace: Workspace, pad = 40): string {
         e.route,
         routeStyleFor(workspace.diagramKind),
       );
-      connectorSvg +=
-        `<polyline points="${pts.map((p) => `${p.x},${p.y}`).join(" ")}" fill="none" stroke="#8a8a90" stroke-width="1.5" marker-end="url(#export-arrow)"/>`;
+      connectorSvg += `<polyline points="${pts.map((p) => `${p.x},${p.y}`).join(" ")}" fill="none" stroke="#8a8a90" stroke-width="1.5" marker-end="url(#export-arrow)"/>`;
     } else {
-      connectorSvg +=
-        `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#8a8a90" stroke-width="1.5" marker-end="url(#export-arrow)"/>`;
+      connectorSvg += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#8a8a90" stroke-width="1.5" marker-end="url(#export-arrow)"/>`;
     }
   }
   parts.push(connectorSvg);

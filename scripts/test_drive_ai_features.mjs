@@ -1,7 +1,8 @@
 import { chromium } from "playwright";
 import path from "node:path";
 
-const ARTIFACT_DIR = "C:\\Users\\User\\.gemini\\antigravity\\brain\\2b2c4ff7-26fe-4f14-a6eb-49607cf95d6f";
+const ARTIFACT_DIR =
+  "C:\\Users\\User\\.gemini\\antigravity\\brain\\2b2c4ff7-26fe-4f14-a6eb-49607cf95d6f";
 const BASE_URL = "https://161.33.167.15.sslip.io";
 
 async function run() {
@@ -27,7 +28,9 @@ async function run() {
   // Listen for prompts (used by "Generate image with AI")
   page.on("dialog", async (dialog) => {
     console.log(`[Dialog ${dialog.type()}]:`, dialog.message());
-    await dialog.accept("A vibrant minimalist neon diagram icon of a central neural core with connected nodes");
+    await dialog.accept(
+      "A vibrant minimalist neon diagram icon of a central neural core with connected nodes",
+    );
   });
 
   page.on("console", (msg) => {
@@ -42,7 +45,9 @@ async function run() {
     await page.goto(`${BASE_URL}/login`, { waitUntil: "networkidle" });
     await page.waitForTimeout(1000);
 
-    const signupToggle = page.locator('button:has-text("Create an account"), button:has-text("Sign up")');
+    const signupToggle = page.locator(
+      'button:has-text("Create an account"), button:has-text("Sign up")',
+    );
     if ((await signupToggle.count()) > 0) {
       console.log("Switching to Sign Up view...");
       await signupToggle.first().click();
@@ -77,7 +82,9 @@ async function run() {
       await page.waitForTimeout(600);
     }
 
-    const blankBoardBtn = page.locator('button:has-text("start with a blank board"), button:has-text("blank board")');
+    const blankBoardBtn = page.locator(
+      'button:has-text("start with a blank board"), button:has-text("blank board")',
+    );
     if ((await blankBoardBtn.count()) > 0) {
       console.log("Clicking 'start with a blank board'...");
       await blankBoardBtn.first().click();
@@ -89,9 +96,15 @@ async function run() {
 
     // 3. Test DeepSeek-v4.1-flash Canvas Diagram Generation
     console.log("3. Testing DeepSeek-v4.1-flash Diagram Generation via AI Pill...");
-    const aiInput = page.locator('.ai-pill input, input[placeholder*="describe it"], input[placeholder*="Ask Lucent"]').first();
+    const aiInput = page
+      .locator(
+        '.ai-pill input, input[placeholder*="describe it"], input[placeholder*="Ask Lucent"]',
+      )
+      .first();
     await aiInput.waitFor({ state: "visible", timeout: 10000 });
-    await aiInput.fill("Build an event-driven architecture with API Gateway, Auth Service, Order Service, and Database");
+    await aiInput.fill(
+      "Build an event-driven architecture with API Gateway, Auth Service, Order Service, and Database",
+    );
     await page.waitForTimeout(400);
     console.log("Submitting prompt to AI generation pipeline...");
     await page.keyboard.press("Enter");
@@ -106,7 +119,9 @@ async function run() {
 
     // 4. Test GPT-Image-2.5 Imagine Visual Generation
     console.log("4. Testing GPT-Image-2.5 Imagine Visual Generation via ShapeToolbar...");
-    const genImgBtn = page.locator('button[aria-label="Generate image with AI"], button[data-tip*="Generate image"]').first();
+    const genImgBtn = page
+      .locator('button[aria-label="Generate image with AI"], button[data-tip*="Generate image"]')
+      .first();
     if ((await genImgBtn.count()) > 0) {
       console.log("Clicking 'Generate image with AI' toolbar button...");
       await genImgBtn.click();
@@ -123,7 +138,9 @@ async function run() {
 
     // 5. Test Meeting Stage & Conversational Lease UI
     console.log("5. Testing Meeting Stage & Conversational Lease UI...");
-    const presentBtn = page.locator('button:has-text("Present"), button[aria-label="Meeting mode"]').first();
+    const presentBtn = page
+      .locator('button:has-text("Present"), button[aria-label="Meeting mode"]')
+      .first();
     if ((await presentBtn.count()) > 0) {
       await presentBtn.click();
       console.log("Waiting for Meeting View to render...");

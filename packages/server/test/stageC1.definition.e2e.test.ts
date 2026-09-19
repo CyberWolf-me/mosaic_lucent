@@ -236,9 +236,7 @@ describe("Stage C1 definition of done — the continuous scenario", () => {
       method: "POST",
       token: alice.token,
       body: JSON.stringify({
-        operations: [
-          { op: "CHANGE_TEXT", id: "pricing", text: "Pricing ($15/mo)" },
-        ],
+        operations: [{ op: "CHANGE_TEXT", id: "pricing", text: "Pricing ($15/mo)" }],
         request: "update pricing",
         explanation: "pricing refreshed",
         meetingId: "mtg_1",

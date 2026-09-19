@@ -58,4 +58,5 @@ export const goldenElkHashes: Record<string, string> = {
 };
 
 /** An empty workspace's fixtures stay importable for negative-path tests. */
-export const emptyGolden = (): Workspace => createWorkspace({ id: "wk-empty-golden", name: "Empty" });
+export const emptyGolden = (): Workspace =>
+  createWorkspace({ id: "wk-empty-golden", name: "Empty" });

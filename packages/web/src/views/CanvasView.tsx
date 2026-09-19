@@ -56,7 +56,7 @@ import { useSettings } from "../settings.js";
 import { useToast } from "../ui/Toast.js";
 import { generateImage } from "../api.js";
 import { getSttProvider, isAnyVoiceSupported, type VoiceSession } from "../stt/index.js";
-import { createShapeOp, nextZ, normalizeZ, shapeId } from "../shapes.js";
+import { nextZ, normalizeZ, shapeId } from "../shapes.js";
 import { resolveEmbed } from "../embed.js";
 import { boardToMarkdown, boardToCsv, csvToStickyOps } from "../board/serialize.js";
 import { boardToMermaid, mermaidToOps } from "../board/mermaid.js";
@@ -118,7 +118,7 @@ export function parseExplicitImageIntent(text: string): string | null {
   }
   const patterns = [
     /^(?:please\s+)?(?:generate|create|make|draw)\s+(?:an?\s+)?(?:reference\s+)?(?:image|picture|photo|illustration|logo|icon|graphic)\s+(?:of|for)\s+(.+)$/i,
-    /^(?:please\s+)?(?:generate|create|make|draw)\s+(?:an?\s+)?(?:reference\s+image|reference\s+picture|reference\s+photo)\s*[:\-]?\s*(.+)$/i,
+    /^(?:please\s+)?(?:generate|create|make|draw)\s+(?:an?\s+)?(?:reference\s+image|reference\s+picture|reference\s+photo)\s*[:-]?\s*(.+)$/i,
     /^(?:imagine|render\s+image)\s+(?:of\s+)?(.+)$/i,
     /^(?:create|generate)\s+a\s+logo\s+(?:for|of)\s+(.+)$/i,
   ];
@@ -638,7 +638,18 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
     // "turn this screenshot into a wireframe" has something to look at.
     const attachments = collectAttachments(workspace, sel);
     void send(text, sel, attachments);
-  }, [message, send, ask, pillMode, selectedShapes, selected, workspace, generateImageShape, proposal, notify]);
+  }, [
+    message,
+    send,
+    ask,
+    pillMode,
+    selectedShapes,
+    selected,
+    workspace,
+    generateImageShape,
+    proposal,
+    notify,
+  ]);
 
   const toggleVoice = useCallback(() => {
     if (listening) {
@@ -1268,10 +1279,7 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
     const node = workspace.nodes[reveal];
     if (node) {
       selectNode(reveal, false);
-      controls.current?.focusOn(
-        (node.position?.x ?? 0) + 80,
-        (node.position?.y ?? 0) + 40,
-      );
+      controls.current?.focusOn((node.position?.x ?? 0) + 80, (node.position?.y ?? 0) + 40);
     }
   }, [workspace.nodes, selectNode]);
 
@@ -1688,7 +1696,10 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
     // The board's real name — a previous fix pinned the fallback to a
     // placeholder ("E-commerce platform") for every named board, which is
     // the same bug class the identical-project-names fix (02afaa5) covered.
-    { label: projectName || (nodeCount ? "Untitled workspace" : "Untitled workspace"), current: true },
+    {
+      label: projectName || (nodeCount ? "Untitled workspace" : "Untitled workspace"),
+      current: true,
+    },
   ];
 
   // Title-block stamp: kind on the left, scale + node count on the right. The
@@ -1742,7 +1753,8 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
           if (last.role !== "error") return null;
           // Only the immediately-preceding failed attempt: the user entry for
           // it sits right before the error.
-          const userText = chat[chat.length - 2]?.role === "user" ? chat[chat.length - 2]!.text : undefined;
+          const userText =
+            chat[chat.length - 2]?.role === "user" ? chat[chat.length - 2]!.text : undefined;
           return { text: last.text, retryPrompt: last.retryPrompt ?? userText };
         })()
       : null;
@@ -2200,11 +2212,7 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
                     ⚠ {attentionItems.length} to review
                   </button>
                   {attentionOpen && (
-                    <div
-                      role="dialog"
-                      aria-label="Needs attention"
-                      className="utility-popover"
-                    >
+                    <div role="dialog" aria-label="Needs attention" className="utility-popover">
                       <AttentionPanel items={attentionItems} />
                     </div>
                   )}
@@ -2409,11 +2417,7 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
             </span>
           </StatusBadge>
           {layoutStatus.phase === "degraded" && (
-            <button
-              className="icon-btn"
-              onClick={retryLayout}
-              title="Re-run the layout refinement"
-            >
+            <button className="icon-btn" onClick={retryLayout} title="Re-run the layout refinement">
               Retry layout
             </button>
           )}
@@ -2535,7 +2539,10 @@ function SelectionHud({
           ADR 0022); the old metadata stamp stays as the pre-C2 fallback.
           Stage D2: the ✦ MEETING jump requires meeting evidence — a
           createdFrom-only node (plan evidence) has no transcript to open. */}
-      {Boolean((node.provenance?.meetingId ?? node.metadata?.meeting) || node.statement?.provenance?.meetingId) && (
+      {Boolean(
+        (node.provenance?.meetingId ?? node.metadata?.meeting) ||
+          node.statement?.provenance?.meetingId,
+      ) && (
         <ProvenanceButton
           provenance={node.provenance}
           legacy={node.metadata?.meeting as Record<string, unknown> | undefined}
@@ -2657,16 +2664,13 @@ function StatementEditor({
       : topicDuplicateHint(topic, workspace);
   const [supersedes, setSupersedes] = useState<ReadonlySet<string>>(
     new Set(prior?.supersedes ?? []),
-  );;
+  );
 
   // Candidates: statement-carrying nodes other than this one. The validator
   // refuses everything else (no statement, self, cycles) — the picker offers
   // only what can succeed.
   const candidates = useMemo(
-    () =>
-      Object.values(workspace.nodes).filter(
-        (n) => n.statement && n.id !== node.id,
-      ),
+    () => Object.values(workspace.nodes).filter((n) => n.statement && n.id !== node.id),
     [workspace.nodes, node.id],
   );
 
@@ -2727,7 +2731,10 @@ function StatementEditor({
       onMouseDown={(e) => e.stopPropagation()}
     >
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <span className="mono" style={{ fontSize: 10, color: "var(--ink-3)", textTransform: "uppercase" }}>
+        <span
+          className="mono"
+          style={{ fontSize: 10, color: "var(--ink-3)", textTransform: "uppercase" }}
+        >
           Statement
         </span>
         <span style={{ flex: 1 }} />
@@ -2813,7 +2820,8 @@ function StatementEditor({
             }}
           >
             <div>
-              Possible duplicate — &quot;{topic.trim()}&quot; may refer to existing &quot;{hint.existing}&quot; ({hint.statements}{" "}
+              Possible duplicate — &quot;{topic.trim()}&quot; may refer to existing &quot;
+              {hint.existing}&quot; ({hint.statements}{" "}
               {hint.statements === 1 ? "statement" : "statements"} carry it).
             </div>
             <div style={{ display: "flex", gap: 6, marginTop: 4 }}>

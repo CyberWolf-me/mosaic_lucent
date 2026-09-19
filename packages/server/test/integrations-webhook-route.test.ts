@@ -94,7 +94,16 @@ async function setup(opts?: { withoutBundle?: boolean }) {
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const { port } = server.address() as AddressInfo;
-  return { port, boardStore, store, inbound, webhookEvents, close: async () => { await close(); } };
+  return {
+    port,
+    boardStore,
+    store,
+    inbound,
+    webhookEvents,
+    close: async () => {
+      await close();
+    },
+  };
 }
 
 async function post(port: number, path: string, body: string, signature?: string) {
@@ -106,10 +115,18 @@ async function post(port: number, path: string, body: string, signature?: string
     },
     body,
   });
-  return { status: res.status, body: (await res.json().catch(() => null)) as Record<string, unknown> | null };
+  return {
+    status: res.status,
+    body: (await res.json().catch(() => null)) as Record<string, unknown> | null,
+  };
 }
 
-async function seedBoard(boardStore: InMemoryBoardStore, boardId: string, nodeId: string, status: string) {
+async function seedBoard(
+  boardStore: InMemoryBoardStore,
+  boardId: string,
+  nodeId: string,
+  status: string,
+) {
   const workspace = createWorkspace({ name: "w" });
   workspace.nodes[nodeId] = {
     id: nodeId,

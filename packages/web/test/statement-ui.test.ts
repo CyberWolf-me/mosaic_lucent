@@ -26,9 +26,9 @@ import {
 
 describe("statementChip", () => {
   it("renders kind · status as one token", () => {
-    expect(
-      statementChipText({ kind: "decision", status: "resolved", topic: "pricing" }),
-    ).toBe("decision · resolved");
+    expect(statementChipText({ kind: "decision", status: "resolved", topic: "pricing" })).toBe(
+      "decision · resolved",
+    );
     expect(statementChipText({ kind: "question", status: "open" })).toBe("question · open");
   });
 
@@ -41,7 +41,8 @@ describe("statementChip", () => {
 
   it("tints every kind (a missing tint would render unstyled)", () => {
     for (const kind of STATEMENT_KINDS) expect(KIND_TINT[kind]).toBeDefined();
-    for (const status of STATEMENT_STATUSES) expect(["open", "resolved", "rejected", "superseded"]).toContain(status);
+    for (const status of STATEMENT_STATUSES)
+      expect(["open", "resolved", "rejected", "superseded"]).toContain(status);
   });
 });
 
@@ -49,7 +50,11 @@ describe("statementEditOps — the HUD's op builder", () => {
   const seeded = applyOperations(createWorkspace(), [
     { op: "CREATE_NODE", id: "n1", nodeType: "decision", label: "One" },
     { op: "CREATE_NODE", id: "n2", nodeType: "decision", label: "Two" },
-    { op: "SET_STATEMENT", id: "n2", statement: { kind: "proposal", status: "open", topic: "pricing" } },
+    {
+      op: "SET_STATEMENT",
+      id: "n2",
+      statement: { kind: "proposal", status: "open", topic: "pricing" },
+    },
   ]);
 
   it("no prior statement → SET_STATEMENT with the draft", () => {
@@ -136,7 +141,11 @@ describe("statementEditOps — the HUD's op builder", () => {
     const cyclicBoard = applyOperations(createWorkspace(), [
       { op: "CREATE_NODE", id: "a", nodeType: "decision", label: "A" },
       { op: "CREATE_NODE", id: "b", nodeType: "decision", label: "B" },
-      { op: "SET_STATEMENT", id: "a", statement: { kind: "decision", status: "open", supersedes: ["b"] } },
+      {
+        op: "SET_STATEMENT",
+        id: "a",
+        statement: { kind: "decision", status: "open", supersedes: ["b"] },
+      },
       { op: "SET_STATEMENT", id: "b", statement: { kind: "proposal", status: "open" } },
     ]);
     const cycleOps = statementEditOps("b", cyclicBoard.nodes.b!.statement, {

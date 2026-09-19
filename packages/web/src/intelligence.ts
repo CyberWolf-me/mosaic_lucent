@@ -1,10 +1,6 @@
 import type { Node, Operation, StatementKind, StatementStatus, Workspace } from "@lucent/core";
 import { actionsFromDecision, derivedExecution, statementNodes } from "@lucent/core";
-import {
-  canonicalizeTopic,
-  possibleDuplicateTopics,
-  topicsAreVariants,
-} from "@lucent/core";
+import { canonicalizeTopic, possibleDuplicateTopics, topicsAreVariants } from "@lucent/core";
 
 /**
  * The Intelligence projection (Stage C6, ADR 0026).
@@ -117,7 +113,11 @@ function rowOf(node: Node): IntelligenceRow {
  * due date past `now` on work that is not completed/cancelled. Pure so the
  * overdue tint is testable without the DOM.
  */
-export function isOverdue(dueDate: string | undefined, executionStatus: string | undefined, now: number): boolean {
+export function isOverdue(
+  dueDate: string | undefined,
+  executionStatus: string | undefined,
+  now: number,
+): boolean {
   if (!dueDate) return false;
   if (executionStatus === "completed" || executionStatus === "cancelled") return false;
   // The due date counts as overdue the day AFTER it: compare date strings
@@ -262,7 +262,10 @@ export interface MergeChange {
  * confirmed Merge commits — the preview and the ops are derived from the
  * same workspace, so the preview can never lie about the batch.
  */
-export function mergePreview(workspace: Workspace, item: InboxItem): {
+export function mergePreview(
+  workspace: Workspace,
+  item: InboxItem,
+): {
   changes: MergeChange[];
   /** The count line for the preview copy: N statements, nothing deleted. */
   statementCount: number;

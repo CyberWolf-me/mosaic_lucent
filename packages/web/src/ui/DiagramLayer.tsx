@@ -183,9 +183,7 @@ export function DiagramLayer({
       const baseY = g.y - 9;
       let slot = 0;
       const hits = (y: number) =>
-        placed.some(
-          (p) => Math.abs(p.y - y) < LABEL_ROW - 2 && x < p.x + p.w && p.x < x + w,
-        );
+        placed.some((p) => Math.abs(p.y - y) < LABEL_ROW - 2 && x < p.x + p.w && p.x < x + w);
       while (hits(baseY + slot * LABEL_ROW)) slot += 1;
       labelSlots.set(g.id, slot);
       placed.push({ x, y: baseY + slot * LABEL_ROW, w });
@@ -206,11 +204,8 @@ export function DiagramLayer({
   // The BPMN lens is per-region (ADR 0014): a node renders BPMN shapes when
   // its region's kind — else the board kind — is "bpmn". Everything else on
   // the board renders exactly as before.
-  const regionKindOf = new Map(
-    groups.filter((g) => g.kind).map((g) => [g.id, g.kind] as const),
-  );
-  const lensKindOf = (id: string) =>
-    regionKindOf.get(regionOf(id) ?? "") ?? workspace.diagramKind;
+  const regionKindOf = new Map(groups.filter((g) => g.kind).map((g) => [g.id, g.kind] as const));
+  const lensKindOf = (id: string) => regionKindOf.get(regionOf(id) ?? "") ?? workspace.diagramKind;
   const finalNodes =
     collapsedSet.size > 0 ? drawNodes.filter((n) => !isCollapsedMember(n.id)) : drawNodes;
   const finalEdges =
@@ -365,10 +360,7 @@ export function DiagramLayer({
           // to 0.45. Zoomed in: everything at full weight.
           const density = edgeDensity(e.tier, scale, band);
           if (density.hidden) return null;
-          const cls = [
-            proposed ? "dashed emerging" : isQuiet ? "edge-dep" : "",
-            "appear",
-          ]
+          const cls = [proposed ? "dashed emerging" : isQuiet ? "edge-dep" : "", "appear"]
             .filter(Boolean)
             .join(" ");
           // Selection focus (P1): an edge stays fully drawn when EITHER
@@ -405,7 +397,11 @@ export function DiagramLayer({
               pathLength={100}
               markerEnd={proposed ? "url(#arr-amber)" : "url(#arr)"}
               opacity={edgeFocus * density.opacity}
-              style={edgeFocus !== 1 || density.opacity !== 1 ? { transition: "opacity 160ms ease" } : undefined}
+              style={
+                edgeFocus !== 1 || density.opacity !== 1
+                  ? { transition: "opacity 160ms ease" }
+                  : undefined
+              }
             />
           );
         })}

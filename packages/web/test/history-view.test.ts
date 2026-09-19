@@ -20,7 +20,11 @@ import type { BoardHistoryItem } from "../src/boards.js";
 
 const NOW = Date.UTC(2026, 8, 3, 12, 0); // 2026-09-03 12:00 UTC
 
-function item(seq: number, at: number, overrides: Partial<BoardHistoryItem> = {}): BoardHistoryItem {
+function item(
+  seq: number,
+  at: number,
+  overrides: Partial<BoardHistoryItem> = {},
+): BoardHistoryItem {
   return {
     seq,
     at,
@@ -48,11 +52,7 @@ describe("groupHistoryByDay", () => {
   });
 
   it("keeps a day's entries newest-first as the route sent them", () => {
-    const items = [
-      item(5, NOW - 60_000),
-      item(4, NOW - 2 * 60_000),
-      item(3, NOW - 3 * 60_000),
-    ];
+    const items = [item(5, NOW - 60_000), item(4, NOW - 2 * 60_000), item(3, NOW - 3 * 60_000)];
     const days = groupHistoryByDay(items, NOW);
     expect(days).toHaveLength(1);
     expect(days[0]!.items.map((i) => i.seq)).toEqual([5, 4, 3]);
@@ -120,7 +120,11 @@ describe("citationTarget — the navigation contract", () => {
 });
 
 describe("mergeChronology + chronologyByDay (Stage C3)", () => {
-  const meetingAt = (id: string, at: number, turns = 2): import("../src/meetings.js").MeetingTranscript => ({
+  const meetingAt = (
+    id: string,
+    at: number,
+    turns = 2,
+  ): import("../src/meetings.js").MeetingTranscript => ({
     id,
     boardId: "brd_1",
     orgId: "org_1",
@@ -138,10 +142,7 @@ describe("mergeChronology + chronologyByDay (Stage C3)", () => {
 
   it("interleaves the three streams newest-first", () => {
     const rows = mergeChronology(
-      [
-        item(3, NOW - 60_000),
-        item(1, NOW - 3 * 3_600_000),
-      ],
+      [item(3, NOW - 60_000), item(1, NOW - 3 * 3_600_000)],
       [meetingAt("mtg_mid", NOW - 2 * 3_600_000)],
     );
     expect(rows.map((r) => r.kind)).toEqual(["revision", "meeting", "revision"]);

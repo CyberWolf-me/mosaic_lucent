@@ -25,7 +25,7 @@ things that may not exist.
 mode flag on `generateOperations` — the guarantees differ (an answer never
 mutates the board, so there is no validator/repair pipeline downstream), and
 a union type would have made every existing call site a runtime
-discriminant. `AnswerRequest` carries structured, *windowed* context
+discriminant. `AnswerRequest` carries structured, _windowed_ context
 (history entries, meeting extracts with classified turns, a node index, and a
 pre-rendered provenance-aware board digest — the projection Build's summary
 deliberately omits, because "why is this node here?" is Ask's core question);
@@ -36,7 +36,7 @@ showed.
 **Citations are validated at the server boundary and dropped, not
 repaired.** The model's citations are untrusted output: a hallucinated
 `revision 9172` or a node id that never existed must not render as evidence.
-The route resolves every citation against real, *caller-visible* state — a
+The route resolves every citation against real, _caller-visible_ state — a
 node must be on the board, a meeting inside the caller's window, a revision
 inside the window — and the failures land in `warnings` while the answer
 survives. This is the Stage A partial-application rule (one bad op never

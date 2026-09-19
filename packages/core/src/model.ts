@@ -177,12 +177,14 @@ export function resolveDueDate(words: string, referenceAt: number): string | und
     saturday: 6,
   };
   const nextWeekday = (target: number): Date => {
-    const delta = ((target - ref.getDay() + 7) % 7) || 7;
+    const delta = (target - ref.getDay() + 7) % 7 || 7;
     return addDays(delta);
   };
   const nextWeek = /next\s+(sunday|monday|tuesday|wednesday|thursday|friday|saturday)/.exec(text);
   if (nextWeek) return iso(nextWeekday(WEEKDAYS[nextWeek[1]!]!));
-  const thisWeek = /(^|[^a-z])(sunday|monday|tuesday|wednesday|thursday|friday|saturday)/.exec(text);
+  const thisWeek = /(^|[^a-z])(sunday|monday|tuesday|wednesday|thursday|friday|saturday)/.exec(
+    text,
+  );
   if (thisWeek) return iso(nextWeekday(WEEKDAYS[thisWeek[2]!]!));
   if (/\btomorrow\b/.test(text)) return iso(addDays(1));
   if (/\btoday\b/.test(text)) return iso(ref);
@@ -211,9 +213,7 @@ export function resolveDueDate(words: string, referenceAt: number): string | und
  * ("maybe we should redesign onboarding" is not work), so it is excluded.
  */
 export function actionNodes(workspace: Workspace): Node[] {
-  return Object.values(workspace.nodes).filter(
-    (n) => n.statement?.kind === "action" && n.issue,
-  );
+  return Object.values(workspace.nodes).filter((n) => n.statement?.kind === "action" && n.issue);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -393,14 +393,9 @@ export interface DerivedExecution {
  * Recovery is re-computation — upstream unblocks or its deadline moves,
  * and the derived state disappears because nothing was ever stored.
  */
-export function derivedExecution(
-  workspace: Workspace,
-  now: number,
-): Map<string, DerivedExecution> {
+export function derivedExecution(workspace: Workspace, now: number): Map<string, DerivedExecution> {
   const deps = dependsOnGraph(workspace);
-  const executable = new Set(
-    actionNodes(workspace).map((n) => n.id),
-  );
+  const executable = new Set(actionNodes(workspace).map((n) => n.id));
   const out = new Map<string, DerivedExecution>();
 
   // Collect the transitive upstream set of one node, bounded by `seen`

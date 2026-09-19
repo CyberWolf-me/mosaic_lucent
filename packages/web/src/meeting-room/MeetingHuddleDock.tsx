@@ -182,7 +182,8 @@ export function MeetingHuddleDock() {
               }}
             />
             <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-              ↳ Continuing with {activeLease.speakerName || activeLease.speakerId} ({leaseRemainingSec}s)
+              ↳ Continuing with {activeLease.speakerName || activeLease.speakerId} (
+              {leaseRemainingSec}s)
             </span>
           </div>
           <button
@@ -224,15 +225,27 @@ export function MeetingHuddleDock() {
           }}
         >
           <Ico.Screen width={14} height={14} />
-          <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            {screenTile.identity === "local" ? "You are presenting" : `${screenTile.name} is presenting`}
+          <span
+            style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+          >
+            {screenTile.identity === "local"
+              ? "You are presenting"
+              : `${screenTile.name} is presenting`}
           </span>
           <span style={{ fontSize: 10, opacity: 0.8 }}>View</span>
         </div>
       )}
 
       {/* Participant avatar strip */}
-      <div style={{ display: "flex", alignItems: "center", gap: 8, overflowX: "auto", padding: "4px 0" }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          overflowX: "auto",
+          padding: "4px 0",
+        }}
+      >
         {/* Local user */}
         <div
           style={{

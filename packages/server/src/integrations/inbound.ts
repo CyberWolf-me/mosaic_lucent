@@ -70,7 +70,11 @@ export interface InboundChangeStore {
    * external value) or is updated in place to the new value — never a
    * second pending row for one field of one node.
    */
-  put(input: Omit<InboundChangeRecord, "id" | "status" | "detectedAt" | "source">, source: InboundChangeRecord["source"], now: number): Promise<InboundChangeRecord>;
+  put(
+    input: Omit<InboundChangeRecord, "id" | "status" | "detectedAt" | "source">,
+    source: InboundChangeRecord["source"],
+    now: number,
+  ): Promise<InboundChangeRecord>;
   /** The board's records, pending first then newest-detected first. */
   forBoard(boardId: string): Promise<InboundChangeRecord[]>;
   /** Board-scoped read: a leaked id is not a read. */
@@ -79,11 +83,25 @@ export interface InboundChangeStore {
    * The decided-once transition guard (the B3 pattern): a second decide
    * on an already-decided record is a no-op returning the current state.
    */
-  decide(boardId: string, id: string, decision: "applied" | "dismissed", decidedBy: string, now: number, extra?: { appliedSeq?: number; reason?: string }): Promise<InboundChangeRecord | undefined>;
+  decide(
+    boardId: string,
+    id: string,
+    decision: "applied" | "dismissed",
+    decidedBy: string,
+    now: number,
+    extra?: { appliedSeq?: number; reason?: string },
+  ): Promise<InboundChangeRecord | undefined>;
   /** The sync route's supersession arm: every pending record for the
    * (board, node, provider, field) becomes superseded — the board's
    * pushed value is the newer human decision. */
-  supersedePending(boardId: string, nodeIds: readonly string[], provider: string, field: InboundField, reason: string, now: number): Promise<number>;
+  supersedePending(
+    boardId: string,
+    nodeIds: readonly string[],
+    provider: string,
+    field: InboundField,
+    reason: string,
+    now: number,
+  ): Promise<number>;
   /**
    * Stage D10, ADR 0036: delete TERMINAL records (applied | dismissed |
    * superseded) whose decidedAt is older than the horizon. The cutoff
@@ -223,8 +241,18 @@ export class InMemoryInboundChangeStore implements InboundChangeStore {
  */
 export interface IngestDeps {
   /** linksForExternalId(provider, externalId) — the new store method. */
-  linksForExternalId: (provider: string, externalId: string) => Promise<
-    Array<{ orgId: string; boardId: string; nodeId: string; provider: IntegrationProviderName; externalId: string; lastSyncedStatus: string }>
+  linksForExternalId: (
+    provider: string,
+    externalId: string,
+  ) => Promise<
+    Array<{
+      orgId: string;
+      boardId: string;
+      nodeId: string;
+      provider: IntegrationProviderName;
+      externalId: string;
+      lastSyncedStatus: string;
+    }>
   >;
   /** board(boardId) → the live node's issue status, or null when the
    * node is gone or carries no issue (the honest "nothing to compare"). */

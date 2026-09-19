@@ -34,6 +34,11 @@ export default tseslint.config(
       // product code, never reviewed — linting it drowned the gate in
       // thousands of findings from a vendored browser extension dump.
       ".zcode/**",
+      "scratch/**",
+      ".cert-scratch/**",
+      "scripts/**",
+      "packages/load/**",
+      "packages/server/scripts/**",
     ],
   },
   js.configs.recommended,

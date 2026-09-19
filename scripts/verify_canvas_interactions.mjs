@@ -1,17 +1,15 @@
 import { chromium } from "playwright";
 import path from "node:path";
 
-const ARTIFACT_DIR = "C:\\Users\\User\\.gemini\\antigravity\\brain\\e0c7d7e8-f6b0-4298-bccd-8d1781e03bce";
+const ARTIFACT_DIR =
+  "C:\\Users\\User\\.gemini\\antigravity\\brain\\e0c7d7e8-f6b0-4298-bccd-8d1781e03bce";
 const BASE_URL = "https://161.33.167.15.sslip.io";
 
 async function run() {
   console.log("Launching Chromium against", BASE_URL);
   const browser = await chromium.launch({
     headless: true,
-    args: [
-      "--no-sandbox",
-      "--disable-setuid-sandbox",
-    ],
+    args: ["--no-sandbox", "--disable-setuid-sandbox"],
   });
 
   const context = await browser.newContext({
@@ -32,7 +30,9 @@ async function run() {
     await page.goto(`${BASE_URL}/login`, { waitUntil: "networkidle" });
     await page.waitForTimeout(1000);
 
-    const signupToggle = page.locator('button:has-text("Create an account"), button:has-text("Sign up")');
+    const signupToggle = page.locator(
+      'button:has-text("Create an account"), button:has-text("Sign up")',
+    );
     if ((await signupToggle.count()) > 0) {
       await signupToggle.first().click();
       await page.waitForTimeout(500);
@@ -66,7 +66,9 @@ async function run() {
     }
 
     // Dismiss empty state by clicking "start with a blank board"
-    const blankBoardBtn = page.locator('button:has-text("start with a blank board"), button:has-text("blank board")');
+    const blankBoardBtn = page.locator(
+      'button:has-text("start with a blank board"), button:has-text("blank board")',
+    );
     if ((await blankBoardBtn.count()) > 0 && (await blankBoardBtn.isVisible())) {
       console.log("Clicking 'start with a blank board'...");
       await blankBoardBtn.first().click();
@@ -143,7 +145,9 @@ async function run() {
     await page.keyboard.press("p");
     await page.waitForTimeout(600);
 
-    const drawingActive = await page.evaluate(() => document.querySelector(".drawing-active") !== null);
+    const drawingActive = await page.evaluate(
+      () => document.querySelector(".drawing-active") !== null,
+    );
     console.log("CanvasViewport has .drawing-active class:", drawingActive);
 
     console.log(`Drawing pen stroke directly across node at (${box.x}, ${box.y})...`);
@@ -161,8 +165,13 @@ async function run() {
     const hudCount = await page.locator(".selection-hud").count();
     console.log("Selection HUD count (should be 0):", hudCount);
 
-    const nodeSelectedDuringPen = await targetNode.evaluate((el) => el.classList.contains("selected"));
-    console.log("Node selected state during/after pen stroke (should be false):", nodeSelectedDuringPen);
+    const nodeSelectedDuringPen = await targetNode.evaluate((el) =>
+      el.classList.contains("selected"),
+    );
+    console.log(
+      "Node selected state during/after pen stroke (should be false):",
+      nodeSelectedDuringPen,
+    );
 
     await page.screenshot({ path: path.join(ARTIFACT_DIR, "live_pen_drawn_over_node.png") });
     console.log("Captured live_pen_drawn_over_node.png");
@@ -181,7 +190,7 @@ async function run() {
     await page.waitForTimeout(1000);
 
     // Verify sticky was placed
-    const stickies = page.locator('.shape.sticky');
+    const stickies = page.locator(".shape.sticky");
     const stickyCount = await stickies.count();
     console.log(`Sticky elements count on canvas: ${stickyCount}`);
 

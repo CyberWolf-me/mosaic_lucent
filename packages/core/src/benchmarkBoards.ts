@@ -50,7 +50,11 @@ function addEdge(ws: Workspace, source: string, target: string, relationship: st
  * (verified: the layered ladder's median row holds ~sqrt(n) nodes).
  */
 export function layeredBoard(n: number, seed = 1): Workspace {
-  const ws = createWorkspace({ id: "bench-layered", name: `Layered ${n}`, diagramKind: "flowchart" });
+  const ws = createWorkspace({
+    id: "bench-layered",
+    name: `Layered ${n}`,
+    diagramKind: "flowchart",
+  });
   const layers = Math.max(2, Math.round(Math.sqrt(n)));
   const perLayer = Math.max(2, Math.ceil(n / layers));
   // rows[l] = the node ids placed in layer l.
@@ -130,7 +134,11 @@ export function treeBoard(n: number, _seed = 1): Workspace {
  *  left→right, with deterministic handoffs to the next lane (the crossing
  *  risk swimlane layout exists to manage). */
 export function swimlaneBoard(n: number, seed = 1): Workspace {
-  const ws = createWorkspace({ id: "bench-swimlane", name: `Swimlane ${n}`, diagramKind: "process" });
+  const ws = createWorkspace({
+    id: "bench-swimlane",
+    name: `Swimlane ${n}`,
+    diagramKind: "process",
+  });
   const lanes = Math.max(2, Math.min(5, Math.round(n / 10)));
   const perLane = Math.max(2, Math.ceil(n / lanes));
   let count = 0;

@@ -64,13 +64,29 @@ async function makeHarness() {
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const { port } = server.address() as AddressInfo;
-  return { base: `http://127.0.0.1:${port}`, userStore, boardStore, store, fake, close: async () => { await close(); } };
+  return {
+    base: `http://127.0.0.1:${port}`,
+    userStore,
+    boardStore,
+    store,
+    fake,
+    close: async () => {
+      await close();
+    },
+  };
 }
 
 let open: Awaited<ReturnType<typeof makeHarness>> | null = null;
-afterEach(async () => { await open?.close(); open = null; });
+afterEach(async () => {
+  await open?.close();
+  open = null;
+});
 
-async function api(h: NonNullable<typeof open>, path: string, init: RequestInit & { token?: string; csrf?: string } = {}) {
+async function api(
+  h: NonNullable<typeof open>,
+  path: string,
+  init: RequestInit & { token?: string; csrf?: string } = {},
+) {
   const { token, csrf, ...rest } = init;
   const res = await fetch(`${h.base}${path}`, {
     ...rest,
@@ -97,11 +113,23 @@ async function signup(h: NonNullable<typeof open>, email: string) {
   return { token: body.token, id: body.user.id };
 }
 
-function action(id: string, fields: { assignee?: string; dueDate?: string; status?: string } = {}): Operation[] {
+function action(
+  id: string,
+  fields: { assignee?: string; dueDate?: string; status?: string } = {},
+): Operation[] {
   return [
     { op: "CREATE_NODE", id, nodeType: "action", label: id.replace(/-/g, " ") },
     { op: "SET_STATEMENT", id, statement: { kind: "action", status: "open", topic: "d4" } },
-    { op: "SET_ISSUE", id, issue: { type: "task", status: fields.status ?? "open", ...(fields.assignee ? { assignee: fields.assignee } : {}), ...(fields.dueDate ? { dueDate: fields.dueDate } : {}) } },
+    {
+      op: "SET_ISSUE",
+      id,
+      issue: {
+        type: "task",
+        status: fields.status ?? "open",
+        ...(fields.assignee ? { assignee: fields.assignee } : {}),
+        ...(fields.dueDate ? { dueDate: fields.dueDate } : {}),
+      },
+    },
   ];
 }
 
@@ -122,7 +150,8 @@ describe("Stage D4 definition of done — Action → ExecutionProvider → FakeP
     const boardId = created.body.id as string;
 
     const tenOps: Operation[] = [];
-    for (let i = 1; i <= 10; i += 1) tenOps.push(...action(`task-${i}`, { assignee: `owner-${i}`, dueDate: "2026-09-20" }));
+    for (let i = 1; i <= 10; i += 1)
+      tenOps.push(...action(`task-${i}`, { assignee: `owner-${i}`, dueDate: "2026-09-20" }));
     const seeded = await api(h, `/api/boards/${boardId}/ops`, {
       method: "POST",
       token: alice.token,
@@ -182,7 +211,10 @@ describe("Stage D4 definition of done — Action → ExecutionProvider → FakeP
     await api(h, `/api/boards/${boardId}/ops`, {
       method: "POST",
       token: alice.token,
-      body: JSON.stringify({ ops: [{ op: "UPDATE_ISSUE", id: "task-3", status: "in_progress" }], label: "drift" }),
+      body: JSON.stringify({
+        ops: [{ op: "UPDATE_ISSUE", id: "task-3", status: "in_progress" }],
+        label: "drift",
+      }),
     });
     const sync3 = await api(h, `/api/boards/${boardId}/integrations/fake/sync`, {
       method: "POST",
@@ -192,7 +224,9 @@ describe("Stage D4 definition of done — Action → ExecutionProvider → FakeP
     expect(sync3.status).toBe(200);
     expect(sync3.body.updated).toBe(1);
     expect(sync3.body.results.find((r: any) => r.nodeId === "task-3").status).toBe("active"); // in_progress → active
-    const links3 = await api(h, `/api/boards/${boardId}/integrations/links`, { token: alice.token });
+    const links3 = await api(h, `/api/boards/${boardId}/integrations/links`, {
+      token: alice.token,
+    });
     expect(links3.body.links.find((l: any) => l.nodeId === "task-3").status).toBe("active");
 
     // -- Unlink + re-sync (the D10 recovery contract): the node's external
@@ -209,7 +243,9 @@ describe("Stage D4 definition of done — Action → ExecutionProvider → FakeP
     const task5Result = sync4.body.results.find((r: any) => r.nodeId === "task-5");
     expect(["relinked", "created"]).toContain(task5Result.action);
     expect(sync4.body.skipped).toBe(9);
-    const links4 = await api(h, `/api/boards/${boardId}/integrations/links`, { token: alice.token });
+    const links4 = await api(h, `/api/boards/${boardId}/integrations/links`, {
+      token: alice.token,
+    });
     expect(links4.body.links.find((l: any) => l.nodeId === "task-5")).toBeDefined();
 
     // -- THE ACCEPTANCE'S LITERAL WORDING: the core Action model never
@@ -243,7 +279,9 @@ describe("Stage D4 definition of done — Action → ExecutionProvider → FakeP
       csrf: "csrf",
     });
     expect(viewerSync.status).toBe(404); // editor floor, ids unguessable
-    const viewerLinks = await api(h, `/api/boards/${boardId}/integrations/links`, { token: bob.token });
+    const viewerLinks = await api(h, `/api/boards/${boardId}/integrations/links`, {
+      token: bob.token,
+    });
     expect(viewerLinks.status).toBe(200); // links are readable state
     expect(viewerLinks.body.links).toHaveLength(10);
   });

@@ -21,8 +21,14 @@ import type { MeetingTranscript } from "../src/meetings.js";
 
 const T0 = Date.UTC(2026, 8, 2, 9, 0);
 
-function entry(seq: number, label: string, actorType: "user" | "ai" | "system" = "user"): LoggedOpEntry {
-  const ops: Operation[] = [{ op: "CREATE_NODE", id: `n${seq}`, nodeType: "step", label: `N${seq}` }];
+function entry(
+  seq: number,
+  label: string,
+  actorType: "user" | "ai" | "system" = "user",
+): LoggedOpEntry {
+  const ops: Operation[] = [
+    { op: "CREATE_NODE", id: `n${seq}`, nodeType: "step", label: `N${seq}` },
+  ];
   return {
     seq,
     ops,
@@ -42,7 +48,10 @@ function baseInput(overrides: Record<string, unknown> = {}) {
     boardName: "Q3 launch",
     workspace: ws,
     log: [entry(42, "proposal approved"), entry(41, "added pricing region")],
-    actorNames: new Map([["usr_42", "Sarah"], ["usr_41", "Alex"]]),
+    actorNames: new Map([
+      ["usr_42", "Sarah"],
+      ["usr_41", "Alex"],
+    ]),
     meetings: [] as MeetingTranscript[],
     window: { depth: 25, hasMore: false },
     ...overrides,
@@ -72,7 +81,10 @@ describe("buildAnswerRequest: the context-scope guarantee", () => {
   it("resolves actor display names and marks AI actors as Lucent", () => {
     const log = [
       entry(42, "proposal approved", "ai"),
-      { ...entry(41, "added pricing region"), actor: { actorType: "ai", actorId: "lucent", initiatedBy: "usr_41", approvedBy: "usr_42" } },
+      {
+        ...entry(41, "added pricing region"),
+        actor: { actorType: "ai", actorId: "lucent", initiatedBy: "usr_41", approvedBy: "usr_42" },
+      },
     ];
     const request = buildAnswerRequest(baseInput({ log }));
     expect(request.history[0]).toMatchObject({ seq: 42, actorName: "Lucent", actorType: "ai" });
@@ -101,7 +113,7 @@ describe("renderBoardDigest: provenance is the point", () => {
     };
     const digest = renderBoardDigest(baseInput({ workspace: ws }));
     expect(digest).toContain("pricing (decision): Pricing ($15/month)");
-    expect(digest).toContain("[from meeting mtg_7 turns 4–6: \"Let's price it at $15/month.\"]");
+    expect(digest).toContain('[from meeting mtg_7 turns 4–6: "Let\'s price it at $15/month."]');
   });
 
   it("renders hostile metadata inertly rather than crashing", () => {
@@ -122,7 +134,12 @@ describe("renderBoardDigest: provenance is the point", () => {
       {
         op: "SET_ISSUE",
         id: "brief",
-        issue: { type: "task", status: "In Progress", statusCategory: "in_progress", assignee: "Sarah" },
+        issue: {
+          type: "task",
+          status: "In Progress",
+          statusCategory: "in_progress",
+          assignee: "Sarah",
+        },
       },
     ]);
     const digest = renderBoardDigest(baseInput({ workspace: ws }));
@@ -140,7 +157,12 @@ describe("projectMeetings: classified turns only", () => {
       endedAt: T0 + 3600_000,
       turns: [
         { speaker: "Alex", at: T0, text: "Hi everyone." },
-        { speaker: "Sarah", at: T0 + 60_000, text: "Let's price it at $15/month.", kind: "decision" },
+        {
+          speaker: "Sarah",
+          at: T0 + 60_000,
+          text: "Let's price it at $15/month.",
+          kind: "decision",
+        },
         { speaker: "Alex", at: T0 + 120_000, text: "I'll prepare the brief.", kind: "action" },
         { speaker: "Sarah", at: T0 + 180_000, text: "Weather looks nice today." },
       ],
@@ -160,9 +182,7 @@ describe("projectMeetings: classified turns only", () => {
       orgId: "org_1",
       startedAt: T0 + i,
       endedAt: null,
-      turns: [
-        { speaker: "A", at: T0, text: "x".repeat(2000), kind: "decision" as const },
-      ],
+      turns: [{ speaker: "A", at: T0, text: "x".repeat(2000), kind: "decision" as const }],
       createdBy: null,
       createdAt: T0,
     }));
@@ -262,7 +282,11 @@ describe("C3: the evolution section + turn indices + the honest meetings window"
         label: "$20/month",
         provenance: { meetingId: "mtg_mon" },
       },
-      { op: "SET_STATEMENT", id: "old", statement: { kind: "decision", status: "resolved", topic: "pricing" } },
+      {
+        op: "SET_STATEMENT",
+        id: "old",
+        statement: { kind: "decision", status: "resolved", topic: "pricing" },
+      },
       {
         op: "CREATE_NODE",
         id: "new",
@@ -284,7 +308,9 @@ describe("C3: the evolution section + turn indices + the honest meetings window"
     const digest = renderBoardDigest(baseInput({ workspace: ws }));
     expect(digest).toContain("Statement evolution");
     expect(digest).toContain("new (decision · resolved · topic: pricing, from meeting mtg_wed)");
-    expect(digest).toContain("replacing old (decision · superseded · topic: pricing, from meeting mtg_mon)");
+    expect(digest).toContain(
+      "replacing old (decision · superseded · topic: pricing, from meeting mtg_mon)",
+    );
   });
 
   it("statement-embedded provenance names the meeting when the node has none", () => {
@@ -325,8 +351,20 @@ describe("C3: the evolution section + turn indices + the honest meetings window"
     };
     const projected = projectMeetings([meeting]);
     expect(projected[0]!.turns).toEqual([
-      { index: 1, speaker: "Sarah", at: T0 + 60_000, kind: "decision", text: "Let's price it at $15." },
-      { index: 3, speaker: "Alex", at: T0 + 180_000, kind: "action", text: "I'll prepare the brief." },
+      {
+        index: 1,
+        speaker: "Sarah",
+        at: T0 + 60_000,
+        kind: "decision",
+        text: "Let's price it at $15.",
+      },
+      {
+        index: 3,
+        speaker: "Alex",
+        at: T0 + 180_000,
+        kind: "action",
+        text: "I'll prepare the brief.",
+      },
     ]);
   });
 
@@ -380,9 +418,7 @@ describe("retrieved evidence (Stage C4)", () => {
   });
 
   it("projects node hits with their statement bracket", () => {
-    const request = buildAnswerRequest(
-      baseInput({ question: "what is the pricing decision?" }),
-    );
+    const request = buildAnswerRequest(baseInput({ question: "what is the pricing decision?" }));
     const node = request.retrieved?.find((h) => h.kind === "node");
     expect(node).toBeDefined();
     if (node?.kind !== "node") return;
@@ -417,9 +453,7 @@ describe("retrieved evidence (Stage C4)", () => {
       createdBy: null,
       createdAt: T0 + i,
     }));
-    const request = buildAnswerRequest(
-      baseInput({ question: "pricing", meetings }),
-    );
+    const request = buildAnswerRequest(baseInput({ question: "pricing", meetings }));
     expect(request.retrieved?.length).toBeLessThanOrEqual(8);
   });
 });
@@ -495,11 +529,20 @@ describe("the derived execution in the digest (Stage D3)", () => {
     const ws = applyOperations(createWorkspace(), [
       { op: "CREATE_NODE", id: "design", nodeType: "action", label: "Design approval" },
       { op: "SET_STATEMENT", id: "design", statement: { kind: "action", status: "open" } },
-      { op: "SET_ISSUE", id: "design", issue: { type: "task", status: "blocked", dueDate: "2020-01-01" } },
+      {
+        op: "SET_ISSUE",
+        id: "design",
+        issue: { type: "task", status: "blocked", dueDate: "2020-01-01" },
+      },
       { op: "CREATE_NODE", id: "implementation", nodeType: "action", label: "Implementation" },
       { op: "SET_STATEMENT", id: "implementation", statement: { kind: "action", status: "open" } },
       { op: "SET_ISSUE", id: "implementation", issue: { type: "task", status: "open" } },
-      { op: "CONNECT_NODES", source: "implementation", target: "design", relationship: "depends_on" },
+      {
+        op: "CONNECT_NODES",
+        source: "implementation",
+        target: "design",
+        relationship: "depends_on",
+      },
     ]);
     const request = buildAnswerRequest(baseInput({ workspace: ws }));
     // Both derived brackets ride the implementation line, beside — never

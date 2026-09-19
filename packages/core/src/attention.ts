@@ -11,12 +11,7 @@
  * pure over (workspace, now), the same projection stance as the rollup.
  */
 
-import {
-  actionNodes,
-  derivedExecution,
-  isOverdueUnfinished,
-  type Workspace,
-} from "./model.js";
+import { actionNodes, derivedExecution, isOverdueUnfinished, type Workspace } from "./model.js";
 
 export type AttentionKind = "blocked" | "overdue" | "openDecision" | "newStatement";
 

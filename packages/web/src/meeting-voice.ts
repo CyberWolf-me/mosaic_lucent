@@ -98,7 +98,7 @@ export function addressesOtherPerson(text: string, knownTeammates: string[] = []
   for (const name of knownTeammates) {
     if (LUCENT_NAMES_SET.has(name.toLowerCase())) continue;
     const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const re = new RegExp(`^\\s*(?:wait[,\s]+)?${escaped}[,\s:;.!?—–-]+`, "i");
+    const re = new RegExp(`^\\s*(?:wait[,\\s]+)?${escaped}[,\\s:;.!?—–-]+`, "i");
     if (re.test(t)) return true;
   }
   return false;
@@ -136,7 +136,10 @@ export function isContinuationUtterance(text: string): boolean {
 
   if (CONTINUATION_STARTS.test(t)) return true;
   // Any sentence ending in question mark with a question word or pronoun
-  if (t.endsWith("?") && /\b(why|what|how|where|who|when|which|can|could|would|should|is|are)\b/i.test(t)) {
+  if (
+    t.endsWith("?") &&
+    /\b(why|what|how|where|who|when|which|can|could|would|should|is|are)\b/i.test(t)
+  ) {
     return true;
   }
   return false;
@@ -321,7 +324,12 @@ export class ConversationalLeaseManager {
 
     if (match) {
       let remainder = (match[1] ?? "").trim();
-      remainder = remainder.replace(new RegExp(`^(?:hey|ok|okay)?[,\\s]*${LUCENT_NAME_PATTERN}[,\\s:;.!?—–-]*`, "i"), "").trim();
+      remainder = remainder
+        .replace(
+          new RegExp(`^(?:hey|ok|okay)?[,\\s]*${LUCENT_NAME_PATTERN}[,\\s:;.!?—–-]*`, "i"),
+          "",
+        )
+        .trim();
       if (remainder) {
         this.onExplicitInvocation(speakerId, remainder, undefined, now);
         return { interrupted: true, newQuery: remainder };

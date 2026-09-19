@@ -33,7 +33,11 @@ function action(id: string, fields: { status?: string; dueDate?: string } = {}):
     {
       op: "SET_ISSUE",
       id,
-      issue: { type: "task", status: fields.status ?? "open", ...(fields.dueDate ? { dueDate: fields.dueDate } : {}) },
+      issue: {
+        type: "task",
+        status: fields.status ?? "open",
+        ...(fields.dueDate ? { dueDate: fields.dueDate } : {}),
+      },
     },
   ];
 }
@@ -66,22 +70,22 @@ function validateFixture(ops: Operation[]) {
 }
 
 describe("dependsOnGraph — the normalized upstream adjacency", () => {
-  it('depends_on is canonical; blocks normalizes to the same form', () => {
+  it("depends_on is canonical; blocks normalizes to the same form", () => {
     const ws = board([
-      ...action('impl'),
-      ...action('design'),
-      ...action('qa'),
-      depends('impl', 'design'),
-      { op: 'CONNECT_NODES', source: 'design', target: 'qa', relationship: 'blocks' },
-      { op: 'CREATE_NODE', id: 'x', nodeType: 'step', label: 'X' },
-      { op: 'CREATE_NODE', id: 'y', nodeType: 'step', label: 'Y' },
-      { op: 'CONNECT_NODES', source: 'x', target: 'y', relationship: 'related_to' },
+      ...action("impl"),
+      ...action("design"),
+      ...action("qa"),
+      depends("impl", "design"),
+      { op: "CONNECT_NODES", source: "design", target: "qa", relationship: "blocks" },
+      { op: "CREATE_NODE", id: "x", nodeType: "step", label: "X" },
+      { op: "CREATE_NODE", id: "y", nodeType: "step", label: "Y" },
+      { op: "CONNECT_NODES", source: "x", target: "y", relationship: "related_to" },
     ]);
     const deps = dependsOnGraph(ws);
-    expect(deps.get('impl')).toEqual(['design']);
-    expect(deps.get('qa')).toEqual(['design']);
-    expect(deps.get('x')).toBeUndefined();
-    expect(deps.has('y')).toBe(false);
+    expect(deps.get("impl")).toEqual(["design"]);
+    expect(deps.get("qa")).toEqual(["design"]);
+    expect(deps.get("x")).toBeUndefined();
+    expect(deps.has("y")).toBe(false);
   });
 
   it("dependencyReaches walks transitively, seen-bounded", () => {
@@ -155,21 +159,13 @@ describe("the validator's cycle rule", () => {
   });
 
   it("a cycle against PRE-EXISTING edges is also rejected", () => {
-    const ws = board([
-      ...action("a"),
-      ...action("b"),
-      depends("a", "b"),
-    ]);
+    const ws = board([...action("a"), ...action("b"), depends("a", "b")]);
     const errors = validateOperations(ws, stampAuthorship([depends("b", "a")], "test-user"));
     expect(errors.length).toBe(1);
   });
 
   it("disconnect removes from the simulated adjacency — re-linking after a disconnect is valid", () => {
-    const ws = board([
-      ...action("a"),
-      ...action("b"),
-      depends("a", "b"),
-    ]);
+    const ws = board([...action("a"), ...action("b"), depends("a", "b")]);
     const ops: Operation[] = [
       { op: "DISCONNECT_NODES", source: "a", target: "b", relationship: "depends_on" },
       depends("b", "a"), // valid only because the first edge is gone
@@ -223,7 +219,10 @@ describe("derivedExecution — computed project truth", () => {
       depends("c", "b"),
     ]);
     expect(derivedExecution(ws, NOW).get("c")!.blockedBy).toEqual(["a"]);
-    const recovered = applyOperations(ws, stampAuthorship([{ op: "UPDATE_ISSUE", id: "a", status: "completed" }], "test-user"));
+    const recovered = applyOperations(
+      ws,
+      stampAuthorship([{ op: "UPDATE_ISSUE", id: "a", status: "completed" }], "test-user"),
+    );
     const derived = derivedExecution(recovered, NOW);
     expect(derived.get("b")).toEqual({ blockedBy: [], atRiskBy: [] });
     expect(derived.get("c")).toEqual({ blockedBy: [], atRiskBy: [] });
@@ -236,7 +235,10 @@ describe("derivedExecution — computed project truth", () => {
       depends("build", "research"),
     ]);
     expect(derivedExecution(ws, NOW).get("build")!.atRiskBy).toEqual(["research"]);
-    const moved = applyOperations(ws, stampAuthorship([{ op: "UPDATE_ISSUE", id: "research", dueDate: "2026-09-20" }], "test-user"));
+    const moved = applyOperations(
+      ws,
+      stampAuthorship([{ op: "UPDATE_ISSUE", id: "research", dueDate: "2026-09-20" }], "test-user"),
+    );
     expect(derivedExecution(moved, NOW).get("build")).toEqual({ blockedBy: [], atRiskBy: [] });
   });
 
@@ -315,15 +317,14 @@ describe("isOverdueUnfinished", () => {
 
 describe("deletion and undo inherit the edge machinery", () => {
   it("DELETE_NODE drops dependency edges; undo restores them as CONNECT_NODES", () => {
-    const ws = board([
-      ...action("a"),
-      ...action("b"),
-      depends("b", "a"),
-    ]);
+    const ws = board([...action("a"), ...action("b"), depends("b", "a")]);
     const del: Operation[] = [{ op: "DELETE_NODE", id: "a" }];
     const deleted = applyOperations(ws, stampAuthorship(del, "test-user"));
     expect(Object.keys(deleted.edges)).toEqual([]);
-    const restored = applyOperations(deleted, stampAuthorship(inverseOperations(del, ws), "test-user"));
+    const restored = applyOperations(
+      deleted,
+      stampAuthorship(inverseOperations(del, ws), "test-user"),
+    );
     expect(restored.edges["b->a:depends_on"]).toBeDefined();
     expect(restored.nodes["a"]?.issue).toBeDefined();
   });

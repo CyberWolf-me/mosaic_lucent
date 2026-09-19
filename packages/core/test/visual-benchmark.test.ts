@@ -46,10 +46,7 @@ describe("synthetic benchmark boards", () => {
     for (const factory of BOARD_FACTORIES) {
       for (const n of [20, 80, 500]) {
         const ws = factory.build(n);
-        expect(
-          Object.keys(ws.nodes).length,
-          `${factory.label} at n=${n}`,
-        ).toBe(n);
+        expect(Object.keys(ws.nodes).length, `${factory.label} at n=${n}`).toBe(n);
       }
     }
   });
@@ -87,15 +84,21 @@ describe("synthetic benchmark boards", () => {
     expect(Object.values(swim.edges).some((e) => e.relationship === "hands off to")).toBe(true);
     // Radial has one topic node reaching several branches.
     const radial = radialBoard(40);
-    expect(Object.values(radial.edges).filter((e) => e.relationship === "spans").length).toBeGreaterThanOrEqual(3);
+    expect(
+      Object.values(radial.edges).filter((e) => e.relationship === "spans").length,
+    ).toBeGreaterThanOrEqual(3);
     // Dense carries ~2.2–2.5× edges per node (the fan-in stress).
     const dense = denseBoard(150);
     expect(Object.keys(dense.edges).length).toBeGreaterThanOrEqual(2 * 150);
     // Adversarial carries cycles (back edges) AND diamonds — the V5 defect
     // class and the ordering pass's coin flips, on one board.
     const adversarial = adversarialBoard(150);
-    expect(Object.values(adversarial.edges).filter((e) => e.relationship === "falls back to").length).toBeGreaterThanOrEqual(2);
-    expect(Object.values(adversarial.edges).filter((e) => e.relationship === "merges into").length).toBeGreaterThanOrEqual(2);
+    expect(
+      Object.values(adversarial.edges).filter((e) => e.relationship === "falls back to").length,
+    ).toBeGreaterThanOrEqual(2);
+    expect(
+      Object.values(adversarial.edges).filter((e) => e.relationship === "merges into").length,
+    ).toBeGreaterThanOrEqual(2);
     // Long edges: skips span a quarter, a half, and three quarters of the
     // depth — asserted via the layer metadata the generator stamps.
     const longEdge = longEdgeBoard(100);
@@ -257,20 +260,28 @@ describe("phase 0 metrics on hand-built geometry", () => {
     // a → b runs left to right THROUGH c, which sits on the line between them.
     ws.edges.e1 = { id: "e1", source: "a", target: "b", relationship: "r" };
     ws.nodes.c = { ...ws.nodes.c!, label: "c" };
-    const through = measureVisualMetrics(ws, {}, {
-      a: box(0, 0),
-      b: box(100, 0),
-      c: box(50, 0),
-      d: box(0, 100),
-    });
+    const through = measureVisualMetrics(
+      ws,
+      {},
+      {
+        a: box(0, 0),
+        b: box(100, 0),
+        c: box(50, 0),
+        d: box(0, 100),
+      },
+    );
     expect(through.edgesThroughNodes).toBe(1);
     // Same board, c out of the way: zero.
-    const clean = measureVisualMetrics(ws, {}, {
-      a: box(0, 0),
-      b: box(100, 0),
-      c: box(50, 50),
-      d: box(0, 100),
-    });
+    const clean = measureVisualMetrics(
+      ws,
+      {},
+      {
+        a: box(0, 0),
+        b: box(100, 0),
+        c: box(50, 50),
+        d: box(0, 100),
+      },
+    );
     expect(clean.edgesThroughNodes).toBe(0);
   });
 
@@ -282,7 +293,10 @@ describe("phase 0 metrics on hand-built geometry", () => {
       source: "c",
       target: "d",
       relationship: "r",
-      route: [{ x: 50, y: 200 }, { x: 60, y: 200 }],
+      route: [
+        { x: 50, y: 200 },
+        { x: 60, y: 200 },
+      ],
     };
     // Polyline pinned as the controlled variable: under the board kind's own
     // policy (flowchart → ortho) each diagonal approach segment squares into
@@ -304,12 +318,16 @@ describe("phase 0 metrics on hand-built geometry", () => {
 
   it("viewport coverage is node area over bounding box", () => {
     const ws = fourNodeBoard();
-    const metrics = measureVisualMetrics(ws, {}, {
-      a: box(0, 0),
-      b: box(90, 0),
-      c: box(0, 90),
-      d: box(90, 90),
-    });
+    const metrics = measureVisualMetrics(
+      ws,
+      {},
+      {
+        a: box(0, 0),
+        b: box(90, 0),
+        c: box(0, 90),
+        d: box(90, 90),
+      },
+    );
     // Four 10×10 boxes in a 100×100 bbox → 400/10000.
     expect(metrics.viewportCoverage).toBeCloseTo(0.04, 5);
   });
@@ -322,23 +340,31 @@ describe("phase 0 metrics on hand-built geometry", () => {
     ws.nodes.c = { id: "c", nodeType: "x", label: "c" };
     ws.edges.intra = { id: "intra", source: "a", target: "b", relationship: "r" };
     ws.edges.cross = { id: "cross", source: "b", target: "c", relationship: "r" };
-    const metrics = measureVisualMetrics(ws, {}, {
-      a: box(0, 0),
-      b: box(10, 0),
-      c: box(1000, 0),
-    });
+    const metrics = measureVisualMetrics(
+      ws,
+      {},
+      {
+        a: box(0, 0),
+        b: box(10, 0),
+        c: box(1000, 0),
+      },
+    );
     expect(metrics.cohesionRatio).toBeCloseTo(10 / 990, 5);
   });
 
   it("cohesion is null when no edge touches a group", () => {
     const ws = fourNodeBoard();
     ws.edges.e1 = { id: "e1", source: "a", target: "b", relationship: "r" };
-    const metrics = measureVisualMetrics(ws, {}, {
-      a: box(0, 0),
-      b: box(100, 0),
-      c: box(0, 100),
-      d: box(100, 100),
-    });
+    const metrics = measureVisualMetrics(
+      ws,
+      {},
+      {
+        a: box(0, 0),
+        b: box(100, 0),
+        c: box(0, 100),
+        d: box(100, 100),
+      },
+    );
     expect(metrics.cohesionRatio).toBeNull();
   });
 });
@@ -391,7 +417,10 @@ describe("the layout-engine boundary (Phase 1)", () => {
 
   it("a registered override engine serves supported requests; clearing restores the default", () => {
     const built = layeredBoard(40);
-    const sentinel = { layout: { "x-fake": { position: { x: 1, y: 2 }, size: { width: 3, height: 4 } } }, routes: {} };
+    const sentinel = {
+      layout: { "x-fake": { position: { x: 1, y: 2 }, size: { width: 3, height: 4 } } },
+      routes: {},
+    };
     const fake: DiagramLayoutEngine = {
       id: "test-override",
       supports: (req) => req.workspace.id === built.id,

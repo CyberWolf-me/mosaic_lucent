@@ -114,9 +114,14 @@ const { base, close } = await boot({ provider: cloudStub, allowByo: true, selfHo
 // 1. Sign up the owner (verified, so nothing else gates the run).
 const created = await api(base, "/api/auth/signup", {
   method: "POST",
-  body: JSON.stringify({ email: `owner.${tag}@example.com`, password: "password123", name: "Owner" }),
+  body: JSON.stringify({
+    email: `owner.${tag}@example.com`,
+    password: "password123",
+    name: "Owner",
+  }),
 });
-if (created.status !== 201) throw new Error(`signup failed: ${created.status} ${JSON.stringify(created.body)}`);
+if (created.status !== 201)
+  throw new Error(`signup failed: ${created.status} ${JSON.stringify(created.body)}`);
 const owner = { token: created.body.token as string, id: created.body.user.id as string };
 const found = await userStore.findByEmail(`owner.${tag}@example.com`);
 if (found) await userStore.setEmailVerified(found.id, Date.now());
@@ -146,7 +151,11 @@ record(
 // 3. A member reads the policy but not the full plane.
 const member = await api(base, "/api/auth/signup", {
   method: "POST",
-  body: JSON.stringify({ email: `member.${tag}@example.com`, password: "password123", name: "Member" }),
+  body: JSON.stringify({
+    email: `member.${tag}@example.com`,
+    password: "password123",
+    name: "Member",
+  }),
 });
 const memberUser = await userStore.findByEmail(`member.${tag}@example.com`);
 if (memberUser) {

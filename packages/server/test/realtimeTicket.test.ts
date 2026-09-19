@@ -74,7 +74,11 @@ function contract(name: string, make: () => TicketStore, makeShort: () => Ticket
   });
 }
 
-contract("in-memory", () => new InMemoryTicketStore(60_000), () => new InMemoryTicketStore(1_000));
+contract(
+  "in-memory",
+  () => new InMemoryTicketStore(60_000),
+  () => new InMemoryTicketStore(1_000),
+);
 
 describeIf("Postgres ticket store (needs LUCENT_TEST_DATABASE_URL)", () => {
   let target: Db;
@@ -99,5 +103,9 @@ describeIf("Postgres ticket store (needs LUCENT_TEST_DATABASE_URL)", () => {
     expect(await a.consume(ticket)).toBeNull();
   });
 
-  contract("postgres", () => new PgTicketStore(target, 60_000), () => new PgTicketStore(target, 1_000));
+  contract(
+    "postgres",
+    () => new PgTicketStore(target, 60_000),
+    () => new PgTicketStore(target, 1_000),
+  );
 });

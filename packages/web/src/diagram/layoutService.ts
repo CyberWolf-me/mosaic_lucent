@@ -31,12 +31,7 @@ import {
 } from "@lucent/core";
 import { ELK_LAYOUT_ENGINE, WORKER_ELK_ENGINE } from "./elk/index.js";
 
-const ELK_KINDS: ReadonlySet<string> = new Set([
-  "flowchart",
-  "architecture",
-  "journey",
-  "bpmn",
-]);
+const ELK_KINDS: ReadonlySet<string> = new Set(["flowchart", "architecture", "journey", "bpmn"]);
 
 export interface LayoutOutcome {
   workspace: Workspace;
@@ -85,7 +80,13 @@ export function elkRegionEligible(workspace: Workspace, groupId: string): boolea
 
 function stamp(
   ws: Workspace,
-  out: { layout: Record<string, { position: { x: number; y: number }; size: { width: number; height: number } }>; routes: Record<string, Array<{ x: number; y: number }>> },
+  out: {
+    layout: Record<
+      string,
+      { position: { x: number; y: number }; size: { width: number; height: number } }
+    >;
+    routes: Record<string, Array<{ x: number; y: number }>>;
+  },
 ): Workspace {
   return applyRoutes(applyLayout(ws, out.layout), out.routes);
 }
@@ -95,7 +96,7 @@ export async function layoutBoard(
   options: LayoutOptions = {},
   engines: LayoutEngines = {},
 ): Promise<LayoutOutcome> {
-  const primary = engines.primary ?? (engines.worker ?? WORKER_ELK_ENGINE) ?? ELK_LAYOUT_ENGINE;
+  const primary = engines.primary ?? engines.worker ?? WORKER_ELK_ENGINE ?? ELK_LAYOUT_ENGINE;
   const fallback = engines.fallback ?? CURRENT_LAYOUT_ENGINE;
 
   if (elkEligible(workspace)) {

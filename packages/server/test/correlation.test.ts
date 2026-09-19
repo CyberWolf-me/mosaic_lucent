@@ -190,7 +190,7 @@ describe("P1: one correlation id per request, end to end", () => {
       handle.server.listen(0, "127.0.0.1", () => {
         const { port } = handle.server.address() as AddressInfo;
         resolve({ ...handle, base: `http://127.0.0.1:${port}` });
-    });
+      });
     });
     const token = await signup(app, "p1-refused@example.com");
     // The window holds exactly one request: the first generate consumes it
@@ -238,9 +238,7 @@ describe("P1: one correlation id per request, end to end", () => {
     });
     expect(first.status).toBe(200);
     expect(second.status).toBe(200);
-    expect(
-      first.headers.get("x-request-id") !== second.headers.get("x-request-id"),
-    ).toBe(true);
+    expect(first.headers.get("x-request-id") !== second.headers.get("x-request-id")).toBe(true);
 
     // Two requests, two distinct ids, one series — the label sets of the
     // samples in the registry never mention the id.

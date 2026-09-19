@@ -85,26 +85,26 @@ cover external engines.
 The advisory numbered its items V0–V30. Several are already built or well
 started; the phases below reference them as "source V-xx".
 
-| Advisory item | Status in Lucent | Where |
-| --- | --- | --- |
-| V0 benchmark corpus + baseline | **Mostly done** | `visualBenchmark.ts`, `benchmarkBoards.ts`, `scripts/visual-benchmark.ts`, the 2026-09-11 baseline report |
-| V1 layout adapter boundary | Not started; seams exist | `computeLayout` / `computeLayoutWithRoutes`; `relayoutRegion*` (ADR 0015) |
-| V2–V3 ELK PoC + comparison | Not started; procedure ready | the baseline report's closing names this exact experiment |
-| V4 adoption decision | Gate, not built | Phase 3 below |
-| V5 web worker | Not started; compute is ≤17 ms at 500 nodes | conditional on a candidate engine's measured cost |
-| V6 incremental layout | Seam exists; engine-specific policy not | `relayoutRegionWithRoutes`; node pinning via MOVE_NODE |
-| V7 diagram intent | Partial | `SET_GROUP_KIND` / `CREATE_DIAGRAM` / `TRANSFORM_DIAGRAM` carry family; no direction / primary-flow hints yet |
-| V8 relationship hierarchy | **Derivation done** | `edgeTiers.ts` — primary / secondary / quiet, deterministic |
-| V9 density + semantic zoom | Partial | region lenses (ADR 0014); the tier-driven zoom policy is stated in `edgeTiers.ts` — verify renderer consumption |
-| V10 routing styles | Partial | orthogonal corridor routing for long edges shipped (`Edge.route`); per-family choice not |
-| V11–V16 BPMN | Not started | Option A (derived projection) is the default |
-| V17 unified lenses | **Exists for graph families** | ADR 0014, the lens workstream |
-| V18–V19 AI chooses the family | Partial | `CREATE_DIAGRAM` / `TRANSFORM_DIAGRAM` are already validated operations |
-| V20–V30 hardening items | Distributed | folded into Phases 5–8 below |
+| Advisory item                  | Status in Lucent                            | Where                                                                                                           |
+| ------------------------------ | ------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| V0 benchmark corpus + baseline | **Mostly done**                             | `visualBenchmark.ts`, `benchmarkBoards.ts`, `scripts/visual-benchmark.ts`, the 2026-09-11 baseline report       |
+| V1 layout adapter boundary     | Not started; seams exist                    | `computeLayout` / `computeLayoutWithRoutes`; `relayoutRegion*` (ADR 0015)                                       |
+| V2–V3 ELK PoC + comparison     | Not started; procedure ready                | the baseline report's closing names this exact experiment                                                       |
+| V4 adoption decision           | Gate, not built                             | Phase 3 below                                                                                                   |
+| V5 web worker                  | Not started; compute is ≤17 ms at 500 nodes | conditional on a candidate engine's measured cost                                                               |
+| V6 incremental layout          | Seam exists; engine-specific policy not     | `relayoutRegionWithRoutes`; node pinning via MOVE_NODE                                                          |
+| V7 diagram intent              | Partial                                     | `SET_GROUP_KIND` / `CREATE_DIAGRAM` / `TRANSFORM_DIAGRAM` carry family; no direction / primary-flow hints yet   |
+| V8 relationship hierarchy      | **Derivation done**                         | `edgeTiers.ts` — primary / secondary / quiet, deterministic                                                     |
+| V9 density + semantic zoom     | Partial                                     | region lenses (ADR 0014); the tier-driven zoom policy is stated in `edgeTiers.ts` — verify renderer consumption |
+| V10 routing styles             | Partial                                     | orthogonal corridor routing for long edges shipped (`Edge.route`); per-family choice not                        |
+| V11–V16 BPMN                   | Not started                                 | Option A (derived projection) is the default                                                                    |
+| V17 unified lenses             | **Exists for graph families**               | ADR 0014, the lens workstream                                                                                   |
+| V18–V19 AI chooses the family  | Partial                                     | `CREATE_DIAGRAM` / `TRANSFORM_DIAGRAM` are already validated operations                                         |
+| V20–V30 hardening items        | Distributed                                 | folded into Phases 5–8 below                                                                                    |
 
 The checklist's "Not built (recorded in ADR 0015): … ELK/dagre" line is
 superseded by this document's gate procedure: ELK is no longer excluded —
-it is *conditional*, on the benchmark and on ADR 0038's clauses.
+it is _conditional_, on the benchmark and on ADR 0038's clauses.
 
 ## The metric vocabulary
 
@@ -172,15 +172,13 @@ interface DiagramLayoutEngine {
 }
 ```
 
-   The request carries the semantic snapshot (nodes, edges, groups), pinned
-   positions, direction, spacing, and diagram family. The result carries
-   node positions and sizes, edge routes (the `Edge.route` precedent), and
-   diagnostics. **The interface owns geometry and nothing else** — it never
-   mutates the workspace, never touches Lucent state, and returns geometry.
-2. `CurrentLayoutEngine` implements the boundary over `computeLayout` /
-   `computeLayoutWithRoutes`; the existing public API stays.
-3. The benchmark runner, the pins, and the region relayout path
-   (`relayoutRegion*`) go through the boundary.
+The request carries the semantic snapshot (nodes, edges, groups), pinned
+positions, direction, spacing, and diagram family. The result carries
+node positions and sizes, edge routes (the `Edge.route` precedent), and
+diagnostics. **The interface owns geometry and nothing else** — it never
+mutates the workspace, never touches Lucent state, and returns geometry. 2. `CurrentLayoutEngine` implements the boundary over `computeLayout` /
+`computeLayoutWithRoutes`; the existing public API stays. 3. The benchmark runner, the pins, and the region relayout path
+(`relayoutRegion*`) go through the boundary.
 
 **Acceptance:** `npx tsx scripts/visual-benchmark.ts` produces
 byte-identical output before and after; typecheck and the full suite green;
@@ -215,11 +213,11 @@ per-family verdict: where ELK wins, where it loses, by how much.
 **Goal:** decide, on evidence, and record the decision. The three outcomes
 and their consequences:
 
-| Result | Meaning | What happens |
-| --- | --- | --- |
-| **A — significantly better** | wins the layered ladder materially, ties or wins elsewhere, human pass agrees | ELK becomes the primary graph-layout engine behind the boundary; Phase 4 opens |
-| **B — better for some families** | e.g. layered/architecture only | hybrid: ELK for those families; the hand-written engine keeps radial, tree, and swimlane, which already hold zero crossings at every scale |
-| **C — not enough** | the current engine keeps the crown | keep the hand-written engine; Phases 4+ close; revisit only when a new failure class is on record |
+| Result                           | Meaning                                                                       | What happens                                                                                                                               |
+| -------------------------------- | ----------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| **A — significantly better**     | wins the layered ladder materially, ties or wins elsewhere, human pass agrees | ELK becomes the primary graph-layout engine behind the boundary; Phase 4 opens                                                             |
+| **B — better for some families** | e.g. layered/architecture only                                                | hybrid: ELK for those families; the hand-written engine keeps radial, tree, and swimlane, which already hold zero crossings at every scale |
+| **C — not enough**               | the current engine keeps the crown                                            | keep the hand-written engine; Phases 4+ close; revisit only when a new failure class is on record                                          |
 
 The bar, stated **before** the numbers exist so the goalposts cannot move:
 materially fewer crossings per edge at 150–500 nodes (the known barycenter
@@ -456,17 +454,17 @@ protocol; the consistency checklist is signed off.
 
 ## Sequencing
 
-| Phase | Depends on | Opens how |
-| --- | --- | --- |
-| 0 — baseline completion | — | legal now (freeze clause: benchmarks and measurement) |
-| 1 — layout boundary | 0's metrics pinned | legal now (the experiment's apparatus) |
-| 2 — ELK comparison | 1 | legal now (measurement) |
-| 3 — adoption decision | 2 | evidence gate |
-| 4 — integration | 3 = Result A or B | **done** (two-phase commit + worker, live-verified) |
-| 5 — intent / density / routing | 0's metrics; independent of the ELK verdict | build opens on the gate |
-| 6 — BPMN XML interchange | ~~license review~~ **answered: viewer cancelled** (doc 19); adapter + round-trip tests stand | done (interchange only) |
-| 7 — BPMN editing bridge | cancelled with the viewer — no bpmn-js, no modeler | — |
-| 8 — lenses + final acceptance | outcomes of 3–6 (BPMN re-scoped to export) | final gate |
+| Phase                          | Depends on                                                                                   | Opens how                                             |
+| ------------------------------ | -------------------------------------------------------------------------------------------- | ----------------------------------------------------- |
+| 0 — baseline completion        | —                                                                                            | legal now (freeze clause: benchmarks and measurement) |
+| 1 — layout boundary            | 0's metrics pinned                                                                           | legal now (the experiment's apparatus)                |
+| 2 — ELK comparison             | 1                                                                                            | legal now (measurement)                               |
+| 3 — adoption decision          | 2                                                                                            | evidence gate                                         |
+| 4 — integration                | 3 = Result A or B                                                                            | **done** (two-phase commit + worker, live-verified)   |
+| 5 — intent / density / routing | 0's metrics; independent of the ELK verdict                                                  | build opens on the gate                               |
+| 6 — BPMN XML interchange       | ~~license review~~ **answered: viewer cancelled** (doc 19); adapter + round-trip tests stand | done (interchange only)                               |
+| 7 — BPMN editing bridge        | cancelled with the viewer — no bpmn-js, no modeler                                           | —                                                     |
+| 8 — lenses + final acceptance  | outcomes of 3–6 (BPMN re-scoped to export)                                                   | final gate                                            |
 
 Phases 5 and 6 do not wait on the ELK verdict: intent, tiers, and density
 are engine-agnostic and partly exist already. Their completion is warranted

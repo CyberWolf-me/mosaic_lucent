@@ -305,9 +305,7 @@ export function HistoryView({ onOpenSettings }: { onOpenSettings: (section?: str
                       const isStatement = row.kind === "statement";
                       const isAi = item.actor.type === "ai";
                       const flash = item.seq === flashSeq;
-                      const tint = isStatement
-                        ? KIND_TINT[item.statementEvent!.kind]
-                        : undefined;
+                      const tint = isStatement ? KIND_TINT[item.statementEvent!.kind] : undefined;
                       return (
                         <div
                           key={`${isStatement ? "s" : "r"}-${item.seq}-${i}`}
@@ -319,9 +317,7 @@ export function HistoryView({ onOpenSettings }: { onOpenSettings: (section?: str
                             borderRadius: 8,
                             transition: "background 0.6s",
                             background:
-                              flash && !isStatement
-                                ? "oklch(0.82 0.15 75 / 0.18)"
-                                : "transparent",
+                              flash && !isStatement ? "oklch(0.82 0.15 75 / 0.18)" : "transparent",
                           }}
                         >
                           <div style={{ width: 24, position: "relative", flexShrink: 0 }}>
@@ -334,18 +330,19 @@ export function HistoryView({ onOpenSettings }: { onOpenSettings: (section?: str
                                 height: 12,
                                 borderRadius: 999,
                                 background: isStatement
-                                  ? tint ?? "var(--canvas-3)"
+                                  ? (tint ?? "var(--canvas-3)")
                                   : isAi
                                     ? "linear-gradient(135deg, var(--amber-2), var(--amber-3))"
                                     : "var(--canvas-3)",
                                 border: `1px solid ${
                                   isStatement
-                                    ? tint ?? "var(--stroke-2)"
+                                    ? (tint ?? "var(--stroke-2)")
                                     : isAi
                                       ? "oklch(0.82 0.15 75 / 0.5)"
                                       : "var(--stroke-2)"
                                 }`,
-                                boxShadow: isAi && !isStatement ? "0 0 8px var(--amber-glow)" : "none",
+                                boxShadow:
+                                  isAi && !isStatement ? "0 0 8px var(--amber-glow)" : "none",
                               }}
                             />
                           </div>
@@ -392,14 +389,12 @@ export function HistoryView({ onOpenSettings }: { onOpenSettings: (section?: str
                               <span
                                 style={{
                                   fontSize: 13,
-                                  color: isStatement ? tint ?? "var(--ink-0)" : "var(--ink-0)",
+                                  color: isStatement ? (tint ?? "var(--ink-0)") : "var(--ink-0)",
                                   fontVariationSettings: "'wght' 500",
                                   flex: 1,
                                 }}
                               >
-                                {isStatement
-                                  ? statementChipText(item.statementEvent!)
-                                  : item.label}
+                                {isStatement ? statementChipText(item.statementEvent!) : item.label}
                               </span>
                               {isStatement && (
                                 <span
@@ -453,7 +448,10 @@ export function HistoryView({ onOpenSettings }: { onOpenSettings: (section?: str
                 <div style={{ fontSize: 13, fontVariationSettings: "'wght' 550" }}>
                   Every change, remembered
                 </div>
-                <div className="mono" style={{ fontSize: 10.5, color: "var(--ink-3)", marginTop: 2 }}>
+                <div
+                  className="mono"
+                  style={{ fontSize: 10.5, color: "var(--ink-3)", marginTop: 2 }}
+                >
                   {server.items.length} visible revision
                   {server.items.length === 1 ? "" : "s"}
                   {server.hasMore ? ` of more — your plan shows the latest ${server.limit}` : ""}

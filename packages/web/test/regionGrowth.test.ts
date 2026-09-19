@@ -28,13 +28,15 @@ function adjacentRegions(): Workspace {
     const id = `L${i}`;
     ws.nodes[id] = { id, nodeType: "step", label: `Left ${i}`, groupId: "g-left" };
     left.push(id);
-    if (i > 0) ws.edges[`eL${i}`] = { id: `eL${i}`, source: `L${i - 1}`, target: id, relationship: "then" };
+    if (i > 0)
+      ws.edges[`eL${i}`] = { id: `eL${i}`, source: `L${i - 1}`, target: id, relationship: "then" };
   }
   for (let i = 0; i < 2; i++) {
     const id = `R${i}`;
     ws.nodes[id] = { id, nodeType: "step", label: `Right ${i}`, groupId: "g-right" };
     right.push(id);
-    if (i > 0) ws.edges[`eR${i}`] = { id: `eR${i}`, source: `R${i - 1}`, target: id, relationship: "then" };
+    if (i > 0)
+      ws.edges[`eR${i}`] = { id: `eR${i}`, source: `R${i - 1}`, target: id, relationship: "then" };
   }
   ws.groups["g-left"] = { id: "g-left", label: "Left", children: left, kind: "flowchart" };
   ws.groups["g-right"] = { id: "g-right", label: "Right", children: right, kind: "flowchart" };
@@ -75,11 +77,19 @@ describe("pushRegionNeighbors (doc 18 Phase 4)", () => {
         ...grown,
         nodes: {
           ...grown.nodes,
-          wide: { id: "wide", nodeType: "step", label: "a very long label for width", groupId: "g-left" },
+          wide: {
+            id: "wide",
+            nodeType: "step",
+            label: "a very long label for width",
+            groupId: "g-left",
+          },
         },
         groups: {
           ...grown.groups,
-          "g-left": { ...grown.groups["g-left"]!, children: [...grown.groups["g-left"]!.children, "wide"] },
+          "g-left": {
+            ...grown.groups["g-left"]!,
+            children: [...grown.groups["g-left"]!.children, "wide"],
+          },
         },
       };
       const second = relayoutRegionWithRoutes(grown, "g-left");

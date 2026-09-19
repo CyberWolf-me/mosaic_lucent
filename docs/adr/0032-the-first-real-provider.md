@@ -41,6 +41,7 @@ seam. The interface gains the optional method as its documented
 evolution, not a break.
 
 **The remaining review fixes:**
+
 - **mapStatus never guesses**: the signature became
   `ExecutionStatus | undefined`. An unknown WorkflowState ("In QA",
   "Deployed", a custom state) returns undefined; surfaces preserve
@@ -52,7 +53,7 @@ evolution, not a break.
   one state query for a 10-create batch).
 - **Deterministic assignee resolution**: exact email > exact normalized
   name > unique partial > AMBIGUOUS (an honest `unable to uniquely
-  resolve assignee "Alex"`, never a guess), cached per instance.
+resolve assignee "Alex"`, never a guess), cached per instance.
 - **teamId in connection config**: `IntegrationConnection.config` —
   provider-specific configuration lives on the connection, never on the
   Action, never in the workspace, never as an env-only secret. The
@@ -98,8 +99,8 @@ accept the retry contract's window") anticipated, now made honest by the
 marker.
 
 **The PG pairs land** (the D4/D5 deferral retired): four tables —
-integration_connections (the (org,provider) unique carries the upsert),
-integration_task_links (the (board,node,provider) unique), integration_
+integration*connections (the (org,provider) unique carries the upsert),
+integration_task_links (the (board,node,provider) unique), integration*
 actions (connection_id + items jsonb — the payload IS the replay
 source), execution_ledger (the composite PK (board_id,provider,
 request_id); attempts decided by the first INSERT; the status-guarded
@@ -133,10 +134,10 @@ summary projection). AI-initiated external proposals (D9).
 
 - The D5 pairing is honest per provider now: key-native providers get
   exactly-one-effect through the key; Linear gets at-least-once delivery
-  + marker-based reconciliation. The ADR 0031 phrasing is corrected in
-  this record — the guarantee was never provider-independent, and
-  pretending it was would have shipped the LIN-482/LIN-483 failure as a
-  surprise.
+  - marker-based reconciliation. The ADR 0031 phrasing is corrected in
+    this record — the guarantee was never provider-independent, and
+    pretending it was would have shipped the LIN-482/LIN-483 failure as a
+    surprise.
 - The acceptance proves the recovery at the wire level: the hang lands
   the issue in the stubbed Linear store, the response is lost, and the
   retry's `recoverCreate(marker)` finds LIN-1 — one issue, one link, zero

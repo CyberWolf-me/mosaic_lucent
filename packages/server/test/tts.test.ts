@@ -161,7 +161,8 @@ describe("OpenAiTtsService (UNVERIFIED — no key has exercised this path)", () 
   });
 });
 
-describe("DeepgramTtsService", () => {  function stubAudio(
+describe("DeepgramTtsService", () => {
+  function stubAudio(
     seen: Array<{ url: string; headers: Record<string, string>; body: unknown }>,
     audio: Uint8Array,
     status = 200,

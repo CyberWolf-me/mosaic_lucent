@@ -43,7 +43,10 @@ describe("toScene stamps the family's routeStyle", () => {
 describe("makePath draws the style", () => {
   const a = { x: 0, y: 0 };
   const b = { x: 100, y: 300 };
-  const w = [{ x: 40, y: 120 }, { x: 60, y: 200 }];
+  const w = [
+    { x: 40, y: 120 },
+    { x: 60, y: 200 },
+  ];
 
   it("polyline: straight segments through the waypoints", () => {
     const d = makePath(a, b, "h", 0, w, "polyline");

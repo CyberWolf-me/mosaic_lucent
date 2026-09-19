@@ -76,5 +76,5 @@ tentative thoughts promoted to state).
    authoritative apply, and/or a propose-without-apply mode, before
    any client attaches `boardId`.
 2. **Eval driver kept for re-runs:** `packages/server/eval-driver.
-   scratch.ts` + `ws-apply.scratch.mjs` were scratch (deleted after
+scratch.ts` + `ws-apply.scratch.mjs` were scratch (deleted after
    the run); re-create from this sheet if needed.

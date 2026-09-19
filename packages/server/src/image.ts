@@ -39,8 +39,18 @@ export function selectImageProvider(env: NodeJS.ProcessEnv = process.env): Image
   const rawModel = env.LUCENT_IMAGE_MODEL;
   const rawFallback = env.LUCENT_IMAGE_FALLBACK_MODEL;
   const modelList = [
-    ...(rawModel ? rawModel.split(",").map((s) => s.trim()).filter(Boolean) : []),
-    ...(rawFallback ? rawFallback.split(",").map((s) => s.trim()).filter(Boolean) : []),
+    ...(rawModel
+      ? rawModel
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean)
+      : []),
+    ...(rawFallback
+      ? rawFallback
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean)
+      : []),
   ];
   const primaryModel = modelList[0];
   const fallbackModels = modelList.slice(1);

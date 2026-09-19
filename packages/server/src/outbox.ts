@@ -286,10 +286,7 @@ export class PostgresOutbox implements OutboxStore {
     const removed = await this.db.db
       .delete(outboxEvents)
       .where(
-        and(
-          sql`${outboxEvents.dispatchedAt} is not null`,
-          lt(outboxEvents.dispatchedAt, cutoff),
-        ),
+        and(sql`${outboxEvents.dispatchedAt} is not null`, lt(outboxEvents.dispatchedAt, cutoff)),
       )
       .returning({ id: outboxEvents.id });
     return removed.length;

@@ -145,11 +145,9 @@ function render(file: PromptFile, vocabulary: readonly string[]): string {
   if (!body.includes(OPERATIONS_PLACEHOLDER)) {
     throw new Error(`prompt "${file.id}": body never uses ${OPERATIONS_PLACEHOLDER}`);
   }
-  const rendered =
-    body.split(OPERATIONS_PLACEHOLDER)
-      .join(
-        vocabulary.length ? vocabulary.join(", ") : "(none — this prompt emits no operations)",
-      );
+  const rendered = body
+    .split(OPERATIONS_PLACEHOLDER)
+    .join(vocabulary.length ? vocabulary.join(", ") : "(none — this prompt emits no operations)");
   const leftover = ANY_PLACEHOLDER.exec(rendered);
   if (leftover) {
     throw new Error(`prompt "${file.id}": unresolved placeholder ${leftover[0]}`);

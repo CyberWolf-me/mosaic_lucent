@@ -634,7 +634,9 @@ function ProjectCard({ project, onOpen }: { project: DisplayProject; onOpen: () 
             gap: 6,
           }}
         >
-          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>
+          <span
+            style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}
+          >
             {project.name}
           </span>
           {project.isCloud && (
@@ -652,7 +654,11 @@ function ProjectCard({ project, onOpen }: { project: DisplayProject; onOpen: () 
                 border: "1px solid var(--stroke-1)",
               }}
             >
-              {project.isShared ? <Ico.Share width={10} height={10} /> : <Ico.Layers width={10} height={10} />}
+              {project.isShared ? (
+                <Ico.Share width={10} height={10} />
+              ) : (
+                <Ico.Layers width={10} height={10} />
+              )}
               <span>{project.isShared ? "Shared" : "Cloud"}</span>
             </span>
           )}

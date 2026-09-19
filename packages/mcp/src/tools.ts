@@ -133,9 +133,7 @@ export function summarizeBoard(ws: Workspace): Record<string, unknown> {
               // Stage D1: the execution fields, capped for the summary —
               // an agent that can see the deadline can reason about it.
               ...(n.issue.dueDate ? { dueDate: n.issue.dueDate } : {}),
-              ...(n.issue.description
-                ? { description: n.issue.description.slice(0, 200) }
-                : {}),
+              ...(n.issue.description ? { description: n.issue.description.slice(0, 200) } : {}),
             },
           }
         : {}),
@@ -148,26 +146,20 @@ export function summarizeBoard(ws: Workspace): Record<string, unknown> {
               kind: n.statement.kind,
               status: n.statement.status,
               ...(n.statement.topic ? { topic: n.statement.topic } : {}),
-              ...(n.statement.supersedes?.length
-                ? { supersedes: n.statement.supersedes }
-                : {}),
+              ...(n.statement.supersedes?.length ? { supersedes: n.statement.supersedes } : {}),
             },
           }
         : {}),
       // Stage D2: either evidence kind reaches the agent — meeting origin
       // when it exists, plan sources when that is what the node carries.
       ...(n.provenance?.meetingId ? { fromMeeting: n.provenance.meetingId } : {}),
-      ...(n.provenance?.createdFrom?.length
-        ? { fromStatements: n.provenance.createdFrom }
-        : {}),
+      ...(n.provenance?.createdFrom?.length ? { fromStatements: n.provenance.createdFrom } : {}),
       // Stage D3: the derived execution truth — computed per read, so an
       // agent can answer "what's blocking this?" from structure, not labels.
       ...(derivedFor(n.id)?.blockedBy.length
         ? { derivedBlockers: derivedFor(n.id)!.blockedBy }
         : {}),
-      ...(derivedFor(n.id)?.atRiskBy.length
-        ? { derivedRisks: derivedFor(n.id)!.atRiskBy }
-        : {}),
+      ...(derivedFor(n.id)?.atRiskBy.length ? { derivedRisks: derivedFor(n.id)!.atRiskBy } : {}),
       // Stage E1: the drives causality — "what work came from this
       // decision?" and the reverse, straight from the edges.
       ...(n.statement?.kind === "decision" && driveGraph.get(n.id)?.length
@@ -221,7 +213,9 @@ export class BoardSession {
         // state; the workspace blob carries zero provider strings by
         // design). The honest structured answer, the reset_board
         // notSupported precedent.
-        return text(JSON.stringify({ links: [], note: "no link registry in the local session" }, null, 2));
+        return text(
+          JSON.stringify({ links: [], note: "no link registry in the local session" }, null, 2),
+        );
       case "reset_board": {
         const kind = typeof args.diagramKind === "string" ? args.diagramKind : undefined;
         this.ws = createWorkspace(

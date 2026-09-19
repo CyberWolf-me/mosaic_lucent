@@ -118,8 +118,9 @@ export function MeetingSessionProvider({ children }: { children: ReactNode }) {
         }
         void lp.setMicrophoneEnabled(false).catch(() => {});
         void lp.setCameraEnabled(false).catch(() => {});
-        void lp.setScreenShareEnabled(false).catch(() => {});
-      } catch {}
+      } catch {
+        /* best-effort media teardown */
+      }
       void room.disconnect(true).catch(() => {});
     }
     setTiles([]);

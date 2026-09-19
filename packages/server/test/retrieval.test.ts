@@ -231,7 +231,9 @@ describe("ranking and caps", () => {
 
   it("caps at the requested limit and at resultsMax", () => {
     const corpus = buildSearchCorpus({
-      workspace: workspaceOf(...Array.from({ length: 30 }, (_, i) => ({ id: `n${i}`, label: `Alpha ${i}` }))),
+      workspace: workspaceOf(
+        ...Array.from({ length: 30 }, (_, i) => ({ id: `n${i}`, label: `Alpha ${i}` })),
+      ),
       meetings: [],
       log: [],
     });
@@ -250,9 +252,7 @@ describe("ranking and caps", () => {
 
   it("a plural repetition collapses to one token and does not double-score", () => {
     const one = retrieve("price", baseCorpus(), 10).find((h) => h.kind === "node");
-    const two = retrieve("price prices", baseCorpus(), 10).find(
-      (h) => h.kind === "node",
-    );
+    const two = retrieve("price prices", baseCorpus(), 10).find((h) => h.kind === "node");
     expect(one?.score).toBe(two?.score);
   });
 

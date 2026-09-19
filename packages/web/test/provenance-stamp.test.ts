@@ -110,7 +110,9 @@ describe("attachProvenance — the enrichment the apply paths call", () => {
     // What the HUD tooltip renders + what the click handler routes on.
     expect(provenance.quote).toContain("launch brief");
     expect((provenance.turnKinds ?? []).join(", ")).toBe("action");
-    expect(provenance.turnRange ? `${provenance.turnRange[0]}–${provenance.turnRange[1]}` : null).toBe("4–4");
+    expect(
+      provenance.turnRange ? `${provenance.turnRange[0]}–${provenance.turnRange[1]}` : null,
+    ).toBe("4–4");
     expect(provenance.meetingId !== "live-session" ? provenance.meetingId : null).toBe("mtg_123");
   });
 });

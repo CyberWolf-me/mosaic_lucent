@@ -17,7 +17,7 @@ validated operations, never pixels or free text), ADR 0014 (diagram kinds are
 rendering lenses over one model), ADR 0015 (relayout is scoped and spatially
 additive), and the visual benchmark's founding rule — the benchmark decides
 (`docs/eval-results/2026-09-11-visual-benchmark-baseline.md`). None of them
-yet says what an external engine is *allowed to be*. The phased plan that
+yet says what an external engine is _allowed to be_. The phased plan that
 operates inside this decision is `docs/18-structured-visual-engine.md`.
 
 ## Decision
@@ -44,7 +44,7 @@ Four clauses, concretely:
    log, and broadcast as every other change.
 4. **Adoption is earned by measurement, and licenses are checked before
    code.** An engine is adopted only when it wins the visual benchmark on
-   identical fixtures — mechanical metrics *and* the human-half pass — never
+   identical fixtures — mechanical metrics _and_ the human-half pass — never
    for reputation. License obligations are reviewed before integration
    ships: ELK is EPL-2.0; bpmn-js's license requires the bpmn.io watermark
    in rendered diagrams to remain visible and unobscured.
@@ -64,4 +64,4 @@ Four clauses, concretely:
   upgrades: a dependency bump must never silently rearrange existing boards.
 - The checklist's "Not built (recorded in ADR 0015): … ELK/dagre" line is
   superseded by this gate procedure: ELK is no longer excluded, it is
-  *conditional* — on the benchmark, and on these clauses.
+  _conditional_ — on the benchmark, and on these clauses.

@@ -77,8 +77,7 @@ function adoptLegacyKeysOnce(userId: string): void {
     }
     for (const key of keys) {
       const isProjectRecord = key.startsWith(PROJECT_PREFIX);
-      const isWorkspaceKey =
-        key === INDEX_KEY || key === LAST_OPEN_KEY || key === SHARED_BOARD_KEY;
+      const isWorkspaceKey = key === INDEX_KEY || key === LAST_OPEN_KEY || key === SHARED_BOARD_KEY;
       if (!isProjectRecord && !isWorkspaceKey) continue;
       const value = localStorage.getItem(key);
       if (value === null) continue;

@@ -109,15 +109,27 @@ function contractBody(make: () => JobQueue, reset: () => Promise<void>) {
       // tick. While one is queued, the others must not pile up.
       await reset();
       const q = make();
-      const first = await q.enqueue({ family: "maintenance", type: "sweep-stripe", dedupeKey: "sweep-stripe" });
-      const second = await q.enqueue({ family: "maintenance", type: "sweep-stripe", dedupeKey: "sweep-stripe" });
+      const first = await q.enqueue({
+        family: "maintenance",
+        type: "sweep-stripe",
+        dedupeKey: "sweep-stripe",
+      });
+      const second = await q.enqueue({
+        family: "maintenance",
+        type: "sweep-stripe",
+        dedupeKey: "sweep-stripe",
+      });
       expect(second.id).toBe(first.id);
       expect(Object.values(await q.depth()).reduce((a, b) => a + b, 0)).toBe(1);
 
       // Once it is finished, the next tick may enqueue a fresh one.
       const [claimed] = await q.claim(["maintenance"], "w", 10);
       await q.complete(claimed!.id);
-      const third = await q.enqueue({ family: "maintenance", type: "sweep-stripe", dedupeKey: "sweep-stripe" });
+      const third = await q.enqueue({
+        family: "maintenance",
+        type: "sweep-stripe",
+        dedupeKey: "sweep-stripe",
+      });
       expect(third.id).not.toBe(first.id);
     });
 
@@ -178,7 +190,10 @@ function contractBody(make: () => JobQueue, reset: () => Promise<void>) {
 }
 
 describe("InMemoryJobQueue", () => {
-  contractBody(() => new InMemoryJobQueue(), async () => {});
+  contractBody(
+    () => new InMemoryJobQueue(),
+    async () => {},
+  );
 });
 
 describe("the runner", () => {
@@ -348,8 +363,8 @@ describe.skipIf(!TEST_URL)("PostgresJobQueue", () => {
     await queue.complete(doneJob.id);
     // Backdate the finish so it is past the retention window.
     await target.db.execute(
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (await import("drizzle-orm")).sql`update ${jobs} set "finished_at" = ${Date.now() - 10 * 60_000} where "id" = ${doneJob.id}`,
+      (await import("drizzle-orm"))
+        .sql`update ${jobs} set "finished_at" = ${Date.now() - 10 * 60_000} where "id" = ${doneJob.id}`,
     );
 
     const removed = await queue.prune(60_000);

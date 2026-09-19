@@ -177,7 +177,10 @@ export class OpenAICompatibleProvider implements LLMProvider {
     throw lastError ?? new Error("Provider request failed");
   }
 
-  private async executeGenerateOperations(request: GenerateRequest, modelToUse: string): Promise<GenerateResult> {
+  private async executeGenerateOperations(
+    request: GenerateRequest,
+    modelToUse: string,
+  ): Promise<GenerateResult> {
     // Vision: OpenAI-compatible gateways take an array of content parts. Text
     // only when there are no images, so a text-only gateway is unaffected.
     const text = buildUserPrompt(request);
@@ -327,7 +330,10 @@ export class OpenAICompatibleProvider implements LLMProvider {
     throw lastError ?? new Error("Provider request failed");
   }
 
-  private async executeGenerateAnswer(request: AnswerRequest, modelToUse: string): Promise<AnswerResult> {
+  private async executeGenerateAnswer(
+    request: AnswerRequest,
+    modelToUse: string,
+  ): Promise<AnswerResult> {
     let body = JSON.stringify({
       model: modelToUse,
       messages: [

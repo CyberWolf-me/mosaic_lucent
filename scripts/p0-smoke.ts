@@ -129,7 +129,9 @@ async function main() {
     `status ${seed.status}, seq ${seedBody.seq}, applied ${seedBody.applied}`,
   );
 
-  const got = await fetch(`${base}/api/boards/${boardId}`, { headers: { authorization: `Bearer ${token}` } });
+  const got = await fetch(`${base}/api/boards/${boardId}`, {
+    headers: { authorization: `Bearer ${token}` },
+  });
   const gotBody = (await got.json()) as { workspace?: { nodes?: Record<string, unknown> } };
   const nodeIds = Object.keys(gotBody.workspace?.nodes ?? {});
   ok(

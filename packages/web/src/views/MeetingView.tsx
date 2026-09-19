@@ -8,11 +8,9 @@ import { getSttProvider, isAnyVoiceSupported, type VoiceSession } from "../stt/i
 import { askLucent } from "../boards.js";
 import {
   ConversationalLeaseManager,
-  shouldAnswerVoice,
   voiceAnswerCard,
   openBoardQuestions,
   type VoiceAnswer,
-  type ConversationalLease,
 } from "../meeting-voice.js";
 import { useMeetingSession } from "../meeting-room/MeetingSessionContext.js";
 import { speakAnswer } from "../tts.js";
@@ -196,8 +194,6 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
   const [topicBreaks, setTopicBreaks] = useState<number[]>([]);
   const [panelOpen, setPanelOpen] = useState(true);
   const [activePanel, setActivePanel] = useState<"transcript" | "extract" | "saved">("transcript");
-  const [meetingTab, setMeetingTab] = useState<"video" | "notes">("video");
-  const [notesOpen, setNotesOpen] = useState(true);
 
   // M6.1–M6.3: Conversational Lease Platform
   const { activeLease, setActiveLease, peers, leave } = useMeetingSession();
@@ -919,11 +915,20 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
                     </div>
                     <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                       {!recording ? (
-                        <button className="btn amber" style={{ height: 26, fontSize: 11 }} onClick={startRecording} disabled={!voiceSupported}>
+                        <button
+                          className="btn amber"
+                          style={{ height: 26, fontSize: 11 }}
+                          onClick={startRecording}
+                          disabled={!voiceSupported}
+                        >
                           <Ico.Mic /> {turns.length > 0 || shown ? "New capture" : "Record"}
                         </button>
                       ) : (
-                        <button className="btn" style={{ height: 26, fontSize: 11 }} onClick={stopRecording}>
+                        <button
+                          className="btn"
+                          style={{ height: 26, fontSize: 11 }}
+                          onClick={stopRecording}
+                        >
                           Stop
                         </button>
                       )}
@@ -931,7 +936,11 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
                         <button
                           className="btn"
                           style={{ height: 26, fontSize: 11 }}
-                          title={voiceMuted ? "Unmute Lucent's spoken answers" : "Mute Lucent's spoken answers"}
+                          title={
+                            voiceMuted
+                              ? "Unmute Lucent's spoken answers"
+                              : "Mute Lucent's spoken answers"
+                          }
                           aria-pressed={!voiceMuted}
                           onClick={() => {
                             if (!voiceMuted) {
@@ -945,7 +954,12 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
                         </button>
                       )}
                       {!shown && turns.length > 0 && (
-                        <button className="btn primary" style={{ height: 26, fontSize: 11 }} onClick={() => void onSave()} disabled={saving}>
+                        <button
+                          className="btn primary"
+                          style={{ height: 26, fontSize: 11 }}
+                          onClick={() => void onSave()}
+                          disabled={saving}
+                        >
                           {saving ? "Saving…" : "Save"}
                         </button>
                       )}
@@ -973,8 +987,12 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
                   </div>
 
                   {!livekitConfigured && !recording && (
-                    <p className="mono small" style={{ color: "var(--ink-3)", margin: "4px 0 8px" }}>
-                      Local STT labels lines "You". Configure LiveKit in Settings for per-speaker identity.
+                    <p
+                      className="mono small"
+                      style={{ color: "var(--ink-3)", margin: "4px 0 8px" }}
+                    >
+                      Local STT labels lines "You". Configure LiveKit in Settings for per-speaker
+                      identity.
                     </p>
                   )}
 
@@ -1025,8 +1043,8 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
                         <span>
                           {activeLease.state === "waiting_for_user_response"
                             ? `Awaiting clarification from ${activeLease.speakerName || activeLease.speakerId}`
-                            : `Continuing conversation with ${activeLease.speakerName || activeLease.speakerId}`}
-                          {" "}({leaseRemainingSec}s)
+                            : `Continuing conversation with ${activeLease.speakerName || activeLease.speakerId}`}{" "}
+                          ({leaseRemainingSec}s)
                         </span>
                       </div>
                       <button
@@ -1051,9 +1069,9 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
                   <div className="meeting-turns">
                     {displayTurns.length === 0 && (
                       <p className="muted" style={{ fontSize: 13, padding: "24px 4px" }}>
-                        Start recording to capture the meeting. Lines classify themselves as they land
-                        (problem / hypothesis / solution / decision / action / requirement) and save to this
-                        board.
+                        Start recording to capture the meeting. Lines classify themselves as they
+                        land (problem / hypothesis / solution / decision / action / requirement) and
+                        save to this board.
                       </p>
                     )}
                     {displayTurns.map((t, i) => {
@@ -1244,7 +1262,14 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
 
               {activePanel === "extract" && (
                 <div>
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      marginBottom: 12,
+                    }}
+                  >
                     <div className="mono small" style={{ color: "var(--ink-3)" }}>
                       Real-time classified items
                     </div>
@@ -1264,7 +1289,10 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
                       const hits = displayTurns.filter((t) => t.kind === k);
                       return (
                         <div key={k} className="meeting-extract-col">
-                          <div className="mono meeting-extract-title" style={{ color: extractColor[k] }}>
+                          <div
+                            className="mono meeting-extract-title"
+                            style={{ color: extractColor[k] }}
+                          >
                             {k} ({hits.length})
                           </div>
                           {hits.length === 0 && <div className="meeting-extract-empty">—</div>}
@@ -1286,7 +1314,10 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
                     Saved on this board ({saved.length})
                   </div>
                   {saved.length === 0 && (
-                    <div className="mono small" style={{ color: "var(--ink-3)", padding: "12px 0" }}>
+                    <div
+                      className="mono small"
+                      style={{ color: "var(--ink-3)", padding: "12px 0" }}
+                    >
                       No saved meetings yet. Record and save to archive minutes.
                     </div>
                   )}
@@ -1300,7 +1331,8 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
                         alignItems: "center",
                         padding: "10px 12px",
                         borderRadius: 8,
-                        background: selectedMeeting?.id === m.id ? "var(--canvas-3)" : "var(--canvas-2)",
+                        background:
+                          selectedMeeting?.id === m.id ? "var(--canvas-3)" : "var(--canvas-2)",
                         border: "1px solid var(--stroke-1)",
                         marginBottom: 6,
                         cursor: "pointer",

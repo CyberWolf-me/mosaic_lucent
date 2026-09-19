@@ -1,7 +1,15 @@
 import { afterEach, describe, expect, it } from "vitest";
 import type { AddressInfo } from "node:net";
 import { MockImageProvider, MockProvider } from "@lucent/ai";
-import { applyOperations, actionsFromDecision, createWorkspace, decisionDriveGraph, decisionsBehindAction, inverseOperations, type Operation } from "@lucent/core";
+import {
+  applyOperations,
+  actionsFromDecision,
+  createWorkspace,
+  decisionDriveGraph,
+  decisionsBehindAction,
+  inverseOperations,
+  type Operation,
+} from "@lucent/core";
 import { createApp } from "../src/app.js";
 import { InMemoryUserStore } from "../src/accounts.js";
 import { InMemoryBoardStore } from "../src/boards.js";
@@ -61,13 +69,27 @@ async function makeHarness() {
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const { port } = server.address() as AddressInfo;
-  return { base: `http://127.0.0.1:${port}`, userStore, boardStore, close: async () => { await close(); } };
+  return {
+    base: `http://127.0.0.1:${port}`,
+    userStore,
+    boardStore,
+    close: async () => {
+      await close();
+    },
+  };
 }
 
 let open: Awaited<ReturnType<typeof makeHarness>> | null = null;
-afterEach(async () => { await open?.close(); open = null; });
+afterEach(async () => {
+  await open?.close();
+  open = null;
+});
 
-async function api(h: NonNullable<typeof open>, path: string, init: RequestInit & { token?: string } = {}) {
+async function api(
+  h: NonNullable<typeof open>,
+  path: string,
+  init: RequestInit & { token?: string } = {},
+) {
   const { token, ...rest } = init;
   const res = await fetch(`${h.base}${path}`, {
     ...rest,
@@ -98,11 +120,16 @@ function fixtureOps(): Operation[] {
   const ops: Operation[] = [];
   const add = (id: string, kind: any, issue?: Record<string, unknown>) => {
     ops.push({ op: "CREATE_NODE", id, nodeType: kind, label: id.replace(/-/g, " ") });
-    ops.push({ op: "SET_STATEMENT", id, statement: { kind, status: kind === "decision" ? "resolved" : "open" } });
+    ops.push({
+      op: "SET_STATEMENT",
+      id,
+      statement: { kind, status: kind === "decision" ? "resolved" : "open" },
+    });
     if (issue) ops.push({ op: "SET_ISSUE", id, issue: { type: "task", ...issue } } as Operation);
   };
   for (let i = 0; i < 4; i += 1) add(`dec-${i}`, "decision");
-  for (let i = 0; i < 6; i += 1) add(`act-${i}`, "action", { status: "assigned", assignee: "Sarah" });
+  for (let i = 0; i < 6; i += 1)
+    add(`act-${i}`, "action", { status: "assigned", assignee: "Sarah" });
   for (let i = 0; i < 3; i += 1) add(`req-${i}`, "requirement");
   for (let i = 0; i < 5; i += 1) add(`pro-${i}`, "proposal");
   for (let i = 0; i < 4; i += 1) add(`que-${i}`, "question");
@@ -119,7 +146,15 @@ async function planOpsFromMock() {
   // The server test cannot import @lucent/web (the C4/C6 precedent) — the
   // real gate is node-tested in the web package (plan-gate.test.ts); here
   // the same allowlist is mirrored inline as the honest contract twin.
-  const PLAN_SAFE_OPS = new Set(["CREATE_NODE", "SET_STATEMENT", "SET_ISSUE", "UPDATE_ISSUE", "CREATE_GROUP", "CONNECT_NODES", "SET_GROUP_KIND"]);
+  const PLAN_SAFE_OPS = new Set([
+    "CREATE_NODE",
+    "SET_STATEMENT",
+    "SET_ISSUE",
+    "UPDATE_ISSUE",
+    "CREATE_GROUP",
+    "CONNECT_NODES",
+    "SET_GROUP_KIND",
+  ]);
   const gatePlanOps = (ops: readonly Operation[]) => ({
     allowed: ops.filter((o) => PLAN_SAFE_OPS.has(o.op)),
     skipped: ops.filter((o) => !PLAN_SAFE_OPS.has(o.op)).map((o) => ({ op: o.op, reason: "gate" })),
@@ -132,7 +167,17 @@ async function planOpsFromMock() {
   } as never);
   // The send path's composition: gate, then stamp.
   const gated = gatePlanOps(result.operations);
-  const stamped = attachPlanProvenance(gated.allowed, ["dec-0", "dec-1", "dec-2", "dec-3", "req-0", "req-1", "req-2", "rsk-0", "rsk-1"]);
+  const stamped = attachPlanProvenance(gated.allowed, [
+    "dec-0",
+    "dec-1",
+    "dec-2",
+    "dec-3",
+    "req-0",
+    "req-1",
+    "req-2",
+    "rsk-0",
+    "rsk-1",
+  ]);
   return { raw: result.operations, gated, stamped };
 }
 
@@ -220,7 +265,13 @@ describe("Stage D2 definition of done — the acceptance fixture", () => {
     expect(region!.children).toContain("req-0-action");
 
     // Every derived action traces createdFrom to REAL source statement ids.
-    for (const id of ["req-0-action", "req-1-action", "req-2-action", "rsk-0-action", "rsk-1-action"]) {
+    for (const id of [
+      "req-0-action",
+      "req-1-action",
+      "req-2-action",
+      "rsk-0-action",
+      "rsk-1-action",
+    ]) {
       const node = ws.nodes[id];
       expect(node, `${id} created`).toBeDefined();
       expect(node!.provenance?.createdFrom).toBeDefined();
@@ -257,7 +308,13 @@ describe("Stage D2 definition of done — the acceptance fixture", () => {
     const drivenActions = new Set(
       [...driveGraph.values()].reduce<string[]>((acc, ids) => [...acc, ...ids], []),
     );
-    for (const id of ["req-0-action", "req-1-action", "req-2-action", "rsk-0-action", "rsk-1-action"]) {
+    for (const id of [
+      "req-0-action",
+      "req-1-action",
+      "req-2-action",
+      "rsk-0-action",
+      "rsk-1-action",
+    ]) {
       expect(drivenActions.has(id), `${id} is driven by a decision`).toBe(true);
     }
     const decisionIds = [...driveGraph.keys()];
@@ -295,7 +352,9 @@ describe("Stage D2 definition of done — the acceptance fixture", () => {
 
     // -- The log records the approval as the AI actor chain ------------------
     const log = await h.boardStore.loadLog(boardId);
-    const planEntry = log.find((e) => e.label === "proposal approved" || (e.actor?.actorType === "ai"));
+    const planEntry = log.find(
+      (e) => e.label === "proposal approved" || e.actor?.actorType === "ai",
+    );
     expect(planEntry).toBeDefined();
     expect(planEntry!.actor?.actorType).toBe("ai");
     expect(planEntry!.actor?.initiatedBy).toBe(alice.id);
@@ -303,10 +362,13 @@ describe("Stage D2 definition of done — the acceptance fixture", () => {
 
     // -- Undo restores the board (the plan is one reversible batch) ----------
     const planOps = planEntry!.ops;
-    const inverse = inverseOperations(planOps, /* pre-state */ (() => {
-      const before = applyOperations(createWorkspace(), fixtureOps());
-      return before;
-    })());
+    const inverse = inverseOperations(
+      planOps,
+      /* pre-state */ (() => {
+        const before = applyOperations(createWorkspace(), fixtureOps());
+        return before;
+      })(),
+    );
     const undone = applyOperations(ws, inverse);
     expect(undone.groups["plan-region"]).toBeUndefined();
     expect(undone.nodes["req-0-action"]).toBeUndefined();
@@ -320,4 +382,3 @@ describe("Stage D2 definition of done — the acceptance fixture", () => {
 function planRequestTextText(): string {
   return "Create the work from these 9 statements: organize the decisions into a plan region, preserve existing actions with their owners and deadlines, derive new actions for requirements and risks, and link each derived action to the decision that drives it with a drives relationship. Proposals and questions are context — never create confirmed work from them.";
 }
-

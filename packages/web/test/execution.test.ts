@@ -12,7 +12,14 @@ import { executionProjection } from "../src/execution.js";
 
 const NOW = Date.UTC(2026, 8, 9, 12, 0); // 2026-09-09
 
-function action(id: string, fields: { status?: string; statusCategory?: "todo" | "in_progress" | "done"; dueDate?: string } = {}): Operation[] {
+function action(
+  id: string,
+  fields: {
+    status?: string;
+    statusCategory?: "todo" | "in_progress" | "done";
+    dueDate?: string;
+  } = {},
+): Operation[] {
   return [
     { op: "CREATE_NODE", id, nodeType: "action", label: id.replace(/-/g, " ") },
     { op: "SET_STATEMENT", id, statement: { kind: "action", status: "open" } },
@@ -56,7 +63,12 @@ describe("executionProjection", () => {
       ...action("design", { status: "blocked", statusCategory: "in_progress" }),
       ...action("implementation"),
       ...action("qa"),
-      { op: "CONNECT_NODES", source: "implementation", target: "design", relationship: "depends_on" },
+      {
+        op: "CONNECT_NODES",
+        source: "implementation",
+        target: "design",
+        relationship: "depends_on",
+      },
       { op: "CONNECT_NODES", source: "qa", target: "implementation", relationship: "depends_on" },
     ]);
     const { chains } = executionProjection(ws, NOW);

@@ -240,11 +240,21 @@ export const NodeCard = memo(function NodeCard({
         <span className="node-mark bpmn-gateway-marker" style={{ color: "var(--amber-2)" }}>
           {bpmnShape === "gateway" ? (
             <svg width={13} height={13} viewBox="0 0 13 13" aria-hidden>
-              <path d="M2 2 L11 11 M11 2 L2 11" stroke="currentColor" strokeWidth={1.8} fill="none" />
+              <path
+                d="M2 2 L11 11 M11 2 L2 11"
+                stroke="currentColor"
+                strokeWidth={1.8}
+                fill="none"
+              />
             </svg>
           ) : (
             <svg width={13} height={13} viewBox="0 0 13 13" aria-hidden>
-              <path d="M6.5 1.5 V11.5 M1.5 6.5 H11.5" stroke="currentColor" strokeWidth={1.8} fill="none" />
+              <path
+                d="M6.5 1.5 V11.5 M1.5 6.5 H11.5"
+                stroke="currentColor"
+                strokeWidth={1.8}
+                fill="none"
+              />
             </svg>
           )}
         </span>

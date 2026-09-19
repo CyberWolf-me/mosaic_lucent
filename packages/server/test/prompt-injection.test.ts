@@ -63,14 +63,28 @@ class StubSelector implements LLMProvider {
 
 /** The GitHub wire (the D8/E3 stub's shape, reused). */
 class GithubWire {
-  readonly issues: Array<{ number: number; title: string; body: string; state: string; state_reason: string | null }> = [];
+  readonly issues: Array<{
+    number: number;
+    title: string;
+    body: string;
+    state: string;
+    state_reason: string | null;
+  }> = [];
   private next = 100;
 
   readonly fetchImpl = (async (_url: string | URL | Request, init?: RequestInit) => {
     const url = new URL(String(_url));
     const method = (init?.method ?? "GET").toUpperCase();
-    const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : undefined;
-    const issueJson = (issue: { number: number; title: string; body: string; state: string; state_reason: string | null }) => ({
+    const body = init?.body
+      ? (JSON.parse(String(init.body)) as Record<string, unknown>)
+      : undefined;
+    const issueJson = (issue: {
+      number: number;
+      title: string;
+      body: string;
+      state: string;
+      state_reason: string | null;
+    }) => ({
       ...issue,
       html_url: `https://github.test/issues/${issue.number}`,
       assignees: [],
@@ -80,7 +94,13 @@ class GithubWire {
     }
     if (method === "POST" && url.pathname === "/repos/acme/app/issues") {
       const number = this.next++;
-      const issue = { number, title: String(body?.title ?? ""), body: String(body?.body ?? ""), state: "open", state_reason: null };
+      const issue = {
+        number,
+        title: String(body?.title ?? ""),
+        body: String(body?.body ?? ""),
+        state: "open",
+        state_reason: null,
+      };
       this.issues.push(issue);
       return new Response(JSON.stringify(issueJson(issue)), { status: 201 });
     }
@@ -134,9 +154,10 @@ async function makeHarness() {
     tickets: new InMemoryTicketStore(60_000),
     integrations: {
       store: new InMemoryIntegrationStore(),
-      providers: new Map<string, import("../src/integrations/provider.js").ExecutionProviderFactory>([
-        ["github", () => github],
-      ]),
+      providers: new Map<
+        string,
+        import("../src/integrations/provider.js").ExecutionProviderFactory
+      >([["github", () => github]]),
       actions,
       ledger: new InMemoryExecutionLedger(),
     },
@@ -189,10 +210,15 @@ describe("prompt-injection fixture — the gate under attack", () => {
 
     const signup = await api(h, "/api/auth/signup", {
       method: "POST",
-      body: JSON.stringify({ email: "injection@example.com", password: "password123", name: "Inj" }),
+      body: JSON.stringify({
+        email: "injection@example.com",
+        password: "password123",
+        name: "Inj",
+      }),
     });
     const { token } = signup.body as { token: string };
-    const orgId = (await h.userStore.membershipsFor((signup.body.user as { id: string }).id))[0]!.orgId;
+    const orgId = (await h.userStore.membershipsFor((signup.body.user as { id: string }).id))[0]!
+      .orgId;
 
     // THE CONNECTION: org-scoped, credentialRef → the harness env var.
     const connected = await api(h, `/api/orgs/${orgId}/integrations/github`, {
@@ -255,12 +281,16 @@ describe("prompt-injection fixture — the gate under attack", () => {
     // THE HUMAN GATE, positively: approve executes exactly the node's real
     // action — ONE create, carrying the node's id marker — and nothing the
     // injected text could have suggested.
-    const approve = await api(h, `/api/boards/${boardId}/integrations/actions/${actionId}/approve`, {
-      method: "POST",
-      token,
-      csrf: "csrf",
-      body: JSON.stringify({}),
-    });
+    const approve = await api(
+      h,
+      `/api/boards/${boardId}/integrations/actions/${actionId}/approve`,
+      {
+        method: "POST",
+        token,
+        csrf: "csrf",
+        body: JSON.stringify({}),
+      },
+    );
     expect(approve.status).toBe(200);
     expect(approve.body.applied).toBe(1);
     expect(h.wire.issues).toHaveLength(1);

@@ -227,9 +227,7 @@ export function statementEventOf(
           kind: op.statement.kind,
           status: op.statement.status,
           ...(op.statement.topic ? { topic: op.statement.topic } : {}),
-          ...(op.statement.supersedes?.length
-            ? { supersedes: op.statement.supersedes }
-            : {}),
+          ...(op.statement.supersedes?.length ? { supersedes: op.statement.supersedes } : {}),
           nodeId: op.id,
         },
       };

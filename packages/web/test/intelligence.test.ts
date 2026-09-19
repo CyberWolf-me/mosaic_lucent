@@ -27,9 +27,18 @@ function boardOf(ops: Operation[]) {
 function statement(
   id: string,
   kind: Operation extends never ? never : any,
-  fields: { status?: string; topic?: string; supersedes?: string[]; assignee?: string; meetingId?: string; turnRange?: [number, number] },
+  fields: {
+    status?: string;
+    topic?: string;
+    supersedes?: string[];
+    assignee?: string;
+    meetingId?: string;
+    turnRange?: [number, number];
+  },
 ) {
-  const ops: Operation[] = [{ op: "CREATE_NODE", id, nodeType: kind, label: id.replace(/-/g, " ") }];
+  const ops: Operation[] = [
+    { op: "CREATE_NODE", id, nodeType: kind, label: id.replace(/-/g, " ") },
+  ];
   ops.push({
     op: "SET_STATEMENT",
     id,
@@ -38,7 +47,14 @@ function statement(
       status: (fields.status ?? "open") as any,
       ...(fields.topic ? { topic: fields.topic } : {}),
       ...(fields.supersedes?.length ? { supersedes: fields.supersedes } : {}),
-      ...(fields.meetingId ? { provenance: { meetingId: fields.meetingId, ...(fields.turnRange ? { turnRange: fields.turnRange } : {}) } } : {}),
+      ...(fields.meetingId
+        ? {
+            provenance: {
+              meetingId: fields.meetingId,
+              ...(fields.turnRange ? { turnRange: fields.turnRange } : {}),
+            },
+          }
+        : {}),
     },
   });
   if (fields.assignee) {
@@ -58,14 +74,30 @@ function statement(
 
 function fullBoard() {
   return boardOf([
-    ...statement("launch-decision", "decision", { status: "resolved", topic: "launch", meetingId: "mtg_mon" }),
-    ...statement("pricing-decision", "decision", { topic: "pricing", meetingId: "mtg_wed", turnRange: [2, 2] }),
+    ...statement("launch-decision", "decision", {
+      status: "resolved",
+      topic: "launch",
+      meetingId: "mtg_mon",
+    }),
+    ...statement("pricing-decision", "decision", {
+      topic: "pricing",
+      meetingId: "mtg_wed",
+      turnRange: [2, 2],
+    }),
     ...statement("university-proposal", "proposal", { topic: "targeting" }),
     ...statement("billing-question", "question", { topic: "pricing" }),
-    ...statement("launch-brief", "action", { topic: "launch", assignee: "sarah", meetingId: "mtg_wed" }),
+    ...statement("launch-brief", "action", {
+      topic: "launch",
+      assignee: "sarah",
+      meetingId: "mtg_wed",
+    }),
     ...statement("sso-requirement", "requirement", { status: "resolved", topic: "auth" }),
     ...statement("appstore-risk", "risk", { topic: "launch" }),
-    ...statement("old-pricing", "decision", { status: "superseded", topic: "pricing", supersedes: [] }),
+    ...statement("old-pricing", "decision", {
+      status: "superseded",
+      topic: "pricing",
+      supersedes: [],
+    }),
     ...statement("pricing-model-risk", "risk", { topic: "pricing-model" }),
   ]);
 }
@@ -176,7 +208,7 @@ describe("the recommendation inbox", () => {
     const items = inboxItems(fullBoard());
     const key = suppressionKey(items[0]!);
     // Same pair, changed counts → a new question.
-    const changed: typeof items[0] extends never ? never : ReturnType<typeof inboxItems>[0] = {
+    const changed: (typeof items)[0] extends never ? never : ReturnType<typeof inboxItems>[0] = {
       ...items[0]!,
       dupStatements: 2,
     };
@@ -300,7 +332,12 @@ describe("the D3 derived execution on the projection (Stage D3, ADR 0029)", () =
       [
         { op: "UPDATE_ISSUE", id: "design", status: "blocked" },
         { op: "UPDATE_ISSUE", id: "design", dueDate: "2020-01-01" }, // blocked AND overdue
-        { op: "CONNECT_NODES", source: "implementation", target: "design", relationship: "depends_on" },
+        {
+          op: "CONNECT_NODES",
+          source: "implementation",
+          target: "design",
+          relationship: "depends_on",
+        },
         { op: "CONNECT_NODES", source: "qa", target: "implementation", relationship: "depends_on" },
       ],
     );
@@ -344,7 +381,14 @@ describe("the E1 drives causality on the projection (Stage E1, ADR 0037)", () =>
         ...statement("pilot-action", "action", { assignee: "sarah" }),
         ...statement("solo-action", "action", { assignee: "bo" }),
       ]),
-      [{ op: "CONNECT_NODES", source: "launch-decision", target: "pilot-action", relationship: "drives" }],
+      [
+        {
+          op: "CONNECT_NODES",
+          source: "launch-decision",
+          target: "pilot-action",
+          relationship: "drives",
+        },
+      ],
     );
   }
 
@@ -371,7 +415,14 @@ describe("the D6 link join (the chip's data)", () => {
   it("linksByNode maps node id → the board's link", () => {
     // The same join IntelligenceView builds — pinned here as the contract.
     const links = [
-      { nodeId: "a", provider: "linear", externalId: "LIN-482", url: "u", status: "Todo", syncedAt: 1 },
+      {
+        nodeId: "a",
+        provider: "linear",
+        externalId: "LIN-482",
+        url: "u",
+        status: "Todo",
+        syncedAt: 1,
+      },
       { nodeId: "b", provider: "fake", externalId: "fake-1", status: "todo", syncedAt: 2 },
     ];
     const map = new Map(links.map((l) => [l.nodeId, l]));

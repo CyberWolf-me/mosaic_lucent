@@ -31,10 +31,7 @@ function readRules(): string {
 
 /** Prometheus metric names the server registers (`name: "lucent_..."`). */
 function emittedMetrics(): Set<string> {
-  const sources = [
-    "packages/server/src/app.ts",
-    "packages/server/src/obs/metrics.ts",
-  ];
+  const sources = ["packages/server/src/app.ts", "packages/server/src/obs/metrics.ts"];
   const names = new Set<string>();
   for (const rel of sources) {
     const path = resolve(ROOT, rel);
@@ -51,9 +48,7 @@ function emittedMetrics(): Set<string> {
 function referencedMetrics(expr: string): string[] {
   // `lucent_x_total` etc, optionally followed by `_bucket`/`_count`/`_sum`
   // (Prometheus appends those to a histogram's base name).
-  return [...expr.matchAll(/\b(lucent_[a-z0-9_]+?)(?:_bucket|_count|_sum)?\b/g)].map(
-    (m) => m[1]!,
-  );
+  return [...expr.matchAll(/\b(lucent_[a-z0-9_]+?)(?:_bucket|_count|_sum)?\b/g)].map((m) => m[1]!);
 }
 
 describe("P6: the SLO alert rules", () => {
@@ -104,9 +99,11 @@ describe("P6: the SLO alert rules", () => {
     expect(emitted.size).toBeGreaterThan(10);
 
     const text = readRules();
-    const exprs = [...text.matchAll(/expr:\s*\|?\s*([\s\S]*?)(?=\n\s{10}\S|\n\s{10}- alert|\n\s{6}- alert|\n\s{6}labels:)/g)].map(
-      (m) => m[1]!,
-    );
+    const exprs = [
+      ...text.matchAll(
+        /expr:\s*\|?\s*([\s\S]*?)(?=\n\s{10}\S|\n\s{10}- alert|\n\s{6}- alert|\n\s{6}labels:)/g,
+      ),
+    ].map((m) => m[1]!);
     expect(exprs.length).toBeGreaterThan(0);
 
     const unknown = new Set<string>();

@@ -130,7 +130,14 @@ export function EmptyState({
             </div>
             <div
               className="mono"
-              style={{ fontSize: 11, color: "var(--ink-3)", marginTop: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "pre-wrap" }}
+              style={{
+                fontSize: 11,
+                color: "var(--ink-3)",
+                marginTop: 3,
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "pre-wrap",
+              }}
             >
               {failedAttempt.text}
             </div>

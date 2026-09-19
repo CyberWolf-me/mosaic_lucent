@@ -34,14 +34,28 @@ const SECRET = "d9-acceptance-secret-0123456789";
 
 /** The GitHub wire (the D8 stub's shape): the REST issues + assignees. */
 class GithubWire {
-  readonly issues: Array<{ number: number; title: string; body: string; state: string; state_reason: string | null }> = [];
+  readonly issues: Array<{
+    number: number;
+    title: string;
+    body: string;
+    state: string;
+    state_reason: string | null;
+  }> = [];
   private next = 100;
 
   readonly fetchImpl = (async (_url: string | URL | Request, init?: RequestInit) => {
     const url = new URL(String(_url));
     const method = (init?.method ?? "GET").toUpperCase();
-    const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : undefined;
-    const issueJson = (issue: { number: number; title: string; body: string; state: string; state_reason: string | null }) => ({
+    const body = init?.body
+      ? (JSON.parse(String(init.body)) as Record<string, unknown>)
+      : undefined;
+    const issueJson = (issue: {
+      number: number;
+      title: string;
+      body: string;
+      state: string;
+      state_reason: string | null;
+    }) => ({
       ...issue,
       html_url: `https://github.test/issues/${issue.number}`,
       assignees: [],
@@ -51,7 +65,13 @@ class GithubWire {
     }
     if (method === "POST" && url.pathname === "/repos/acme/app/issues") {
       const number = this.next++;
-      const issue = { number, title: String(body?.title ?? ""), body: String(body?.body ?? ""), state: "open", state_reason: null };
+      const issue = {
+        number,
+        title: String(body?.title ?? ""),
+        body: String(body?.body ?? ""),
+        state: "open",
+        state_reason: null,
+      };
       this.issues.push(issue);
       return new Response(JSON.stringify(issueJson(issue)), { status: 201 });
     }
@@ -66,7 +86,6 @@ class GithubWire {
     return new Response(JSON.stringify({ message: "no route" }), { status: 404 });
   }) as typeof fetch;
 }
-
 
 /** The scripted selector: the test sets the plan; every call is recorded. */
 class SelectorLLM implements LLMProvider {
@@ -128,9 +147,10 @@ async function makeHarness() {
     tickets: new InMemoryTicketStore(60_000),
     integrations: {
       store,
-      providers: new Map<string, import("../src/integrations/provider.js").ExecutionProviderFactory>([
-        ["github", () => github],
-      ]),
+      providers: new Map<
+        string,
+        import("../src/integrations/provider.js").ExecutionProviderFactory
+      >([["github", () => github]]),
       actions,
       ledger: new InMemoryExecutionLedger(),
     },
@@ -146,7 +166,9 @@ async function makeHarness() {
     actions,
     wire,
     selector,
-    close: async () => { await close(); },
+    close: async () => {
+      await close();
+    },
   };
 }
 
@@ -157,7 +179,11 @@ afterEach(async () => {
   delete process.env.D9_GH_KEY;
 });
 
-async function api(h: NonNullable<typeof open>, path: string, init: RequestInit & { token?: string; csrf?: string } = {}) {
+async function api(
+  h: NonNullable<typeof open>,
+  path: string,
+  init: RequestInit & { token?: string; csrf?: string } = {},
+) {
   const { token, csrf, ...rest } = init;
   const res = await fetch(`${h.base}${path}`, {
     ...rest,
@@ -177,15 +203,26 @@ async function api(h: NonNullable<typeof open>, path: string, init: RequestInit 
  * capability-warning target), 7 don't. */
 function tenActions(): Operation[] {
   const names = [
-    "Prepare launch brief", "Finalize launch spec", "Launch comms plan",
-    "Fix onboarding bug", "QA pass", "Update pricing page",
-    "Analytics check", "Security review", "Docs update", "Team retro",
+    "Prepare launch brief",
+    "Finalize launch spec",
+    "Launch comms plan",
+    "Fix onboarding bug",
+    "QA pass",
+    "Update pricing page",
+    "Analytics check",
+    "Security review",
+    "Docs update",
+    "Team retro",
   ];
   const ops: Operation[] = [];
   for (const [i, name] of names.entries()) {
     const id = `nd_${i + 1}`;
     ops.push({ op: "CREATE_NODE", id, nodeType: "action", label: name });
-    ops.push({ op: "SET_STATEMENT", id, statement: { kind: "action", status: "open", topic: "d9" } });
+    ops.push({
+      op: "SET_STATEMENT",
+      id,
+      statement: { kind: "action", status: "open", topic: "d9" },
+    });
     ops.push({
       op: "SET_ISSUE",
       id,
@@ -212,7 +249,9 @@ describe("Stage D9 definition of done — the narrowing agent, end to end", () =
     const token: string = signup.body.token;
     const orgId = (await h.userStore.membershipsFor(signup.body.user.id))[0]!.orgId;
     const put = await api(h, `/api/orgs/${orgId}/integrations/github`, {
-      method: "PUT", token, csrf: "csrf",
+      method: "PUT",
+      token,
+      csrf: "csrf",
       body: JSON.stringify({ credentialRef: "D9_GH_KEY", config: { repo: "acme/app" } }),
     });
     expect(put.status).toBe(201);
@@ -220,22 +259,29 @@ describe("Stage D9 definition of done — the narrowing agent, end to end", () =
     // The board with 10 actions (3 with dueDates + blocked status — the
     // warning targets).
     const created = await api(h, "/api/boards", {
-      method: "POST", token, body: JSON.stringify({ name: "D9 board", workspace: createWorkspace() }),
+      method: "POST",
+      token,
+      body: JSON.stringify({ name: "D9 board", workspace: createWorkspace() }),
     });
     expect(created.status).toBe(201);
     const boardId = created.body.id as string;
     const seeded = await api(h, `/api/boards/${boardId}/ops`, {
-      method: "POST", token, body: JSON.stringify({ ops: tenActions(), label: "ten" }),
+      method: "POST",
+      token,
+      body: JSON.stringify({ ops: tenActions(), label: "ten" }),
     });
     expect(seeded.status).toBe(200);
 
     // THE SELECTION: the model picks 4 (two launch + two others).
     h.selector.plan = {
       nodeIds: ["nd_1", "nd_2", "nd_6", "nd_8", "nd_ghost"],
-      explanation: "The launch brief and spec are the critical path; pricing and security support the launch gate.",
+      explanation:
+        "The launch brief and spec are the critical path; pricing and security support the launch gate.",
     };
     const proposed = await api(h, `/api/boards/${boardId}/integrations/github/propose-ai`, {
-      method: "POST", token, csrf: "csrf",
+      method: "POST",
+      token,
+      csrf: "csrf",
       body: JSON.stringify({ request: "send the actions needed for the launch" }),
     });
     expect(proposed.status).toBe(201);
@@ -252,12 +298,13 @@ describe("Stage D9 definition of done — the narrowing agent, end to end", () =
     const warned = proposed.body.preview.creates.filter((c: any) => c.warnings?.length);
     expect(warned.map((c: any) => c.nodeId).sort()).toEqual(["nd_1", "nd_2"]);
     // THE DROP WARNING: the ghost id is visible.
-    expect(proposed.body.preview.warnings).toEqual([
-      expect.stringContaining("nd_ghost"),
-    ]);
+    expect(proposed.body.preview.warnings).toEqual([expect.stringContaining("nd_ghost")]);
     // THE SELECTOR'S REQUEST: the semantic candidates, none of the connection.
     expect(h.selector.lastRequest!.candidates).toHaveLength(10);
-    expect(h.selector.lastRequest!.candidates[0]).toMatchObject({ nodeId: "nd_1", label: "Prepare launch brief" });
+    expect(h.selector.lastRequest!.candidates[0]).toMatchObject({
+      nodeId: "nd_1",
+      label: "Prepare launch brief",
+    });
     expect(JSON.stringify(h.selector.lastRequest)).not.toContain("teamId");
     expect(JSON.stringify(h.selector.lastRequest)).not.toContain("credentialRef");
 
@@ -272,18 +319,30 @@ describe("Stage D9 definition of done — the narrowing agent, end to end", () =
 
     // THE HUMAN GATE, arm 1: approve WITHOUT the ack → the 409 (the D8
     // warnings are on the narrowed set), zero wire mutations.
-    const refused = await api(h, `/api/boards/${boardId}/integrations/actions/${proposed.body.action.id}/approve`, {
-      method: "POST", token, csrf: "csrf",
-    });
+    const refused = await api(
+      h,
+      `/api/boards/${boardId}/integrations/actions/${proposed.body.action.id}/approve`,
+      {
+        method: "POST",
+        token,
+        csrf: "csrf",
+      },
+    );
     expect(refused.status).toBe(409);
     expect(refused.body.warnings.length).toBe(4); // 2 items × 2 warnings
     expect(h.wire.issues).toHaveLength(0);
 
     // Arm 2: WITH the ack → applied, exactly 4 on the wire.
-    const approved = await api(h, `/api/boards/${boardId}/integrations/actions/${proposed.body.action.id}/approve`, {
-      method: "POST", token, csrf: "csrf",
-      body: JSON.stringify({ acknowledgeWarnings: true }),
-    });
+    const approved = await api(
+      h,
+      `/api/boards/${boardId}/integrations/actions/${proposed.body.action.id}/approve`,
+      {
+        method: "POST",
+        token,
+        csrf: "csrf",
+        body: JSON.stringify({ acknowledgeWarnings: true }),
+      },
+    );
     expect(approved.status).toBe(200);
     expect(approved.body.applied).toBe(4);
     expect(h.wire.issues).toHaveLength(4);
@@ -291,7 +350,10 @@ describe("Stage D9 definition of done — the narrowing agent, end to end", () =
     // body — and the consented loss holds: no dueDate, state open (GitHub
     // is the warning-carrying provider; the ack is what the 409 demanded).
     expect(h.wire.issues.map((i) => i.title).sort()).toEqual([
-      "Finalize launch spec", "Prepare launch brief", "Security review", "Update pricing page",
+      "Finalize launch spec",
+      "Prepare launch brief",
+      "Security review",
+      "Update pricing page",
     ]);
     for (const issue of h.wire.issues) {
       expect(issue.body).toContain("<!-- lucent-action:ext_");
@@ -303,8 +365,16 @@ describe("Stage D9 definition of done — the narrowing agent, end to end", () =
     // audit, not a gate). Flip an unselected node's status and re-check
     // the wire count did not move.
     await api(h, `/api/boards/${boardId}/ops`, {
-      method: "POST", token, body: JSON.stringify({
-        ops: [{ op: "SET_ISSUE", id: "nd_5", issue: { type: "task", status: "completed", statusCategory: "done" } }],
+      method: "POST",
+      token,
+      body: JSON.stringify({
+        ops: [
+          {
+            op: "SET_ISSUE",
+            id: "nd_5",
+            issue: { type: "task", status: "completed", statusCategory: "done" },
+          },
+        ],
         label: "stale flip",
       }),
     });
@@ -313,7 +383,9 @@ describe("Stage D9 definition of done — the narrowing agent, end to end", () =
     // THE NEVER-SPEND ARM: propose-ai on a provider with no connection →
     // 404, ZERO selector calls (linear is unregistered in this harness).
     const noConn = await api(h, `/api/boards/${boardId}/integrations/linear/propose-ai`, {
-      method: "POST", token, csrf: "csrf",
+      method: "POST",
+      token,
+      csrf: "csrf",
       body: JSON.stringify({ request: "anything" }),
     });
     expect(noConn.status).toBe(404);
@@ -325,10 +397,16 @@ describe("Stage D9 definition of done — the narrowing agent, end to end", () =
     expect(row).toMatchObject({ status: "approved" });
 
     // DUPLICATE APPROVAL: the decided-once guard.
-    const dup = await api(h, `/api/boards/${boardId}/integrations/actions/${proposed.body.action.id}/approve`, {
-      method: "POST", token, csrf: "csrf",
-      body: JSON.stringify({ acknowledgeWarnings: true }),
-    });
+    const dup = await api(
+      h,
+      `/api/boards/${boardId}/integrations/actions/${proposed.body.action.id}/approve`,
+      {
+        method: "POST",
+        token,
+        csrf: "csrf",
+        body: JSON.stringify({ acknowledgeWarnings: true }),
+      },
+    );
     expect(dup.body.duplicate).toBe(true);
     expect(h.wire.issues).toHaveLength(4);
     // 30s budget, not the 5s default: this spins the full D1→D9 world and

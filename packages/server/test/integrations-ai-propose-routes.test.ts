@@ -98,9 +98,10 @@ async function makeHarness(opts?: { withoutConnection?: boolean }) {
     tickets: new InMemoryTicketStore(60_000),
     integrations: {
       store,
-      providers: new Map<string, import("../src/integrations/provider.js").ExecutionProviderFactory>([
-        ["fake", () => new FakeProvider()],
-      ]),
+      providers: new Map<
+        string,
+        import("../src/integrations/provider.js").ExecutionProviderFactory
+      >([["fake", () => new FakeProvider()]]),
       actions,
       ledger: new InMemoryExecutionLedger(),
     },
@@ -115,7 +116,9 @@ async function makeHarness(opts?: { withoutConnection?: boolean }) {
     store,
     actions,
     selector,
-    close: async () => { await close(); },
+    close: async () => {
+      await close();
+    },
   };
 }
 
@@ -126,7 +129,11 @@ afterEach(async () => {
   delete process.env.D9_FAKE_CRED;
 });
 
-async function api(h: NonNullable<typeof open>, path: string, init: RequestInit & { token?: string; csrf?: string } = {}) {
+async function api(
+  h: NonNullable<typeof open>,
+  path: string,
+  init: RequestInit & { token?: string; csrf?: string } = {},
+) {
   const { token, csrf, ...rest } = init;
   const res = await fetch(`${h.base}${path}`, {
     ...rest,
@@ -155,12 +162,23 @@ async function signup(h: NonNullable<typeof open>, email: string) {
 
 /** Six actions: launch brief / spec / qa / pricing / onboarding / analytics. */
 function seedOps(): Operation[] {
-  const names = ["launch brief", "launch spec", "qa pass", "pricing update", "onboarding fix", "analytics check"];
+  const names = [
+    "launch brief",
+    "launch spec",
+    "qa pass",
+    "pricing update",
+    "onboarding fix",
+    "analytics check",
+  ];
   const ops: Operation[] = [];
   for (const [i, name] of names.entries()) {
     const id = `nd_${i + 1}`;
     ops.push({ op: "CREATE_NODE", id, nodeType: "action", label: name });
-    ops.push({ op: "SET_STATEMENT", id, statement: { kind: "action", status: "open", topic: "d9" } });
+    ops.push({
+      op: "SET_STATEMENT",
+      id,
+      statement: { kind: "action", status: "open", topic: "d9" },
+    });
     ops.push({ op: "SET_ISSUE", id, issue: { type: "task", status: "open" } });
   }
   return ops;
@@ -168,12 +186,16 @@ function seedOps(): Operation[] {
 
 async function seedBoard(h: NonNullable<typeof open>, token: string): Promise<string> {
   const created = await api(h, "/api/boards", {
-    method: "POST", token, body: JSON.stringify({ name: "D9 board", workspace: createWorkspace() }),
+    method: "POST",
+    token,
+    body: JSON.stringify({ name: "D9 board", workspace: createWorkspace() }),
   });
   expect(created.status).toBe(201);
   const boardId = created.body.id as string;
   const seeded = await api(h, `/api/boards/${boardId}/ops`, {
-    method: "POST", token, body: JSON.stringify({ ops: seedOps(), label: "seed" }),
+    method: "POST",
+    token,
+    body: JSON.stringify({ ops: seedOps(), label: "seed" }),
   });
   expect(seeded.status).toBe(200);
   return boardId;
@@ -196,7 +218,9 @@ describe("the AI-propose route — the narrowing agent", () => {
     };
 
     const result = await api(h, `/api/boards/${boardId}/integrations/fake/propose-ai`, {
-      method: "POST", token: user.token, csrf: "csrf",
+      method: "POST",
+      token: user.token,
+      csrf: "csrf",
       body: JSON.stringify({ request: "send the launch-related actions" }),
     });
     expect(result.status).toBe(201);
@@ -242,14 +266,14 @@ describe("the AI-propose route — the narrowing agent", () => {
       explanation: "mixing real and invented ids",
     };
     const result = await api(h, `/api/boards/${boardId}/integrations/fake/propose-ai`, {
-      method: "POST", token: user.token, csrf: "csrf",
+      method: "POST",
+      token: user.token,
+      csrf: "csrf",
       body: JSON.stringify({ request: "send some" }),
     });
     expect(result.status).toBe(201);
     expect(result.body.preview.creates).toHaveLength(2);
-    expect(result.body.preview.warnings).toEqual([
-      expect.stringContaining("nd_ghost"),
-    ]);
+    expect(result.body.preview.warnings).toEqual([expect.stringContaining("nd_ghost")]);
     const record = await h.actions.action(boardId, result.body.action.id);
     expect(record!.items.map((i) => i.nodeId)).toEqual(["nd_1", "nd_2"]);
   });
@@ -265,7 +289,9 @@ describe("the AI-propose route — the narrowing agent", () => {
     const boardId = await seedBoard(h, user.token);
     h.selector.plan = { nodeIds: ["nd_1", "nd_1", "nd_2", "nd_2"], explanation: "duplicated" };
     const result = await api(h, `/api/boards/${boardId}/integrations/fake/propose-ai`, {
-      method: "POST", token: user.token, csrf: "csrf",
+      method: "POST",
+      token: user.token,
+      csrf: "csrf",
       body: JSON.stringify({ request: "send some" }),
     });
     expect(result.body.preview.selectedCount).toBe(2);
@@ -288,18 +314,26 @@ describe("the AI-propose route — the narrowing agent", () => {
     for (let i = 7; i <= 14; i += 1) {
       const id = `nd_${i}`;
       more.push({ op: "CREATE_NODE", id, nodeType: "action", label: `action ${i}` });
-      more.push({ op: "SET_STATEMENT", id, statement: { kind: "action", status: "open", topic: "d9" } });
+      more.push({
+        op: "SET_STATEMENT",
+        id,
+        statement: { kind: "action", status: "open", topic: "d9" },
+      });
       more.push({ op: "SET_ISSUE", id, issue: { type: "task", status: "open" } });
     }
     await api(h, `/api/boards/${boardId}/ops`, {
-      method: "POST", token: user.token, body: JSON.stringify({ ops: more, label: "more" }),
+      method: "POST",
+      token: user.token,
+      body: JSON.stringify({ ops: more, label: "more" }),
     });
     h.selector.plan = {
       nodeIds: Array.from({ length: 12 }, (_, i) => `nd_${i + 1}`),
       explanation: "selected everything",
     };
     const result = await api(h, `/api/boards/${boardId}/integrations/fake/propose-ai`, {
-      method: "POST", token: user.token, csrf: "csrf",
+      method: "POST",
+      token: user.token,
+      csrf: "csrf",
       body: JSON.stringify({ request: "send everything" }),
     });
     expect(result.status).toBe(422);
@@ -320,7 +354,9 @@ describe("the AI-propose route — the narrowing agent", () => {
     const boardId = await seedBoard(h, user.token);
     h.selector.plan = { nodeIds: ["ghost_1", "ghost_2"], explanation: "nothing real" };
     const result = await api(h, `/api/boards/${boardId}/integrations/fake/propose-ai`, {
-      method: "POST", token: user.token, csrf: "csrf",
+      method: "POST",
+      token: user.token,
+      csrf: "csrf",
       body: JSON.stringify({ request: "send whatever" }),
     });
     expect(result.status).toBe(422);
@@ -333,7 +369,9 @@ describe("the AI-propose route — the narrowing agent", () => {
     const user = await signup(h, "d9@example.com");
     const boardId = await seedBoard(h, user.token);
     const result = await api(h, `/api/boards/${boardId}/integrations/fake/propose-ai`, {
-      method: "POST", token: user.token, csrf: "csrf",
+      method: "POST",
+      token: user.token,
+      csrf: "csrf",
       body: JSON.stringify({ request: "send the launch ones" }),
     });
     expect(result.status).toBe(404);
@@ -353,14 +391,22 @@ describe("the AI-propose route — the narrowing agent", () => {
     const boardId = await seedBoard(h, user.token);
     h.selector.plan = { nodeIds: ["nd_1"], explanation: "one" };
     const proposed = await api(h, `/api/boards/${boardId}/integrations/fake/propose-ai`, {
-      method: "POST", token: user.token, csrf: "csrf",
+      method: "POST",
+      token: user.token,
+      csrf: "csrf",
       body: JSON.stringify({ request: "the brief" }),
     });
     expect(proposed.status).toBe(201);
     // The human approve route decides it — the same route, same semantics.
-    const approved = await api(h, `/api/boards/${boardId}/integrations/actions/${proposed.body.action.id}/approve`, {
-      method: "POST", token: user.token, csrf: "csrf",
-    });
+    const approved = await api(
+      h,
+      `/api/boards/${boardId}/integrations/actions/${proposed.body.action.id}/approve`,
+      {
+        method: "POST",
+        token: user.token,
+        csrf: "csrf",
+      },
+    );
     expect(approved.status).toBe(200);
     expect(approved.body.applied).toBe(1);
     // The link registry carries the item.
@@ -379,16 +425,22 @@ describe("the AI-propose route — the narrowing agent", () => {
     );
     const boardId = await seedBoard(h, user.token);
     const noBody = await api(h, `/api/boards/${boardId}/integrations/fake/propose-ai`, {
-      method: "POST", token: user.token, csrf: "csrf",
+      method: "POST",
+      token: user.token,
+      csrf: "csrf",
     });
     expect(noBody.status).toBe(400);
     // A board with no actions.
     const empty = await api(h, "/api/boards", {
-      method: "POST", token: user.token, body: JSON.stringify({ name: "empty", workspace: createWorkspace() }),
+      method: "POST",
+      token: user.token,
+      body: JSON.stringify({ name: "empty", workspace: createWorkspace() }),
     });
     h.selector.plan = { nodeIds: ["x"], explanation: "x" };
     const noActions = await api(h, `/api/boards/${empty.body.id}/integrations/fake/propose-ai`, {
-      method: "POST", token: user.token, csrf: "csrf",
+      method: "POST",
+      token: user.token,
+      csrf: "csrf",
       body: JSON.stringify({ request: "anything" }),
     });
     expect(noActions.status).toBe(422);

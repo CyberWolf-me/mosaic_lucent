@@ -232,7 +232,8 @@ export class JiraProvider implements ExecutionProvider {
   }
 
   async createTask(input: CreateTaskInput): Promise<ExternalTask> {
-    const assignee = input.assignee !== undefined ? await this.resolveAssignee(input.assignee) : null;
+    const assignee =
+      input.assignee !== undefined ? await this.resolveAssignee(input.assignee) : null;
     const issue = await this.rest<{ key: string }>("/issue", {
       method: "POST",
       body: JSON.stringify({
@@ -259,14 +260,20 @@ export class JiraProvider implements ExecutionProvider {
     // The fields PUT directly: title/summary, description, assignee,
     // duedate. STATUS DOES NOT — Jira only moves status through
     // transitions (the recorded divergence).
-    const assignee = input.assignee !== undefined ? await this.resolveAssignee(input.assignee) : null;
+    const assignee =
+      input.assignee !== undefined ? await this.resolveAssignee(input.assignee) : null;
     await this.rest("/issue/" + encodeURIComponent(externalId), {
       method: "PUT",
       body: JSON.stringify({
         fields: {
           ...(input.title !== undefined ? { summary: input.title } : {}),
           ...(input.description !== undefined
-            ? { description: adfWithMarker(input.description, markerFor({ title: input.title ?? externalId })) }
+            ? {
+                description: adfWithMarker(
+                  input.description,
+                  markerFor({ title: input.title ?? externalId }),
+                ),
+              }
             : {}),
           ...(assignee ? { assignee: { accountId: assignee.accountId } } : {}),
           ...(input.dueDate !== undefined ? { duedate: input.dueDate } : {}),
@@ -289,18 +296,12 @@ export class JiraProvider implements ExecutionProvider {
    */
   private async transition(externalId: string, lucentStatus: string): Promise<void> {
     const target = this.toExternalStatus(lucentStatus);
-    const data = await this.rest<{ transitions?: Array<{ id: string; name: string; to?: { name?: string } }> }>(
-      `/issue/${encodeURIComponent(externalId)}/transitions`,
-    );
-    const matching = (data.transitions ?? []).filter(
-      (t) => (t.to?.name ?? "").trim() === target,
-    );
+    const data = await this.rest<{
+      transitions?: Array<{ id: string; name: string; to?: { name?: string } }>;
+    }>(`/issue/${encodeURIComponent(externalId)}/transitions`);
+    const matching = (data.transitions ?? []).filter((t) => (t.to?.name ?? "").trim() === target);
     if (matching.length === 0) {
-      throw new JiraError(
-        `no transition to "${target}" is available for ${externalId}`,
-        0,
-        false,
-      );
+      throw new JiraError(`no transition to "${target}" is available for ${externalId}`, 0, false);
     }
     if (matching.length > 1) {
       throw new JiraError(
@@ -385,7 +386,11 @@ export class JiraProvider implements ExecutionProvider {
         // blocked/cancelled have no well-known Jira counterpart — the
         // capability warning says so BEFORE execution; the honest error
         // answers a call that gets this far anyway.
-        throw new JiraError(`Lucent status "${lucentStatus}" has no well-known Jira counterpart`, 0, false);
+        throw new JiraError(
+          `Lucent status "${lucentStatus}" has no well-known Jira counterpart`,
+          0,
+          false,
+        );
     }
   }
 
@@ -424,15 +429,15 @@ export class JiraProvider implements ExecutionProvider {
    * assignee quietly — the same contract as GitHub's ladder (ADR 0034:
    * unresolvable is a warning-and-omit, not a failed item).
    */
-  private async resolveAssignee(assignee: string): Promise<{ accountId: string; label: string } | null> {
+  private async resolveAssignee(
+    assignee: string,
+  ): Promise<{ accountId: string; label: string } | null> {
     const key = assignee.trim().toLowerCase();
     await this.ensureAssigneeIndex();
     const index = this.assigneeIndex!;
     const exact = index.get(key);
     if (exact) return exact;
-    const partial = [...index.keys()].filter(
-      (k) => k.includes(key) || key.includes(k),
-    );
+    const partial = [...index.keys()].filter((k) => k.includes(key) || key.includes(k));
     if (partial.length === 1) return index.get(partial[0]!)!;
     if (partial.length > 1) {
       throw new JiraError(`unable to uniquely resolve assignee "${assignee}"`, 0, false);
@@ -467,9 +472,10 @@ export class JiraProvider implements ExecutionProvider {
  * site + projectKey + issueType (default "Task"). The site is validated
  * SSRF-safe at CONNECT time (the honest 400; ADR 0034's policy).
  */
-export function jiraConnectionFactory(): (
-  connection: { credentialRef: string; config?: Record<string, string> },
-) => ExecutionProvider {
+export function jiraConnectionFactory(): (connection: {
+  credentialRef: string;
+  config?: Record<string, string>;
+}) => ExecutionProvider {
   return (connection) => {
     const credential = process.env[connection.credentialRef];
     if (!credential) {

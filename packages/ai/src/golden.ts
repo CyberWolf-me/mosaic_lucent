@@ -288,7 +288,12 @@ export const GOLDEN_SET: readonly GoldenCase[] = [
       "From Wednesday's meeting: Sarah: 'Actually, we're going with $15/month — the $20 felt too steep.' The board currently shows Monday's decision node (id pricing-decision) at $20/month.",
     summary: summarizeWorkspace(
       applyOperations(createWorkspace(), [
-        { op: "CREATE_NODE", id: "pricing-decision", nodeType: "decision", label: "Pricing at $20/month" },
+        {
+          op: "CREATE_NODE",
+          id: "pricing-decision",
+          nodeType: "decision",
+          label: "Pricing at $20/month",
+        },
         {
           op: "SET_STATEMENT",
           id: "pricing-decision",
@@ -321,7 +326,12 @@ export const GOLDEN_SET: readonly GoldenCase[] = [
     message: "Add a decision about the pricing model for the pro tier.",
     summary: summarizeWorkspace(
       applyOperations(createWorkspace(), [
-        { op: "CREATE_NODE", id: "pricing-proposal", nodeType: "decision", label: "Pricing at $20/month" },
+        {
+          op: "CREATE_NODE",
+          id: "pricing-proposal",
+          nodeType: "decision",
+          label: "Pricing at $20/month",
+        },
         {
           op: "SET_STATEMENT",
           id: "pricing-proposal",
@@ -387,8 +397,7 @@ export const GOLDEN_SET: readonly GoldenCase[] = [
     // ISO dueDate (never the word 'Friday'), the canonical 'assigned'
     // initialization, and a description when the words carry one. The mock
     // script is the fixed-reference determinism stand-in.
-    message:
-      "From a planning meeting: David: 'I'll prepare the launch brief by Friday.'",
+    message: "From a planning meeting: David: 'I'll prepare the launch brief by Friday.'",
     summary: empty,
     expectOperations: [
       { op: "CREATE_NODE", nodeType: "action" },
@@ -477,33 +486,89 @@ export const GOLDEN_SET: readonly GoldenCase[] = [
     // work — mechanically, no UPDATE_STATEMENT/DELETE anywhere in the batch.
     message: "Create the work from these decisions.",
     summary: summarizeWorkspace(
-      applyOperations(createWorkspace(), [
-        ...Array.from({ length: 4 }, (_, i) => [
-          { op: "CREATE_NODE" as const, id: `dec-${i}`, nodeType: "decision", label: `Decision ${i}` },
-          { op: "SET_STATEMENT" as const, id: `dec-${i}`, statement: { kind: "decision" as const, status: "resolved" as const } },
-        ]),
-        ...Array.from({ length: 6 }, (_, i) => [
-          { op: "CREATE_NODE" as const, id: `act-${i}`, nodeType: "action", label: `Action ${i}` },
-          { op: "SET_STATEMENT" as const, id: `act-${i}`, statement: { kind: "action" as const, status: "open" as const } },
-          { op: "SET_ISSUE" as const, id: `act-${i}`, issue: { type: "task" as const, status: "assigned", assignee: "Sarah" } },
-        ]),
-        ...Array.from({ length: 3 }, (_, i) => [
-          { op: "CREATE_NODE" as const, id: `req-${i}`, nodeType: "requirement", label: `Requirement ${i}` },
-          { op: "SET_STATEMENT" as const, id: `req-${i}`, statement: { kind: "requirement" as const, status: "open" as const } },
-        ]),
-        ...Array.from({ length: 5 }, (_, i) => [
-          { op: "CREATE_NODE" as const, id: `pro-${i}`, nodeType: "proposal", label: `Proposal ${i}` },
-          { op: "SET_STATEMENT" as const, id: `pro-${i}`, statement: { kind: "proposal" as const, status: "open" as const } },
-        ]),
-        ...Array.from({ length: 4 }, (_, i) => [
-          { op: "CREATE_NODE" as const, id: `que-${i}`, nodeType: "question", label: `Question ${i}` },
-          { op: "SET_STATEMENT" as const, id: `que-${i}`, statement: { kind: "question" as const, status: "open" as const } },
-        ]),
-        ...Array.from({ length: 2 }, (_, i) => [
-          { op: "CREATE_NODE" as const, id: `rsk-${i}`, nodeType: "risk", label: `Risk ${i}` },
-          { op: "SET_STATEMENT" as const, id: `rsk-${i}`, statement: { kind: "risk" as const, status: "open" as const } },
-        ]),
-      ].flat() as never[]),
+      applyOperations(
+        createWorkspace(),
+        [
+          ...Array.from({ length: 4 }, (_, i) => [
+            {
+              op: "CREATE_NODE" as const,
+              id: `dec-${i}`,
+              nodeType: "decision",
+              label: `Decision ${i}`,
+            },
+            {
+              op: "SET_STATEMENT" as const,
+              id: `dec-${i}`,
+              statement: { kind: "decision" as const, status: "resolved" as const },
+            },
+          ]),
+          ...Array.from({ length: 6 }, (_, i) => [
+            {
+              op: "CREATE_NODE" as const,
+              id: `act-${i}`,
+              nodeType: "action",
+              label: `Action ${i}`,
+            },
+            {
+              op: "SET_STATEMENT" as const,
+              id: `act-${i}`,
+              statement: { kind: "action" as const, status: "open" as const },
+            },
+            {
+              op: "SET_ISSUE" as const,
+              id: `act-${i}`,
+              issue: { type: "task" as const, status: "assigned", assignee: "Sarah" },
+            },
+          ]),
+          ...Array.from({ length: 3 }, (_, i) => [
+            {
+              op: "CREATE_NODE" as const,
+              id: `req-${i}`,
+              nodeType: "requirement",
+              label: `Requirement ${i}`,
+            },
+            {
+              op: "SET_STATEMENT" as const,
+              id: `req-${i}`,
+              statement: { kind: "requirement" as const, status: "open" as const },
+            },
+          ]),
+          ...Array.from({ length: 5 }, (_, i) => [
+            {
+              op: "CREATE_NODE" as const,
+              id: `pro-${i}`,
+              nodeType: "proposal",
+              label: `Proposal ${i}`,
+            },
+            {
+              op: "SET_STATEMENT" as const,
+              id: `pro-${i}`,
+              statement: { kind: "proposal" as const, status: "open" as const },
+            },
+          ]),
+          ...Array.from({ length: 4 }, (_, i) => [
+            {
+              op: "CREATE_NODE" as const,
+              id: `que-${i}`,
+              nodeType: "question",
+              label: `Question ${i}`,
+            },
+            {
+              op: "SET_STATEMENT" as const,
+              id: `que-${i}`,
+              statement: { kind: "question" as const, status: "open" as const },
+            },
+          ]),
+          ...Array.from({ length: 2 }, (_, i) => [
+            { op: "CREATE_NODE" as const, id: `rsk-${i}`, nodeType: "risk", label: `Risk ${i}` },
+            {
+              op: "SET_STATEMENT" as const,
+              id: `rsk-${i}`,
+              statement: { kind: "risk" as const, status: "open" as const },
+            },
+          ]),
+        ].flat() as never[],
+      ),
     ),
     expectOperations: [
       // Decisions create structure: the region.

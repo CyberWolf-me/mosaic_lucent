@@ -72,7 +72,7 @@ editing/renumbering (the index system depends on immutability).
 
 - "Memory" in Lucent means: canonical state (ops, statements, provenance,
   transcripts) plus the ability to read it forwards and backwards. Anything
-  that wants a *derived* memory later (C5's topic entities, summaries) must
+  that wants a _derived_ memory later (C5's topic entities, summaries) must
   follow askContext's rule: derived, disposable, never persisted, and if it
   ever needs durability it gets its own ADR first.
 - Turn indices are now load-bearing in three surfaces; any future change to

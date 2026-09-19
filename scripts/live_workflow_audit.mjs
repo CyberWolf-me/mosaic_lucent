@@ -2,7 +2,8 @@ import { chromium } from "playwright";
 import path from "node:path";
 import fs from "node:fs";
 
-const ARTIFACT_DIR = "C:\\Users\\User\\.gemini\\antigravity\\brain\\2b2c4ff7-26fe-4f14-a6eb-49607cf95d6f";
+const ARTIFACT_DIR =
+  "C:\\Users\\User\\.gemini\\antigravity\\brain\\2b2c4ff7-26fe-4f14-a6eb-49607cf95d6f";
 const BASE_URL = "https://161.33.167.15.sslip.io";
 
 const results = {
@@ -10,7 +11,7 @@ const results = {
   failed: [],
   observations: [],
   consoleErrors: [],
-  networkErrors: []
+  networkErrors: [],
 };
 
 async function logStep(name, fn) {
@@ -71,7 +72,9 @@ async function run() {
 
   page.on("dialog", async (dialog) => {
     console.log(`[Browser Dialog] type=${dialog.type()} message="${dialog.message()}"`);
-    await dialog.accept("A glowing modern geometric cyber logo badge with violet and teal luminescence");
+    await dialog.accept(
+      "A glowing modern geometric cyber logo badge with violet and teal luminescence",
+    );
   });
 
   let currentBoardUrl = "";
@@ -85,7 +88,9 @@ async function run() {
     await page.goto(`${BASE_URL}/login`, { waitUntil: "networkidle" });
     await page.waitForTimeout(1000);
 
-    const signupToggle = page.locator('button:has-text("Create an account"), button:has-text("Sign up")');
+    const signupToggle = page.locator(
+      'button:has-text("Create an account"), button:has-text("Sign up")',
+    );
     if ((await signupToggle.count()) > 0) {
       await signupToggle.first().click();
       await page.waitForTimeout(500);
@@ -114,7 +119,9 @@ async function run() {
       await page.waitForTimeout(500);
     }
 
-    const blankBoardBtn = page.locator('button:has-text("start with a blank board"), button:has-text("blank board")');
+    const blankBoardBtn = page.locator(
+      'button:has-text("start with a blank board"), button:has-text("blank board")',
+    );
     if ((await blankBoardBtn.count()) > 0) {
       await blankBoardBtn.first().click();
       await page.waitForTimeout(600);
@@ -132,17 +139,24 @@ async function run() {
   // WORKFLOW 2: AI Diagram Generation & Layout
   // ----------------------------------------------------
   await logStep("Workflow 2: AI Diagram Generation from Natural Language", async () => {
-    const aiInput = page.locator('.ai-pill input, input[placeholder*="describe it"], input[placeholder*="Ask Lucent"]').first();
+    const aiInput = page
+      .locator(
+        '.ai-pill input, input[placeholder*="describe it"], input[placeholder*="Ask Lucent"]',
+      )
+      .first();
     if ((await aiInput.count()) === 0) {
       throw new Error("AI Pill input field not found on canvas!");
     }
 
-    const promptText = "Create an incident management workflow with PagerDuty Alert, On-Call Engineer, Runbook Check, Remediation, and Post-Mortem";
+    const promptText =
+      "Create an incident management workflow with PagerDuty Alert, On-Call Engineer, Runbook Check, Remediation, and Post-Mortem";
     console.log(`Prompt: "${promptText}"`);
     await aiInput.fill(promptText);
     await page.waitForTimeout(400);
 
-    const generatePromise = page.waitForResponse((res) => res.url().includes("/api/generate"), { timeout: 35000 });
+    const generatePromise = page.waitForResponse((res) => res.url().includes("/api/generate"), {
+      timeout: 35000,
+    });
     await page.keyboard.press("Enter");
 
     const genRes = await generatePromise;
@@ -154,13 +168,15 @@ async function run() {
 
     // Wait for nodes to layout and render
     try {
-      await page.waitForSelector('.node, .diagram-node, [data-node-id], .node-pill, .node-card', { timeout: 12000 });
+      await page.waitForSelector(".node, .diagram-node, [data-node-id], .node-pill, .node-card", {
+        timeout: 12000,
+      });
     } catch {
       console.log("Timed out waiting for standard node selector, checking DOM...");
     }
     await page.waitForTimeout(2000);
 
-    const nodes = page.locator('.node, .diagram-node, [data-node-id], .node-pill, .node-card');
+    const nodes = page.locator(".node, .diagram-node, [data-node-id], .node-pill, .node-card");
     const nodeCount = await nodes.count();
     console.log(`Rendered nodes found on canvas: ${nodeCount}`);
 
@@ -172,13 +188,20 @@ async function run() {
   // WORKFLOW 3: Conversational Refinement of Diagram
   // ----------------------------------------------------
   await logStep("Workflow 3: Conversational Diagram Refinement", async () => {
-    const aiInput = page.locator('.ai-pill input, input[placeholder*="describe it"], input[placeholder*="Ask Lucent"]').first();
-    const refineText = "Add an Escalation Policy branch if the alert is unacknowledged within 10 minutes";
+    const aiInput = page
+      .locator(
+        '.ai-pill input, input[placeholder*="describe it"], input[placeholder*="Ask Lucent"]',
+      )
+      .first();
+    const refineText =
+      "Add an Escalation Policy branch if the alert is unacknowledged within 10 minutes";
     console.log(`Refinement prompt: "${refineText}"`);
     await aiInput.fill(refineText);
     await page.waitForTimeout(400);
 
-    const generatePromise = page.waitForResponse((res) => res.url().includes("/api/generate"), { timeout: 35000 });
+    const generatePromise = page.waitForResponse((res) => res.url().includes("/api/generate"), {
+      timeout: 35000,
+    });
     await page.keyboard.press("Enter");
 
     const genRes = await generatePromise;
@@ -198,7 +221,7 @@ async function run() {
 
       // Fallback click if shortcut didn't trigger from active element
       if ((await proposalPanel.count()) > 0) {
-        const applyBtn = page.locator('.panel-foot button.amber');
+        const applyBtn = page.locator(".panel-foot button.amber");
         if ((await applyBtn.count()) > 0) {
           await applyBtn.first().click();
           await page.waitForTimeout(1500);
@@ -207,7 +230,7 @@ async function run() {
       console.log("Proposal applied!");
     }
 
-    const nodes = page.locator('.node, .diagram-node, [data-node-id], .node-pill, .node-card');
+    const nodes = page.locator(".node, .diagram-node, [data-node-id], .node-pill, .node-card");
     const nodeCount = await nodes.count();
     return `Refined diagram updated. Current node count: ${nodeCount}`;
   });
@@ -216,13 +239,19 @@ async function run() {
   // WORKFLOW 4: Conversational Image Generation (Imagine)
   // ----------------------------------------------------
   await logStep("Workflow 4: Conversational Image Generation (Imagine)", async () => {
-    const aiInput = page.locator('.ai-pill input, input[placeholder*="describe it"], input[placeholder*="Ask Lucent"]').first();
+    const aiInput = page
+      .locator(
+        '.ai-pill input, input[placeholder*="describe it"], input[placeholder*="Ask Lucent"]',
+      )
+      .first();
     const imgPrompt = "create a reference image for our incident response team logo";
     console.log(`Conversational Image prompt: "${imgPrompt}"`);
     await aiInput.fill(imgPrompt);
     await page.waitForTimeout(400);
 
-    const imgPromise = page.waitForResponse((res) => res.url().includes("/api/image"), { timeout: 70000 });
+    const imgPromise = page.waitForResponse((res) => res.url().includes("/api/image"), {
+      timeout: 70000,
+    });
     await page.keyboard.press("Enter");
 
     console.log("Waiting for /api/image response...");
@@ -235,14 +264,19 @@ async function run() {
 
     // Wait for image shape to render on canvas
     try {
-      await page.waitForSelector('image, img[src^="data:image"], .shape-image, [data-shape-kind="image"]', { timeout: 15000 });
+      await page.waitForSelector(
+        'image, img[src^="data:image"], .shape-image, [data-shape-kind="image"]',
+        { timeout: 15000 },
+      );
     } catch {
       console.log("Image element selector timeout, continuing...");
     }
     await page.waitForTimeout(2000);
     await page.screenshot({ path: path.join(ARTIFACT_DIR, "wf4_conversational_image.png") });
 
-    const imageShapes = page.locator('image, img[src^="data:image"], .shape-image, [data-shape-kind="image"]');
+    const imageShapes = page.locator(
+      'image, img[src^="data:image"], .shape-image, [data-shape-kind="image"]',
+    );
     const imgCount = await imageShapes.count();
     console.log(`Found image elements on canvas: ${imgCount}`);
     return `Conversational image generation succeeded with HTTP 200. Image shapes in DOM: ${imgCount}`;
@@ -260,7 +294,9 @@ async function run() {
     await page.keyboard.press("s");
     await page.waitForTimeout(300);
 
-    const canvasViewport = page.locator('.canvas-viewport, [role="application"], .workspace-canvas, main').first();
+    const canvasViewport = page
+      .locator('.canvas-viewport, [role="application"], .workspace-canvas, main')
+      .first();
     const box = await canvasViewport.boundingBox();
     if (!box) throw new Error("Canvas viewport bounding box not found!");
 
@@ -307,10 +343,12 @@ async function run() {
 
       const publishBtn = page.locator('button:has-text("Publish")');
       if ((await publishBtn.count()) > 0) {
-        const publishPromise = page.waitForResponse(
-          (res) => res.url().includes("/api/boards") && res.request().method() === "POST",
-          { timeout: 15000 }
-        ).catch(() => null);
+        const publishPromise = page
+          .waitForResponse(
+            (res) => res.url().includes("/api/boards") && res.request().method() === "POST",
+            { timeout: 15000 },
+          )
+          .catch(() => null);
         await publishBtn.first().click();
         await publishPromise;
         await page.waitForTimeout(1500);
@@ -332,7 +370,9 @@ async function run() {
     await page2.goto(currentBoardUrl, { waitUntil: "networkidle" });
     await page2.waitForTimeout(3000);
 
-    const peerBadge = page.locator('.peer-pill, .peers-indicator, [data-tip*="collaborator"], [data-tip*="online"]');
+    const peerBadge = page.locator(
+      '.peer-pill, .peers-indicator, [data-tip*="collaborator"], [data-tip*="online"]',
+    );
     const peerCount = await peerBadge.count();
     console.log(`Peer presence badge count in Tab 1: ${peerCount}`);
 
@@ -341,7 +381,9 @@ async function run() {
     await page2.keyboard.press("s");
     await page2.waitForTimeout(300);
 
-    const vp2 = page2.locator('.canvas-viewport, [role="application"], .workspace-canvas, main').first();
+    const vp2 = page2
+      .locator('.canvas-viewport, [role="application"], .workspace-canvas, main')
+      .first();
     const box2 = await vp2.boundingBox();
     if (box2) {
       await page2.mouse.click(box2.x + 350, box2.y + 150);
@@ -373,7 +415,9 @@ async function run() {
   // WORKFLOW 7: Export Functionality (SVG / PNG / JSON)
   // ----------------------------------------------------
   await logStep("Workflow 7: Board Exports (SVG / PNG / JSON)", async () => {
-    const exportBtn = page.locator('.export-menu button, button:has-text("Export"), [title*="Export"]').first();
+    const exportBtn = page
+      .locator('.export-menu button, button:has-text("Export"), [title*="Export"]')
+      .first();
     if ((await exportBtn.count()) === 0) {
       throw new Error("Export button not found in UI!");
     }
@@ -382,12 +426,20 @@ async function run() {
     await exportBtn.click();
     await page.waitForTimeout(500);
 
-    const svgBtn = page.locator('.export-pop button:has-text("SVG"), button:has-text("SVG")').first();
-    const pngBtn = page.locator('.export-pop button:has-text("PNG"), button:has-text("PNG")').first();
-    const jsonBtn = page.locator('.export-pop button:has-text("JSON"), button:has-text("JSON")').first();
+    const svgBtn = page
+      .locator('.export-pop button:has-text("SVG"), button:has-text("SVG")')
+      .first();
+    const pngBtn = page
+      .locator('.export-pop button:has-text("PNG"), button:has-text("PNG")')
+      .first();
+    const jsonBtn = page
+      .locator('.export-pop button:has-text("JSON"), button:has-text("JSON")')
+      .first();
 
     const hasOptions = (await svgBtn.count()) > 0 && (await pngBtn.count()) > 0;
-    console.log(`Export options visible: SVG=${await svgBtn.count()}, PNG=${await pngBtn.count()}, JSON=${await jsonBtn.count()}`);
+    console.log(
+      `Export options visible: SVG=${await svgBtn.count()}, PNG=${await pngBtn.count()}, JSON=${await jsonBtn.count()}`,
+    );
 
     await page.screenshot({ path: path.join(ARTIFACT_DIR, "wf7_export_dialog.png") });
 
@@ -406,7 +458,9 @@ async function run() {
     console.log("Navigating to dashboard / boards list...");
     await page.keyboard.press("Escape");
     await page.waitForTimeout(300);
-    const homeBtn = page.locator('button.brand, button[aria-label="Dashboard"], button[title="Dashboard"]').first();
+    const homeBtn = page
+      .locator('button.brand, button[aria-label="Dashboard"], button[title="Dashboard"]')
+      .first();
     if ((await homeBtn.count()) > 0) {
       try {
         await homeBtn.click({ timeout: 5000 });
@@ -423,7 +477,9 @@ async function run() {
     const pageUrl = page.url();
     console.log("Current page URL after dashboard click:", pageUrl);
 
-    const boardCards = page.locator('.board-card, .project-card, [data-board-id], tr[data-board-row], .board-item');
+    const boardCards = page.locator(
+      ".board-card, .project-card, [data-board-id], tr[data-board-row], .board-item",
+    );
     const count = await boardCards.count();
     console.log(`Boards found on dashboard/list: ${count}`);
 
@@ -442,7 +498,7 @@ async function run() {
   fs.writeFileSync(
     path.join(ARTIFACT_DIR, "workflow_audit_results.json"),
     JSON.stringify(results, null, 2),
-    "utf8"
+    "utf8",
   );
 
   await browser.close();

@@ -80,7 +80,11 @@ export function verifyLinearSignature(
   }
   const signature = headerValue.trim().toLowerCase();
   if (signature.length !== SIGNATURE_HEX_LENGTH || !/^[0-9a-f]{64}$/.test(signature)) {
-    return { ok: false, reason: "malformed_header", detail: "X-Signature is not a 64-char hex digest" };
+    return {
+      ok: false,
+      reason: "malformed_header",
+      detail: "X-Signature is not a 64-char hex digest",
+    };
   }
   if (candidates.length === 0) {
     return {
@@ -264,7 +268,11 @@ export const githubWebhookScheme: WebhookScheme = {
       }
     }
     if (!match) {
-      return { ok: false, reason: "no_match", detail: "signature matches no active connection secret" };
+      return {
+        ok: false,
+        reason: "no_match",
+        detail: "signature matches no active connection secret",
+      };
     }
     return { ok: true, match };
   },
@@ -280,16 +288,21 @@ export const githubWebhookScheme: WebhookScheme = {
     }
     const action = typeof body.action === "string" ? body.action : "";
     if (action !== "opened" && action !== "reopened" && action !== "closed") {
-      return { kind: "ignored", reason: `action "${action}" does not change status` } as ParseResult;
+      return {
+        kind: "ignored",
+        reason: `action "${action}" does not change status`,
+      } as ParseResult;
     }
     const issue = body.issue;
     const number = issue && typeof issue.number === "number" ? issue.number : null;
     if (number === null) {
-      return { kind: "ignored", reason: "the issue webhook carries no issue.number" } as ParseResult;
+      return {
+        kind: "ignored",
+        reason: "the issue webhook carries no issue.number",
+      } as ParseResult;
     }
     const state = issue && typeof issue.state === "string" ? issue.state : "";
-    const stateReason =
-      issue && typeof issue.state_reason === "string" ? issue.state_reason : null;
+    const stateReason = issue && typeof issue.state_reason === "string" ? issue.state_reason : null;
     if (!state) {
       return { kind: "ignored", reason: "the issue carries no state" } as ParseResult;
     }
@@ -320,12 +333,7 @@ export const webhookSchemes: ReadonlyMap<string, WebhookScheme> = new Map([
   ["fake", fakeWebhookScheme],
 ]);
 
-export const INTEGRATION_EVENT_STATUSES = [
-  "received",
-  "processed",
-  "ignored",
-  "failed",
-] as const;
+export const INTEGRATION_EVENT_STATUSES = ["received", "processed", "ignored", "failed"] as const;
 export type IntegrationEventStatus = (typeof INTEGRATION_EVENT_STATUSES)[number];
 
 export interface IntegrationWebhookEvent {
@@ -518,7 +526,10 @@ export interface IntegrationWebhookReceiverOptions {
   candidates: SignatureCandidate[];
   events: IntegrationWebhookEventStore;
   /** Where a verified change lands: the inbound queue's ingest. */
-  onChange: (change: { provider: string; externalId: string; status: string; at: number }, orgId: string) => Promise<void>;
+  onChange: (
+    change: { provider: string; externalId: string; status: string; at: number },
+    orgId: string,
+  ) => Promise<void>;
   staleAfterMs?: number;
   now?: () => number;
 }
@@ -595,9 +606,14 @@ export function createIntegrationWebhookReceiver(
     const eventId = integrationWebhookEventId(provider, raw);
 
     // Verify-before-ledger: the claim happens only after the HMAC held.
-    const claim = await events.claim(
-      { id: eventId, provider, orgId: verified.match.orgId, externalId, now, staleAfterMs },
-    );
+    const claim = await events.claim({
+      id: eventId,
+      provider,
+      orgId: verified.match.orgId,
+      externalId,
+      now,
+      staleAfterMs,
+    });
     if (claim.outcome === "duplicate") {
       return result(200, "duplicate", eventId);
     }
