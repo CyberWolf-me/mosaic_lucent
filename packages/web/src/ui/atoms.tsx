@@ -2,6 +2,7 @@ import {
   useEffect,
   useRef,
   useState,
+  memo,
   type CSSProperties,
   type ReactNode,
   type SVGProps,
@@ -37,32 +38,7 @@ export function CanvasBackdrop({
 
 export type NodeState = "" | "selected" | "emerging" | "proposed" | "ghost";
 
-export function NodeCard({
-  x,
-  y,
-  w,
-  h,
-  title,
-  meta,
-  sub,
-  dot,
-  state = "",
-  delay = 0,
-  appear = false,
-  dimmed = false,
-  onClick,
-  mark,
-  draggable = false,
-  scale = 1,
-  opacity,
-  onMove,
-  onRename,
-  editRequested = false,
-  onEditConsumed,
-  statement,
-  statementTint,
-  bpmnShape,
-}: {
+export interface NodeCardProps {
   x: number;
   y: number;
   w?: number;
@@ -111,7 +87,34 @@ export function NodeCard({
    * Undefined renders the ordinary card; the LENS decides, never the model.
    */
   bpmnShape?: "event" | "eventEnd" | "gateway" | "gatewayParallel" | "task";
-}) {
+}
+
+export const NodeCard = memo(function NodeCard({
+  x,
+  y,
+  w,
+  h,
+  title,
+  meta,
+  sub,
+  dot,
+  state = "",
+  delay = 0,
+  appear = false,
+  dimmed = false,
+  onClick,
+  mark,
+  draggable = false,
+  scale = 1,
+  opacity,
+  onMove,
+  onRename,
+  editRequested = false,
+  onEditConsumed,
+  statement,
+  statementTint,
+  bpmnShape,
+}: NodeCardProps) {
   const cls = [
     "node",
     state,
@@ -167,6 +170,10 @@ export function NodeCard({
     if (e.button !== 0) return;
     e.stopPropagation();
     const additive = e.shiftKey || e.metaKey || e.ctrlKey;
+    // Figma/Miro standard: select immediately on pointerdown unless additive or already selected (to allow multi-node drag)
+    if (!additive && state !== "selected") {
+      onClick?.(false);
+    }
     drag.current = { sx: e.clientX, sy: e.clientY, moved: false };
 
     const move = (ev: MouseEvent) => {
@@ -186,7 +193,7 @@ export function NodeCard({
       if (!d) return;
       if (d.moved) {
         onMove(x + (ev.clientX - d.sx) / scale, y + (ev.clientY - d.sy) / scale, true);
-      } else {
+      } else if (additive || state === "selected") {
         onClick?.(additive);
       }
     };
@@ -305,7 +312,7 @@ export function NodeCard({
       )}
     </div>
   );
-}
+});
 
 export interface Point {
   x: number;
@@ -347,6 +354,7 @@ export function makePath(
     // truth.
     const pts = vertices ?? routedVertices(a, b, route, style);
     if (style === "spline") return splinePath(pts);
+    if (style === "ortho") return orthoRoundedPath(pts, 10);
     let d = `M ${pts[0]!.x} ${pts[0]!.y}`;
     for (let i = 1; i < pts.length; i++) {
       d += ` L ${pts[i]!.x} ${pts[i]!.y}`;
@@ -364,6 +372,47 @@ export function makePath(
     return `M ${a.x} ${a.y} C ${a.x + spread} ${mid}, ${b.x + spread} ${mid}, ${b.x} ${b.y}`;
   }
   return `M ${a.x} ${a.y} L ${b.x} ${b.y}`;
+}
+
+/**
+ * Renders orthogonal paths with smooth filleted/rounded corners (Eraser.io style).
+ * Every 90-degree corner turns into a gentle arc (Q) rather than a harsh jagged join.
+ */
+function orthoRoundedPath(pts: Point[], radius = 10): string {
+  if (pts.length < 3) {
+    let d = `M ${pts[0]!.x} ${pts[0]!.y}`;
+    for (let i = 1; i < pts.length; i++) d += ` L ${pts[i]!.x} ${pts[i]!.y}`;
+    return d;
+  }
+  let d = `M ${pts[0]!.x} ${pts[0]!.y}`;
+  for (let i = 1; i < pts.length - 1; i++) {
+    const prev = pts[i - 1]!;
+    const curr = pts[i]!;
+    const next = pts[i + 1]!;
+
+    const d1x = curr.x - prev.x;
+    const d1y = curr.y - prev.y;
+    const len1 = Math.hypot(d1x, d1y);
+
+    const d2x = next.x - curr.x;
+    const d2y = next.y - curr.y;
+    const len2 = Math.hypot(d2x, d2y);
+
+    if (len1 < 1 || len2 < 1) {
+      d += ` L ${curr.x} ${curr.y}`;
+      continue;
+    }
+
+    const r = Math.min(radius, len1 / 2, len2 / 2);
+    const startX = curr.x - (d1x / len1) * r;
+    const startY = curr.y - (d1y / len1) * r;
+    const endX = curr.x + (d2x / len2) * r;
+    const endY = curr.y + (d2y / len2) * r;
+
+    d += ` L ${startX} ${startY} Q ${curr.x} ${curr.y} ${endX} ${endY}`;
+  }
+  d += ` L ${pts[pts.length - 1]!.x} ${pts[pts.length - 1]!.y}`;
+  return d;
 }
 
 /**
@@ -485,6 +534,7 @@ export function CanvasViewport({
   onZoom,
   onViewport,
   setControls,
+  className,
 }: {
   children: ReactNode;
   initialZoom?: number;
@@ -497,6 +547,7 @@ export function CanvasViewport({
    */
   onViewport?: (box: { x: number; y: number; width: number; height: number }) => void;
   setControls?: (c: ViewportControls) => void;
+  className?: string;
 }) {
   const [zoom, setZoom] = useState(initialZoom);
   const [pan, setPan] = useState<Point>({ x: 0, y: 0 });
@@ -557,7 +608,7 @@ export function CanvasViewport({
         const availH = Math.max(120, h - CHROME_INSET.top - CHROME_INSET.bottom);
         const pad = 1.1; // a little breathing room around content
         const fit = Math.min(availW / (box.width * pad), availH / (box.height * pad));
-        const nextZoom = clamp(fit * 100, 25, 200);
+        const nextZoom = clamp(fit * 100, 25, 100);
         const s = nextZoom / 100;
         const ox = 0.5 * w;
         const oy = 0.4 * h;
@@ -591,14 +642,31 @@ export function CanvasViewport({
     });
   }, [zoom, pan, setControls]);
 
-  const onWheel = (e: React.WheelEvent) => {
-    if (e.ctrlKey || e.metaKey) {
-      const factor = Math.exp(-e.deltaY * 0.006);
-      setZoom((z) => clamp(z * factor, 25, 400));
-    } else {
-      setPan((p) => ({ x: p.x - e.deltaX, y: p.y - e.deltaY }));
-    }
-  };
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const handleWheel = (e: WheelEvent) => {
+      // e.preventDefault() prevents native browser page zoom (Ctrl+wheel / trackpad pinch)
+      e.preventDefault();
+      if (e.ctrlKey || e.metaKey) {
+        const factor = Math.exp(-e.deltaY * 0.006);
+        setZoom((z) => clamp(z * factor, 25, 400));
+      } else {
+        setPan((p) => ({ x: p.x - e.deltaX, y: p.y - e.deltaY }));
+      }
+    };
+    const preventGesture = (e: Event) => e.preventDefault();
+
+    el.addEventListener("wheel", handleWheel, { passive: false });
+    el.addEventListener("gesturestart", preventGesture);
+    el.addEventListener("gesturechange", preventGesture);
+    return () => {
+      el.removeEventListener("wheel", handleWheel);
+      el.removeEventListener("gesturestart", preventGesture);
+      el.removeEventListener("gesturechange", preventGesture);
+    };
+  }, []);
+
   const onMouseDown = (e: React.MouseEvent) => {
     if (!(e.button === 1 || tool === "hand" || e.shiftKey)) return;
     drag.current = {
@@ -623,12 +691,12 @@ export function CanvasViewport({
   return (
     <div
       ref={containerRef}
+      className={["canvas-viewport", className].filter(Boolean).join(" ")}
       // Focusable so keyboard users can enter the canvas and then Tab through
       // its objects (the window-level handler in CanvasView does the cycling).
       tabIndex={0}
       role="application"
       aria-label="Canvas — press Tab to move between objects, Enter to edit, arrow keys to nudge"
-      onWheel={onWheel}
       onMouseDown={onMouseDown}
       onMouseMove={onMouseMove}
       onMouseUp={onMouseUp}

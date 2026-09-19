@@ -497,6 +497,106 @@ export const Ico = {
       <path d="M3 6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6z" />
     </svg>
   ),
+  Team: (p: P) => (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      {...p}
+    >
+      <circle cx="9" cy="9" r="3" />
+      <path d="M3 20c1-3.5 3-5 6-5s5 1.5 6 5" />
+      <circle cx="17" cy="8" r="2.5" />
+      <path d="M17 12.5c2 0 3.5 1 4.5 3" />
+    </svg>
+  ),
+  Video: (p: P) => (
+    <svg
+      width="15"
+      height="15"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      {...p}
+    >
+      <path d="m22 7-6 4v2l6 4V7z" />
+      <rect width="14" height="12" x="2" y="6" rx="2" />
+    </svg>
+  ),
+  VideoOff: (p: P) => (
+    <svg
+      width="15"
+      height="15"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      {...p}
+    >
+      <path d="M2 2l20 20M10.66 6H14a2 2 0 0 1 2 2v2.34l6-4v10l-3.33-2.22" />
+      <path d="M16 16a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h1.34" />
+    </svg>
+  ),
+  MicOff: (p: P) => (
+    <svg
+      width="15"
+      height="15"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      {...p}
+    >
+      <path d="M2 2l20 20M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V5a3 3 0 0 0-5.68-1.33" />
+      <path d="M19 10v1a7 7 0 0 1-1.16 3.8M5 10v1a7 7 0 0 0 10.74 5.92" />
+      <path d="M12 18v3" />
+    </svg>
+  ),
+  PhoneOff: (p: P) => (
+    <svg
+      width="15"
+      height="15"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      {...p}
+    >
+      <path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7 2 2 0 0 1 1.72 2v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.42 19.42 0 0 1-3.33-2.67m-2.67-3.34a19.79 19.79 0 0 1-3.07-8.63A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91" />
+      <line x1="2" x2="22" y1="2" y2="22" />
+    </svg>
+  ),
+  Screen: (p: P) => (
+    <svg
+      width="15"
+      height="15"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      {...p}
+    >
+      <rect width="20" height="14" x="2" y="3" rx="2" />
+      <line x1="8" x2="16" y1="21" y2="21" />
+      <line x1="12" x2="12" y1="17" y2="21" />
+    </svg>
+  ),
 };
 
 export const ToolIco = {
@@ -844,22 +944,5 @@ export const ToolIco = {
       <path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6" />
     </svg>
   ),
-  Team: (p: P) => (
-    <svg
-      width="14"
-      height="14"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      {...p}
-    >
-      <circle cx="9" cy="9" r="3" />
-      <path d="M3 20c1-3.5 3-5 6-5s5 1.5 6 5" />
-      <circle cx="17" cy="8" r="2.5" />
-      <path d="M17 12.5c2 0 3.5 1 4.5 3" />
-    </svg>
-  ),
+  Team: (p: P) => Ico.Team(p),
 };

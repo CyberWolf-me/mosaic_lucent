@@ -1,4 +1,4 @@
-import type { Node, Workspace } from "@lucent/core";
+import type { Workspace } from "@lucent/core";
 import type { LoggedOpEntry } from "./boards.js";
 import type { MeetingTranscript } from "./meetings.js";
 
@@ -355,7 +355,7 @@ function snippetAround(text: string, anchor: number, max: number): string {
   if (text.length <= max) return text;
   const half = Math.floor(max / 2) - 1;
   let start = Math.max(0, anchor - half);
-  let end = Math.min(text.length, start + max - 2);
+  const end = Math.min(text.length, start + max - 2);
   start = Math.max(0, end - max + 2);
   const prefix = start > 0 ? "…" : "";
   const suffix = end < text.length ? "…" : "";

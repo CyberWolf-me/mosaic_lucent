@@ -120,4 +120,28 @@ describe("OpenAIImageProvider", () => {
     expect(() => new OpenAIImageProvider({ apiKey: "", baseUrl: "https://x" })).toThrow(/apiKey/);
     expect(() => new OpenAIImageProvider({ apiKey: "k", baseUrl: "" })).toThrow(/baseUrl/);
   });
+
+  it("tries fallback models when primary model fails", async () => {
+    const modelsUsed: string[] = [];
+    const fetchImpl = vi.fn<typeof fetch>().mockImplementation((_url, init) => {
+      const parsed = JSON.parse(((init as RequestInit)?.body as string) ?? "{}");
+      modelsUsed.push(parsed.model);
+      if (parsed.model === "primary") {
+        return Promise.resolve(jsonResponse(500, { error: { message: "Internal error" } }));
+      }
+      return Promise.resolve(jsonResponse(200, { data: [{ b64_json: OK_B64 }] }));
+    });
+
+    const provider = new OpenAIImageProvider({
+      apiKey: "k",
+      baseUrl: "https://api/v1/images/generations",
+      model: "primary",
+      fallbackModels: ["backup-1", "backup-2"],
+      fetchImpl,
+    });
+
+    const res = await provider.generateImage({ prompt: "a cat" });
+    expect(res.src).toBe(`data:image/png;base64,${OK_B64}`);
+    expect(modelsUsed).toEqual(["primary", "backup-1"]);
+  });
 });

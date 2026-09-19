@@ -101,6 +101,10 @@ export class BoardSync {
     this.workspace = initial;
   }
 
+  updateWorkspace(ws: Workspace): void {
+    this.workspace = ws;
+  }
+
   connect(): void {
     this.closed = false;
     this.open();

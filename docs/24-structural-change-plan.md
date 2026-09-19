@@ -216,7 +216,7 @@ plan is complete; costed as slices V1–V3 in docs/25 (voice-platform advisory,
   labels — server-proxied (`routes/stt.ts`, ephemeral registry) because
   keys must never reach the browser, with the `serverStt` org switch and
   `voice.minute` metering built alongside. Identity mapping stays out (no
-  biometrics, per the advisory's V1 stance). No vendor live-verified.
+  biometrics, per the advisory's V1 stance). Deepgram live-verified 2026-09-17.
   Legal-now sub-case: a shared-mic meeting today attributes every turn to
   "You" — a correctness gap, not a feature, once anyone actually hits it.
 

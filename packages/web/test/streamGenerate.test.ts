@@ -104,4 +104,30 @@ describe("streamGenerate", () => {
     );
     expect(result.operations).toEqual([]);
   });
+
+  it("delivers progressive phase events to onPhase callback (UX-P1-004)", async () => {
+    mockFetchSse([
+      ["start", { provider: "mock" }],
+      ["phase", { phase: "understanding", message: "Parsing intent..." }],
+      ["phase", { phase: "constructing", message: "Designing architecture..." }],
+      ["delta", { text: '{"ops":[]}' }],
+      ["phase", { phase: "validating", message: "Optimizing layout..." }],
+      ["phase", { phase: "applying", message: "Rendering nodes..." }],
+      ["done", { operations: [], explanation: "done", provider: "mock" }],
+    ]);
+    const phases: string[] = [];
+    const result = await streamGenerate(
+      "x",
+      emptyWorkspace,
+      () => {},
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      (phase) => phases.push(phase),
+    );
+    expect(phases).toEqual(["understanding", "constructing", "validating", "applying"]);
+    expect(result.explanation).toBe("done");
+  });
 });
+

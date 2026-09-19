@@ -463,12 +463,20 @@ export class PostgresOrgStore implements OrgStore {
   constructor(private readonly target: Db) {}
 
   async insert(org: StoredOrg): Promise<void> {
-    await this.target.db.insert(organizations).values({
-      id: org.id,
-      name: org.name,
-      settings: org.settings ?? null,
-      createdAt: org.createdAt,
-    });
+    // Conflict-safe by certification finding (2026-09-17): signup mirrors
+    // the personal org here after `ensurePersonalOrg` already wrote the
+    // same row, so a bare insert 400s every Postgres signup on a duplicate
+    // primary key. Non-personal creates use fresh ids where the conflict
+    // arm is unreachable outside a retry, which must converge, not fail.
+    await this.target.db
+      .insert(organizations)
+      .values({
+        id: org.id,
+        name: org.name,
+        settings: org.settings ?? null,
+        createdAt: org.createdAt,
+      })
+      .onConflictDoNothing();
   }
 
   async get(orgId: string): Promise<StoredOrg | undefined> {

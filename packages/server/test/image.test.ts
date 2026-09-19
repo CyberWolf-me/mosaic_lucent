@@ -62,4 +62,14 @@ describe("selectImageProvider", () => {
       }).name,
     ).toBe("azure-images");
   });
+
+  it("normalizes baseUrl and parses comma-separated models", () => {
+    const provider = selectImageProvider({
+      LUCENT_IMAGE_KEY: "k",
+      LUCENT_IMAGE_BASE_URL: "https://api/v1",
+      LUCENT_IMAGE_MODEL: "gpt-image-2.5,gpt-image-2",
+    });
+    expect(provider.name).toBe("openai-image");
+    expect(provider.model).toBe("gpt-image-2.5");
+  });
 });

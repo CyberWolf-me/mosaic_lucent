@@ -30,6 +30,10 @@ export default tseslint.config(
       "**/coverage/**",
       "packages/server/migrations/meta/**",
       "reference/**",
+      // Agent scratch (ad-hoc scripts, browser test profiles): never
+      // product code, never reviewed — linting it drowned the gate in
+      // thousands of findings from a vendored browser extension dump.
+      ".zcode/**",
     ],
   },
   js.configs.recommended,

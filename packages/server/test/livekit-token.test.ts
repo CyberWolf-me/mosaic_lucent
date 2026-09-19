@@ -59,7 +59,14 @@ describe("mintLiveKitToken (wire format)", () => {
     expect(claims.name).toBe("Ada");
     expect(claims.nbf).toBe(1_700_000_000);
     expect(claims.exp).toBe(1_700_000_300);
-    expect(claims.video).toEqual({ room: "brd_abc", canPublish: true, canSubscribe: true });
+    expect(claims.video).toEqual({
+      room: "brd_abc",
+      // roomJoin admits to the room (signal 401 without it — found by a
+      // real headless join, not by reading docs harder).
+      roomJoin: true,
+      canPublish: true,
+      canSubscribe: true,
+    });
 
     // The signature is a real HMAC over header.payload with the api secret.
     const expected = createHmac("sha256", API_SECRET).update(`${header}.${payload}`).digest();

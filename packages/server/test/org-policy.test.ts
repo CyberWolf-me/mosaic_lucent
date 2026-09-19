@@ -2,7 +2,6 @@ import { afterEach, beforeAll, afterAll, describe, expect, it } from "vitest";
 import type { AddressInfo } from "node:net";
 import { MockProvider, MockImageProvider } from "@lucent/ai";
 import type { LLMProvider } from "@lucent/ai";
-import { createWorkspace } from "@lucent/core";
 import { createApp } from "../src/app.js";
 import { InMemoryUserStore } from "../src/accounts.js";
 import { InMemoryBoardStore } from "../src/boards.js";

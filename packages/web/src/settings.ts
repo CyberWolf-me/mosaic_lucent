@@ -43,6 +43,8 @@ export interface Settings {
   boardStyle: BoardStyle;
   /** When the AI must ask before applying changes (UX-1). */
   approvalThreshold: ApprovalThreshold;
+  /** Opt-in experimental ELK layout engine for orthogonal layered graphs. Default false. */
+  elkLayout: boolean;
 }
 
 const LS_KEY = "lucent.settings";
@@ -62,6 +64,7 @@ export const DEFAULT_SETTINGS: Settings = {
   livekitRoom: "lucent-voice",
   boardStyle: "clean",
   approvalThreshold: "large",
+  elkLayout: false,
 };
 
 type Listener = (s: Settings) => void;

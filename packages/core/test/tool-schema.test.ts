@@ -169,4 +169,36 @@ describe("schema still validates what the tool advertises", () => {
       expect(result.success, `${name}: ${result.success ? "" : result.error.message}`).toBe(true);
     }
   });
+
+  it("tolerates empty, omitted, and null relationship on CONNECT_NODES and DISCONNECT_NODES", () => {
+    const emptyRel = safeParseOperations([
+      { op: "CONNECT_NODES", source: "a", target: "b", relationship: "" },
+      { op: "DISCONNECT_NODES", source: "a", target: "b", relationship: "" },
+    ]);
+    expect(emptyRel.success).toBe(true);
+    if (emptyRel.success) {
+      expect((emptyRel.data[0] as { relationship: string }).relationship).toBe("");
+      expect((emptyRel.data[1] as { relationship: string }).relationship).toBe("");
+    }
+
+    const omittedRel = safeParseOperations([
+      { op: "CONNECT_NODES", source: "a", target: "b" },
+      { op: "DISCONNECT_NODES", source: "a", target: "b" },
+    ]);
+    expect(omittedRel.success).toBe(true);
+    if (omittedRel.success) {
+      expect((omittedRel.data[0] as { relationship: string }).relationship).toBe("");
+      expect((omittedRel.data[1] as { relationship: string }).relationship).toBe("");
+    }
+
+    const nullRel = safeParseOperations([
+      { op: "CONNECT_NODES", source: "a", target: "b", relationship: null },
+      { op: "DISCONNECT_NODES", source: "a", target: "b", relationship: null },
+    ]);
+    expect(nullRel.success).toBe(true);
+    if (nullRel.success) {
+      expect((nullRel.data[0] as { relationship: string }).relationship).toBe("");
+      expect((nullRel.data[1] as { relationship: string }).relationship).toBe("");
+    }
+  });
 });

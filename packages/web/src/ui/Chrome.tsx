@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Ico } from "./icons.js";
 import { CommandOverlay } from "./CommandOverlay.js";
 import { NotificationTray } from "./NotificationTray.js";
@@ -6,7 +7,9 @@ import { ProfileMenu } from "./ProfileMenu.js";
 import { getSessionUser } from "../session.js";
 import { useWorkspace, type CanvasLens, type View } from "../workspace.js";
 import {
+  classifyBoard,
   createShareLink,
+  fetchBoard,
   listMembers,
   readShareLinkError,
   removeMember,
@@ -15,6 +18,7 @@ import {
   type BoardMemberSummary,
   type ShareRole,
 } from "../boards.js";
+import { BOARD_TIERS, TIER_DESCRIPTIONS, TIER_LABELS, type BoardTier } from "../board-tiers.js";
 
 /** Top bar, left rail, command overlay, and badges. Ported from chrome.jsx. */
 
@@ -36,14 +40,26 @@ export function TopBar({
   meta?: React.ReactNode;
   onOpenSettings: (section?: string) => void;
 }) {
-  const { setView, readOnly } = useWorkspace();
+  const { setView, readOnly, projectName, setProjectName } = useWorkspace();
   const [share, setShare] = useState(false);
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [titleDraft, setTitleDraft] = useState(projectName);
+
+  const commitTitle = () => {
+    setEditingTitle(false);
+    const next = titleDraft.trim();
+    if (next && next !== projectName) {
+      setProjectName(next);
+    }
+  };
+
   return (
     <div className="top-bar">
       <button
         className="brand"
         onClick={() => setView("dashboard")}
-        title="Home"
+        title="Dashboard"
+        aria-label="Dashboard"
         style={{ background: "none", border: 0, padding: 0, cursor: "pointer" }}
       >
         <div className="logo" />
@@ -60,6 +76,43 @@ export function TopBar({
             >
               {c.label}
             </button>
+          ) : c.current && !readOnly ? (
+            editingTitle ? (
+              <input
+                autoFocus
+                className="crumb-title-input"
+                value={titleDraft}
+                onChange={(e) => setTitleDraft(e.target.value)}
+                onBlur={commitTitle}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") commitTitle();
+                  if (e.key === "Escape") {
+                    setTitleDraft(projectName);
+                    setEditingTitle(false);
+                  }
+                }}
+              />
+            ) : (
+              <span
+                className="crumb current editable"
+                onClick={() => {
+                  setTitleDraft(projectName || c.label);
+                  setEditingTitle(true);
+                }}
+                title="Click to rename board"
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    setTitleDraft(projectName || c.label);
+                    setEditingTitle(true);
+                  }
+                }}
+              >
+                {c.label}
+              </span>
+            )
           ) : (
             <span className={`crumb ${c.current ? "current" : ""}`}>{c.label}</span>
           )}
@@ -82,11 +135,7 @@ export function TopBar({
               <Ico.Eye /> View only
             </span>
           )}
-          <button
-            className="icon-btn"
-            onClick={() => setShare(true)}
-            aria-label="Share workspace"
-          >
+          <button className="icon-btn" onClick={() => setShare(true)} aria-label="Share workspace">
             <Ico.Share /> Share
           </button>
           <button
@@ -137,6 +186,12 @@ function ShareDialog({ onClose }: { onClose: () => void }) {
   const [minting, setMinting] = useState(false);
   const [members, setMembers] = useState<BoardMemberSummary[]>([]);
   const isOwner = syncRole === "owner";
+  // Board governance tier (docs/23 S1): the resolved tier the server
+  // enforces, loaded with the member list. Null while loading or on local
+  // boards, which have no server and nothing to govern.
+  const [tier, setTier] = useState<BoardTier | null>(null);
+  const [tierError, setTierError] = useState<string | null>(null);
+  const [tierSaving, setTierSaving] = useState(false);
 
   // Load the member list whenever the dialog opens on a shared board, so role
   // changes and removals act on current data rather than a stale snapshot.
@@ -146,10 +201,26 @@ function ShareDialog({ onClose }: { onClose: () => void }) {
     void listMembers(boardId).then((res) => {
       if (!cancelled && res) setMembers(res.members);
     });
+    // The governance tier rides the same open: members see what governs
+    // them, owners may change it below.
+    void fetchBoard(boardId).then((board) => {
+      if (!cancelled && board) setTier(board.classification);
+    });
     return () => {
       cancelled = true;
     };
   }, [boardId]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
 
   const refreshMembers = async () => {
     if (!boardId) return;
@@ -221,7 +292,22 @@ function ShareDialog({ onClose }: { onClose: () => void }) {
     );
   };
 
-  return (
+  /** Re-classify the board. The server is authoritative (owner-only, strict
+   * tiers); a refusal surfaces its reason rather than silently reverting. */
+  const changeTier = async (next: BoardTier) => {
+    if (!boardId || tierSaving) return;
+    setTierSaving(true);
+    setTierError(null);
+    const result = await classifyBoard(boardId, next);
+    setTierSaving(false);
+    if (result.ok) {
+      setTier(result.classification);
+    } else {
+      setTierError(result.error);
+    }
+  };
+
+  return createPortal(
     <>
       <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 200 }} />
       <div
@@ -323,6 +409,64 @@ function ShareDialog({ onClose }: { onClose: () => void }) {
                 isOwner &&
                 " Create an invite link below — a bare board link won't let anyone in."}
             </div>
+
+            {isOwner && (
+              <div
+                style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid var(--stroke-1)" }}
+              >
+                <div
+                  style={{
+                    fontSize: 11,
+                    color: "var(--ink-3)",
+                    textTransform: "uppercase",
+                    letterSpacing: "0.05em",
+                    marginBottom: 8,
+                  }}
+                >
+                  Governance
+                </div>
+                {tier === null ? (
+                  <div style={{ fontSize: 12, color: "var(--ink-3)" }}>Loading tier…</div>
+                ) : (
+                  <>
+                    <div className="segmented" role="radiogroup" aria-label="Board governance tier">
+                      {BOARD_TIERS.map((t) => (
+                        <button
+                          key={t}
+                          className={tier === t ? "active" : ""}
+                          aria-pressed={tier === t}
+                          disabled={tierSaving}
+                          onClick={() => void changeTier(t)}
+                        >
+                          {TIER_LABELS[t]}
+                        </button>
+                      ))}
+                    </div>
+                    <div
+                      style={{
+                        fontSize: 11.5,
+                        color: "var(--ink-2)",
+                        lineHeight: 1.45,
+                        marginTop: 8,
+                      }}
+                    >
+                      {TIER_DESCRIPTIONS[tier]}
+                    </div>
+                    {tierError && (
+                      <div style={{ fontSize: 11.5, color: "var(--sig-red)", marginTop: 6 }}>
+                        {tierError}
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
+
+            {!isOwner && tier !== null && (
+              <div style={{ fontSize: 11.5, color: "var(--ink-3)", marginTop: 12 }}>
+                Governed as {TIER_LABELS[tier].toLowerCase()} — {TIER_DESCRIPTIONS[tier]}
+              </div>
+            )}
 
             {isOwner && (
               <div
@@ -490,7 +634,8 @@ function ShareDialog({ onClose }: { onClose: () => void }) {
           </div>
         )}
       </div>
-    </>
+    </>,
+    document.body,
   );
 }
 

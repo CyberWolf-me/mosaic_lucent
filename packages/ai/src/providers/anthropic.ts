@@ -4,7 +4,6 @@ import type { AnswerRequest, AnswerResult } from "../answer.js";
 import {
   ANSWER_TOOL_NAME,
   anthropicAnswerToolDefinition,
-  answerArgumentsSchema,
 } from "../answer.js";
 import type { ExternalPlanRequest, ExternalPlanResult } from "../externalPlan.js";
 import {

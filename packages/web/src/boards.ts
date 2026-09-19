@@ -1,6 +1,9 @@
 import type { Workspace } from "@lucent/core";
 import { apiFetch } from "./http.js";
 import { hasSession } from "./session.js";
+import { isBoardTier, type BoardTier } from "./board-tiers.js";
+
+export type { BoardTier };
 
 /**
  * Board REST client (docs/12). Server-side boards are what make a board
@@ -106,18 +109,68 @@ export async function listBoards(orgId: string, scope?: BoardScope): Promise<Boa
  * Fetch one board. Returns the caller's own role alongside the workspace, so
  * the UI can decide what to offer without a second request or a guess.
  * Null when the board doesn't exist or the caller isn't a member.
+ * `classification` is the RESOLVED tier the server governs by (unset reads
+ * as `internal`) — the picker shows what is enforced, not what was typed.
  */
-export async function fetchBoard(
-  id: string,
-): Promise<{ id: string; name: string; workspace: Workspace; role: BoardRole } | null> {
+export async function fetchBoard(id: string): Promise<{
+  id: string;
+  name: string;
+  workspace: Workspace;
+  role: BoardRole;
+  classification: BoardTier;
+} | null> {
   const res = await authed(`/api/boards/${encodeURIComponent(id)}`);
   if (!res || !res.ok) return null;
-  return (await res.json()) as {
+  const body = (await res.json()) as {
     id: string;
     name: string;
     workspace: Workspace;
     role: BoardRole;
+    classification?: unknown;
   };
+  return {
+    id: body.id,
+    name: body.name,
+    workspace: body.workspace,
+    role: body.role,
+    classification: isBoardTier(body.classification) ? body.classification : "internal",
+  };
+}
+
+/**
+ * Re-classify a board (owner only — the server answers 404 otherwise, the
+ * same masking as every board denial). Sends `{id, classification}` through
+ * the upsert route, which preserves the workspace when it is omitted (an
+ * update naming only the label must never wipe content). A tier the client
+ * does not know is refused before any request: only the three declared
+ * tiers may leave this function, the server validating again on arrival.
+ */
+export async function classifyBoard(
+  boardId: string,
+  tier: BoardTier,
+): Promise<{ ok: true; classification: BoardTier } | { ok: false; error: string }> {
+  if (!isBoardTier(tier)) return { ok: false, error: "unknown governance tier" };
+  const res = await authed("/api/boards", {
+    method: "POST",
+    body: JSON.stringify({ id: boardId, classification: tier }),
+  });
+  if (!res) return { ok: false, error: "You're working offline. Sign in to change governance." };
+  if (!res.ok) {
+    try {
+      const body = (await res.json()) as { error?: string };
+      if (typeof body?.error === "string" && body.error !== "")
+        return { ok: false, error: body.error };
+    } catch {
+      // non-JSON body: fall through to the status-coded message
+    }
+    return {
+      ok: false,
+      error: res.status === 404 ? "board not found" : `server refused (${res.status})`,
+    };
+  }
+  // The upsert answers 201 without echoing the tier; the request named it
+  // and a 201 means it stored, so the sent tier is the resolved one.
+  return { ok: true, classification: tier };
 }
 
 /**
@@ -560,11 +613,19 @@ export async function proposeIntegration(
   boardId: string,
   provider: string,
 ): Promise<IntegrationPreview | { error: string; status: number } | null> {
-  const res = await authed(`/api/boards/${encodeURIComponent(boardId)}/integrations/${encodeURIComponent(provider)}/propose`, {
-    method: "POST",
-  });
+  const res = await authed(
+    `/api/boards/${encodeURIComponent(boardId)}/integrations/${encodeURIComponent(provider)}/propose`,
+    {
+      method: "POST",
+    },
+  );
   if (!res) return null;
-  if (!res.ok) return { error: (await res.json().catch(() => ({ error: "propose failed" }))).error ?? "propose failed", status: res.status };
+  if (!res.ok)
+    return {
+      error:
+        (await res.json().catch(() => ({ error: "propose failed" }))).error ?? "propose failed",
+      status: res.status,
+    };
   return (await res.json()) as IntegrationPreview;
 }
 
@@ -601,7 +662,11 @@ export async function proposeIntegrationAI(
       error?: string;
       hint?: string;
     };
-    return { error: body.error ?? "propose failed", status: res.status, ...(body.hint ? { hint: body.hint } : {}) };
+    return {
+      error: body.error ?? "propose failed",
+      status: res.status,
+      ...(body.hint ? { hint: body.hint } : {}),
+    };
   }
   return (await res.json()) as IntegrationPreview;
 }
@@ -611,7 +676,15 @@ export async function decideIntegrationAction(
   actionId: string,
   decision: "approve" | "reject",
   options?: { acknowledgeWarnings?: boolean },
-): Promise<IntegrationDecisionResult | { error: string; status: number; warnings?: Array<{ nodeId: string; field: string; reason: string }> } | null> {
+): Promise<
+  | IntegrationDecisionResult
+  | {
+      error: string;
+      status: number;
+      warnings?: Array<{ nodeId: string; field: string; reason: string }>;
+    }
+  | null
+> {
   const res = await authed(
     `/api/boards/${encodeURIComponent(boardId)}/integrations/actions/${encodeURIComponent(actionId)}/${decision}`,
     {
@@ -677,14 +750,22 @@ export async function decideInboundChange(
   boardId: string,
   changeId: string,
   decision: "accept" | "dismiss",
-): Promise<{ change?: InboundChangeView; duplicate?: boolean; seq?: number; error?: string; status?: number } | null> {
+): Promise<{
+  change?: InboundChangeView;
+  duplicate?: boolean;
+  seq?: number;
+  error?: string;
+  status?: number;
+} | null> {
   const res = await authed(
     `/api/boards/${encodeURIComponent(boardId)}/integrations/inbound/${encodeURIComponent(changeId)}/${decision}`,
     { method: "POST" },
   );
   if (!res) return null;
   if (!res.ok) {
-    const body = (await res.json().catch(() => ({ error: "decision failed" }))) as { error?: string };
+    const body = (await res.json().catch(() => ({ error: "decision failed" }))) as {
+      error?: string;
+    };
     return { error: body.error ?? "decision failed", status: res.status };
   }
   return (await res.json()) as { change?: InboundChangeView; duplicate?: boolean; seq?: number };

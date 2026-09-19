@@ -32,6 +32,12 @@ service:
   type: ClusterIP
   port: 80
   targetPort: 4387
+  # Rooms and presence are per-process (docs/20, threat-model B7): a WS
+  # reconnect landing on another replica loses its room. ClientIP affinity
+  # keeps a client's /ws on one pod; disable only behind an ingress that
+  # pins sticky sessions itself (e.g. nginx affinity annotations).
+  sessionAffinity: ClientIP
+  sessionAffinityTimeoutSeconds: 10800
 
 ingress:
   enabled: false

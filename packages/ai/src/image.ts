@@ -73,6 +73,56 @@ export class MockImageProvider implements ImageProvider {
 }
 
 /**
+ * Free high-quality image generation via Pollinations AI.
+ * Requires no API key and returns self-contained base64 data URLs.
+ */
+export class PollinationsImageProvider implements ImageProvider {
+  readonly name = "pollinations";
+  private readonly fetchImpl: typeof fetch;
+
+  constructor(options: { fetchImpl?: typeof fetch } = {}) {
+    this.fetchImpl =
+      options.fetchImpl ??
+      (typeof fetch !== "undefined" ? fetch : (undefined as unknown as typeof fetch));
+  }
+
+  async generateImage(request: ImageRequest): Promise<ImageResult> {
+    const dims =
+      request.size === "landscape"
+        ? [1024, 640]
+        : request.size === "portrait"
+          ? [640, 1024]
+          : [768, 768];
+    const [w, h] = dims;
+    const cleanPrompt = request.prompt.trim();
+    const seed = Math.floor(Math.random() * 1000000);
+    const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(cleanPrompt)}?width=${w}&height=${h}&nologo=true&seed=${seed}`;
+
+    try {
+      const res = await this.fetchImpl(url, { signal: AbortSignal.timeout(15000) });
+      if (res.ok) {
+        const arrayBuf = await res.arrayBuffer();
+        let b64 = "";
+        if (typeof Buffer !== "undefined") {
+          b64 = Buffer.from(arrayBuf).toString("base64");
+        } else {
+          const bytes = new Uint8Array(arrayBuf);
+          let binary = "";
+          for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]!);
+          b64 = btoa(binary);
+        }
+        const mime = res.headers.get("content-type") || "image/jpeg";
+        const src = `data:${mime};base64,${b64}`;
+        return { src, explanation: `Generated visual for "${cleanPrompt}".` };
+      }
+    } catch {
+      // Fall back to placeholder if offline or unreachable
+    }
+    return new MockImageProvider().generateImage(request);
+  }
+}
+
+/**
  * Real image generation against an OpenAI-compatible `/v1/images/generations`
  * endpoint (OpenAI, Azure OpenAI, or a gateway that mirrors the shape).
  *
@@ -86,6 +136,8 @@ export interface OpenAIImageOptions {
   /** Full images endpoint, e.g. https://api.openai.com/v1/images/generations */
   baseUrl: string;
   model?: string;
+  /** Optional fallback models to use if the primary model fails. */
+  fallbackModels?: string[];
   fetchImpl?: typeof fetch;
   name?: string;
 }
@@ -104,6 +156,7 @@ const SIZE_MAP: Record<NonNullable<ImageRequest["size"]>, string> = {
 export class OpenAIImageProvider implements ImageProvider {
   readonly name: string;
   readonly model: string;
+  private readonly fallbackModels: string[];
   private readonly apiKey: string;
   private readonly baseUrl: string;
   private readonly fetchImpl: typeof fetch;
@@ -114,11 +167,28 @@ export class OpenAIImageProvider implements ImageProvider {
     this.apiKey = options.apiKey;
     this.baseUrl = options.baseUrl;
     this.model = options.model ?? "gpt-image-1";
+    this.fallbackModels = options.fallbackModels ?? [];
     this.fetchImpl = options.fetchImpl ?? fetch;
     this.name = options.name ?? "openai-image";
   }
 
   async generateImage(request: ImageRequest): Promise<ImageResult> {
+    const candidateModels = [
+      this.model,
+      ...this.fallbackModels.filter((m) => m !== this.model),
+    ];
+    let lastError: Error | null = null;
+    for (const modelToUse of candidateModels) {
+      try {
+        return await this.executeGenerateImage(request, modelToUse);
+      } catch (err) {
+        lastError = err as Error;
+      }
+    }
+    throw lastError ?? new Error("Image provider request failed");
+  }
+
+  private async executeGenerateImage(request: ImageRequest, modelToUse: string): Promise<ImageResult> {
     const response = await this.fetchImpl(this.baseUrl, {
       method: "POST",
       headers: {
@@ -126,7 +196,7 @@ export class OpenAIImageProvider implements ImageProvider {
         authorization: `Bearer ${this.apiKey}`,
       },
       body: JSON.stringify({
-        model: this.model,
+        model: modelToUse,
         prompt: request.prompt,
         n: 1,
         size: SIZE_MAP[request.size ?? "square"],

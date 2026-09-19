@@ -8,7 +8,6 @@ import {
   InMemoryJobQueue,
   isJobReclaimable,
   JobRunner,
-  type Job,
   type JobQueue,
   PostgresJobQueue,
 } from "../src/jobs.js";

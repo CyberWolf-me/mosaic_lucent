@@ -316,5 +316,7 @@ describe("Stage E3 definition of done — the create-the-work bridge, end to end
     expect(empty.status).toBe(422);
     expect(h.selector.calls).toBe(0);
     expect(h.wire.issues).toHaveLength(4);
-  });
+    // 30s budget, not the 5s default: same load-flake rationale as D9
+    // (seen live 2026-09-17; ~380ms in isolation).
+  }, 30000);
 });

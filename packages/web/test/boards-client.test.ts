@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { createWorkspace } from "@lucent/core";
-import { fetchBoard, listBoards, saveBoard } from "../src/boards.js";
+import { classifyBoard, fetchBoard, listBoards, saveBoard } from "../src/boards.js";
+import { BOARD_TIERS } from "../src/board-tiers.js";
 
 /**
  * The board REST client is what turns a local board into a shareable one — the
@@ -136,5 +137,83 @@ describe("board client", () => {
     // The scope an outside collaborator needs: it lists what they hold a
     // `board_members` row on without requiring an org membership.
     expect(fetchMock.mock.calls[0]![0]).toBe("/api/boards?orgId=org_1&scope=shared");
+  });
+});
+
+describe("board governance tier (docs/23 S1)", () => {
+  it("reads the resolved tier off fetchBoard, defaulting garbage to internal", async () => {
+    signedIn();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Promise.resolve(
+          new Response(
+            JSON.stringify({
+              id: "a",
+              name: "A",
+              workspace: createWorkspace(),
+              role: "owner",
+              classification: "restricted",
+            }),
+            { status: 200 },
+          ),
+        ),
+      ),
+    );
+    expect((await fetchBoard("a"))?.classification).toBe("restricted");
+  });
+
+  it("classifies through the upsert route with id + tier and nothing else", async () => {
+    signedIn();
+    const fetchMock = vi.fn((_url: string, _init?: RequestInit) =>
+      Promise.resolve(new Response(JSON.stringify({ id: "brd_1" }), { status: 201 })),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const result = await classifyBoard("brd_1", "confidential");
+    expect(result).toEqual({ ok: true, classification: "confidential" });
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toBe("/api/boards");
+    expect(init!.method).toBe("POST");
+    // The workspace must NOT ride along: the server preserves content on
+    // updates that omit it, and a 8 MiB blob on a label change would be
+    // how a governance click becomes a data bill.
+    expect(JSON.parse(String(init!.body))).toEqual({ id: "brd_1", classification: "confidential" });
+  });
+
+  it("refuses unknown tiers before any request and surfaces server refusals", async () => {
+    signedIn();
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    expect(await classifyBoard("brd_1", "top-secret" as never)).toEqual({
+      ok: false,
+      error: "unknown governance tier",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+    for (const tier of BOARD_TIERS) {
+      expect(["internal", "confidential", "restricted"]).toContain(tier);
+    }
+  });
+
+  it("maps 400/404 to the server's reason or the unguessable mask", async () => {
+    signedIn();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ error: "invalid classification" }), { status: 400 }),
+      ),
+    );
+    expect(await classifyBoard("brd_1", "restricted")).toEqual({
+      ok: false,
+      error: "invalid classification",
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("nope", { status: 404 })),
+    );
+    expect(await classifyBoard("brd_1", "restricted")).toEqual({
+      ok: false,
+      error: "board not found",
+    });
   });
 });

@@ -1116,7 +1116,7 @@ function boundsOf(layout: LayoutResult): { x: number; y: number; w: number; h: n
  * sub-workspace, regions pack along a row, and the board flow (if any) stacks
  * above the region strip.
  */
-function layoutWithRegions(
+function _layoutWithRegions(
   workspace: Workspace,
   partition: RegionPartition,
   opts: Required<Omit<LayoutOptions, "strategy">>,

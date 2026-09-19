@@ -103,6 +103,33 @@ export function buildPrintDocument(svg: string, title: string): string {
 }
 
 /**
+ * Detect explicit user intent to generate a visual reference image, illustration,
+ * or logo. Must NEVER intercept diagram, flowchart, mindmap, or architecture requests.
+ */
+export function parseExplicitImageIntent(text: string): string | null {
+  const trimmed = text.trim();
+  if (!trimmed) return null;
+  if (
+    /\b(diagram|flowchart|flow\s+chart|mindmap|mind\s+map|architecture|journey|wireframe|mockup|table|graph|sequence|decisiontree|process\s+map|orgchart)\b/i.test(
+      trimmed,
+    )
+  ) {
+    return null;
+  }
+  const patterns = [
+    /^(?:please\s+)?(?:generate|create|make|draw)\s+(?:an?\s+)?(?:reference\s+)?(?:image|picture|photo|illustration|logo|icon|graphic)\s+(?:of|for)\s+(.+)$/i,
+    /^(?:please\s+)?(?:generate|create|make|draw)\s+(?:an?\s+)?(?:reference\s+image|reference\s+picture|reference\s+photo)\s*[:\-]?\s*(.+)$/i,
+    /^(?:imagine|render\s+image)\s+(?:of\s+)?(.+)$/i,
+    /^(?:create|generate)\s+a\s+logo\s+(?:for|of)\s+(.+)$/i,
+  ];
+  for (const p of patterns) {
+    const m = trimmed.match(p);
+    if (m && m[1]) return m[1].trim();
+  }
+  return null;
+}
+
+/**
  * The canvas view. Its sub-state (empty / generating / main / proposing /
  * voice) is derived from real data in the workspace context, not stored
  * separately (docs/11). Coordinates come from computeLayout; the AI only
@@ -118,6 +145,8 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
     cancelSend,
     canvasPhase,
     proposal,
+    applyProposal,
+    cancelProposal,
     listening,
     setListening,
     send,
@@ -145,6 +174,10 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
   const locale = useMemo(() => resolveLocale(navigator.language), []);
 
   const [message, setMessage] = useState("");
+  const [blankBoardStarted, setBlankBoardStarted] = useState(false);
+  useEffect(() => {
+    setBlankBoardStarted(false);
+  }, [boardId]);
   const [selected, setSelected] = useState<string | null>(null);
   const [selectedShapes, setSelectedShapes] = useState<Set<string>>(new Set());
   // Multi-node selection, so a marquee or shift-click can grab several diagram
@@ -152,6 +185,15 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
   // single "focused" node that drives the selection HUD and inspectors.
   const [selectedNodes, setSelectedNodes] = useState<Set<string>>(new Set());
   const [tool, setTool] = useState<Tool>("select");
+  const changeTool = useCallback((next: Tool) => {
+    setTool(next);
+    if (next !== "select" && next !== "hand") {
+      setSelected(null);
+      setSelectedShapes(new Set());
+      setSelectedNodes(new Set());
+      setSelectedLink(null);
+    }
+  }, []);
   const [zoom, setZoom] = useState(85);
   const [mode, setMode] = useState<"edit" | "present" | "focus">("edit");
   const [presentStep, setPresentStep] = useState(0);
@@ -475,6 +517,13 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
         }
       }
 
+      // Proposal review shortcut: Cmd/Ctrl + Enter applies the proposal immediately.
+      if (mod && e.key === "Enter" && proposal) {
+        e.preventDefault();
+        applyProposal();
+        return;
+      }
+
       // Tool shortcuts — only when no modifier is held.
       if (mod || e.altKey) return;
       const map: Record<string, Tool> = {
@@ -494,8 +543,12 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
       };
       const next = map[e.key.toLowerCase()];
       if (next) {
-        setTool(next);
+        changeTool(next);
       } else if (e.key === "Escape") {
+        if (proposal) {
+          cancelProposal();
+          return;
+        }
         setTool("select");
         setSelectedShapes(new Set());
         setSelectedNodes(new Set());
@@ -517,17 +570,66 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
     mode,
     canvasPhase,
     readOnly,
+    proposal,
+    applyProposal,
+    cancelProposal,
   ]);
+
+  // AI image generation (Phase E): prompt → server → image shape on the canvas.
+  // Supports both manual toolbar prompt and conversational voice/chat prompts.
+  const generateImageShape = useCallback(
+    async (customPrompt?: string) => {
+      const prompt = customPrompt ?? window.prompt("Describe an image for Lucent to generate:");
+      if (!prompt) return;
+      notify("Generating reference image with Lucent Imagine…");
+      try {
+        const { src, explanation } = await generateImage(prompt, "landscape");
+        const posX = viewportBox
+          ? Math.round(viewportBox.x + Math.max(0, (viewportBox.width - 400) / 2))
+          : 320;
+        const posY = viewportBox
+          ? Math.round(viewportBox.y + Math.max(0, (viewportBox.height - 250) / 2))
+          : 220;
+        applyManual(
+          [
+            {
+              op: "CREATE_SHAPE",
+              id: shapeId(),
+              kind: "image",
+              position: { x: posX, y: posY },
+              size: { width: 400, height: 250 },
+              src,
+              z: nextZ(shapes),
+            },
+          ],
+          "Generate image",
+        );
+        if (explanation) notify(explanation);
+      } catch (err) {
+        notify((err as Error).message);
+      }
+    },
+    [applyManual, notify, shapes, viewportBox],
+  );
 
   const submit = useCallback(() => {
     const text = message.trim();
     if (!text) return;
     setMessage("");
+    if (proposal) {
+      notify("Superseding uncommitted proposal with new request…");
+    }
     // Ask mode (Stage C1): the read direction. No selection/attachments — a
     // question about the board's history carries no board edits, and the
     // server builds its own context from the visible window.
     if (pillMode === "ask") {
       void ask(text);
+      return;
+    }
+    // Explicit image/reference/logo generation intent:
+    const imgPrompt = parseExplicitImageIntent(text);
+    if (imgPrompt) {
+      void generateImageShape(imgPrompt);
       return;
     }
     // Pass current selection so the AI can resolve "this/these/that" (Phase C).
@@ -536,7 +638,7 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
     // "turn this screenshot into a wireframe" has something to look at.
     const attachments = collectAttachments(workspace, sel);
     void send(text, sel, attachments);
-  }, [message, send, ask, pillMode, selectedShapes, selected, workspace]);
+  }, [message, send, ask, pillMode, selectedShapes, selected, workspace, generateImageShape, proposal, notify]);
 
   const toggleVoice = useCallback(() => {
     if (listening) {
@@ -574,7 +676,12 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
         if (pillMode === "ask") {
           void ask(t);
         } else {
-          void send(t);
+          const imgPrompt = parseExplicitImageIntent(t);
+          if (imgPrompt) {
+            void generateImageShape(imgPrompt);
+          } else {
+            void send(t);
+          }
         }
       },
       onError: (msg) => {
@@ -588,7 +695,7 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
         notify("Listening — on-device Whisper. First use downloads the model.");
       }
       if (provider.id === "browser") {
-        notify("Listening — the browser engine sends audio to its cloud speech service.");
+        notify("Listening — describe what to build or change...");
       }
     }
   }, [
@@ -603,6 +710,7 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
     settings.livekitUrl,
     settings.livekitTokenUrl,
     settings.livekitRoom,
+    generateImageShape,
   ]);
 
   const addShape = useCallback(
@@ -617,6 +725,9 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
       setSelectedShapes(new Set([op.id]));
       setSelected(null);
       setTool("select");
+      if (op.kind === "sticky" || op.kind === "text") {
+        setEditShapeId(op.id);
+      }
     },
     [applyManual, shapes, notify],
   );
@@ -647,33 +758,6 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
       ],
       "Add embed",
     );
-  }, [applyManual, notify, shapes]);
-
-  // AI image generation (Phase E): prompt → server → image shape on the canvas.
-  const generateImageShape = useCallback(async () => {
-    const prompt = window.prompt("Describe an image for Lucent to generate:");
-    if (!prompt) return;
-    notify("Generating image…");
-    try {
-      const { src, explanation } = await generateImage(prompt, "landscape");
-      applyManual(
-        [
-          {
-            op: "CREATE_SHAPE",
-            id: shapeId(),
-            kind: "image",
-            position: { x: 320, y: 220 },
-            size: { width: 400, height: 250 },
-            src,
-            z: nextZ(shapes),
-          },
-        ],
-        "Generate image",
-      );
-      if (explanation) notify(explanation);
-    } catch (err) {
-      notify((err as Error).message);
-    }
   }, [applyManual, notify, shapes]);
 
   // Paste/duplicate a set of shapes offset by (dx,dy); selects the new copies.
@@ -797,6 +881,9 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
   const [nodeDrag, setNodeDrag] = useState<{ ids: Set<string>; dx: number; dy: number } | null>(
     null,
   );
+  const dragRaf = useRef<number | null>(null);
+  const pendingNodeDrag = useRef<{ ids: Set<string>; dx: number; dy: number } | null>(null);
+
   const moveNode = useCallback(
     (id: string, x: number, y: number, commit: boolean) => {
       const origin = workspace.nodes[id]?.position;
@@ -807,9 +894,24 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
       const dy = origin ? y - origin.y : 0;
 
       if (!commit) {
-        setNodeDrag({ ids: new Set(group), dx, dy });
+        // UX-P1-003: Schedule drag updates with requestAnimationFrame so rapid mouse movements
+        // update React state in lockstep with the frame render loop without frame lag.
+        pendingNodeDrag.current = { ids: new Set(group), dx, dy };
+        if (dragRaf.current == null) {
+          dragRaf.current = requestAnimationFrame(() => {
+            dragRaf.current = null;
+            if (pendingNodeDrag.current) {
+              setNodeDrag(pendingNodeDrag.current);
+            }
+          });
+        }
         return;
       }
+      if (dragRaf.current != null) {
+        cancelAnimationFrame(dragRaf.current);
+        dragRaf.current = null;
+      }
+      pendingNodeDrag.current = null;
       setNodeDrag(null);
       const ops = group.flatMap((nid) => {
         const p = workspace.nodes[nid]?.position;
@@ -1608,10 +1710,10 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
   // UX-2: named phases replace the char counter as the status model.
   // The workspace owns the phase; the char count rides along as detail.
   const PHASE_LABEL: Record<string, string> = {
-    understanding: "Understanding…",
-    constructing: "Constructing…",
-    validating: "Validating…",
-    applying: "Applying…",
+    understanding: "Parsing intent…",
+    constructing: "Designing architecture…",
+    validating: "Optimizing layout…",
+    applying: "Rendering nodes…",
   };
   const status =
     canvasPhase === "generating"
@@ -1672,7 +1774,7 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
   // drawing tool is armed we must show the board instead, or picking a shape on a
   // fresh board silently does nothing — the drag lands on the hero.
   const drawingArmed = tool !== "select" && tool !== "hand";
-  const showHero = canvasPhase === "empty" && !drawingArmed;
+  const showHero = canvasPhase === "empty" && !drawingArmed && !blankBoardStarted;
 
   // UX-1: lenses render here, inside the Canvas entry — one board URL
   // (?view=canvas&lens=kanban) covers them. Each lens view is a full
@@ -1707,7 +1809,7 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
             onChange={setMessage}
             onSubmit={submit}
             onSpeak={toggleVoice}
-            onBlankBoard={() => addShape(createShapeOp("sticky", 340, 260))}
+            onBlankBoard={() => setBlankBoardStarted(true)}
             failedAttempt={heroFailure}
           />
           {/* The tour overlays the hero: it is the first-minute surface, and
@@ -1720,6 +1822,7 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
           <CanvasViewport
             initialZoom={85}
             tool={tool === "hand" ? "hand" : "select"}
+            className={drawingArmed ? "drawing-active" : undefined}
             onZoom={setZoom}
             setControls={(c) => (controls.current = c)}
             onViewport={setViewportBox}
@@ -1739,6 +1842,7 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
             )}
             <DiagramLayer
               workspace={previewWorkspace}
+              useElkRoutes={settings.elkLayout}
               selected={selected}
               selectedNodes={selectedNodes}
               proposedIds={proposedIds}
@@ -1823,14 +1927,14 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
                 track their objects through pan and zoom. */}
             {mode !== "present" && <EngagementBadges workspace={workspace} />}
             {mode !== "present" && <CommentPins workspace={workspace} onOpen={setCommentTarget} />}
-            {engagementTarget && canEdit && !voting && (
+            {engagementTarget && canEdit && !voting && !drawingArmed && (
               <EngagementAnchor
                 workspace={workspace}
                 targetId={engagementTarget}
                 onApply={applyManual}
               />
             )}
-            {selected && canvasPhase === "main" && canEdit && (
+            {selected && canvasPhase === "main" && canEdit && !drawingArmed && (
               <SelectionHud
                 id={selected}
                 workspace={workspace}
@@ -2001,122 +2105,127 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
           {canEdit && (
             <ShapeToolbar
               activeTool={tool}
-              onSelectTool={setTool}
+              onSelectTool={changeTool}
               onEmbed={addEmbed}
               onGenImage={generateImageShape}
               orientation="left"
             />
           )}
-          <LeftRail side="right" />
+          <LeftRail onOpenSettings={onOpenSettings} />
 
           {/* UX-1 L1/L2/L3: one Board-tools menu (L2) replaces the four-button
               right pileup (Polish/Templates/Timer/Vote). The comment bell
               stays separate — comments are attention, not tools. */}
+          {/* Top-right consolidated Activity & Utilities Bar */}
           {rightClusterVisible && (
-            <div style={{ position: "absolute", top: 72, right: 64, zIndex: 30 }}>
-              <button
-                className="templates-btn"
-                style={{ position: "static" }}
-                onClick={() => setToolsOpen((v) => !v)}
-                aria-haspopup="menu"
-                aria-expanded={toolsOpen}
-                aria-label="Board tools"
-                title="Board tools"
-              >
-                <Ico.Book /> Tools
-              </button>
-              {toolsOpen && (
-                <Menu onClose={() => setToolsOpen(false)} label="Board tools">
-                  <button
-                    role="menuitem"
-                    disabled={busy || (nodeCount === 0 && shapes.length === 0)}
-                    onClick={() => {
-                      setToolsOpen(false);
-                      void send(
-                        "Review this board and improve it: fix unclear or inconsistent labels, " +
-                          "add any obviously missing steps or connections, remove duplicates, and " +
-                          "group related nodes. Change only what genuinely improves it, and explain " +
-                          "each change.",
-                      );
-                    }}
-                  >
-                    <Ico.Sparkle /> Polish board
-                  </button>
-                  <button
-                    role="menuitem"
-                    onClick={() => {
-                      setToolsOpen(false);
-                      setTemplatesOpen(true);
-                    }}
-                  >
-                    <Ico.Book /> Insert a template
-                  </button>
-                  <button
-                    role="menuitem"
-                    onClick={() => {
-                      setToolsOpen(false);
-                      setTimerOpen((v) => !v);
-                    }}
-                  >
-                    <Ico.History /> Workshop timer
-                  </button>
-                  <button
-                    role="menuitem"
-                    onClick={() => {
-                      setToolsOpen(false);
-                      setVotePanelOpen((v) => !v);
-                    }}
-                  >
-                    ▲ {voting ? "Stop voting" : "Voting and reactions"}
-                  </button>
-                </Menu>
-              )}
-            </div>
-          )}
-          {/* UX-3: the one attention entry. Count rides the button; the
-              queue itself is a drawer, every row a jump to the evidence. */}
-          {attentionItems.length > 0 && (
-            <div style={{ position: "absolute", top: 116, right: 64, zIndex: 30 }}>
-              <button
-                className="timer-btn"
-                style={{ position: "static", borderColor: "var(--amber-3)" }}
-                onClick={() => setAttentionOpen((v) => !v)}
-                aria-expanded={attentionOpen}
-                aria-label={`Needs attention, ${attentionItems.length} items`}
-                title={`${attentionItems.length} thing${attentionItems.length > 1 ? "s need" : " needs"} review`}
-              >
-                ⚠ {attentionItems.length} to review
-              </button>
-              {attentionOpen && (
-                <div
-                  role="dialog"
-                  aria-label="Needs attention"
-                  style={{
-                    marginTop: 8,
-                    width: 300,
-                    padding: 12,
-                    background: "oklch(from var(--canvas-2) l c h / 0.95)",
-                    border: "1px solid var(--stroke-2)",
-                    borderRadius: "var(--r-lg)",
-                    boxShadow: "var(--elev-3)",
+            <div className="canvas-utility-bar">
+              <div className="utility-bar-item">
+                <button
+                  className="templates-btn"
+                  style={{ position: "static" }}
+                  onClick={() => {
+                    setToolsOpen((v) => !v);
+                    setAttentionOpen(false);
+                    setInboxOpen(false);
                   }}
+                  aria-haspopup="menu"
+                  aria-expanded={toolsOpen}
+                  aria-label="Board tools"
+                  title="Board tools"
                 >
-                  <AttentionPanel items={attentionItems} />
+                  <Ico.Book /> Tools
+                </button>
+                {toolsOpen && (
+                  <Menu onClose={() => setToolsOpen(false)} label="Board tools">
+                    <button
+                      role="menuitem"
+                      disabled={busy || (nodeCount === 0 && shapes.length === 0)}
+                      onClick={() => {
+                        setToolsOpen(false);
+                        void send(
+                          "Review this board and improve it: fix unclear or inconsistent labels, " +
+                            "add any obviously missing steps or connections, remove duplicates, and " +
+                            "group related nodes. Change only what genuinely improves it, and explain " +
+                            "each change.",
+                        );
+                      }}
+                    >
+                      <Ico.Sparkle /> Polish board
+                    </button>
+                    <button
+                      role="menuitem"
+                      onClick={() => {
+                        setToolsOpen(false);
+                        setTemplatesOpen(true);
+                      }}
+                    >
+                      <Ico.Book /> Insert a template
+                    </button>
+                    <button
+                      role="menuitem"
+                      onClick={() => {
+                        setToolsOpen(false);
+                        setTimerOpen((v) => !v);
+                      }}
+                    >
+                      <Ico.History /> Workshop timer
+                    </button>
+                    <button
+                      role="menuitem"
+                      onClick={() => {
+                        setToolsOpen(false);
+                        setVotePanelOpen((v) => !v);
+                      }}
+                    >
+                      ▲ {voting ? "Stop voting" : "Voting and reactions"}
+                    </button>
+                  </Menu>
+                )}
+              </div>
+
+              {attentionItems.length > 0 && (
+                <div className="utility-bar-item">
+                  <button
+                    className="timer-btn"
+                    style={{ position: "static", borderColor: "var(--amber-3)" }}
+                    onClick={() => {
+                      setAttentionOpen((v) => !v);
+                      setToolsOpen(false);
+                      setInboxOpen(false);
+                    }}
+                    aria-expanded={attentionOpen}
+                    aria-label={`Needs attention, ${attentionItems.length} items`}
+                    title={`${attentionItems.length} thing${attentionItems.length > 1 ? "s need" : " needs"} review`}
+                  >
+                    ⚠ {attentionItems.length} to review
+                  </button>
+                  {attentionOpen && (
+                    <div
+                      role="dialog"
+                      aria-label="Needs attention"
+                      className="utility-popover"
+                    >
+                      <AttentionPanel items={attentionItems} />
+                    </div>
+                  )}
                 </div>
               )}
-            </div>
-          )}
-          {rightClusterVisible && (
-            <div className="notif-wrap">
-              <NotificationBell workspace={workspace} onOpenTarget={setCommentTarget} />
-              <button
-                className={`inbox-btn ${openThreads ? "has" : ""}`}
-                onClick={() => setInboxOpen((v) => !v)}
-                title={openThreads ? `${openThreads} open thread(s)` : "All comments"}
-                aria-label={openThreads ? `${openThreads} open comment threads` : "All comments"}
-              >
-                All
-              </button>
+
+              <div className="utility-bar-item utility-comments-cluster">
+                <NotificationBell workspace={workspace} onOpenTarget={setCommentTarget} />
+                <button
+                  className={`inbox-btn ${openThreads ? "has" : ""}`}
+                  onClick={() => {
+                    setInboxOpen((v) => !v);
+                    setAttentionOpen(false);
+                    setToolsOpen(false);
+                  }}
+                  title={openThreads ? `${openThreads} open thread(s)` : "All comments"}
+                  aria-label={openThreads ? `${openThreads} open comment threads` : "All comments"}
+                >
+                  All
+                </button>
+              </div>
             </div>
           )}
           {inboxOpen && canEdit && (
@@ -2181,7 +2290,7 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
 
           {canvasPhase === "proposing" && <ProposalPanel />}
 
-          {canEdit && selectedShapes.size > 0 && (
+          {canEdit && canvasPhase !== "proposing" && selectedShapes.size > 0 && (
             <ShapeInspector
               shapes={workspace.shapes}
               selectedIds={selectedShapes}
@@ -2190,7 +2299,7 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
             />
           )}
 
-          {canEdit && selectedLink && (
+          {canEdit && canvasPhase !== "proposing" && selectedLink && (
             <LinkInspector
               workspace={workspace}
               linkId={selectedLink}
@@ -2205,7 +2314,11 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
               phase={genPhase}
               progressNote={genProgress}
               onCancel={busy ? () => cancelSend() : undefined}
-              placeholder="Refine, add, or transform — just describe it"
+              placeholder={
+                canvasPhase === "proposing"
+                  ? "Review proposal on right (⌘↵ to apply, Esc to cancel), or describe edits…"
+                  : "Refine, add, or transform — just describe it"
+              }
               value={message}
               onChange={setMessage}
               onSubmit={submit}

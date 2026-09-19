@@ -48,7 +48,7 @@ describe("gatePlanOps", () => {
   });
 
   it("every skipped descriptor carries the op kind and a readable reason", () => {
-    const { skipped } = gatePlanOps([{ op: "UPDATE_ISSUE", id: "x" }, ...planBatch.slice(0, 1)] as Operation[]);
+    const { skipped: _skipped } = gatePlanOps([{ op: "UPDATE_ISSUE", id: "x" }, ...planBatch.slice(0, 1)] as Operation[]);
     // UPDATE_ISSUE is ALLOWED — only the first slice item is in-list; this
     // asserts the descriptor shape on a real skip instead.
     const real: GatedOp[] = gatePlanOps([{ op: "MOVE_NODE" } as unknown as Operation]).skipped;

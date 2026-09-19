@@ -267,7 +267,7 @@ describe("Stage C4 definition of done — the continuous scenario", () => {
       ops: [{ op: "CREATE_NODE", id: "setup-node", nodeType: "step", label: "setup" }],
       by: alice.id,
       label: "board setup",
-      at: mondayAt - 1 * DAY,
+      at: mondayAt - Number(DAY),
       actor: { actorType: "user", actorId: alice.id, initiatedBy: alice.id },
     });
     expect(floor.ok).toBe(true);

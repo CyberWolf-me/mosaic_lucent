@@ -1492,5 +1492,7 @@ under these two orders, each slice verified before the next began.
   text answers through Ask with TTS playback, mute, and capture-start
   yield; open-questions panel; response-policy table.
 - **Still gated, explicitly**: proactive speech (M6.3 maturity + measured
-  reliability), vendor STT/TTS adapters (keys + live verification),
-  continuous transport/VAD onset, per-org residency + DPA (counsel), board-tier picker.
+  reliability), vendor live-runs (OpenAI adapters await keys; Zoom/Meet/Teams
+  await OAuth creds), continuous transport/VAD onset, per-org residency + DPA
+  (counsel). Closed since: board-tier picker (Share dialog), lint gate
+  (0 errors), PG-local verification (122/1380/0).

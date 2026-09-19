@@ -1,13 +1,24 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Operation } from "@lucent/core";
 import { createShapeOp, Z_OVERLAY_DRAW } from "../shapes.js";
 import type { DropKind } from "../shapes.js";
 
+const DEFAULT_SIZES: Record<DropKind, { width: number; height: number }> = {
+  rect: { width: 150, height: 72 },
+  ellipse: { width: 150, height: 90 },
+  diamond: { width: 110, height: 110 },
+  triangle: { width: 120, height: 100 },
+  star: { width: 110, height: 110 },
+  sticky: { width: 160, height: 120 },
+  text: { width: 180, height: 32 },
+  frame: { width: 320, height: 220 },
+};
+
 /**
- * Draw-to-place surface. When a shape tool is armed, the user click-drags to set
- * the shape's position AND size (docs/14) instead of it auto-dropping. A plain
- * click (no drag) creates the shape at its default size. Live preview follows
- * the cursor. Coordinates are content-space so it works at any zoom/pan.
+ * Draw-to-place surface. When a shape tool is armed:
+ * - A single click drops the shape centered at the click position.
+ * - Click-drag sizes the shape interactively with a live preview.
+ * - Pressing Escape cancels the tool and returns to Select mode.
  */
 export function ShapeDrawLayer({
   kind,
@@ -22,41 +33,75 @@ export function ShapeDrawLayer({
 }) {
   const [rect, setRect] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
   const active = useRef(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onDone();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onDone]);
 
   const toContent = (e: React.PointerEvent) => {
-    const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const r = containerRef.current?.getBoundingClientRect();
+    if (!r) return { x: e.clientX / scale, y: e.clientY / scale };
     return { x: (e.clientX - r.left) / scale, y: (e.clientY - r.top) / scale };
   };
 
   const onPointerDown = (e: React.PointerEvent) => {
+    if (e.button !== 0) return;
+    e.stopPropagation();
+    e.preventDefault();
     active.current = true;
-    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    try {
+      containerRef.current?.setPointerCapture(e.pointerId);
+    } catch {}
     const p = toContent(e);
     setRect({ x0: p.x, y0: p.y, x1: p.x, y1: p.y });
   };
+
   const onPointerMove = (e: React.PointerEvent) => {
     if (!active.current || !rect) return;
+    e.stopPropagation();
+    e.preventDefault();
     const p = toContent(e);
     setRect((r) => (r ? { ...r, x1: p.x, y1: p.y } : r));
   };
-  const onPointerUp = () => {
+
+  const onPointerUp = (e: React.PointerEvent) => {
     if (!active.current || !rect) {
       active.current = false;
       return;
     }
+    e.stopPropagation();
     active.current = false;
-    const x = Math.min(rect.x0, rect.x1);
-    const y = Math.min(rect.y0, rect.y1);
+    try {
+      containerRef.current?.releasePointerCapture(e.pointerId);
+    } catch {}
     const w = Math.abs(rect.x1 - rect.x0);
     const h = Math.abs(rect.y1 - rect.y0);
-    // Tiny drag == a click: use the default size for that kind.
-    const drawn = w > 6 && h > 6;
-    const op = drawn
-      ? createShapeOp(kind, Math.round(x), Math.round(y), {
-          width: Math.round(w),
-          height: Math.round(h),
-        })
-      : createShapeOp(kind, Math.round(x), Math.round(y));
+    const drawn = w > 8 && h > 8;
+
+    let op: Extract<Operation, { op: "CREATE_SHAPE" }>;
+    if (drawn) {
+      const x = Math.min(rect.x0, rect.x1);
+      const y = Math.min(rect.y0, rect.y1);
+      op = createShapeOp(kind, Math.round(x), Math.round(y), {
+        width: Math.round(w),
+        height: Math.round(h),
+      });
+    } else {
+      // Single click: place centered at click position
+      const def = DEFAULT_SIZES[kind] ?? { width: 160, height: 120 };
+      const centerX = Math.round(rect.x0 - def.width / 2);
+      const centerY = Math.round(rect.y0 - def.height / 2);
+      op = createShapeOp(kind, centerX, centerY, def);
+    }
+
     onCreate(op);
     setRect(null);
     onDone();
@@ -82,17 +127,33 @@ export function ShapeDrawLayer({
 
   return (
     <div
+      ref={containerRef}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
       style={{
         position: "absolute",
         inset: 0,
+        width: "100%",
+        height: "100%",
         zIndex: Z_OVERLAY_DRAW,
         cursor: "crosshair",
         touchAction: "none",
+        pointerEvents: "all",
+        background: "transparent",
       }}
     >
+      <div
+        style={{
+          position: "absolute",
+          left: -50000,
+          top: -50000,
+          width: 100000,
+          height: 100000,
+          pointerEvents: "all",
+          background: "transparent",
+        }}
+      />
       {box && box.width > 2 && box.height > 2 && (
         <div
           style={{

@@ -1,12 +1,10 @@
 import { useMemo, useState } from "react";
 import { useWorkspace } from "../workspace.js";
-import type { WorkspaceState } from "../workspace.js";
 import {
   decideIntegrationAction,
   proposeIntegration,
   proposeIntegrationAI,
   type IntegrationDecisionResult,
-  type IntegrationLink,
   type IntegrationPreview,
 } from "../boards.js";
 import { resolveLocale, t } from "@lucent/i18n";
@@ -53,7 +51,6 @@ export function IntegrationPanel({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [results, setResults] = useState<IntegrationDecisionResult | null>(null);
-  const [links, setLinks] = useState<IntegrationLink[] | null>(null);
   /** Stage D9: the Ask-Lucent input — the natural-language request. */
   const [aiRequest, setAiRequest] = useState("");
   /** Stage D8: the ack the approve route requires when the provider cannot

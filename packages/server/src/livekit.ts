@@ -86,6 +86,11 @@ export function mintLiveKitToken(input: MintLiveKitTokenInput): MintedLiveKitTok
     exp: nowSec + ttl,
     video: {
       room: input.room,
+      // roomJoin is what the signal path actually authorizes: without it
+      // LiveKit answers 401 "permissions denied" on connect (found by a
+      // real headless join, 2026-09-17 — publish/subscribe alone do not
+      // admit anyone to the room).
+      roomJoin: true,
       canPublish: true,
       canSubscribe: true,
     },

@@ -4,7 +4,6 @@ import {
   canonicalizeTopic,
   possibleDuplicateTopics,
   topicsAreVariants,
-  type TopicDuplicate,
 } from "@lucent/core";
 
 /**

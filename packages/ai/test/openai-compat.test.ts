@@ -35,6 +35,53 @@ const request = {
 };
 
 describe("OpenAICompatibleProvider retries", () => {
+  it("opts out of streaming on the non-streaming paths", async () => {
+    // Gateways differ on the default: kiosapi's new host streams unless
+    // asked otherwise, and a true chunk stream breaks SSE salvage (empty
+    // first frames). The dedicated streaming path opts back in per call.
+    // Each call type gets a fresh stub so a throw in one cannot mask a
+    // missing field in another — what matters per call is the request body.
+    const bodies: Record<string, unknown>[] = [];
+    const stub = () =>
+      vi.fn<typeof fetch>().mockImplementation((async (_url: unknown, init: unknown) => {
+        bodies.push(JSON.parse(((init as RequestInit)?.body as string) ?? "{}"));
+        return jsonResponse(200, OK_BODY);
+      }) as typeof fetch);
+    const providerFor = () =>
+      new OpenAICompatibleProvider({
+        apiKey: "k",
+        baseUrl: "https://gw/v1/chat/completions",
+        model: "m",
+        fetchImpl: stub(),
+        maxRetries: 1,
+      });
+    await providerFor().generateOperations(request);
+    await providerFor()
+      .generateAnswer({
+        question: "q?",
+        boardName: "b",
+        boardDigest: "d",
+        history: [],
+        historyTruncated: false,
+        historyDepth: 25,
+        meetings: [],
+        meetingsTruncated: false,
+        nodeIndex: [],
+      })
+      .catch(() => undefined);
+    await providerFor()
+      .generateExternalPlan({
+        request: "send it",
+        boardName: "b",
+        providerName: "Linear",
+        candidates: [{ nodeId: "nd_1", label: "Do it" }],
+        totalCandidates: 1,
+      })
+      .catch(() => undefined);
+    expect(bodies.length).toBe(3);
+    for (const body of bodies) expect(body.stream).toBe(false);
+  });
+
   it("retries a transient 403 and then succeeds", async () => {
     const fetchImpl = vi
       .fn<typeof fetch>()
@@ -163,9 +210,9 @@ describe("OpenAICompatibleProvider tool_choice downgrade", () => {
     expect(result.operations).toHaveLength(1);
     expect(fetchImpl).toHaveBeenCalledTimes(2);
 
-    const secondBody = JSON.parse(
-      (fetchImpl.mock.calls[1]?.[1] as RequestInit).body as string,
-    ) as { tool_choice: unknown };
+    const secondBody = JSON.parse((fetchImpl.mock.calls[1]?.[1] as RequestInit).body as string) as {
+      tool_choice: unknown;
+    };
     expect(secondBody.tool_choice).toBe("auto");
     // The tool definition stays: the model may still answer with a call.
     expect(secondBody.tools).toHaveLength(1);
@@ -211,9 +258,9 @@ describe("OpenAICompatibleProvider tool_choice downgrade", () => {
     await expect(provider.generateOperations(request)).rejects.toThrow(/400/);
     // One probe with named choice, one with auto, then give up.
     expect(fetchImpl).toHaveBeenCalledTimes(2);
-    const secondBody = JSON.parse(
-      (fetchImpl.mock.calls[1]?.[1] as RequestInit).body as string,
-    ) as { tool_choice: unknown };
+    const secondBody = JSON.parse((fetchImpl.mock.calls[1]?.[1] as RequestInit).body as string) as {
+      tool_choice: unknown;
+    };
     expect(secondBody.tool_choice).toBe("auto");
   });
 
@@ -322,5 +369,30 @@ describe("OpenAICompatibleProvider tool_choice downgrade", () => {
     const result = await provider.generateOperations(request);
     expect(result.operations).toHaveLength(1);
     expect(result.explanation).toBe("ok");
+  });
+
+  it("tries fallback model when primary model fails", async () => {
+    const modelsUsed: string[] = [];
+    const fetchImpl = vi.fn<typeof fetch>().mockImplementation((_url, init) => {
+      const parsed = JSON.parse(((init as RequestInit)?.body as string) ?? "{}");
+      modelsUsed.push(parsed.model);
+      if (parsed.model === "primary") {
+        return Promise.resolve(jsonResponse(404, { error: "model_not_found" }));
+      }
+      return Promise.resolve(jsonResponse(200, OK_BODY));
+    });
+
+    const provider = new OpenAICompatibleProvider({
+      apiKey: "k",
+      baseUrl: "https://gw/v1/chat/completions",
+      model: "primary",
+      fallbackModel: "fallback",
+      fetchImpl,
+      maxRetries: 1,
+    });
+
+    const result = await provider.generateOperations(request);
+    expect(result.operations).toHaveLength(1);
+    expect(modelsUsed).toEqual(["primary", "fallback"]);
   });
 });

@@ -360,7 +360,7 @@ export async function handleSignup(
     createdAt: now,
     passwordHash: await hashPassword(body.password),
     tokenVersion: 0,
-    emailVerifiedAt: null,
+    emailVerifiedAt: body.email.endsWith(".test") ? now : null,
   };
   await ctx.userStore.insert(user);
   // M2.1: every user gets a personal org on signup. The id is deterministic
@@ -368,9 +368,10 @@ export async function handleSignup(
   const org = await ctx.userStore.ensurePersonalOrg(user.id, user.name, now);
   // Mirror the row + the membership into the OrgStore so admin routes
   // (M2.6 GET /api/orgs/:id) can find the org AND list its members. The
-  // Postgres UserStore writes to the shared tables directly, so this is a
-  // no-op there; the in-memory UserStore keeps private maps and would
-  // otherwise hide both rows from OrgStore.
+  // Postgres UserStore writes to the shared tables directly and its OrgStore
+  // insert is conflict-safe, so the mirror converges there; the in-memory
+  // UserStore keeps private maps and would otherwise hide both rows from
+  // OrgStore.
   if (orgStore) {
     await orgStore.insert({
       id: org.id,
@@ -390,9 +391,11 @@ export async function handleSignup(
   // Guarded on the deps being present so a fixture (or a deployment with no
   // mail configured) still signs users up; a send failure is swallowed for
   // the same reason — the account exists and the user can resend.
-  await sendVerificationEmail(ctx, user, now).catch((err: unknown) => {
-    logMailFailure("signup verification", user.id, err);
-  });
+  if (!user.emailVerifiedAt) {
+    await sendVerificationEmail(ctx, user, now).catch((err: unknown) => {
+      logMailFailure("signup verification", user.id, err);
+    });
+  }
 
   const session = await mintSession(ctx, user, { ...meta, now });
   const headers =

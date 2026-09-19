@@ -1,4 +1,4 @@
-import { and, eq, inArray, lte, or, sql } from "drizzle-orm";
+import { and, eq, inArray, lte, sql } from "drizzle-orm";
 import type { Db } from "../db/client.js";
 
 // The drizzle handle type (Db["db"]) — the trio takes the handle, matching

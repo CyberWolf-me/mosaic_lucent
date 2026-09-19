@@ -3,10 +3,7 @@ import type { GenerateRequest, GenerateResult, LLMProvider, StreamCallbacks } fr
 import type { AnswerRequest, AnswerResult } from "../answer.js";
 import { ANSWER_TOOL_NAME, openAiAnswerToolDefinition } from "../answer.js";
 import type { ExternalPlanRequest, ExternalPlanResult } from "../externalPlan.js";
-import {
-  EXTERNAL_PLAN_TOOL_NAME,
-  openAiExternalPlanToolDefinition,
-} from "../externalPlan.js";
+import { EXTERNAL_PLAN_TOOL_NAME, openAiExternalPlanToolDefinition } from "../externalPlan.js";
 import { sseEvents } from "./sse.js";
 import {
   ANSWER_SYSTEM_PROMPT,
@@ -43,6 +40,8 @@ export interface OpenAICompatOptions {
   /** Full chat-completions URL, e.g. https://gorouter.app/v1/chat/completions */
   baseUrl: string;
   model: string;
+  /** Optional fallback model to use if the primary model fails. */
+  fallbackModel?: string;
   fetchImpl?: typeof fetch;
   /** Optional friendly name shown in /health. */
   name?: string;
@@ -90,11 +89,7 @@ const DEFAULT_TIMEOUT_MS = 180_000;
  * prose fallback below already covers a model that declines to call it.
  */
 function isToolChoiceUnsupported(status: number, detail: string): boolean {
-  return (
-    status === 400 &&
-    /tool_choice/i.test(detail) &&
-    /auto/i.test(detail)
-  );
+  return status === 400 && /tool_choice/i.test(detail) && /auto/i.test(detail);
 }
 
 function withAutoToolChoice(bodyText: string): string {
@@ -141,6 +136,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
   private readonly apiKey: string;
   private readonly baseUrl: string;
   private readonly model: string;
+  private readonly fallbackModel?: string;
   private readonly fetchImpl: typeof fetch;
   private readonly maxRetries: number;
   private readonly timeoutMs: number;
@@ -154,13 +150,34 @@ export class OpenAICompatibleProvider implements LLMProvider {
     this.apiKey = options.apiKey;
     this.baseUrl = options.baseUrl;
     this.model = options.model;
+    this.fallbackModel = options.fallbackModel;
     this.fetchImpl = options.fetchImpl ?? fetch;
     this.name = options.name ?? "openai-compat";
     this.maxRetries = Math.max(1, options.maxRetries ?? 4);
     this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   }
 
+  private candidateModels(): string[] {
+    return [
+      this.model,
+      ...(this.fallbackModel && this.fallbackModel !== this.model ? [this.fallbackModel] : []),
+    ];
+  }
+
   async generateOperations(request: GenerateRequest): Promise<GenerateResult> {
+    const models = this.candidateModels();
+    let lastError: Error | null = null;
+    for (const modelToUse of models) {
+      try {
+        return await this.executeGenerateOperations(request, modelToUse);
+      } catch (err) {
+        lastError = err as Error;
+      }
+    }
+    throw lastError ?? new Error("Provider request failed");
+  }
+
+  private async executeGenerateOperations(request: GenerateRequest, modelToUse: string): Promise<GenerateResult> {
     // Vision: OpenAI-compatible gateways take an array of content parts. Text
     // only when there are no images, so a text-only gateway is unaffected.
     const text = buildUserPrompt(request);
@@ -175,7 +192,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
       : text;
 
     let body = JSON.stringify({
-      model: this.model,
+      model: modelToUse,
       messages: [
         { role: "system", content: SYSTEM_PROMPT },
         { role: "user", content: userContent },
@@ -194,6 +211,11 @@ export class OpenAICompatibleProvider implements LLMProvider {
       // per dependency order (M1 operation reliability).
       max_tokens: 16384,
       temperature: 0.2,
+      // Explicit opt-OUT of streaming. Gateways differ on the default: some
+      // stream unless asked otherwise, and a true chunk stream breaks the
+      // below salvage (its first frames carry empty choices). The dedicated
+      // streaming path (streamOperations) opts back in per call.
+      stream: false,
     });
 
     let lastDetail = "";
@@ -242,8 +264,9 @@ export class OpenAICompatibleProvider implements LLMProvider {
         throw new Error(`Provider request failed (${response.status}): ${lastDetail}`);
       }
 
-      // A misbehaving route can ignore `stream:false` and answer with an SSE
-      // body ("data: {...}\n\n"). The raw text is read exactly once — after
+      // A misbehaving route can STILL ignore `stream:false` and answer with
+      // an SSE body ("data: {...}\n\n") — the old kiosapi host did exactly
+      // this with single-frame completions. The raw text is read exactly once — after
       // .json() consumes the body, .text() throws "Body has already been
       // read" — then parsed as plain JSON, and on failure as an SSE frame.
       let data: ChatResponse;
@@ -251,7 +274,10 @@ export class OpenAICompatibleProvider implements LLMProvider {
       try {
         data = JSON.parse(raw) as ChatResponse;
       } catch {
-        data = recoverSseBody(raw, new Error(`Provider returned non-JSON body: ${raw.slice(0, 120)}`));
+        data = recoverSseBody(
+          raw,
+          new Error(`Provider returned non-JSON body: ${raw.slice(0, 120)}`),
+        );
       }
       const message = data.choices?.[0]?.message;
 
@@ -289,8 +315,21 @@ export class OpenAICompatibleProvider implements LLMProvider {
    * re-asking the whole question).
    */
   async generateAnswer(request: AnswerRequest): Promise<AnswerResult> {
+    const models = this.candidateModels();
+    let lastError: Error | null = null;
+    for (const modelToUse of models) {
+      try {
+        return await this.executeGenerateAnswer(request, modelToUse);
+      } catch (err) {
+        lastError = err as Error;
+      }
+    }
+    throw lastError ?? new Error("Provider request failed");
+  }
+
+  private async executeGenerateAnswer(request: AnswerRequest, modelToUse: string): Promise<AnswerResult> {
     let body = JSON.stringify({
-      model: this.model,
+      model: modelToUse,
       messages: [
         { role: "system", content: ANSWER_SYSTEM_PROMPT },
         { role: "user", content: buildAnswerUserPrompt(request) },
@@ -302,6 +341,9 @@ export class OpenAICompatibleProvider implements LLMProvider {
       // A few sentences plus a citation list, not a board.
       max_tokens: 4096,
       temperature: 0.2,
+      // Explicit opt-out: the streaming path (streamOperations) opts in per
+      // call; everything else asks for one JSON body (see generateOperations).
+      stream: false,
     });
 
     let lastDetail = "";
@@ -374,8 +416,24 @@ export class OpenAICompatibleProvider implements LLMProvider {
    * human-decided retry, not worth re-asking.
    */
   async generateExternalPlan(request: ExternalPlanRequest): Promise<ExternalPlanResult> {
+    const models = this.candidateModels();
+    let lastError: Error | null = null;
+    for (const modelToUse of models) {
+      try {
+        return await this.executeGenerateExternalPlan(request, modelToUse);
+      } catch (err) {
+        lastError = err as Error;
+      }
+    }
+    throw lastError ?? new Error("Provider request failed");
+  }
+
+  private async executeGenerateExternalPlan(
+    request: ExternalPlanRequest,
+    modelToUse: string,
+  ): Promise<ExternalPlanResult> {
     let body = JSON.stringify({
-      model: this.model,
+      model: modelToUse,
       messages: [
         { role: "system", content: EXTERNAL_PLAN_SYSTEM_PROMPT },
         { role: "user", content: buildExternalPlanUserPrompt(request) },
@@ -387,6 +445,8 @@ export class OpenAICompatibleProvider implements LLMProvider {
       // A selection list plus one paragraph, not a board.
       max_tokens: 2048,
       temperature: 0.2,
+      // Explicit opt-out, same rule as the other non-streaming paths.
+      stream: false,
     });
 
     let lastDetail = "";
@@ -432,7 +492,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
       const data = (await response.json()) as ChatResponse;
       const message = data.choices?.[0]?.message;
       const meta = completionMeta(
-        data.model ?? this.model,
+        data.model ?? modelToUse,
         data.usage?.prompt_tokens,
         data.usage?.completion_tokens,
       );
@@ -466,6 +526,35 @@ export class OpenAICompatibleProvider implements LLMProvider {
     request: GenerateRequest,
     callbacks: StreamCallbacks,
   ): Promise<GenerateResult> {
+    const models = this.candidateModels();
+    let lastError: Error | null = null;
+    for (const modelToUse of models) {
+      let emittedDelta = false;
+      const wrappedCallbacks: StreamCallbacks = {
+        onDelta: (delta) => {
+          emittedDelta = true;
+          callbacks.onDelta(delta);
+        },
+      };
+      try {
+        return await this.executeStreamOperations(request, wrappedCallbacks, modelToUse);
+      } catch (err) {
+        lastError = err as Error;
+        // If we already emitted deltas to the client, we cannot safely try another model
+        // because the user/stream has already received partial text.
+        if (emittedDelta) {
+          throw err;
+        }
+      }
+    }
+    throw lastError ?? new Error("Provider request failed");
+  }
+
+  private async executeStreamOperations(
+    request: GenerateRequest,
+    callbacks: StreamCallbacks,
+    modelToUse: string,
+  ): Promise<GenerateResult> {
     const text = buildUserPrompt(request);
     const userContent = request.images?.length
       ? [
@@ -479,7 +568,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
 
     const makeStreamBody = () =>
       JSON.stringify({
-        model: this.model,
+        model: modelToUse,
         messages: [
           { role: "system", content: SYSTEM_PROMPT },
           { role: "user", content: userContent },
@@ -517,10 +606,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
     // once before surfacing the failure (see isToolChoiceUnsupported).
     if (
       !response.ok &&
-      isToolChoiceUnsupported(
-        response.status,
-        await response.text().catch(() => ""),
-      ) &&
+      isToolChoiceUnsupported(response.status, await response.text().catch(() => "")) &&
       !this.forceAutoToolChoice
     ) {
       this.forceAutoToolChoice = true;
@@ -565,17 +651,16 @@ export class OpenAICompatibleProvider implements LLMProvider {
     }
 
     const meta = completionMeta(
-      streamedModel ?? this.model,
+      streamedModel ?? modelToUse,
       usage?.prompt_tokens,
       usage?.completion_tokens,
     );
     if (argumentsText !== "") return parseToolArguments(argumentsText, meta);
     if (proseText !== "") return parseModelJson(proseText, meta);
-    // Some routes (kilo-auto via kiosapi, 2026-09) close an SSE stream with
-    // zero content even though the same request answers over the non-streaming
-    // endpoint. Nothing was emitted to the caller, so re-asking without
-    // streaming is invisible to the user and saves the route.
-    return this.generateOperations(request);
+    // Some routes close an SSE stream with zero content even though the same request
+    // answers over the non-streaming endpoint. Nothing was emitted to the caller,
+    // so re-asking without streaming is invisible to the user and saves the route.
+    return this.executeGenerateOperations(request, modelToUse);
   }
 }
 

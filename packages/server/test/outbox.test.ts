@@ -1,5 +1,4 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { createWorkspace } from "@lucent/core";
 import { closeDb, createDb, type Db } from "../src/db/client.js";
 import { migrate } from "../src/db/migrate.js";
 import { outboxEvents } from "../src/db/schema.js";
@@ -11,7 +10,6 @@ import {
   OutboxDispatcher,
   PostgresOutbox,
   type OutboxEvent,
-  type OutboxStore,
 } from "../src/outbox.js";
 
 /**

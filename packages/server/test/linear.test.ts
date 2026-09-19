@@ -1,6 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
-import { LinearError, LinearProvider } from "../src/integrations/linear.js";
-import type { ExternalTask } from "../src/integrations/provider.js";
+import { describe, expect, it } from "vitest";
+import { LinearProvider } from "../src/integrations/linear.js";
 
 /**
  * The Linear adapter's wire contract (Stage D6, ADR 0032) — asserted against

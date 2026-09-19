@@ -51,6 +51,26 @@ describe("ConsoleMailer", () => {
       spy.mockRestore();
     }
   });
+
+  it("always logs action URLs in full, even past the preview cut", async () => {
+    // A truncated verify link once cost a live run its mailbox confirmations:
+    // readability must never eat the one string the developer needs.
+    const spy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    try {
+      const m = new ConsoleMailer();
+      const token = "A".repeat(43);
+      await m.send({
+        to: "long-address-for-truncation@example.com",
+        subject: "Verify your Lucent account",
+        text: `Hi, confirm your email (long-address-for-truncation@example.com) here: http://localhost:5173/verify?token=${token} done. ${"Some preamble that pushes this body well past the preview cut. ".repeat(6)}`,
+      });
+      const line = spy.mock.calls[0]?.[0] as string;
+      expect(line).toContain("…");
+      expect(line).toContain(`http://localhost:5173/verify?token=${token}`);
+    } finally {
+      spy.mockRestore();
+    }
+  });
 });
 
 describe("selectMailer", () => {

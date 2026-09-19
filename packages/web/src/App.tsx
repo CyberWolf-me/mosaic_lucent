@@ -18,6 +18,9 @@ import { SequenceView } from "./views/SequenceView.js";
 import { ErView } from "./views/ErView.js";
 import { BoardView } from "./views/BoardView.js";
 import { DocumentView } from "./views/DocumentView.js";
+import { MeetingSessionProvider } from "./meeting-room/MeetingSessionContext.js";
+import { MeetingHuddleDock } from "./meeting-room/MeetingHuddleDock.js";
+import { LegalView } from "./views/LegalView.js";
 import {
   AuthView,
   InviteView,
@@ -51,50 +54,53 @@ import { primeCsrfToken } from "./http.js";
  *    with its token ignored, which made verification, password reset and org
  *    invites dead ends in a build that otherwise sent all three emails.
  */
+const VALID_VIEWS: ReadonlySet<string> = new Set([
+  "dashboard",
+  "canvas",
+  "history",
+  "meeting",
+  "intelligence",
+  "execution",
+  "wireframe",
+  "sequence",
+  "er",
+  "board",
+  "document",
+  "admin",
+  "analytics",
+]);
+const VALID_LENSES: ReadonlySet<string> = new Set([
+  "visual",
+  "kanban",
+  "document",
+  "wireframe",
+  "sequence",
+  "er",
+]);
+
 function Router({ onOpenSettings }: { onOpenSettings: (section?: string) => void }) {
   const { view, setView, lens, setLens } = useWorkspace();
-  // UX-1: deep-link ?view=canvas&lens=kanban. Mount-only read so the browser's
-  // Back stays browser-owned; every write below uses replaceState (no entry).
+  // UX-1 & UX-P1-002: initial deep-link read + browser Back/Forward popstate synchronization.
   useEffect(() => {
-    const q = getViewQuery();
-    if (!q.view) return;
-    const validViews: ReadonlySet<string> = new Set([
-      "dashboard",
-      "canvas",
-      "history",
-      "meeting",
-      "intelligence",
-      "execution",
-      "wireframe",
-      "sequence",
-      "er",
-      "board",
-      "document",
-      "admin",
-      "analytics",
-    ]);
-    const validLenses: ReadonlySet<string> = new Set([
-      "visual",
-      "kanban",
-      "document",
-      "wireframe",
-      "sequence",
-      "er",
-    ]);
-    if (!validViews.has(q.view)) return;
-    // setView folds legacy board-like views into canvas+lens; when both view
-    // and lens are present the explicit lens wins (setView("canvas") resets
-    // to visual, so lens applies after).
-    setView(q.view as View);
-    if (q.lens && validLenses.has(q.lens)) setLens(q.lens as CanvasLens);
-    // Mount-only: view/lens are the source of truth afterwards.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-  // Write view/lens back to the URL. replaceState keeps ?board=/?invite= and
-  // never adds a history entry, so Back is not broken. No popstate dispatch,
-  // so this cannot loop with the route listener.
+    const syncFromLocation = () => {
+      const q = getViewQuery();
+      const targetView = q.view ?? "canvas";
+      if (VALID_VIEWS.has(targetView)) {
+        setView(targetView as View);
+      }
+      if (q.lens && VALID_LENSES.has(q.lens)) {
+        setLens(q.lens as CanvasLens);
+      }
+    };
+    syncFromLocation();
+    window.addEventListener("popstate", syncFromLocation);
+    return () => window.removeEventListener("popstate", syncFromLocation);
+  }, [setView, setLens]);
+
+  // Write view/lens back to the URL. Pushes history on user navigation between
+  // views, while reusing replaceState on initial mount or no-op when URL already matches.
   useEffect(() => {
-    setViewQuery(view, view === "canvas" ? lens : undefined);
+    setViewQuery(view, view === "canvas" ? lens : undefined, true);
   }, [view, lens]);
   // Org pages sit *on top of* the board, so their Back returns to the canvas
   // — the surface the user came from. It deliberately does NOT touch the
@@ -268,6 +274,20 @@ export function App() {
           <InviteView token={screen.token} />
         </>
       );
+    case "privacy":
+      return (
+        <>
+          <ThemeRoot />
+          <LegalView mode="privacy" />
+        </>
+      );
+    case "terms":
+      return (
+        <>
+          <ThemeRoot />
+          <LegalView mode="terms" />
+        </>
+      );
     case "app":
       return (
         <>
@@ -277,9 +297,12 @@ export function App() {
           </a>
           <ToastProvider>
             <WorkspaceProvider>
-              <main id="main-content">
-                <Router onOpenSettings={openSettings} />
-              </main>
+              <MeetingSessionProvider>
+                <main id="main-content">
+                  <Router onOpenSettings={openSettings} />
+                </main>
+                <MeetingHuddleDock />
+              </MeetingSessionProvider>
             </WorkspaceProvider>
           </ToastProvider>
           {settingsOpen && (

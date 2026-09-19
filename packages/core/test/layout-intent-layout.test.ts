@@ -20,7 +20,7 @@ import {
 } from "../src/index.js";
 
 function diamond(): Workspace {
-  let ws = createWorkspace();
+  const ws = createWorkspace();
   const ops: Operation[] = [];
   for (const id of ["a", "b", "c", "d", "e"]) {
     ops.push({ op: "CREATE_NODE", id, nodeType: "step", label: id.toUpperCase() });
@@ -79,7 +79,7 @@ describe("primaryFlow spine — ordering bias, deterministically", () => {
    * SPINE's relative positions, which stays true under gap changes).
    */
   function branches(): Workspace {
-    let ws = createWorkspace();
+    const ws = createWorkspace();
     const ops: Operation[] = [];
     for (const id of ["start", "l1", "l2", "r1", "r2", "end"]) {
       ops.push({ op: "CREATE_NODE", id, nodeType: "step", label: id });
@@ -136,7 +136,7 @@ describe("primaryFlow spine — ordering bias, deterministically", () => {
 describe("emphasis — tier promotion, geometry untouched", () => {
   /** The diamond with a spanning a→d edge, laid out and routed. */
   function routedDiamond(): Workspace {
-    let ws = applyOperations(diamond(), [
+    const ws = applyOperations(diamond(), [
       { op: "CONNECT_NODES", source: "a", target: "d", relationship: "then" },
     ]);
     const { layout, routes } = computeLayoutWithRoutes(ws);
@@ -158,7 +158,7 @@ describe("emphasis — tier promotion, geometry untouched", () => {
   });
 
   it("quiet edges stay quiet even when emphasized (execution metadata never becomes flow)", () => {
-    let ws = applyOperations(diamond(), [
+    const ws = applyOperations(diamond(), [
       { op: "CONNECT_NODES", source: "b", target: "d", relationship: "depends_on" },
       { op: "SET_LAYOUT_INTENT", emphasis: ["b", "d"] },
     ]);

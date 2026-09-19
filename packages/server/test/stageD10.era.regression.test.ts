@@ -14,7 +14,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import type { AddressInfo } from "node:net";
 import { createHmac } from "node:crypto";
-import { writeFileSync } from "node:fs";
 import { MockImageProvider, MockProvider } from "@lucent/ai";
 import type { ExternalPlanRequest, ExternalPlanResult, LLMProvider } from "@lucent/ai";
 import { createWorkspace, type Operation } from "@lucent/core";
@@ -215,7 +214,7 @@ afterEach(async () => {
   delete process.env.LUCENT_D7_WEBHOOK_SECRET;
 });
 
-function linearEventBody(identifier: string, stateName: string): string {
+function _linearEventBody(identifier: string, stateName: string): string {
   return JSON.stringify({
     action: "update",
     type: "Issue",
@@ -230,7 +229,7 @@ function linearEventBody(identifier: string, stateName: string): string {
   });
 }
 
-function sign(secret: string, body: string): string {
+function _sign(secret: string, body: string): string {
   return createHmac("sha256", secret).update(Buffer.from(body, "utf8")).digest("hex");
 }
 

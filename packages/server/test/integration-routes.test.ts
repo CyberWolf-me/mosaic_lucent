@@ -200,7 +200,7 @@ describe("the link surface (board viewer)", () => {
     const owner = await signup(h, "o4@example.com");
     const viewer = await signup(h, "v4@example.com");
     const stranger = await signup(h, "s4@example.com");
-    const orgId = await orgIdOf(h, owner.id);
+    const _orgId = await orgIdOf(h, owner.id);
 
     const created = await api(h, "/api/boards", {
       method: "POST",

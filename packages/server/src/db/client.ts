@@ -1,5 +1,5 @@
 import { drizzle } from "drizzle-orm/node-postgres";
-import { Pool } from "pg";
+import { Pool, type ClientConfig } from "pg";
 import * as schema from "./schema.js";
 
 /**
@@ -19,8 +19,24 @@ export interface Db {
   url: string;
 }
 
+export function pgConfigFromUrl(url: string): ClientConfig {
+  const isRemote = !url.includes("localhost") && !url.includes("127.0.0.1");
+  const hasSslParam = url.includes("sslmode=") || url.includes("ssl=");
+  const needsSsl = isRemote || hasSslParam;
+  const ssl = needsSsl
+    ? { rejectUnauthorized: process.env.LUCENT_DATABASE_SSL_REJECT_UNAUTHORIZED === "true" }
+    : undefined;
+  return {
+    connectionString: url,
+    ...(ssl ? { ssl } : {}),
+  };
+}
+
 export function createDb(url: string): Db {
-  const pool = new Pool({ connectionString: url, max: 10 });
+  const max = process.env.LUCENT_DATABASE_POOL_MAX
+    ? Math.max(1, parseInt(process.env.LUCENT_DATABASE_POOL_MAX, 10))
+    : 10;
+  const pool = new Pool({ ...pgConfigFromUrl(url), max });
   // Surface a connection failure at boot rather than at first query.
   pool.on("error", (err) => {
     console.error("[lucent] postgres pool error:", err);

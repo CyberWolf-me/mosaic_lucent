@@ -795,7 +795,7 @@ export async function handleGenerateStream(
   rawBody: unknown,
   userId?: string,
   authoritative?: AuthoritativeContext,
-  send?: (event: "start" | "delta" | "done" | "error", data: unknown) => void,
+  send?: (event: "start" | "delta" | "done" | "error" | "phase", data: unknown) => void,
 ): Promise<{
   status: number;
   provider: string;
@@ -806,8 +806,18 @@ export async function handleGenerateStream(
 }> {
   const emit = send ?? (() => {});
   emit("start", { provider: provider.name, streaming: true });
+  // UX-P1-004: Progressive phase indicator during generation
+  emit("phase", { phase: "understanding", message: "Parsing intent..." });
+
+  let sawDelta = false;
   const outcome = await runGeneratePipeline(provider, rawBody, userId, authoritative, {
-    onDelta: (delta) => emit("delta", { text: delta }),
+    onDelta: (delta) => {
+      if (!sawDelta) {
+        sawDelta = true;
+        emit("phase", { phase: "constructing", message: "Designing architecture..." });
+      }
+      emit("delta", { text: delta });
+    },
   });
   if (!outcome.ok) {
     emit("error", outcome.body);
@@ -820,6 +830,8 @@ export async function handleGenerateStream(
       repaired: outcome.repaired,
     };
   }
+  emit("phase", { phase: "validating", message: "Optimizing layout..." });
+  emit("phase", { phase: "applying", message: "Rendering nodes..." });
   emit("done", {
     operations: outcome.operations,
     explanation: outcome.explanation,

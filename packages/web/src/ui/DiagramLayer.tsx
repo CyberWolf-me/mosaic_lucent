@@ -9,7 +9,7 @@ import {
 import { anchor, ConnectorDefs, makePath, NodeCard, type NodeState } from "./atoms.js";
 import { techMarkFor } from "./techMarks.js";
 import { KIND_TINT } from "../statementUi.js";
-import { DIAGRAM_LABELS, bpmnShapeFor } from "../scene.js";
+import { DIAGRAM_LABELS, bpmnShapeFor, facesFor } from "../scene.js";
 import {
   boundsWithDrag,
   cullRect,
@@ -38,6 +38,7 @@ export function DiagramLayer({
   spotlightId,
   scale = 1,
   showEdgeLabels = true,
+  useElkRoutes = false,
   onMoveNode,
   onRenameNode,
   renameNodeId,
@@ -60,6 +61,8 @@ export function DiagramLayer({
   scale?: number;
   /** Draw each edge's relationship verb at its midpoint. */
   showEdgeLabels?: boolean;
+  /** Whether to draw orthogonal ELK routes. When false (default), connectors render as smooth curves. */
+  useElkRoutes?: boolean;
   /** Supplied when nodes should be draggable; omit for read-only previews. */
   onMoveNode?: (id: string, x: number, y: number, commit: boolean) => void;
   /** Supplied when a node label may be edited in place (double-click). */
@@ -246,7 +249,10 @@ export function DiagramLayer({
       : groups;
 
   return (
-    <div className={["density-" + band, zoomClass].filter(Boolean).join(" ")} style={{ position: "absolute", inset: 0 }}>
+    <div
+      className={["density-" + band, zoomClass].filter(Boolean).join(" ")}
+      style={{ position: "absolute", inset: 0, pointerEvents: "none" }}
+    >
       {/* Semantic groups, drawn behind everything. CREATE_GROUP has always been
           part of the operation schema and the model emits it (process maps depend
           on it for swimlanes), but the canvas never rendered groups — so "group
@@ -327,11 +333,17 @@ export function DiagramLayer({
           const from = nodeAt(e.source);
           const to = nodeAt(e.target);
           if (!from || !to) return null;
-          // Faces are chosen per-edge from the real geometry, so an edge that
-          // points up or left no longer leaves the wrong side and cut back
-          // across its own card.
-          const a = anchor(from, e.fromSide);
-          const b = anchor(to, e.toSide);
+          // UX-P1-003: When either endpoint is actively being dragged, dynamically
+          // re-evaluate faces and anchors from live card positions so connectors never lag
+          // or detach by 1 frame during rapid pointer motion.
+          const isDragging =
+            dragOverride != null &&
+            (dragOverride.ids.has(e.source) || dragOverride.ids.has(e.target));
+          const faces = isDragging
+            ? facesFor(from, to)
+            : { dir: e.dir, fromSide: e.fromSide, toSide: e.toSide };
+          const a = anchor(from, faces.fromSide);
+          const b = anchor(to, faces.toSide);
           // Fan parallel relationships apart: 0, +18, -18, +36, -36 …
           const step = Math.ceil(e.parallelIndex / 2) * 18;
           const spread = e.parallelIndex === 0 ? 0 : e.parallelIndex % 2 === 1 ? step : -step;
@@ -363,16 +375,25 @@ export function DiagramLayer({
           // endpoint is prominent, so the selected node's relationships
           // remain readable while unrelated clusters recede.
           const edgeFocus = focus ? focusEdgeOpacity(focus, e.source, e.target) : 1;
-          // The drawn corridor's vertex list (Phase 5): core's shared
-          // drawn-truth derivation — ortho squares the corners, spline
-          // curves through the same waypoints. The label midpoint below and
-          // the crossing metric in the benchmark consume the same list.
+          // While dragging: if both endpoints move together, translate the corridor's
+          // waypoints; if only one endpoint moves, route directly from a to b with zero latency.
+          const bothDragged =
+            dragOverride != null &&
+            dragOverride.ids.has(e.source) &&
+            dragOverride.ids.has(e.target);
+          const activeRoute = useElkRoutes
+            ? isDragging
+              ? bothDragged && e.route.length > 0
+                ? e.route.map((p) => ({ x: p.x + dragOverride.dx, y: p.y + dragOverride.dy }))
+                : []
+              : e.route
+            : [];
           const vertices =
-            e.route.length > 0 ? routedVertices(a, b, e.route, e.routeStyle) : undefined;
+            activeRoute.length > 0 ? routedVertices(a, b, activeRoute, e.routeStyle) : undefined;
           return (
             <path
               key={e.id}
-              d={makePath(a, b, e.dir, spread, e.route, e.routeStyle, vertices)}
+              d={makePath(a, b, faces.dir, spread, activeRoute, e.routeStyle, vertices)}
               className={cls}
               // Normalize the path's own length to 100 units so the draw-in
               // animation is geometry-independent. The old animation lived on
@@ -426,7 +447,7 @@ export function DiagramLayer({
           // rides the drawn corridor; otherwise the bezier midpoint as before.
           let mx: number;
           let my: number;
-          if (e.route.length > 0) {
+          if (useElkRoutes && e.route.length > 0) {
             // The SAME drawn vertices as the stroke (Phase 5): an ortho
             // label rides the squared corridor the eye follows, not the
             // raw waypoint diagonal. routedVertices is the one derivation.

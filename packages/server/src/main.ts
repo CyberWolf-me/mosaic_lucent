@@ -360,6 +360,13 @@ if (prunedUsers.length > 0) {
 }
 
 const provider = selectProvider(undefined, { timeoutMs: config.aiTimeoutMs });
+// Provider roulette guard (2026-09-17: `kilo-auto` resolved to a different
+// model mid-session and once returned zero ops on a vague prompt). The pin
+// lives in LUCENT_AI_MODEL; this line makes the effective choice visible in
+// every boot log so a drift is noticed in the logs, not mid-session.
+console.log(
+  `[lucent] ai provider=${provider.name} model=${process.env.LUCENT_AI_MODEL ?? "(provider default)"}`,
+);
 const limits = limitsFromEnv();
 
 /**
@@ -455,6 +462,14 @@ const tickets: import("./realtimeTicket.js").TicketStore = db
 // The dispatcher runs every second and drains a bounded batch. It is
 // deliberately in-process here; P3 moves it under the worker role, at which
 // point this becomes the `LUCENT_ROLE=all` fallback.
+//
+// NOTE (reserved, not broken): no consumer is registered yet, so drained
+// events are marked dispatched with zero handlers run (outbox.ts documents
+// the rule). Consumers arrive with the workloads that need them — search
+// projections, notifications fan-out, the finalize pass — each as its own
+// `dispatcher.subscribe` with idempotent handling, never speculative wiring
+// ahead of a reader. The first real producer (the image job's AssetStored
+// announcement) already flows through here for exactly that reason.
 const outbox: import("./outbox.js").OutboxStore = db
   ? new (await import("./outbox.js")).PostgresOutbox(db)
   : new (await import("./outbox.js")).InMemoryOutbox();
@@ -751,9 +766,9 @@ async function sweepIntegration(): Promise<void> {
   // never resurrect an old value this way; the current state supersedes it.
   try {
     const staleAt = Date.now() - 60_000;
-    const pending = await stores.integrations.webhookEvents!.pending(staleAt, Date.now(), 20);
+    const pending = await stores.integrations.webhookEvents.pending(staleAt, Date.now(), 20);
     for (const row of pending) {
-      const reclaimer = await stores.integrations.webhookEvents!.claim({
+      const reclaimer = await stores.integrations.webhookEvents.claim({
         id: row.id,
         provider: row.provider,
         orgId: row.orgId,
@@ -778,15 +793,15 @@ async function sweepIntegration(): Promise<void> {
               if (!board) return null;
               return board.workspace.nodes[nodeId]?.issue?.status ?? null;
             },
-            store: stores.integrations.inbound!,
+            store: stores.integrations.inbound,
             provider,
           },
           { provider: row.provider, externalId: row.externalId, status: task.status },
           row.orgId,
         );
-        await stores.integrations.webhookEvents!.markProcessed(row.id, row.orgId, Date.now());
+        await stores.integrations.webhookEvents.markProcessed(row.id, row.orgId, Date.now());
       } catch (err) {
-        await stores.integrations.webhookEvents!.markFailed(
+        await stores.integrations.webhookEvents.markFailed(
           row.id,
           (err as Error).message.slice(0, 300),
           Date.now(),
@@ -852,8 +867,8 @@ async function sweepIntegration(): Promise<void> {
   // are structurally safe. Bounded per run.
   try {
     const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
-    const prunedEvents = await stores.integrations.webhookEvents!.pruneTerminal(cutoff, 1000);
-    const prunedChanges = await stores.integrations.inbound!.pruneTerminal(cutoff, 1000);
+    const prunedEvents = await stores.integrations.webhookEvents.pruneTerminal(cutoff, 1000);
+    const prunedChanges = await stores.integrations.inbound.pruneTerminal(cutoff, 1000);
     if (prunedEvents > 0 || prunedChanges > 0) {
       logger.info("integrations.prune", { prunedEvents, prunedChanges });
     }
@@ -993,3 +1008,9 @@ async function shutdown(signal: string): Promise<void> {
 }
 process.on("SIGINT", () => void shutdown("SIGINT"));
 process.on("SIGTERM", () => void shutdown("SIGTERM"));
+process.on("unhandledRejection", (reason) => {
+  console.error("[lucent] unhandled rejection:", reason);
+});
+process.on("uncaughtException", (err) => {
+  console.error("[lucent] uncaught exception:", err);
+});

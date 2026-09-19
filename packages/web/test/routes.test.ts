@@ -2,8 +2,10 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   ROUTE_PATHS,
   decideScreen,
+  getViewQuery,
   normalizePath,
   parseRoute,
+  setViewQuery,
   tokenFromSearch,
   type Route,
   type Screen,
@@ -74,6 +76,8 @@ describe("parseRoute", () => {
     ["/verify", "", { kind: "verify", token: null }],
     ["/invite", "?token=inv_1", { kind: "invite", token: "inv_1" }],
     ["/invite", "", { kind: "invite", token: null }],
+    ["/privacy", "", { kind: "privacy" }],
+    ["/terms", "", { kind: "terms" }],
     // Board share links hang off whatever path the app is on and are handled by
     // the workspace, not here.
     ["/", "?board=brd_1&invite=shr_1", { kind: "app" }],
@@ -106,6 +110,8 @@ describe("decideScreen", () => {
     { kind: "reset-confirm", token: "rst_1" },
     { kind: "verify", token: "vrf_1" },
     { kind: "invite", token: "inv_1" },
+    { kind: "privacy" },
+    { kind: "terms" },
   ];
   const STATUSES: AuthStatus[] = ["loading", "authed", "anon"];
 
@@ -123,13 +129,19 @@ describe("decideScreen", () => {
     "reset-request/loading": { kind: "loading" },
     "reset-request/authed": { kind: "app" },
     "reset-request/anon": { kind: "auth", mode: "reset" },
-    // No session needed to redeem an emailed token, so no spinner either.
+    // No session needed to redeem an emailed token or view public legal terms.
     "reset-confirm/loading": { kind: "reset-confirm", token: "rst_1" },
     "reset-confirm/authed": { kind: "reset-confirm", token: "rst_1" },
     "reset-confirm/anon": { kind: "reset-confirm", token: "rst_1" },
     "verify/loading": { kind: "verify", token: "vrf_1" },
     "verify/authed": { kind: "verify", token: "vrf_1" },
     "verify/anon": { kind: "verify", token: "vrf_1" },
+    "privacy/loading": { kind: "privacy" },
+    "privacy/authed": { kind: "privacy" },
+    "privacy/anon": { kind: "privacy" },
+    "terms/loading": { kind: "terms" },
+    "terms/authed": { kind: "terms" },
+    "terms/anon": { kind: "terms" },
     // Accepting an invite does need a session; the token stays in the URL while
     // the visitor signs in.
     "invite/loading": { kind: "loading" },
@@ -272,3 +284,71 @@ describe("the check and the gate together", () => {
     });
   }
 });
+
+describe("view/lens query and navigation history", () => {
+  let fakeUrl: URL;
+  let pushCalls: string[];
+  let replaceCalls: string[];
+
+  beforeEach(() => {
+    fakeUrl = new URL("http://localhost:5173/?view=canvas");
+    pushCalls = [];
+    replaceCalls = [];
+    vi.stubGlobal("window", {
+      location: {
+        get href() {
+          return fakeUrl.href;
+        },
+        get search() {
+          return fakeUrl.search;
+        },
+        get pathname() {
+          return fakeUrl.pathname;
+        },
+        get hash() {
+          return fakeUrl.hash;
+        },
+      },
+      history: {
+        pushState: (_state: unknown, _title: string, url: string) => {
+          pushCalls.push(url);
+          fakeUrl = new URL(url, fakeUrl.origin);
+        },
+        replaceState: (_state: unknown, _title: string, url: string) => {
+          replaceCalls.push(url);
+          fakeUrl = new URL(url, fakeUrl.origin);
+        },
+      },
+    });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("reads view and lens from query", () => {
+    fakeUrl = new URL("http://localhost:5173/?view=intelligence&lens=kanban");
+    expect(getViewQuery()).toEqual({ view: "intelligence", lens: "kanban" });
+  });
+
+  it("pushes a new history entry when transitioning between different views with push=true", () => {
+    setViewQuery("intelligence", undefined, true);
+    expect(pushCalls.length).toBe(1);
+    expect(pushCalls[0]).toContain("view=intelligence");
+    expect(getViewQuery()).toEqual({ view: "intelligence" });
+  });
+
+  it("does not push redundant history entry if target view matches current view", () => {
+    setViewQuery("canvas", undefined, true);
+    expect(pushCalls.length).toBe(0);
+    expect(replaceCalls.length).toBe(0);
+  });
+
+  it("uses replaceState when push is false", () => {
+    setViewQuery("history", undefined, false);
+    expect(pushCalls.length).toBe(0);
+    expect(replaceCalls.length).toBe(1);
+    expect(replaceCalls[0]).toContain("view=history");
+  });
+});
+

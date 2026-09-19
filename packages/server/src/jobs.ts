@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, asc, eq, inArray, isNull, lte, or, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, lte, sql } from "drizzle-orm";
 import type { Db } from "./db/client.js";
 import { jobs } from "./db/schema.js";
 
@@ -389,7 +389,7 @@ export class PostgresJobQueue implements JobQueue {
          )
       returning j.*
     `);
-    return (rows.rows as Array<Record<string, unknown>>).map(fromRawJob);
+    return rows.rows.map(fromRawJob);
   }
 
   async complete(id: string, result?: unknown): Promise<void> {

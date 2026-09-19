@@ -109,3 +109,33 @@ describe("visibleEdges keeps connectors through a drag past the cull rect", () =
     expect(visibleEdges([dangling], byId, view, new Set(["a"]))).toHaveLength(0);
   });
 });
+
+import { facesFor } from "../src/scene.js";
+import { anchor } from "../src/ui/atoms.js";
+import { withDrag } from "../src/board/culling.js";
+
+describe("dynamic connector anchors under drag (UX-P1-003)", () => {
+  it("faces update dynamically when a node is dragged past its partner", () => {
+    const origA = node("a", 100, 100);
+    const origB = node("b", 300, 100);
+    const initialFaces = facesFor(origA, origB);
+    expect(initialFaces.dir).toBe("h");
+    expect(initialFaces.fromSide).toBe("r");
+    expect(initialFaces.toSide).toBe("l");
+
+    // Drag A 400px to the right so it is now to the right of B (x=500):
+    const dragA = { ids: new Set(["a"]), dx: 400, dy: 0 };
+    const movedA = withDrag(origA, dragA);
+    const draggedFaces = facesFor(movedA, origB);
+    expect(draggedFaces.dir).toBe("h");
+    expect(draggedFaces.fromSide).toBe("l");
+    expect(draggedFaces.toSide).toBe("r");
+
+    // Anchors match the moving node's bounds exactly
+    const anchorA = anchor(movedA, draggedFaces.fromSide);
+    const anchorB = anchor(origB, draggedFaces.toSide);
+    expect(anchorA.x).toBe(movedA.cx - movedA.w / 2);
+    expect(anchorB.x).toBe(origB.cx + origB.w / 2);
+  });
+});
+

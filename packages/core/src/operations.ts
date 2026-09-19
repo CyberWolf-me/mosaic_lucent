@@ -308,13 +308,13 @@ const operationSchema = z.discriminatedUnion("op", [
     op: z.literal("CONNECT_NODES"),
     source: z.string().min(1),
     target: z.string().min(1),
-    relationship: z.string().min(1),
+    relationship: z.string().default(""),
   }),
   z.object({
     op: z.literal("DISCONNECT_NODES"),
     source: z.string().min(1),
     target: z.string().min(1),
-    relationship: z.string().min(1),
+    relationship: z.string().default(""),
   }),
   z.object({
     op: z.literal("CREATE_GROUP"),
@@ -561,14 +561,71 @@ export function isHumanOnlyOperation(op: string): boolean {
   return (AI_FORBIDDEN_OPS as readonly string[]).includes(op);
 }
 
+const OP_ALIASES: Record<string, string> = {
+  ADD_NODE: "CREATE_NODE",
+  NEW_NODE: "CREATE_NODE",
+  INSERT_NODE: "CREATE_NODE",
+  CREATE_EDGE: "CONNECT_NODES",
+  ADD_EDGE: "CONNECT_NODES",
+  CONNECT: "CONNECT_NODES",
+  LINK_NODES: "CONNECT_NODES",
+  LINK: "CONNECT_NODES",
+  REMOVE_NODE: "DELETE_NODE",
+  DELETE: "DELETE_NODE",
+};
+
+export function sanitizeRawOperations(raw: unknown): unknown {
+  if (!Array.isArray(raw)) return raw;
+  const knownOps = new Set(ALL_OPERATION_NAMES);
+  const normalized: Array<Record<string, unknown>> = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") {
+      normalized.push(item as any);
+      continue;
+    }
+    const copy = { ...item } as Record<string, unknown>;
+    let op = typeof copy.op === "string" ? copy.op.toUpperCase().trim() : "";
+    const aliased = OP_ALIASES[op];
+    if (aliased) op = aliased;
+    if (!knownOps.has(op)) {
+      if (copy.source && copy.target) {
+        op = "CONNECT_NODES";
+      } else if (copy.label || copy.nodeType) {
+        op = "CREATE_NODE";
+      }
+    }
+    if (op) {
+      copy.op = op;
+    }
+    if (copy.op === "CREATE_NODE") {
+      if (!copy.id || typeof copy.id !== "string") {
+        copy.id = `node_${Math.random().toString(36).slice(2, 9)}`;
+      }
+      if (typeof copy.nodeType !== "string" || !copy.nodeType.trim()) {
+        copy.nodeType = "service";
+      }
+      if (typeof copy.label !== "string") {
+        copy.label = String(copy.label ?? copy.id ?? "");
+      }
+    }
+    if (copy.op === "CONNECT_NODES" || copy.op === "DISCONNECT_NODES") {
+      if (copy.relationship === null || copy.relationship === undefined) {
+        copy.relationship = "";
+      }
+    }
+    normalized.push(copy);
+  }
+  return normalized;
+}
+
 /** Parse raw (untrusted) AI output into typed operations, throwing on invalid. */
 export function parseOperations(raw: unknown): Operation[] {
-  return operationsSchema.parse(raw);
+  return operationsSchema.parse(sanitizeRawOperations(raw));
 }
 
 /** Safe variant that returns a result instead of throwing. */
 export function safeParseOperations(raw: unknown) {
-  return operationsSchema.safeParse(raw);
+  return operationsSchema.safeParse(sanitizeRawOperations(raw));
 }
 
 /**

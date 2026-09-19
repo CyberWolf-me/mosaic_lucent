@@ -1,4 +1,4 @@
-import type { Node, Workspace } from "./model.js";
+import type { Workspace } from "./model.js";
 import type { Operation } from "./operations.js";
 import { statementNodes } from "./model.js";
 
@@ -162,7 +162,7 @@ export function existingTopics(workspace: Workspace): string[] {
 }
 
 /** A statement-carrying op that bears a topic. */
-type StatementOpWithTopic =
+type _StatementOpWithTopic =
   | { op: "SET_STATEMENT"; id: string; statement: { topic?: string } | null }
   | { op: "UPDATE_STATEMENT"; id: string; topic?: string | null };
 

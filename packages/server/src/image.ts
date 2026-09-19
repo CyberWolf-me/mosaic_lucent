@@ -1,5 +1,10 @@
 import { z } from "zod";
-import { MockImageProvider, OpenAIImageProvider, type ImageProvider } from "@lucent/ai";
+import {
+  MockImageProvider,
+  OpenAIImageProvider,
+  PollinationsImageProvider,
+  type ImageProvider,
+} from "@lucent/ai";
 
 /**
  * Request handling for POST /api/image (docs/15 Phase E). Generated images are a
@@ -26,14 +31,35 @@ export interface HandleResult {
  */
 export function selectImageProvider(env: NodeJS.ProcessEnv = process.env): ImageProvider {
   const apiKey = env.LUCENT_IMAGE_KEY ?? env.OPENAI_API_KEY;
-  const baseUrl = env.LUCENT_IMAGE_BASE_URL;
+  let baseUrl = env.LUCENT_IMAGE_BASE_URL;
+  if (baseUrl && !baseUrl.endsWith("/images/generations")) {
+    baseUrl = baseUrl.replace(/\/+$/, "") + "/images/generations";
+  }
+
+  const rawModel = env.LUCENT_IMAGE_MODEL;
+  const rawFallback = env.LUCENT_IMAGE_FALLBACK_MODEL;
+  const modelList = [
+    ...(rawModel ? rawModel.split(",").map((s) => s.trim()).filter(Boolean) : []),
+    ...(rawFallback ? rawFallback.split(",").map((s) => s.trim()).filter(Boolean) : []),
+  ];
+  const primaryModel = modelList[0];
+  const fallbackModels = modelList.slice(1);
+
   if (apiKey && baseUrl) {
     return new OpenAIImageProvider({
       apiKey,
       baseUrl,
-      ...(env.LUCENT_IMAGE_MODEL ? { model: env.LUCENT_IMAGE_MODEL } : {}),
+      ...(primaryModel ? { model: primaryModel } : {}),
+      ...(fallbackModels.length > 0 ? { fallbackModels } : {}),
       ...(env.LUCENT_IMAGE_NAME ? { name: env.LUCENT_IMAGE_NAME } : {}),
     });
+  }
+  const isTest = env.NODE_ENV === "test" || process.env.VITEST !== undefined;
+  if (
+    env.LUCENT_IMAGE_PROVIDER === "pollinations" ||
+    (!isTest && !env.LUCENT_IMAGE_KEY && !env.LUCENT_IMAGE_BASE_URL)
+  ) {
+    return new PollinationsImageProvider();
   }
   return new MockImageProvider();
 }

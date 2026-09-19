@@ -9,7 +9,7 @@
  * implementation of Lucent→ELK mapping — this file ferries envelopes.
  */
 
-import { ElkLayoutEngine } from "./elkLayoutEngine.js";
+import type { ElkLayoutEngine } from "./elkLayoutEngine.js";
 import type { LayoutWorkerRequest, LayoutWorkerResponse } from "./layoutWorkerProtocol.js";
 
 /** The worker-side handler, parameterized on how it posts back. */

@@ -7,11 +7,14 @@ import { useSettings } from "../settings.js";
 import { getSttProvider, isAnyVoiceSupported, type VoiceSession } from "../stt/index.js";
 import { askLucent } from "../boards.js";
 import {
+  ConversationalLeaseManager,
   shouldAnswerVoice,
   voiceAnswerCard,
   openBoardQuestions,
   type VoiceAnswer,
+  type ConversationalLease,
 } from "../meeting-voice.js";
+import { useMeetingSession } from "../meeting-room/MeetingSessionContext.js";
 import { speakAnswer } from "../tts.js";
 import type { VoiceHandlers } from "../stt/index.js";
 import {
@@ -32,6 +35,7 @@ import {
   type MeetingTurn,
 } from "../meetings.js";
 import { differentialPrompt } from "../meeting-extract.js";
+import { NativeRoom } from "../meeting-room/NativeRoom.js";
 import {
   applyExtractOutcome,
   createMeetingEngine,
@@ -98,7 +102,8 @@ function withTopicBreaks(list: MeetingTurn[], breaks: number[]): MeetingTurn[] {
 }
 
 export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: string) => void }) {
-  const { setView, send, boardId, projectName, workspace, onCitation } = useWorkspace();
+  const { setView, send, boardId, projectName, workspace, onCitation, startSharing } =
+    useWorkspace();
   const { notify } = useToast();
   const [settings, setSettings] = useSettings();
   const [recording, setRecording] = useState(false);
@@ -189,6 +194,61 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
   // Render-local — the saved transcript is never rewritten — and spliced
   // into extraction prompts as "── topic break ──" lines.
   const [topicBreaks, setTopicBreaks] = useState<number[]>([]);
+  const [panelOpen, setPanelOpen] = useState(true);
+  const [activePanel, setActivePanel] = useState<"transcript" | "extract" | "saved">("transcript");
+  const [meetingTab, setMeetingTab] = useState<"video" | "notes">("video");
+  const [notesOpen, setNotesOpen] = useState(true);
+
+  // M6.1–M6.3: Conversational Lease Platform
+  const { activeLease, setActiveLease, peers, leave } = useMeetingSession();
+  const leaseManagerRef = useRef<ConversationalLeaseManager>(
+    new ConversationalLeaseManager({ leaseDurationMs: 15_000, maxFollowUpTurns: 3 }),
+  );
+  const [leaseRemainingSec, setLeaseRemainingSec] = useState(0);
+
+  // Sync peer names to lease manager so teammate cross-talk is correctly recognized
+  useEffect(() => {
+    const names = [...peers.values()].map((p) => p.name).filter(Boolean);
+    leaseManagerRef.current.setTeammates(names);
+  }, [peers]);
+
+  // Sync leaseManager changes to MeetingSessionContext and local state
+  useEffect(() => {
+    const manager = leaseManagerRef.current;
+    return manager.subscribe(() => {
+      const l = manager.getLease();
+      setActiveLease(l);
+      if (l) {
+        setLeaseRemainingSec(Math.max(0, Math.ceil((l.expiresAt - Date.now()) / 1000)));
+      } else {
+        setLeaseRemainingSec(0);
+      }
+    });
+  }, [setActiveLease]);
+
+  // 1-second countdown ticker when lease is active
+  useEffect(() => {
+    if (!activeLease) return;
+    const interval = setInterval(() => {
+      const diff = Math.max(0, Math.ceil((activeLease.expiresAt - Date.now()) / 1000));
+      setLeaseRemainingSec(diff);
+      if (diff <= 0) {
+        leaseManagerRef.current.dismissLease();
+      }
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [activeLease]);
+
+  // Global Esc key listener to dismiss conversational lease
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        leaseManagerRef.current.dismissLease();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
 
   // Phase D: the behavior profile. Sanitized at the use site (stored
   // settings predate the field and may hold anything); the capture loop
@@ -244,11 +304,18 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
     return () => clearTimeout(t);
   }, [turnFlash, selectedMeeting]);
 
-  // A capture still running when the view unmounts must stop — otherwise the
-  // mic indicator stays on with no surface left to stop it from.
+  const leaveRef = useRef(leave);
+  leaveRef.current = leave;
+
+  // A capture or meeting room still running when the view unmounts must stop cleanly —
+  // otherwise hardware microphone and camera streams stay locked in the background.
   useEffect(
     () => () => {
       voiceRef.current?.stop();
+      voiceRef.current = null;
+      playbackRef.current?.stop();
+      playbackRef.current = null;
+      leaveRef.current?.();
     },
     [],
   );
@@ -264,40 +331,56 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
       tokenUrl: settings.livekitTokenUrl,
       room: settings.livekitRoom,
     });
-    // M6.1: the text voice loop. Addressed turns in the assistant profiles
-    // ask the board through the read-only pipeline and render the answer
-    // below the transcript. One at a time; anything else is surfaced, never
-    // silently dropped into overlap.
-    const maybeAnswerVoice = (text: string): Promise<void> => {
-      if (!shouldAnswerVoice(selectedMode, text)) return Promise.resolve();
-      if (!boardId) {
-        notify("Share the board first — voice answers read a shared board.");
-        return Promise.resolve();
+    // M6.1–M6.3: execute voice query with TTS done synchronization to conversational lease
+    const executeVoiceQuery = async (speaker: string, question: string): Promise<void> => {
+      let targetBoardId = boardId;
+      if (!targetBoardId) {
+        targetBoardId = await startSharing();
+      }
+      if (!targetBoardId) {
+        notify("Voice answers require a saved board — please sign in or share the board.");
+        return;
       }
       if (answerInFlight.current) {
         notify("Lucent is answering — one spoken question at a time.");
-        return Promise.resolve();
+        return;
       }
       answerInFlight.current = true;
-      return (async () => {
-        try {
-          const question = text.trim();
-          const result = await askLucent(boardId, question);
-          const card = voiceAnswerCard(question, result);
-          setVoiceAnswers((prev) => [...prev, card]);
-          // M6.2: read the answer aloud unless muted. Errors stay text —
-          // speaking a paywall would be theater, and speaking nothing is.
-          if (!voiceMutedRef.current && !card.error && card.answer !== "") {
-            playbackRef.current?.stop();
-            const spoken = await speakAnswer(card.answer);
-            playbackRef.current = spoken.playback;
-            if (spoken.reason) notify(`Voice: ${spoken.reason}`);
+      leaseManagerRef.current.onAiStartResponding();
+      try {
+        const q = question.trim();
+        const result = await askLucent(targetBoardId, q);
+        const card = voiceAnswerCard(q, result);
+        setVoiceAnswers((prev) => [...prev, card]);
+
+        // M6.2: read the answer aloud unless muted. Errors stay text.
+        if (!voiceMutedRef.current && !card.error && card.answer !== "") {
+          playbackRef.current?.stop();
+          const spoken = await speakAnswer(card.answer);
+          playbackRef.current = spoken.playback;
+          if (spoken.reason) notify(`Voice: ${spoken.reason}`);
+
+          // When TTS playback finishes, notify lease manager so the 15s window begins!
+          if (spoken.playback) {
+            void spoken.playback.done
+              .then(() => {
+                leaseManagerRef.current.onTtsDone(card.answer);
+              })
+              .catch(() => {
+                leaseManagerRef.current.onTtsDone(card.answer);
+              });
+          } else {
+            leaseManagerRef.current.onTtsDone(card.answer);
           }
-        } finally {
-          answerInFlight.current = false;
+        } else {
+          // If muted or errored, start lease window immediately
+          leaseManagerRef.current.onTtsDone(card.answer);
         }
-      })();
+      } finally {
+        answerInFlight.current = false;
+      }
     };
+
     // One callbacks object feeding both surfaces: providers that speak
     // events go through it (final → onFinal below), so the stream and the
     // legacy path append byte-identical turns.
@@ -310,32 +393,56 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
         const t = text.trim();
         if (!t) return;
         engineRef.current.noteFinal(Date.now());
+        const speaker =
+          meta?.speaker ??
+          (provider.id === "livekit" || provider.id === "hosted" ? "Speaker" : "You");
+
         appendTurn({
-          // Display precedence (events.ts ladder), not an identity claim:
-          // a diarized label shows opaquely, a stream identity shows as
-          // minted, and "You"/"Speaker" is the honest fallback rather than
-          // a fake guess.
-          speaker:
-            meta?.speaker ??
-            (provider.id === "livekit" || provider.id === "hosted" ? "Speaker" : "You"),
+          speaker,
           at: Date.now(),
           text: t,
           kind: classifyTurn(t),
         });
-        // Queue the turn for the live extraction loop — the trigger effect
-        // decides when the batch is worth a model call. Record mode never
-        // queues: a Record meeting that burns a generation is a clause-4
-        // defect, so the refusal lives here, one call above the send.
+
+        // Queue the turn for the live extraction loop
         if (extracts) setExtractQueued((q) => q + 1);
-        // P1-MT-001: checkpoint the CAPTURED turn immediately — durability of
-        // what was said must not depend on the extraction loop deciding a
-        // batch is worth a model call, or on an extraction succeeding at all.
+
+        // Checkpoint the captured turn immediately
         void checkpointTurns();
-        // M6.1: an addressed turn in an assistant profile gets a text answer
-        // through the read-only Ask pipeline (never a board write). The mode
-        // is captured at recording start, like the STT provider: switching
-        // profiles mid-capture takes effect on the next capture.
-        void maybeAnswerVoice(t);
+
+        // Conversational Lease Engine in Assistant / Participant modes
+        if (selectedMode === "assistant" || selectedMode === "participant") {
+          // 1. Barge-in check if AI is currently playing speech
+          if (playbackRef.current) {
+            const barge = leaseManagerRef.current.onBargeIn(speaker, t);
+            if (barge.interrupted) {
+              playbackRef.current.stop();
+              playbackRef.current = null;
+              if (barge.newQuery) {
+                void executeVoiceQuery(speaker, barge.newQuery);
+                return;
+              }
+            }
+          }
+
+          // 2. Evaluate turn against stateful conversational lease
+          const evaluation = leaseManagerRef.current.evaluateTurn({ speaker, text: t });
+          if (
+            evaluation.action === "direct_mutation" ||
+            evaluation.action === "followup_mutation"
+          ) {
+            notify("Applying voice instruction to canvas…");
+            void send(evaluation.instruction);
+          } else if (
+            evaluation.action === "direct_invoke" ||
+            evaluation.action === "followup_query"
+          ) {
+            void executeVoiceQuery(evaluation.speakerId, evaluation.query);
+          } else if (evaluation.action === "dismiss") {
+            playbackRef.current?.stop();
+            playbackRef.current = null;
+          }
+        }
       },
       onStatus: (s) => {
         if (s === "transcribing") notify("Transcribing on device…");
@@ -720,368 +827,501 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
         ]}
         onOpenSettings={onOpenSettings}
       />
-      <LeftRail />
+      <LeftRail onOpenSettings={onOpenSettings} />
 
-      <div className="meeting-wrap">
-        <div className="meeting-transcript">
-          <div className="meeting-head">
-            <div>
-              <div
-                className="mono small"
+      <div className="meeting-layout">
+        <NativeRoom
+          boardId={boardId}
+          isRecording={recording}
+          onToggleRecording={() => {
+            if (recording) stopRecording();
+            else startRecording();
+          }}
+          panelOpen={panelOpen}
+          onTogglePanel={(p) => {
+            if (panelOpen && activePanel === p) {
+              setPanelOpen(false);
+            } else {
+              setPanelOpen(true);
+              setActivePanel(p);
+            }
+          }}
+          activePanel={activePanel}
+          turnsCount={displayTurns.length}
+        />
+
+        {panelOpen && (
+          <div className="meeting-drawer">
+            <div className="meeting-drawer-tabs">
+              <button
+                className={`meeting-drawer-tab ${activePanel === "transcript" ? "active" : ""}`}
+                onClick={() => setActivePanel("transcript")}
+              >
+                Minutes {displayTurns.length > 0 ? `(${displayTurns.length})` : ""}
+              </button>
+              <button
+                className={`meeting-drawer-tab ${activePanel === "extract" ? "active" : ""}`}
+                onClick={() => setActivePanel("extract")}
+              >
+                Extracted
+              </button>
+              <button
+                className={`meeting-drawer-tab ${activePanel === "saved" ? "active" : ""}`}
+                onClick={() => setActivePanel("saved")}
+              >
+                Saved ({saved.length})
+              </button>
+              <div style={{ flex: 1 }} />
+              <button
+                onClick={() => setPanelOpen(false)}
+                title="Collapse sidebar"
                 style={{
-                  letterSpacing: "0.12em",
-                  color: recording ? "var(--sig-red)" : "var(--ink-3)",
+                  background: "transparent",
+                  border: "none",
+                  color: "var(--ink-3)",
+                  cursor: "pointer",
+                  fontSize: 14,
+                  padding: "0 6px",
                 }}
               >
-                {recording ? "RECORDING" : shown ? "SAVED MEETING" : "READY"}
-              </div>
-              <h2 style={{ margin: "4px 0 0", fontSize: 16, color: "var(--ink-0)" }}>
-                {shown ? new Date(shown.startedAt).toLocaleString() : "Meeting capture"}
-              </h2>
-              {/* Live-extraction heartbeat (M2): the loop's state is visible
-                  without demanding attention — the meeting's key promise is
-                  that the board builds itself while people talk. */}
-              {recording && (
-                <div
-                  className="mono small"
-                  style={{ marginTop: 4, color: "var(--ink-3)", letterSpacing: "0.04em" }}
-                >
-                  {lastExtractStatus ??
-                    (extractQueued > 0
-                      ? `${extractQueued} turn${extractQueued > 1 ? "s" : ""} pending`
-                      : "listening…")}
-                </div>
-              )}
+                ✕
+              </button>
             </div>
-            <div style={{ display: "flex", gap: 8 }}>
-              {!recording ? (
-                <button className="btn amber" onClick={startRecording} disabled={!voiceSupported}>
-                  <Ico.Mic /> {turns.length > 0 || shown ? "New capture" : "Start recording"}
-                </button>
-              ) : (
-                <button className="btn" onClick={stopRecording}>
-                  Stop
-                </button>
-              )}
-              {(selectedMode === "assistant" || selectedMode === "participant") && (
-                <button
-                  className="btn"
-                  title={
-                    voiceMuted ? "Unmute Lucent's spoken answers" : "Mute Lucent's spoken answers"
-                  }
-                  aria-pressed={!voiceMuted}
-                  onClick={() => {
-                    if (!voiceMuted) {
-                      playbackRef.current?.stop();
-                      playbackRef.current = null;
-                    }
-                    setVoiceMuted((m) => !m);
-                  }}
-                >
-                  {voiceMuted ? "Unmute voice" : "Mute voice"}
-                </button>
-              )}
-              {!shown && turns.length > 0 && (
-                <button className="btn primary" onClick={() => void onSave()} disabled={saving}>
-                  {saving ? "Saving…" : "Save meeting"}
-                </button>
-              )}
-              {shown && (
-                <button
-                  className="btn primary"
-                  onClick={() => onExtract(shown)}
-                  disabled={!boardId}
-                >
-                  Extract diagram <Ico.Arrow />
-                </button>
-              )}
-              {displayTurns.length > 0 && (
-                <button
-                  className="btn"
-                  onClick={markTopicBreak}
-                  title="Insert a topic separator — re-extractions treat it as a new topic"
-                >
-                  Mark topic break
-                </button>
-              )}
-            </div>
-          </div>
 
-          {!livekitConfigured && !recording && (
-            <p className="mono small" style={{ color: "var(--ink-3)", margin: "8px 0 0" }}>
-              Local STT labels every line "You". Configure LiveKit in Settings for per-speaker
-              identity, or Hosted for server-side diarisation.
-            </p>
-          )}
-
-          {/* Phase D: behavior profile. Capture + checkpoint always run; the
-              profile decides whether the extraction loop may spend. Assistant
-              and Participant degrade to Intelligence, disclosed, until M6. */}
-          {!recording && (
-            <div style={{ marginTop: 8 }}>
-              <div className="segmented" role="radiogroup" aria-label="Meeting mode">
-                {MEETING_MODES.map((mode) => (
-                  <button
-                    key={mode}
-                    className={selectedMode === mode ? "active" : ""}
-                    aria-pressed={selectedMode === mode}
-                    title={MODE_NOTES[mode]}
-                    onClick={() => setSettings({ meetingMode: mode })}
-                  >
-                    {MODE_LABELS[mode]}
-                    {(mode === "assistant" || mode === "participant") && " · soon"}
-                  </button>
-                ))}
-              </div>
-              <p className="mono small" style={{ color: "var(--ink-3)", margin: "4px 0 0" }}>
-                {MODE_NOTES[selectedMode]}
-              </p>
-            </div>
-          )}
-
-          <div className="meeting-turns">
-            {displayTurns.length === 0 && (
-              <p className="muted" style={{ fontSize: 13, padding: "24px 4px" }}>
-                Start recording to capture the meeting. Lines classify themselves as they land
-                (problem / hypothesis / solution / decision / action / requirement) and save to this
-                board.
-              </p>
-            )}
-            {displayTurns.map((t, i) => {
-              // Reverse provenance (Stage C3): the objects this turn produced,
-              // rendered under the words that created them — the Stage C
-              // document's "Used to create N objects · View on board".
-              // Live capture (UX-5) chips the same from the provisional
-              // live-session stamps via pointsAtLive.
-              const produced = reverseByTurn?.get(i) ?? liveByTurn?.get(i);
-              const provisional = !shown && (liveByTurn?.has(i) ?? false);
-              return (
-                <Fragment key={i}>
-                  {topicBreaks.includes(i) && (
-                    <button
-                      className="mono small"
-                      title="Remove topic break"
-                      onClick={() => setTopicBreaks((prev) => prev.filter((b) => b !== i))}
-                      style={{
-                        alignSelf: "stretch",
-                        textAlign: "center",
-                        margin: "6px 0",
-                        fontSize: 10,
-                        letterSpacing: "0.08em",
-                        color: "var(--ink-3)",
-                        background: "transparent",
-                        border: "none",
-                        borderTop: "1px dashed var(--stroke-2)",
-                        padding: "6px 0 0",
-                        cursor: "pointer",
-                      }}
-                    >
-                      ── topic break ──
-                    </button>
-                  )}
-                  <div data-turn={i}>
-                    <div className={`meeting-turn${i === turnFlash ? " highlight" : ""}`}>
-                      <span className="mono small meeting-turn-speaker">{t.speaker}</span>
-                      <span style={{ flex: 1, fontSize: 13.5, color: "var(--ink-1)" }}>
-                        {t.text}
-                      </span>
-                      {t.kind && (
-                        <span
-                          className="mono"
-                          style={{
-                            fontSize: 9.5,
-                            letterSpacing: "0.08em",
-                            textTransform: "uppercase",
-                            color: extractColor[t.kind],
-                            flexShrink: 0,
-                          }}
+            <div className="meeting-drawer-content">
+              {activePanel === "transcript" && (
+                <div>
+                  <div className="meeting-head">
+                    <div>
+                      <div
+                        className="mono small"
+                        style={{
+                          letterSpacing: "0.12em",
+                          color: recording ? "var(--sig-red)" : "var(--ink-3)",
+                        }}
+                      >
+                        {recording ? "RECORDING" : shown ? "SAVED MEETING" : "READY"}
+                      </div>
+                      <h3 style={{ margin: "4px 0 0", fontSize: 14, color: "var(--ink-0)" }}>
+                        {shown ? new Date(shown.startedAt).toLocaleString() : "Meeting Minutes"}
+                      </h3>
+                      {recording && (
+                        <div
+                          className="mono small"
+                          style={{ marginTop: 4, color: "var(--ink-3)", letterSpacing: "0.04em" }}
                         >
-                          {t.kind}
-                        </span>
+                          {lastExtractStatus ??
+                            (extractQueued > 0
+                              ? `${extractQueued} turn${extractQueued > 1 ? "s" : ""} pending`
+                              : "listening…")}
+                        </div>
                       )}
                     </div>
+                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                      {!recording ? (
+                        <button className="btn amber" style={{ height: 26, fontSize: 11 }} onClick={startRecording} disabled={!voiceSupported}>
+                          <Ico.Mic /> {turns.length > 0 || shown ? "New capture" : "Record"}
+                        </button>
+                      ) : (
+                        <button className="btn" style={{ height: 26, fontSize: 11 }} onClick={stopRecording}>
+                          Stop
+                        </button>
+                      )}
+                      {(selectedMode === "assistant" || selectedMode === "participant") && (
+                        <button
+                          className="btn"
+                          style={{ height: 26, fontSize: 11 }}
+                          title={voiceMuted ? "Unmute Lucent's spoken answers" : "Mute Lucent's spoken answers"}
+                          aria-pressed={!voiceMuted}
+                          onClick={() => {
+                            if (!voiceMuted) {
+                              playbackRef.current?.stop();
+                              playbackRef.current = null;
+                            }
+                            setVoiceMuted((m) => !m);
+                          }}
+                        >
+                          {voiceMuted ? "Unmute voice" : "Mute voice"}
+                        </button>
+                      )}
+                      {!shown && turns.length > 0 && (
+                        <button className="btn primary" style={{ height: 26, fontSize: 11 }} onClick={() => void onSave()} disabled={saving}>
+                          {saving ? "Saving…" : "Save"}
+                        </button>
+                      )}
+                      {shown && (
+                        <button
+                          className="btn primary"
+                          style={{ height: 26, fontSize: 11 }}
+                          onClick={() => onExtract(shown)}
+                          disabled={!boardId}
+                        >
+                          Extract <Ico.Arrow />
+                        </button>
+                      )}
+                      {displayTurns.length > 0 && (
+                        <button
+                          className="btn"
+                          style={{ height: 26, fontSize: 11 }}
+                          onClick={markTopicBreak}
+                          title="Insert a topic separator — re-extractions treat it as a new topic"
+                        >
+                          Topic break
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {!livekitConfigured && !recording && (
+                    <p className="mono small" style={{ color: "var(--ink-3)", margin: "4px 0 8px" }}>
+                      Local STT labels lines "You". Configure LiveKit in Settings for per-speaker identity.
+                    </p>
+                  )}
+
+                  {!recording && (
+                    <div style={{ margin: "8px 0 12px" }}>
+                      <div className="segmented" role="radiogroup" aria-label="Meeting mode">
+                        {MEETING_MODES.map((mode) => (
+                          <button
+                            key={mode}
+                            className={selectedMode === mode ? "active" : ""}
+                            aria-pressed={selectedMode === mode}
+                            title={MODE_NOTES[mode]}
+                            onClick={() => setSettings({ meetingMode: mode })}
+                          >
+                            {MODE_LABELS[mode]}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Conversational Lease Follow-Up Indicator */}
+                  {activeLease && leaseRemainingSec > 0 && (
                     <div
                       style={{
                         display: "flex",
-                        gap: 12,
-                        flexWrap: "wrap",
-                        alignItems: "baseline",
-                        margin: "0 0 6px 10px",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        padding: "6px 12px",
+                        margin: "0 0 10px",
+                        borderRadius: 8,
+                        background: "rgba(99, 102, 241, 0.12)",
+                        border: "1px solid rgba(99, 102, 241, 0.25)",
+                        color: "#a5b4fc",
+                        fontSize: 12,
                       }}
                     >
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <span
+                          style={{
+                            width: 8,
+                            height: 8,
+                            borderRadius: "50%",
+                            background: "#818cf8",
+                            boxShadow: "0 0 8px #818cf8",
+                          }}
+                        />
+                        <span>
+                          {activeLease.state === "waiting_for_user_response"
+                            ? `Awaiting clarification from ${activeLease.speakerName || activeLease.speakerId}`
+                            : `Continuing conversation with ${activeLease.speakerName || activeLease.speakerId}`}
+                          {" "}({leaseRemainingSec}s)
+                        </span>
+                      </div>
                       <button
-                        className="mono"
-                        title="Re-extract the board from this turn onward"
-                        onClick={() => onReextractFrom(i)}
+                        type="button"
+                        onClick={() => leaseManagerRef.current.dismissLease()}
+                        title="Dismiss conversational lease (Esc)"
                         style={{
+                          background: "rgba(255, 255, 255, 0.08)",
+                          border: "1px solid rgba(255, 255, 255, 0.15)",
+                          borderRadius: 4,
+                          color: "#c7d2fe",
+                          cursor: "pointer",
+                          fontSize: 11,
+                          padding: "2px 6px",
+                        }}
+                      >
+                        Esc
+                      </button>
+                    </div>
+                  )}
+
+                  <div className="meeting-turns">
+                    {displayTurns.length === 0 && (
+                      <p className="muted" style={{ fontSize: 13, padding: "24px 4px" }}>
+                        Start recording to capture the meeting. Lines classify themselves as they land
+                        (problem / hypothesis / solution / decision / action / requirement) and save to this
+                        board.
+                      </p>
+                    )}
+                    {displayTurns.map((t, i) => {
+                      const produced = reverseByTurn?.get(i) ?? liveByTurn?.get(i);
+                      const provisional = !shown && (liveByTurn?.has(i) ?? false);
+                      return (
+                        <Fragment key={i}>
+                          {topicBreaks.includes(i) && (
+                            <button
+                              className="mono small"
+                              title="Remove topic break"
+                              onClick={() => setTopicBreaks((prev) => prev.filter((b) => b !== i))}
+                              style={{
+                                alignSelf: "stretch",
+                                textAlign: "center",
+                                margin: "6px 0",
+                                fontSize: 10,
+                                letterSpacing: "0.08em",
+                                color: "var(--ink-3)",
+                                background: "transparent",
+                                border: "none",
+                                borderTop: "1px dashed var(--stroke-2)",
+                                padding: "6px 0 0",
+                                cursor: "pointer",
+                              }}
+                            >
+                              ── topic break ──
+                            </button>
+                          )}
+                          <div data-turn={i}>
+                            <div className={`meeting-turn${i === turnFlash ? " highlight" : ""}`}>
+                              <span className="mono small meeting-turn-speaker">{t.speaker}</span>
+                              <span style={{ flex: 1, fontSize: 13, color: "var(--ink-1)" }}>
+                                {t.text}
+                              </span>
+                              {t.kind && (
+                                <span
+                                  className="mono"
+                                  style={{
+                                    fontSize: 9.5,
+                                    letterSpacing: "0.08em",
+                                    textTransform: "uppercase",
+                                    color: extractColor[t.kind],
+                                    flexShrink: 0,
+                                  }}
+                                >
+                                  {t.kind}
+                                </span>
+                              )}
+                            </div>
+                            <div
+                              style={{
+                                display: "flex",
+                                gap: 10,
+                                flexWrap: "wrap",
+                                alignItems: "baseline",
+                                margin: "0 0 6px 10px",
+                              }}
+                            >
+                              <button
+                                className="mono"
+                                title="Re-extract the board from this turn onward"
+                                onClick={() => onReextractFrom(i)}
+                                style={{
+                                  fontSize: 9.5,
+                                  letterSpacing: "0.05em",
+                                  textTransform: "uppercase",
+                                  color: "var(--ink-3)",
+                                  background: "transparent",
+                                  border: "none",
+                                  padding: 0,
+                                  cursor: "pointer",
+                                }}
+                              >
+                                Re-extract from here
+                              </button>
+                              {produced && produced.length > 0 && (
+                                <span
+                                  className="mono"
+                                  style={{
+                                    fontSize: 9.5,
+                                    letterSpacing: "0.05em",
+                                    textTransform: "uppercase",
+                                    color: "var(--amber-2)",
+                                  }}
+                                  title={`View on board: ${produced.join(", ")}`}
+                                >
+                                  ✦ {produced.length} on board{provisional ? " · provisional" : ""}
+                                </span>
+                              )}
+                              {produced?.map((id) => (
+                                <span
+                                  key={id}
+                                  style={{ display: "inline-flex", gap: 6, alignItems: "baseline" }}
+                                >
+                                  <button
+                                    className="mono turn-objects-link"
+                                    title={`View on board: ${id}`}
+                                    onClick={() => onCitation({ kind: "node", id })}
+                                    style={{
+                                      fontSize: 9.5,
+                                      letterSpacing: "0.05em",
+                                      textTransform: "uppercase",
+                                      color: "var(--amber-2)",
+                                      background: "transparent",
+                                      border: "none",
+                                      padding: 0,
+                                      cursor: "pointer",
+                                    }}
+                                  >
+                                    view
+                                  </button>
+                                  <button
+                                    className="mono"
+                                    title="Unlink this object from the turn"
+                                    onClick={() => onUnlink(id)}
+                                    style={{
+                                      fontSize: 9.5,
+                                      letterSpacing: "0.05em",
+                                      textTransform: "uppercase",
+                                      color: "var(--ink-3)",
+                                      background: "transparent",
+                                      border: "none",
+                                      padding: 0,
+                                      cursor: "pointer",
+                                    }}
+                                  >
+                                    unlink
+                                  </button>
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        </Fragment>
+                      );
+                    })}
+                    {topicBreaks.includes(displayTurns.length) && displayTurns.length > 0 && (
+                      <button
+                        className="mono small"
+                        title="Remove topic break"
+                        onClick={() =>
+                          setTopicBreaks((prev) => prev.filter((b) => b !== displayTurns.length))
+                        }
+                        style={{
+                          alignSelf: "stretch",
+                          textAlign: "center",
+                          margin: "6px 0",
                           fontSize: 10,
-                          letterSpacing: "0.05em",
-                          textTransform: "uppercase",
+                          letterSpacing: "0.08em",
                           color: "var(--ink-3)",
                           background: "transparent",
                           border: "none",
-                          padding: 0,
+                          borderTop: "1px dashed var(--stroke-2)",
+                          padding: "6px 0 0",
                           cursor: "pointer",
                         }}
                       >
-                        Re-extract from here
+                        ── topic break ──
                       </button>
-                      {produced && produced.length > 0 && (
-                        <span
-                          className="mono"
-                          style={{
-                            fontSize: 10,
-                            letterSpacing: "0.05em",
-                            textTransform: "uppercase",
-                            color: "var(--amber-2)",
-                          }}
-                          title={`View on board: ${produced.join(", ")}`}
-                        >
-                          ✦ {produced.length} object{produced.length === 1 ? "" : "s"} on the board
-                          {provisional ? " · provisional" : ""}
-                        </span>
-                      )}
-                      {produced?.map((id) => (
-                        <span
-                          key={id}
-                          style={{ display: "inline-flex", gap: 8, alignItems: "baseline" }}
-                        >
-                          <button
-                            className="mono turn-objects-link"
-                            title={`View on board: ${id}`}
-                            onClick={() => onCitation({ kind: "node", id })}
-                            style={{
-                              fontSize: 10,
-                              letterSpacing: "0.05em",
-                              textTransform: "uppercase",
-                              color: "var(--amber-2)",
-                              background: "transparent",
-                              border: "none",
-                              padding: 0,
-                              cursor: "pointer",
-                            }}
-                          >
-                            view
-                          </button>
-                          <button
-                            className="mono"
-                            title="Unlink this object from the turn (provenance is read-only — opens the node on the canvas)"
-                            onClick={() => onUnlink(id)}
-                            style={{
-                              fontSize: 10,
-                              letterSpacing: "0.05em",
-                              textTransform: "uppercase",
-                              color: "var(--ink-3)",
-                              background: "transparent",
-                              border: "none",
-                              padding: 0,
-                              cursor: "pointer",
-                            }}
-                          >
-                            Unlink from turn
-                          </button>
-                        </span>
+                    )}
+                    {!shown &&
+                      voiceAnswers.map((a) => (
+                        <div key={a.id} className="meeting-turn meeting-answer">
+                          <span className="mono small meeting-turn-speaker">✦ Lucent</span>
+                          <span style={{ flex: 1, fontSize: 13, color: "var(--ink-1)" }}>
+                            {a.error ? `Couldn't answer: ${a.error}` : a.answer}
+                          </span>
+                          {a.citations.length > 0 && (
+                            <span className="mono" style={{ fontSize: 10, color: "var(--ink-3)" }}>
+                              {a.citations.join(" · ")}
+                            </span>
+                          )}
+                        </div>
                       ))}
+                    {!shown && openQuestions.total > 0 && (
+                      <div className="meeting-turn meeting-questions">
+                        <span className="mono small meeting-turn-speaker">? Open</span>
+                        <span style={{ flex: 1, fontSize: 13, color: "var(--ink-1)" }}>
+                          {openQuestions.items.map((q) => q.label).join(" · ")}
+                          {openQuestions.total > openQuestions.items.length &&
+                            ` (+${openQuestions.total - openQuestions.items.length} more)`}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {activePanel === "extract" && (
+                <div>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+                    <div className="mono small" style={{ color: "var(--ink-3)" }}>
+                      Real-time classified items
                     </div>
+                    {shown && (
+                      <button
+                        className="btn primary"
+                        style={{ height: 26, fontSize: 11 }}
+                        onClick={() => onExtract(shown)}
+                        disabled={!boardId}
+                      >
+                        Extract to diagram <Ico.Arrow />
+                      </button>
+                    )}
                   </div>
-                </Fragment>
-              );
-            })}
-            {/* A break marked past the last turn has no turn row to hang on. */}
-            {topicBreaks.includes(displayTurns.length) && displayTurns.length > 0 && (
-              <button
-                className="mono small"
-                title="Remove topic break"
-                onClick={() =>
-                  setTopicBreaks((prev) => prev.filter((b) => b !== displayTurns.length))
-                }
-                style={{
-                  alignSelf: "stretch",
-                  textAlign: "center",
-                  margin: "6px 0",
-                  fontSize: 10,
-                  letterSpacing: "0.08em",
-                  color: "var(--ink-3)",
-                  background: "transparent",
-                  border: "none",
-                  borderTop: "1px dashed var(--stroke-2)",
-                  padding: "6px 0 0",
-                  cursor: "pointer",
-                }}
-              >
-                ── topic break ──
-              </button>
-            )}
-            {/* M6.1: spoken answers, session-local. Text only for now —
-                voice audio arrives with M6.2; citations render as labels,
-                with jumps following the C1 plumbing later. */}
-            {!shown &&
-              voiceAnswers.map((a) => (
-                <div key={a.id} className="meeting-turn meeting-answer">
-                  <span className="mono small meeting-turn-speaker">✦ Lucent</span>
-                  <span style={{ flex: 1, fontSize: 13.5, color: "var(--ink-1)" }}>
-                    {a.error ? `Couldn't answer: ${a.error}` : a.answer}
-                  </span>
-                  {a.citations.length > 0 && (
-                    <span className="mono" style={{ fontSize: 10, color: "var(--ink-3)" }}>
-                      {a.citations.join(" · ")}
-                    </span>
+                  <div className="meeting-extract">
+                    {KIND_ORDER.map((k) => {
+                      const hits = displayTurns.filter((t) => t.kind === k);
+                      return (
+                        <div key={k} className="meeting-extract-col">
+                          <div className="mono meeting-extract-title" style={{ color: extractColor[k] }}>
+                            {k} ({hits.length})
+                          </div>
+                          {hits.length === 0 && <div className="meeting-extract-empty">—</div>}
+                          {hits.map((t, i) => (
+                            <div key={i} className="meeting-extract-card">
+                              {t.text}
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {activePanel === "saved" && (
+                <div className="meeting-saved-list">
+                  <div className="mono small" style={{ color: "var(--ink-3)", marginBottom: 10 }}>
+                    Saved on this board ({saved.length})
+                  </div>
+                  {saved.length === 0 && (
+                    <div className="mono small" style={{ color: "var(--ink-3)", padding: "12px 0" }}>
+                      No saved meetings yet. Record and save to archive minutes.
+                    </div>
                   )}
+                  {saved.map((m) => (
+                    <button
+                      key={m.id}
+                      className="meeting-saved-row"
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        padding: "10px 12px",
+                        borderRadius: 8,
+                        background: selectedMeeting?.id === m.id ? "var(--canvas-3)" : "var(--canvas-2)",
+                        border: "1px solid var(--stroke-1)",
+                        marginBottom: 6,
+                        cursor: "pointer",
+                        width: "100%",
+                      }}
+                      onClick={() => setSelectedMeeting(selectedMeeting?.id === m.id ? null : m)}
+                    >
+                      <span style={{ fontSize: 12.5, color: "var(--ink-0)" }}>
+                        {new Date(m.startedAt).toLocaleString()}
+                      </span>
+                      <span className="mono small" style={{ color: "var(--amber-2)" }}>
+                        {m.turns.length} turns {selectedMeeting?.id === m.id ? "· viewing" : ""}
+                      </span>
+                    </button>
+                  ))}
                 </div>
-              ))}
-            {/* V9: open questions, participant mode only. Derived live from
-                the                 board each render — no store, no speech, dismissed by
-                leaving the profile. */}
-            {!shown && openQuestions.total > 0 && (
-              <div className="meeting-turn meeting-questions">
-                <span className="mono small meeting-turn-speaker">? Open</span>
-                <span style={{ flex: 1, fontSize: 13.5, color: "var(--ink-1)" }}>
-                  {openQuestions.items.map((q) => q.label).join(" · ")}
-                  {openQuestions.total > openQuestions.items.length &&
-                    ` (+${openQuestions.total - openQuestions.items.length} more)`}
-                </span>
-              </div>
-            )}
+              )}
+            </div>
           </div>
-        </div>
-
-        <div className="meeting-extract">
-          {KIND_ORDER.map((k) => {
-            const hits = displayTurns.filter((t) => t.kind === k);
-            return (
-              <div key={k} className="meeting-extract-col">
-                <div className="mono meeting-extract-title" style={{ color: extractColor[k] }}>
-                  {k}
-                </div>
-                {hits.length === 0 && <div className="meeting-extract-empty">—</div>}
-                {hits.map((t, i) => (
-                  <div key={i} className="meeting-extract-card">
-                    {t.text}
-                  </div>
-                ))}
-              </div>
-            );
-          })}
-        </div>
+        )}
       </div>
-
-      {saved.length > 0 && (
-        <div className="meeting-saved">
-          <div className="mono small" style={{ color: "var(--ink-3)", marginBottom: 6 }}>
-            Saved on this board
-          </div>
-          {saved.map((m) => (
-            <button
-              key={m.id}
-              className="meeting-saved-row"
-              onClick={() => setSelectedMeeting(selectedMeeting?.id === m.id ? null : m)}
-            >
-              {new Date(m.startedAt).toLocaleString()} · {m.turns.length} turns
-              {selectedMeeting?.id === m.id ? " · viewing" : ""}
-            </button>
-          ))}
-        </div>
-      )}
     </div>
   );
 }

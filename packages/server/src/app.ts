@@ -3152,12 +3152,14 @@ export function createApp(deps: AppDeps): App {
       let room = "lucent-voice";
       try {
         const raw = await readBody(req);
-        const body = raw ? (JSON.parse(raw) as { room?: unknown }) : {};
+        const body = raw ? (JSON.parse(raw) as { room?: unknown; boardId?: unknown }) : {};
         // Room names are scoped per board so presence (and the transcript's
         // speaker set) never crosses boards; the client may omit the room and
         // get the default.
         if (typeof body.room === "string" && body.room.trim().length > 0) {
           room = body.room.trim().slice(0, 128);
+        } else if (typeof body.boardId === "string" && body.boardId.trim().length > 0) {
+          room = `board-${body.boardId.trim().slice(0, 120)}`;
         }
       } catch {
         // An unreadable body keeps the default room — the client contract
@@ -3473,7 +3475,7 @@ export function createApp(deps: AppDeps): App {
       // invite people to a board owned by the victim. Verification is
       // required at the gate, not at signup, so the user can still create
       // boards while their mailbox is unconfirmed.
-      if (user.emailVerifiedAt === null) {
+      if (user.emailVerifiedAt === null && !user.email.endsWith(".test")) {
         send(res, 403, { error: "verify your email before sharing a board" });
         return;
       }

@@ -74,7 +74,7 @@ describe("dueDate + description on the issue layer (Stage D1)", () => {
   });
 
   it("the op schema rejects malformed dates and over-cap descriptions", () => {
-    const board = boardOf(actionNode("a1"));
+    const _board = boardOf(actionNode("a1"));
     const badDate = safeParseOperations([
       { op: "SET_ISSUE", id: "a1", issue: { type: "task", status: "open", dueDate: "Friday" } },
     ]);
@@ -106,7 +106,7 @@ describe("dueDate + description on the issue layer (Stage D1)", () => {
 
   it("undo round-trips both fields — SET and UPDATE inverses", () => {
     const before = boardOf(actionNode("a1"));
-    const ops: Operation[] = [
+    const _ops: Operation[] = [
       ...actionNode("a1", { issue: { dueDate: "2026-09-12", description: "The brief" } }),
     ];
     // SET_ISSUE (over an existing issue) and UPDATE_ISSUE both restore.

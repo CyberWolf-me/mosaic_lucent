@@ -13,13 +13,13 @@ helm install lucent lucent/lucent \
 
 ## What this chart installs
 
-| Resource              | Purpose                                                                |
-| --------------------- | ---------------------------------------------------------------------- |
-| `Deployment`          | Lucent server pods (default 2 replicas, soft anti-affinity)            |
-| `Service`             | ClusterIP on port 80 → container port `4387`                           |
-| `Ingress` (optional)  | Public-facing TLS terminator                                           |
-| `PodDisruptionBudget` | `minAvailable: 1` so a node drain during rollout stays safe            |
-| `ServiceMonitor`      | Scrape `/metrics/prometheus` when the Prometheus operator is installed |
+| Resource              | Purpose                                                                                                                                                                                                                                            |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Deployment`          | Lucent server pods (default 2 replicas, soft anti-affinity)                                                                                                                                                                                        |
+| `Service`             | ClusterIP on port 80 → container port `4387`, with `ClientIP` session affinity (rooms + presence are per-process — a WS reconnect must land on the same pod; disable `service.sessionAffinity` only behind an ingress that pins stickiness itself) |
+| `Ingress` (optional)  | Public-facing TLS terminator                                                                                                                                                                                                                       |
+| `PodDisruptionBudget` | `minAvailable: 1` so a node drain during rollout stays safe                                                                                                                                                                                        |
+| `ServiceMonitor`      | Scrape `/metrics/prometheus` when the Prometheus operator is installed                                                                                                                                                                             |
 
 ## Required secret keys
 

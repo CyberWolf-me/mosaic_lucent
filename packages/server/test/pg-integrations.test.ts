@@ -2,9 +2,18 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { closeDb, createDb, type Db } from "../src/db/client.js";
 import { migrate } from "../src/db/migrate.js";
 import { like } from "drizzle-orm";
-import { boards as boardsTable, integrationInboundChanges, integrationWebhookEvents, organizations, users as usersTable } from "../src/db/schema.js";
+import {
+  boards as boardsTable,
+  integrationInboundChanges,
+  integrationWebhookEvents,
+  organizations,
+  users as usersTable,
+} from "../src/db/schema.js";
 import { InMemoryExecutionLedger } from "../src/integrations/ledger.js";
-import { InMemoryIntegrationActionStore, InMemoryIntegrationStore } from "../src/integrations/integrations.js";
+import {
+  InMemoryIntegrationActionStore,
+  InMemoryIntegrationStore,
+} from "../src/integrations/integrations.js";
 import {
   PostgresExecutionLedger,
   PostgresIntegrationActionStore,
@@ -14,11 +23,13 @@ import {
 } from "../src/store/pg-integrations.js";
 import type { IntegrationActionStore, IntegrationStore } from "../src/integrations/integrations.js";
 import type { ExecutionLedger as ExecutionLedgerStore } from "../src/integrations/ledger.js";
-import { InMemoryIntegrationWebhookEventStore, type IntegrationWebhookEventStore } from "../src/integrations/webhook.js";
+import {
+  InMemoryIntegrationWebhookEventStore,
+  type IntegrationWebhookEventStore,
+} from "../src/integrations/webhook.js";
 import {
   InMemoryInboundChangeStore,
   type InboundChangeStore,
-  type InboundChangeRecord,
 } from "../src/integrations/inbound.js";
 
 /**
@@ -43,11 +54,23 @@ function connectionContract(name: string, make: () => IntegrationStore, prefix: 
       const store = make();
       const org = `${prefix}-org`;
       const first = await store.putConnection(
-        { orgId: org, provider: "fake", credentialRef: "R1", createdBy: "u", config: { teamId: "t1" } },
+        {
+          orgId: org,
+          provider: "fake",
+          credentialRef: "R1",
+          createdBy: "u",
+          config: { teamId: "t1" },
+        },
         1_000,
       );
       const second = await store.putConnection(
-        { orgId: org, provider: "fake", credentialRef: "R2", createdBy: "u", config: { teamId: "t2" } },
+        {
+          orgId: org,
+          provider: "fake",
+          credentialRef: "R2",
+          createdBy: "u",
+          config: { teamId: "t2" },
+        },
         2_000,
       );
       const all = await store.connectionsForOrg(org);
@@ -66,11 +89,25 @@ function connectionContract(name: string, make: () => IntegrationStore, prefix: 
       const store = make();
       const board = `${prefix}-board`;
       await store.linkTask(
-        { orgId: "o", boardId: board, nodeId: "n1", provider: "fake", externalId: "E1", lastSyncedStatus: "todo" },
+        {
+          orgId: "o",
+          boardId: board,
+          nodeId: "n1",
+          provider: "fake",
+          externalId: "E1",
+          lastSyncedStatus: "todo",
+        },
         1_000,
       );
       await store.linkTask(
-        { orgId: "o", boardId: board, nodeId: "n1", provider: "fake", externalId: "E2", lastSyncedStatus: "done" },
+        {
+          orgId: "o",
+          boardId: board,
+          nodeId: "n1",
+          provider: "fake",
+          externalId: "E2",
+          lastSyncedStatus: "done",
+        },
         2_000,
       );
       const links = await store.linksForNode(board, "n1");
@@ -79,7 +116,14 @@ function connectionContract(name: string, make: () => IntegrationStore, prefix: 
       expect(links[0]!.lastSyncedStatus).toBe("done");
       // A node with two providers keeps both links.
       await store.linkTask(
-        { orgId: "o", boardId: board, nodeId: "n1", provider: "linear", externalId: "L1", lastSyncedStatus: "todo" },
+        {
+          orgId: "o",
+          boardId: board,
+          nodeId: "n1",
+          provider: "linear",
+          externalId: "L1",
+          lastSyncedStatus: "todo",
+        },
         3_000,
       );
       expect(await store.linksForNode(board, "n1")).toHaveLength(2);
@@ -87,7 +131,14 @@ function connectionContract(name: string, make: () => IntegrationStore, prefix: 
       expect(await store.linksForBoard(`${prefix}-other`)).toEqual([]);
       // Stage D10: the org-scoped GC feed — newest-synced first, capped.
       await store.linkTask(
-        { orgId: "o", boardId: `${prefix}-b2`, nodeId: "n1", provider: "fake", externalId: "E3", lastSyncedStatus: "todo" },
+        {
+          orgId: "o",
+          boardId: `${prefix}-b2`,
+          nodeId: "n1",
+          provider: "fake",
+          externalId: "E3",
+          lastSyncedStatus: "todo",
+        },
         4_000,
       );
       const orgLinks = await store.linksForOrg("o", 10);
@@ -111,17 +162,35 @@ function actionContract(name: string, make: () => IntegrationActionStore, prefix
       const store = make();
       const board = `${prefix}-ab`;
       const a = await store.propose({
-        orgId: "o", boardId: board, provider: "fake", connectionId: "int_1",
-        items: [{ nodeId: "n1", action: "create", title: "T", status: "open", idempotencyKey: "ext_n1" }],
-        createdBy: "u", now: 1,
+        orgId: "o",
+        boardId: board,
+        provider: "fake",
+        connectionId: "int_1",
+        items: [
+          { nodeId: "n1", action: "create", title: "T", status: "open", idempotencyKey: "ext_n1" },
+        ],
+        createdBy: "u",
+        now: 1,
       });
       const b = await store.propose({
-        orgId: "o", boardId: board, provider: "fake", connectionId: "int_1",
-        items: [{ nodeId: "n2", action: "create", title: "T2", status: "open", idempotencyKey: "ext_n2",
-          // Stage D8: the capability warnings ride the item (the jsonb
-          // round-trip — the approve gate reads them back from the store).
-          warnings: [{ field: "dueDate", reason: "GitHub has no due-date field" }] }],
-        createdBy: "u", now: 2,
+        orgId: "o",
+        boardId: board,
+        provider: "fake",
+        connectionId: "int_1",
+        items: [
+          {
+            nodeId: "n2",
+            action: "create",
+            title: "T2",
+            status: "open",
+            idempotencyKey: "ext_n2",
+            // Stage D8: the capability warnings ride the item (the jsonb
+            // round-trip — the approve gate reads them back from the store).
+            warnings: [{ field: "dueDate", reason: "GitHub has no due-date field" }],
+          },
+        ],
+        createdBy: "u",
+        now: 2,
         // Stage D9: the AI origin's provenance + the revision snapshot (the
         // columns migration 0022 adds — the round-trip both twins keep).
         origin: "ai",
@@ -169,7 +238,13 @@ function ledgerContract(name: string, make: () => ExecutionLedgerStore, prefix: 
   describe(`execution ledger parity — ${name}`, () => {
     it("claim → applied → duplicate (the original outcome); in-flight in the window", async () => {
       const ledger = make();
-      const key = { boardId: `${prefix}-lb`, provider: "fake", requestId: `${prefix}-r1`, lucentActionId: "a", nodeId: "n" };
+      const key = {
+        boardId: `${prefix}-lb`,
+        provider: "fake",
+        requestId: `${prefix}-r1`,
+        lucentActionId: "a",
+        nodeId: "n",
+      };
       const first = await ledger.claim(key);
       expect(first.outcome).toBe("claimed");
       if (first.outcome === "claimed") expect(first.record.attempts).toBe(1);
@@ -187,7 +262,13 @@ function ledgerContract(name: string, make: () => ExecutionLedgerStore, prefix: 
 
     it("failed re-claims immediately with attempts bumped; pending feeds the sweep", async () => {
       const ledger = make();
-      const key = { boardId: `${prefix}-lc`, provider: "fake", requestId: `${prefix}-r2`, lucentActionId: "a", nodeId: "n" };
+      const key = {
+        boardId: `${prefix}-lc`,
+        provider: "fake",
+        requestId: `${prefix}-r2`,
+        lucentActionId: "a",
+        nodeId: "n",
+      };
       await ledger.claim(key);
       await ledger.failed(key.boardId, key.provider, key.requestId, "boom", Date.now());
       const reclaimed = await ledger.claim(key);
@@ -210,12 +291,23 @@ function ledgerContract(name: string, make: () => ExecutionLedgerStore, prefix: 
 /* The D7 webhook-event ledger contract                                        */
 /* -------------------------------------------------------------------------- */
 
-function webhookEventContract(name: string, make: () => IntegrationWebhookEventStore, prefix: string) {
+function webhookEventContract(
+  name: string,
+  make: () => IntegrationWebhookEventStore,
+  prefix: string,
+) {
   describe(`webhook event ledger parity — ${name}`, () => {
     it("claim → processed → duplicate; the redelivered bytes are one event", async () => {
       const store = make();
       const id = `${prefix}-ev1`;
-      const key = { id, provider: "fake", orgId: "org1", externalId: "FAKE-1", now: 1_000, staleAfterMs: 100 };
+      const key = {
+        id,
+        provider: "fake",
+        orgId: "org1",
+        externalId: "FAKE-1",
+        now: 1_000,
+        staleAfterMs: 100,
+      };
       const first = await store.claim(key);
       expect(first.outcome).toBe("claimed");
       await store.markProcessed(id, "org1", 1_050);
@@ -228,7 +320,14 @@ function webhookEventContract(name: string, make: () => IntegrationWebhookEventS
     it("a received row inside the window is in_flight; past it re-claims with attempts bumped", async () => {
       const store = make();
       const id = `${prefix}-ev2`;
-      const key = { id, provider: "fake", orgId: "org1", externalId: null, now: 1_000, staleAfterMs: 100 };
+      const key = {
+        id,
+        provider: "fake",
+        orgId: "org1",
+        externalId: null,
+        now: 1_000,
+        staleAfterMs: 100,
+      };
       await store.claim(key);
       const inWindow = await store.claim({ ...key, now: 1_050 });
       expect(inWindow.outcome).toBe("in_flight");
@@ -240,7 +339,14 @@ function webhookEventContract(name: string, make: () => IntegrationWebhookEventS
     it("failed rows re-claim immediately; pending feeds the sweep with stale filtering", async () => {
       const store = make();
       const id = `${prefix}-ev3`;
-      const key = { id, provider: "fake", orgId: null, externalId: "FAKE-3", now: 5_000, staleAfterMs: 100 };
+      const key = {
+        id,
+        provider: "fake",
+        orgId: null,
+        externalId: "FAKE-3",
+        now: 5_000,
+        staleAfterMs: 100,
+      };
       await store.claim(key);
       await store.markFailed(id, "queue down", 5_010);
       const reclaimed = await store.claim({ ...key, now: 5_020 });
@@ -258,8 +364,19 @@ function webhookEventContract(name: string, make: () => IntegrationWebhookEventS
 
     it("Stage D10 pruneTerminal: the terminal set only, the terminal timestamp, bounded", async () => {
       const store = make();
-      const mk = async (id: string, status: "processed" | "ignored" | "failed" | "received", at: number) => {
-        await store.claim({ id, provider: "fake", orgId: "o", externalId: null, now: at - 1, staleAfterMs: 1 });
+      const mk = async (
+        id: string,
+        status: "processed" | "ignored" | "failed" | "received",
+        at: number,
+      ) => {
+        await store.claim({
+          id,
+          provider: "fake",
+          orgId: "o",
+          externalId: null,
+          now: at - 1,
+          staleAfterMs: 1,
+        });
         if (status === "failed") await store.markFailed(id, "boom", at);
         else if (status === "processed") await store.markProcessed(id, "o", at);
         else if (status === "ignored") await store.markIgnored(id, at);
@@ -314,18 +431,34 @@ function inboundContract(name: string, make: () => InboundChangeStore, prefix: s
         externalId: "FAKE-1",
         field: "status" as const,
       };
-      await store.put({ ...base, externalValue: "done", mappedValue: "completed" }, "webhook", 1_000);
-      await store.put({ ...base, externalValue: "done", mappedValue: "completed" }, "webhook", 2_000);
+      await store.put(
+        { ...base, externalValue: "done", mappedValue: "completed" },
+        "webhook",
+        1_000,
+      );
+      await store.put(
+        { ...base, externalValue: "done", mappedValue: "completed" },
+        "webhook",
+        2_000,
+      );
       let rows = await store.forBoard(board);
       expect(rows.filter((r) => r.status === "pending")).toHaveLength(1);
       // A NEW value updates the pending row, never a second one.
-      await store.put({ ...base, externalValue: "active", mappedValue: "in_progress" }, "webhook", 3_000);
+      await store.put(
+        { ...base, externalValue: "active", mappedValue: "in_progress" },
+        "webhook",
+        3_000,
+      );
       rows = await store.forBoard(board);
       const pending = rows.filter((r) => r.status === "pending");
       expect(pending).toHaveLength(1);
       expect(pending[0]).toMatchObject({ externalValue: "active", detectedAt: 3_000 });
       // The warning row: mappedValue undefined round-trips as null.
-      await store.put({ ...base, externalValue: "In QA", mappedValue: undefined }, "webhook", 4_000);
+      await store.put(
+        { ...base, externalValue: "In QA", mappedValue: undefined },
+        "webhook",
+        4_000,
+      );
       rows = await store.forBoard(board);
       expect(rows.find((r) => r.status === "pending")!.mappedValue).toBeUndefined();
     });
@@ -339,8 +472,16 @@ function inboundContract(name: string, make: () => InboundChangeStore, prefix: s
         externalId: "FAKE-2",
         field: "status" as const,
       };
-      const a = await store.put({ ...base, nodeId: "nA", externalValue: "done", mappedValue: "completed" }, "webhook", 1_000);
-      await store.put({ ...base, nodeId: "nB", externalValue: "done", mappedValue: "completed" }, "webhook", 1_100);
+      const a = await store.put(
+        { ...base, nodeId: "nA", externalValue: "done", mappedValue: "completed" },
+        "webhook",
+        1_000,
+      );
+      await store.put(
+        { ...base, nodeId: "nB", externalValue: "done", mappedValue: "completed" },
+        "webhook",
+        1_100,
+      );
       // Board-scoped read.
       expect(await store.change(`${prefix}-other`, a.id)).toBeUndefined();
       const decided = await store.decide(board, a.id, "applied", "u1", 2_000, { appliedSeq: 42 });
@@ -349,7 +490,14 @@ function inboundContract(name: string, make: () => InboundChangeStore, prefix: s
       const again = await store.decide(board, a.id, "dismissed", "u2", 3_000);
       expect(again).toMatchObject({ status: "applied", decidedBy: "u1" });
       // Supersession touches only the named nodes' pending rows.
-      const count = await store.supersedePending(board, ["nA", "nB"], "fake", "status", "superseded by sync", 4_000);
+      const count = await store.supersedePending(
+        board,
+        ["nA", "nB"],
+        "fake",
+        "status",
+        "superseded by sync",
+        4_000,
+      );
       expect(count).toBe(1); // nA is decided; only nB was pending
       const rows = await store.forBoard(board);
       expect(rows.find((r) => r.nodeId === "nB")).toMatchObject({ status: "superseded" });
@@ -362,9 +510,8 @@ function inboundContract(name: string, make: () => InboundChangeStore, prefix: s
         "webhook",
         5_000,
       );
-      expect(
-        await store.pruneTerminal(Date.now(), 100),
-      ).toBe(2); // nA (applied, decided 2_000) + nB (superseded, decided 4_000)
+      expect(pending.status).toBe("pending");
+      expect(await store.pruneTerminal(Date.now(), 100)).toBe(2); // nA (applied, decided 2_000) + nB (superseded, decided 4_000)
       const after = await store.forBoard(board);
       expect(after.find((r) => r.nodeId === "nC")).toMatchObject({ status: "pending" });
       expect(after.find((r) => r.nodeId === "nA")).toBeUndefined();
@@ -379,7 +526,11 @@ function inboundContract(name: string, make: () => InboundChangeStore, prefix: s
 
 connectionContract("in-memory", () => new InMemoryIntegrationStore(), `int${tag}`);
 actionContract("in-memory", () => new InMemoryIntegrationActionStore(), `act${tag}`);
-ledgerContract("in-memory", () => new InMemoryExecutionLedger({ staleAfterMs: 60_000 }), `led${tag}`);
+ledgerContract(
+  "in-memory",
+  () => new InMemoryExecutionLedger({ staleAfterMs: 60_000 }),
+  `led${tag}`,
+);
 webhookEventContract("in-memory", () => new InMemoryIntegrationWebhookEventStore(), `whe${tag}`);
 inboundContract("in-memory", () => new InMemoryInboundChangeStore(), `inb${tag}`);
 
@@ -398,7 +549,15 @@ describeIf("Postgres integration parity (needs LUCENT_TEST_DATABASE_URL)", () =>
     // extra duty, per the same convention pg-store.test.ts uses for its
     // boards. Rows carry the run tag so repeated runs never collide.
     const { emptyWorkspace } = await import("../src/boards.js");
-    const user = { id: `u-${tag}`, email: `int-${tag}@e.test`, name: "int", passwordHash: "x:y", tokenVersion: 0, createdAt: Date.now(), emailVerifiedAt: null };
+    const user = {
+      id: `u-${tag}`,
+      email: `int-${tag}@e.test`,
+      name: "int",
+      passwordHash: "x:y",
+      tokenVersion: 0,
+      createdAt: Date.now(),
+      emailVerifiedAt: null,
+    };
     await target.db.insert(usersTable).values(user).onConflictDoNothing();
     for (const orgId of ["o", "org1", `pgi${tag}-org`, `${tag}-other-org`]) {
       await target.db
@@ -407,9 +566,11 @@ describeIf("Postgres integration parity (needs LUCENT_TEST_DATABASE_URL)", () =>
         .onConflictDoNothing();
     }
     const boardIds = [
-      `pgi${tag}-board`, `pgi${tag}-b2`,
+      `pgi${tag}-board`,
+      `pgi${tag}-b2`,
       `pga${tag}-ab`,
-      `pgl${tag}-lb`, `pgl${tag}-lc`,
+      `pgl${tag}-lb`,
+      `pgl${tag}-lc`,
       `pgn${tag}-qb`,
     ];
     for (const id of boardIds) {
@@ -449,7 +610,15 @@ describeIf("Postgres integration parity (needs LUCENT_TEST_DATABASE_URL)", () =>
 
   connectionContract("postgres", () => new PostgresIntegrationStore(target.db), `pgi${tag}`);
   actionContract("postgres", () => new PostgresIntegrationActionStore(target.db), `pga${tag}`);
-  ledgerContract("postgres", () => new PostgresExecutionLedger(target.db, { staleAfterMs: 60_000 }), `pgl${tag}`);
-  webhookEventContract("postgres", () => new PostgresIntegrationWebhookEventStore(target.db), `pgw${tag}`);
+  ledgerContract(
+    "postgres",
+    () => new PostgresExecutionLedger(target.db, { staleAfterMs: 60_000 }),
+    `pgl${tag}`,
+  );
+  webhookEventContract(
+    "postgres",
+    () => new PostgresIntegrationWebhookEventStore(target.db),
+    `pgw${tag}`,
+  );
   inboundContract("postgres", () => new PostgresInboundChangeStore(target.db), `pgn${tag}`);
 });

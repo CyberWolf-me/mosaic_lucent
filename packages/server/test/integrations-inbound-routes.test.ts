@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { AddressInfo } from "node:net";
 import { createHmac } from "node:crypto";
 import { MockImageProvider, MockProvider } from "@lucent/ai";
-import { createWorkspace, type Operation } from "@lucent/core";
+import type { Operation } from "@lucent/core";
 import { createApp } from "../src/app.js";
 import { InMemoryUserStore } from "../src/accounts.js";
 import { InMemoryBoardStore } from "../src/boards.js";

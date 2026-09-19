@@ -81,7 +81,7 @@ describe("the wire contract", () => {
   });
 
   it("createTask threads the resolved assignee; updateTask PATCHes the number and composes the close word", async () => {
-    const { fetchImpl, seen } = responder(({ method, path, body }) => {
+    const { fetchImpl } = responder(({ method, path, body }) => {
       if (path === "/repos/acme/app/assignees") {
         return json([{ login: "sarah-dev" }, { login: "sarahh" }]);
       }

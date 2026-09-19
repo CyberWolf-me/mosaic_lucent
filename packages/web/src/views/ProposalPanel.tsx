@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { Ico } from "../ui/icons.js";
 import { useWorkspace } from "../workspace.js";
 import type { Operation } from "@lucent/core";
@@ -6,6 +7,22 @@ import type { Operation } from "@lucent/core";
  * to the real pending proposal + apply-as-one-commit action (docs/15). */
 export function ProposalPanel() {
   const { proposal, applyProposal, cancelProposal, chat } = useWorkspace();
+
+  useEffect(() => {
+    if (!proposal) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        cancelProposal();
+      } else if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        applyProposal();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [proposal, applyProposal, cancelProposal]);
+
   if (!proposal) return null;
 
   const changes = proposal.operations.map(describe);
@@ -101,11 +118,11 @@ export function ProposalPanel() {
         ))}
       </div>
       <div className="panel-foot">
-        <button className="btn ghost" onClick={cancelProposal}>
-          Cancel
+        <button className="btn ghost" onClick={cancelProposal} title="Cancel proposal (Esc)">
+          Cancel <span style={{ opacity: 0.6, fontSize: 10, marginLeft: 4 }}>Esc</span>
         </button>
-        <button className="btn amber" onClick={applyProposal}>
-          <Ico.Check /> Apply all
+        <button className="btn amber" onClick={applyProposal} title="Apply all changes (⌘Enter or Ctrl+Enter)">
+          <Ico.Check /> Apply all <span style={{ opacity: 0.8, fontSize: 10, marginLeft: 4 }}>⌘↵</span>
         </button>
       </div>
     </div>

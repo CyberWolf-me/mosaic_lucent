@@ -1,4 +1,3 @@
-import fs from "node:fs";
 import { afterEach, describe, expect, it } from "vitest";
 import type { AddressInfo } from "node:net";
 import { MockImageProvider, MockProvider } from "@lucent/ai";
@@ -460,7 +459,7 @@ describe("Stage D6 definition of done — the real provider, end to end on a stu
     const h = (open = await makeHarness(wire));
     const alice = await signup(h, "d6e@example.com");
     const viewer = await signup(h, "d6v@example.com");
-    const orgId = (await h.userStore.membershipsFor(alice.id))[0]!.orgId;
+    const _orgId = (await h.userStore.membershipsFor(alice.id))[0]!.orgId;
     const boardId = await seedTen(h, alice.token);
     const share = await api(h, `/api/boards/${boardId}/share`, {
       method: "POST", token: alice.token, body: JSON.stringify({ role: "viewer" }),

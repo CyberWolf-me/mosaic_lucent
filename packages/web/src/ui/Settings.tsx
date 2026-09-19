@@ -634,6 +634,14 @@ export function SettingsModal({
                   onChange={(v) => setS({ activityIndicators: v })}
                 />
               </div>
+              <div className="setting-row">
+                <RowToggle
+                  label="ELK layout engine (experimental)"
+                  desc="Use Eclipse Layout Kernel in a Web Worker for orthogonal layered layout. When off (default), Lucent preserves its native layout engine with smooth curved connectors."
+                  value={s.elkLayout}
+                  onChange={(v) => setS({ elkLayout: v })}
+                />
+              </div>
             </>
           )}
 

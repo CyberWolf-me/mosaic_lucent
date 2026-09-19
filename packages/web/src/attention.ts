@@ -61,7 +61,10 @@ export function buildAttention(
     items.push({
       id: "proposal",
       kind: "proposal",
-      title: count > 0 ? `Review proposal — ${count} change${count === 1 ? "" : "s"}` : "Review proposal",
+      title:
+        count > 0
+          ? `Review proposal — ${count} change${count === 1 ? "" : "s"}`
+          : "Review proposal",
       detail: proposal.request ?? "Lucent proposed changes waiting for review.",
       ...(count > 0 ? { count } : {}),
       target: { view: "canvas" },
@@ -96,8 +99,7 @@ export function buildAttention(
     const derived = derivedExecution(workspace, now);
     for (const node of Object.values(workspace.nodes)) {
       const d = derived.get(node.id);
-      const isBlocked =
-        (d?.blockedBy.length ?? 0) > 0 || node.issue?.status === "blocked";
+      const isBlocked = (d?.blockedBy.length ?? 0) > 0 || node.issue?.status === "blocked";
       if (isBlocked && node.issue && node.issue.statusCategory !== "done") {
         const by = d?.blockedBy.length ?? 0;
         items.push({
@@ -114,8 +116,11 @@ export function buildAttention(
         });
       }
       const atRiskUpstream = d?.atRiskBy.length ?? 0;
+      // Explicit guards, not `!!`: the rule bans implicit coercion, and a
+      // Boolean() call here would break the narrowing line 101 relies on.
       const selfOverdue =
-        !!node.issue?.dueDate &&
+        node.issue &&
+        node.issue.dueDate &&
         node.issue.status !== "completed" &&
         node.issue.status !== "cancelled" &&
         node.issue.dueDate < todayIso(now);

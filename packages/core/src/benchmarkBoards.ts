@@ -293,7 +293,7 @@ export function adversarialBoard(n: number, seed = 1): Workspace {
  * everything" case as a graded workload, from hundreds to thousands of px as
  * the ladder scales.
  */
-export function longEdgeBoard(n: number, seed = 1): Workspace {
+export function longEdgeBoard(n: number, _seed = 1): Workspace {
   const ws = createWorkspace({
     id: "bench-longedge",
     name: `Long edge ${n}`,

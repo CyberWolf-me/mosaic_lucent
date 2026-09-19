@@ -17,7 +17,7 @@ import {
 
 /** A diamond-plus board: a→b, a→c, b→d, c→d, b→c, a→e-skip edge set. */
 function diamond(): Workspace {
-  let ws = createWorkspace();
+  const ws = createWorkspace();
   const ops: Operation[] = [];
   for (const id of ["a", "b", "c", "d", "e"]) {
     ops.push({ op: "CREATE_NODE", id, nodeType: "step", label: id.toUpperCase() });

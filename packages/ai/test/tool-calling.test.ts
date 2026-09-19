@@ -206,4 +206,20 @@ describe("parseToolArguments", () => {
   it("ignores a non-string explanation", () => {
     expect(parseToolArguments({ operations: [], explanation: 42 }).explanation).toBeUndefined();
   });
+
+  it("accepts operations with empty string, null, or omitted relationship", () => {
+    const result = parseToolArguments({
+      operations: [
+        { op: "CREATE_NODE", id: "n1", nodeType: "step", label: "Step 1" },
+        { op: "CREATE_NODE", id: "n2", nodeType: "step", label: "Step 2" },
+        { op: "CONNECT_NODES", source: "n1", target: "n2", relationship: "" },
+        { op: "CONNECT_NODES", source: "n1", target: "n2", relationship: null },
+        { op: "CONNECT_NODES", source: "n1", target: "n2" },
+      ],
+    });
+    expect(result.operations).toHaveLength(5);
+    expect((result.operations[2] as { relationship: string }).relationship).toBe("");
+    expect((result.operations[3] as { relationship: string }).relationship).toBe("");
+    expect((result.operations[4] as { relationship: string }).relationship).toBe("");
+  });
 });

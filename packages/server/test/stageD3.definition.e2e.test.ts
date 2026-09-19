@@ -225,7 +225,7 @@ describe("Stage D3 definition of done — the execution graph acceptance gate", 
     expect(askCtx.boardDigest).toContain("[blocked by:");
     expect(askCtx.boardDigest).toContain("[at risk:");
     // (2) MCP's summary (derivedBlockers) — the same core function the surface reads.
-    const { derivedBlockersVisible } = await import("@lucent/core").then((c) => ({
+    const { derivedBlockersVisible } = await import("@lucent/core").then((_c) => ({
       derivedBlockersVisible: derivedExecution(ws1, Date.now()).get("t4")!.blockedBy.length > 0,
     }));
     expect(derivedBlockersVisible).toBe(true);

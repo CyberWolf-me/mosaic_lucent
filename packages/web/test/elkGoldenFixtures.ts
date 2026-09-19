@@ -40,7 +40,7 @@ export function compoundBoard(): Workspace {
     children: ids.slice(half),
     kind: "flowchart",
   };
-  for (const [i, id] of ids.slice(0, half).entries()) ws.nodes[id]!.groupId = "region-alpha";
+  for (const [_i, id] of ids.slice(0, half).entries()) ws.nodes[id]!.groupId = "region-alpha";
   for (const id of ids.slice(half)) ws.nodes[id]!.groupId = "region-beta";
   return ws;
 }

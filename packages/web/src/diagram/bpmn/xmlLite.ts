@@ -33,7 +33,7 @@ export function parseXml(src: string): XmlElement {
   const name = (): string => {
     const m = /^[^\s/>=]+/.exec(src.slice(i));
     if (!m) fail("expected a name");
-    const hit = m![0] as string; // m cannot be null past fail() — its `never` return is not seen through the closure
+    const hit = m![0]; // m cannot be null past fail() — its `never` return is not seen through the closure
     i += hit.length;
     return hit;
   };

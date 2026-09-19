@@ -159,7 +159,7 @@ const edgeSchema = z.object({
   id: z.string().min(1),
   source: z.string().min(1),
   target: z.string().min(1),
-  relationship: z.string().min(1),
+  relationship: z.string().default(""),
   label: z.string().optional(),
   // Derived routing waypoints (layout-stamped, like Node.position); optional
   // so every pre-route board parses unchanged.

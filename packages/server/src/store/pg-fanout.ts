@@ -1,5 +1,5 @@
 import { Client } from "pg";
-import type { Db } from "../db/client.js";
+import { pgConfigFromUrl, type Db } from "../db/client.js";
 import {
   decodeFanoutMessage,
   encodeFanoutMessage,
@@ -71,7 +71,7 @@ export class PostgresFanout implements Fanout {
     // harness and production wired the same way — `createDb(url)` is the
     // only place the URL is held.
     const url = target.url;
-    const client = new Client({ connectionString: url });
+    const client = new Client(pgConfigFromUrl(url));
     await client.connect();
     await client.query(`LISTEN ${FANOUT_CHANNEL}`);
     const fanout = new PostgresFanout(client, url, onListenerError);

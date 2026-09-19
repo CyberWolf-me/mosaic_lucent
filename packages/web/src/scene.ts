@@ -100,7 +100,7 @@ export type Side = "l" | "r" | "t" | "b";
  * top/left, so any edge pointing up or left exited the wrong side of the card
  * and cut back across it.
  */
-function facesFor(
+export function facesFor(
   a: { cx: number; cy: number },
   b: { cx: number; cy: number },
 ): { dir: "h" | "v"; fromSide: Side; toSide: Side } {

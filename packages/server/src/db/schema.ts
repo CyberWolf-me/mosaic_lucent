@@ -80,7 +80,10 @@ export const memberships = pgTable(
       .references(() => organizations.id, { onDelete: "cascade" }),
     role: text("role", { enum: ["owner", "editor", "viewer"] }).notNull(),
   },
-  (t) => ({ pk: primaryKey({ columns: [t.userId, t.orgId] }) }),
+  (t) => ({
+    pk: primaryKey({ columns: [t.userId, t.orgId] }),
+    orgIdx: index("memberships_org_idx").on(t.orgId),
+  }),
 );
 
 export const boards = pgTable(
@@ -430,6 +433,7 @@ export const orgInvites = pgTable(
   (t) => ({
     orgIdx: index("org_invites_org_idx").on(t.orgId, t.expiresAt),
     tokenHashIdx: uniqueIndex("org_invites_token_hash_idx").on(t.tokenHash),
+    invitedByIdx: index("org_invites_invited_by_idx").on(t.invitedBy),
   }),
 );
 
@@ -533,7 +537,10 @@ export const notifications = pgTable(
     createdAt: bigint("created_at", { mode: "number" }).notNull(),
     readAt: bigint("read_at", { mode: "number" }),
   },
-  (t) => ({ userIdx: index("notifications_user_idx").on(t.userId, t.createdAt) }),
+  (t) => ({
+    userIdx: index("notifications_user_idx").on(t.userId, t.createdAt),
+    orgIdx: index("notifications_org_idx").on(t.orgId),
+  }),
 );
 
 export type DbNotification = typeof notifications.$inferSelect;
@@ -663,6 +670,7 @@ export const subscriptions = pgTable(
     // The dunning sweep and the expiring-trials job both read by status and
     // period end; without this they scan every subscriber to find the few.
     statusIdx: index("subscriptions_status_idx").on(t.status, t.periodEnd),
+    planIdx: index("subscriptions_plan_idx").on(t.plan),
   }),
 );
 
@@ -820,6 +828,7 @@ export const presence = pgTable(
     // The sweep's only query is `updated_at <= $1` across every board, which the
     // board-leading primary key cannot serve at all.
     updatedIdx: index("presence_updated_idx").on(t.updatedAt),
+    userIdx: index("presence_user_idx").on(t.userId),
   }),
 );
 
@@ -877,6 +886,7 @@ export const assets = pgTable(
     boardIdx: index("assets_board_idx").on(t.boardId),
     // The orphan sweep reads oldest-first across every org.
     createdIdx: index("assets_created_idx").on(t.createdAt),
+    createdByIdx: index("assets_created_by_idx").on(t.createdBy),
   }),
 );
 
@@ -962,6 +972,7 @@ export const teamTemplates = pgTable(
   (t) => ({
     orgIdx: index("team_templates_org_idx").on(t.orgId, t.createdAt),
     orgKindIdx: index("team_templates_org_kind_idx").on(t.orgId, t.kind),
+    createdByIdx: index("team_templates_created_by_idx").on(t.createdBy),
   }),
 );
 
@@ -998,7 +1009,7 @@ export const scimIdentities = pgTable(
     createdAt: bigint("created_at", { mode: "number" }).notNull(),
   },
   (t) => ({
-    pairUnique: uniqueIndex("scim_identities_idp_extid_uniq").on(t.idp, t.externalId),
+    pk: primaryKey({ columns: [t.idp, t.externalId] }),
     userIdx: index("scim_identities_user_idx").on(t.userId),
   }),
 );
@@ -1047,6 +1058,8 @@ export const meetingTranscripts = pgTable(
   },
   (t) => ({
     boardStartedIdx: index("meeting_transcripts_board_started_idx").on(t.boardId, t.startedAt),
+    orgIdx: index("meeting_transcripts_org_idx").on(t.orgId),
+    createdByIdx: index("meeting_transcripts_created_by_idx").on(t.createdBy),
   }),
 );
 
@@ -1174,6 +1187,9 @@ export const proposals = pgTable(
       .on(t.boardId)
       .where(sql`${t.status} = 'pending'`),
     boardIdx: index("proposals_board_idx").on(t.boardId, t.createdAt),
+    orgIdx: index("proposals_org_idx").on(t.orgId),
+    createdByIdx: index("proposals_created_by_idx").on(t.createdBy),
+    decidedByIdx: index("proposals_decided_by_idx").on(t.decidedBy),
   }),
 );
 

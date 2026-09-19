@@ -33,7 +33,7 @@
  * mechanical half; the eval owns the human half; decisions want both.
  */
 
-import type { Edge, Node, Position, Workspace } from "./model.js";
+import type { Node, Position, Workspace } from "./model.js";
 import {
   applyLayout,
   applyRoutes,
@@ -41,7 +41,6 @@ import {
   computeLayoutWithRoutes,
   relayoutRegionWithRoutes,
   type LayoutOptions,
-  type LayoutResult,
 } from "./layout.js";
 import { routeStyleFor, routedVertices, type RouteStyle } from "./routing.js";
 
@@ -433,7 +432,7 @@ export function measureMovementAfterEdit(
       const relaid = applyRoutes(applyLayout(edited, regionOut.layout), regionOut.routes);
       const members = new Set(
         Object.values(relaid.nodes)
-          .filter((n) => n.groupId === anchor!.groupId)
+          .filter((n) => n.groupId === anchor.groupId)
           .map((n) => n.id),
       );
       let movedOutside = 0;

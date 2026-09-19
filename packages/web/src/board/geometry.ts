@@ -1,7 +1,6 @@
 import type { Shape, Workspace } from "@lucent/core";
 import { routeStyleFor, routedVertices } from "@lucent/core";
 import { DIAGRAM_LABELS } from "../scene.js";
-import type { DiagramKind } from "@lucent/core";
 
 /**
  * Pure board geometry helpers, extracted from CanvasView so they can be unit
@@ -310,7 +309,7 @@ export function buildBoardSvg(workspace: Workspace, pad = 40): string {
     const gp = 22;
     // The same display vocabulary the live canvas uses for the region pill
     // (DIAGRAM_LABELS), not the raw kind string.
-    const label = g.kind ? `${g.label} · ${DIAGRAM_LABELS[g.kind as DiagramKind]}` : g.label;
+    const label = g.kind ? `${g.label} · ${DIAGRAM_LABELS[g.kind]}` : g.label;
     regionBoxes.push(
       `<rect x="${minX2 - gp}" y="${minY2 - gp}" width="${maxX2 - minX2 + gp * 2}" height="${maxY2 - minY2 + gp * 2}" rx="12" fill="#1a1a1d" stroke="#3a3a3e"/>` +
         `<text x="${minX2 - gp + 12}" y="${minY2 - gp + 16}" fill="#8a8a90" font-family="sans-serif" font-size="11">${escapeXml(label)}</text>`,

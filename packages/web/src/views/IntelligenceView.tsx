@@ -92,6 +92,24 @@ export function IntelligenceView({ onOpenSettings }: { onOpenSettings: (section?
   const inbox = useMemo(() => inboxItems(workspace), [workspace]);
   const totalStatements = sections.reduce((n, s) => n + s.rows.length, 0);
 
+  const [filterCategory, setFilterCategory] = useState<string>("all");
+
+  const decisionsCount =
+    (sections.find((s) => s.kind === "decision")?.rows.length ?? 0) +
+    (sections.find((s) => s.kind === "proposal")?.rows.length ?? 0);
+  const actionsCount = sections.find((s) => s.kind === "action")?.rows.length ?? 0;
+  const risksCount = sections.find((s) => s.kind === "risk")?.rows.length ?? 0;
+
+  const filteredSections = useMemo(() => {
+    if (filterCategory === "all") return sections;
+    if (filterCategory === "decision")
+      return sections.filter((s) => s.kind === "decision" || s.kind === "proposal");
+    if (filterCategory === "action") return sections.filter((s) => s.kind === "action");
+    if (filterCategory === "risk") return sections.filter((s) => s.kind === "risk");
+    if (filterCategory === "inbox" || filterCategory === "inbound") return [];
+    return sections.filter((s) => s.kind === filterCategory);
+  }, [sections, filterCategory]);
+
   /** Sections start expanded when populated, collapsed when empty. */
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
   /** Change-aware Keep dismissals: suppression keys for THIS session only. */
@@ -243,18 +261,85 @@ export function IntelligenceView({ onOpenSettings }: { onOpenSettings: (section?
         onOpenSettings={onOpenSettings}
       />
       <LeftRail onOpenSettings={onOpenSettings} />
-      <div
-        style={{
-          position: "absolute",
-          top: 76,
-          bottom: 30,
-          left: 76,
-          right: 30,
-          display: "grid",
-          gridTemplateColumns: "minmax(420px, 520px) 1fr",
-          gap: 18,
-        }}
-      >
+      <div className="intel-layout">
+        {/* KPI Summary Header Cards */}
+        <div className="intel-kpi-row">
+          <div
+            className={`intel-kpi-card ${filterCategory === "all" ? "active" : ""}`}
+            onClick={() => setFilterCategory("all")}
+          >
+            <div>
+              <div className="intel-kpi-num">{totalStatements}</div>
+              <div className="intel-kpi-label">Total Statements</div>
+            </div>
+          </div>
+          <div
+            className={`intel-kpi-card ${filterCategory === "decision" ? "active" : ""}`}
+            onClick={() => setFilterCategory("decision")}
+          >
+            <div>
+              <div className="intel-kpi-num" style={{ color: "var(--sig-violet, #a855f7)" }}>
+                {decisionsCount}
+              </div>
+              <div className="intel-kpi-label">Decisions & Proposals</div>
+            </div>
+          </div>
+          <div
+            className={`intel-kpi-card ${filterCategory === "action" ? "active" : ""}`}
+            onClick={() => setFilterCategory("action")}
+          >
+            <div>
+              <div className="intel-kpi-num" style={{ color: "var(--amber-1, #f59e0b)" }}>
+                {actionsCount}
+              </div>
+              <div className="intel-kpi-label">Actions & Tasks</div>
+            </div>
+          </div>
+          <div
+            className={`intel-kpi-card ${filterCategory === "risk" ? "active" : ""}`}
+            onClick={() => setFilterCategory("risk")}
+          >
+            <div>
+              <div className="intel-kpi-num" style={{ color: "var(--sig-red, #ef4444)" }}>
+                {risksCount}
+              </div>
+              <div className="intel-kpi-label">Risks & Mitigations</div>
+            </div>
+          </div>
+          <div
+            className={`intel-kpi-card ${filterCategory === "inbox" ? "active" : ""}`}
+            onClick={() => setFilterCategory("inbox")}
+          >
+            <div>
+              <div className="intel-kpi-num" style={{ color: "var(--sig-blue, #3b82f6)" }}>
+                {visibleInbox.length}
+              </div>
+              <div className="intel-kpi-label">AI Recommendations</div>
+            </div>
+          </div>
+        </div>
+
+        {/* Category Filter Tabs */}
+        <div className="intel-tabs">
+          {[
+            { id: "all", label: "All Intelligence" },
+            { id: "decision", label: "Decisions & Proposals" },
+            { id: "action", label: "Actions & Tasks" },
+            { id: "risk", label: "Risks & Mitigations" },
+            { id: "inbound", label: "External Sync" },
+          ].map((tab) => (
+            <button
+              key={tab.id}
+              className={`intel-tab-btn ${filterCategory === tab.id ? "active" : ""}`}
+              onClick={() => setFilterCategory(tab.id)}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Main Grid */}
+        <div className="intel-main-grid">
       {/* — The sections: the six kinds, open first, settled dimmed — */}
       <div
         style={{
@@ -344,16 +429,16 @@ export function IntelligenceView({ onOpenSettings }: { onOpenSettings: (section?
           )}
         </div>
         <div className="panel-body" style={{ overflowY: "auto", padding: 6 }}>
-          {totalStatements === 0 ? (
+          {totalStatements === 0 || (filteredSections.length === 0 && filterCategory !== "inbound") ? (
             <div className="view-empty" style={{ position: "static", padding: "40px 20px" }}>
               <div className="view-empty-icon">
                 <Ico.Sparkle />
               </div>
-              <h2>{t("intel.empty.view", locale)}</h2>
-              <p>{t("intel.empty.view.hint", locale)}</p>
+              <h2>{totalStatements === 0 ? t("intel.empty.view", locale) : "No statements in this category"}</h2>
+              <p>{totalStatements === 0 ? t("intel.empty.view.hint", locale) : "Try selecting 'All Intelligence' or another category filter above."}</p>
             </div>
           ) : (
-            sections.map((section) => {
+            filteredSections.map((section) => {
               const isCollapsed = collapsed.has(section.kind);
               return (
                 <div key={section.kind} style={{ padding: "4px 6px" }}>
@@ -554,7 +639,7 @@ export function IntelligenceView({ onOpenSettings }: { onOpenSettings: (section?
               Pending rows offer Accept/Keep-ours; a warning row (no
               translation) offers Keep-ours only — Accept would require
               guessing a status; decided rows dim with their outcome. — */}
-          {inbound.length > 0 && (
+          {inbound.length > 0 && (filterCategory === "all" || filterCategory === "inbound") && (
             <div style={{ padding: "4px 6px 12px" }}>
               <div
                 style={{
@@ -775,6 +860,7 @@ export function IntelligenceView({ onOpenSettings }: { onOpenSettings: (section?
             })
           )}
         </div>
+      </div>
       </div>
       {panelProvider && (
         <IntegrationPanel

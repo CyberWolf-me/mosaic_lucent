@@ -17,16 +17,13 @@ import {
   applyValidOperations,
   attachPlanProvenance,
   attachProvenance,
-  computeLayout,
   computeLayoutWithRoutes,
   createWorkspace,
   existingTopics,
   foldStatementTopics,
   parseWorkspace,
   parseWorkspaceOrDefault,
-  relayoutRegion,
   relayoutRegionWithRoutes,
-  separateRegions,
   validateOperations,
   type DiagramKind,
   type Operation,
@@ -393,8 +390,14 @@ interface LayoutScope {
  * pass already decided to re-flow, so the spatial-additivity invariant holds
  * for both engines.
  */
-function laidOutScoped(ws: Workspace, touched: ReadonlySet<string>): { ws: Workspace; scope: LayoutScope } {
-  const full = (): { ws: Workspace; scope: LayoutScope } => ({ ws: laidOut(ws), scope: { kind: "board" } });
+function laidOutScoped(
+  ws: Workspace,
+  touched: ReadonlySet<string>,
+): { ws: Workspace; scope: LayoutScope } {
+  const full = (): { ws: Workspace; scope: LayoutScope } => ({
+    ws: laidOut(ws),
+    scope: { kind: "board" },
+  });
   if (touched.size === 0) return full();
   const groupIds = new Set<string>();
   for (const id of touched) {
@@ -451,6 +454,32 @@ function touchedIdsOf(ops: readonly Operation[]): Set<string> {
     }
   }
   return touched;
+}
+
+/** Whether a batch contains operations that alter semantic graph topology or layout. */
+function opsNeedLayout(ops: readonly Operation[]): boolean {
+  for (const op of ops) {
+    switch (op.op) {
+      case "CREATE_NODE":
+      case "DELETE_NODE":
+      case "CHANGE_TEXT":
+      case "CHANGE_NODE_TYPE":
+      case "SET_ISSUE":
+      case "UPDATE_ISSUE":
+      case "SET_STATEMENT":
+      case "UPDATE_STATEMENT":
+      case "CONNECT_NODES":
+      case "DISCONNECT_NODES":
+      case "CREATE_GROUP":
+      case "DELETE_GROUP":
+      case "SET_GROUP_KIND":
+      case "TRANSFORM_DIAGRAM":
+        return true;
+      default:
+        break;
+    }
+  }
+  return false;
 }
 
 /**
@@ -541,8 +570,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   // re-stamp built-in geometry over a saved ELK board and rearrange it on
   // every reload (the M2 never-rearrange violation).
   const bootNeedsLayout = Boolean(
-    restored &&
-      Object.values(withDefaults(restored.workspace).nodes).some((n) => !n.position),
+    restored && Object.values(withDefaults(restored.workspace).nodes).some((n) => !n.position),
   );
   const historyRef = useRef(
     new OperationHistory(
@@ -689,9 +717,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
    * Without it, a remote frame arriving after a project switch would run a
    * refinement whose `persist` still points at the previous project's slot.
    */
-  const refineRef = useRef<
-    (from: Workspace, scope: LayoutScope, persistOnLand?: boolean) => void
-  >(() => {});
+  const refineRef = useRef<(from: Workspace, scope: LayoutScope, persistOnLand?: boolean) => void>(
+    () => {},
+  );
   // Live collaborators. Populated only when a server-side board is open and the
   // realtime socket is connected; empty in the offline/solo localStorage flow.
   const [peers, setPeers] = useState<Peer[]>([]);
@@ -731,11 +759,20 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         // the workspace from ops, which carry no coordinates — nodes land
         // unpositioned and stack at (0,0) under the region labels. Incremental
         // frames never drop positions (applyOperations preserves fields), so
-        // only a rebuild needs the guard the adopt/undo/redo paths carry:
-        // lay out ONLY when positions are missing, never rearrange a
-        // positioned board (M2).
-        const hasUnpositioned = Object.values(ws.nodes).some((n) => !n.position);
-        const positioned = hasUnpositioned ? laidOut(ws) : ws;
+        // Re-layout ONLY when positions are genuinely missing from both the incoming
+        // workspace and our local workspace (M2). Incremental frames or echos of
+        // operations we already positioned must keep their coordinates rather than
+        // triggering a delayed relayout.
+        const currentNodes = workspaceRef.current.nodes;
+        const mergedNodes = { ...ws.nodes };
+        for (const [id, node] of Object.entries(mergedNodes)) {
+          if (!node.position && currentNodes[id]?.position) {
+            mergedNodes[id] = { ...node, position: currentNodes[id].position };
+          }
+        }
+        const wsWithPositions = { ...ws, nodes: mergedNodes };
+        const hasUnpositioned = Object.values(wsWithPositions.nodes).some((n) => !n.position);
+        const positioned = hasUnpositioned ? laidOut(wsWithPositions) : wsWithPositions;
         historyRef.current.syncFromRemote(positioned);
         setWorkspace(positioned);
         setTick((t) => t + 1);
@@ -967,6 +1004,12 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   } | null>(null);
   const refineLayout = useCallback(
     async (from: Workspace, scope: LayoutScope, persistOnLand = false) => {
+      // ELK refinement is an opt-in path (docs/AGENTS.md: hand-written engine
+      // in core stays default; ELK is opted-in). When elkLayout is disabled,
+      // the synchronous phase-1 geometry produced by core is final.
+      if (!settingsStore.get().elkLayout) {
+        return;
+      }
       // Skip before any worker traffic: families ELK did not win, and region
       // scopes whose region is not ELK-eligible (the service would answer
       // with the built-in engine — geometry phase 1 already produced).
@@ -983,9 +1026,14 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       try {
         let refined: Workspace | null = null;
         if (scope.kind === "region" && scope.groupId) {
-          const result = await relayoutRegionScoped(from, scope.groupId, {}, {
-            primary: WORKER_ELK_ENGINE,
-          });
+          const result = await relayoutRegionScoped(
+            from,
+            scope.groupId,
+            {},
+            {
+              primary: WORKER_ELK_ENGINE,
+            },
+          );
           // The built-in fallback inside the service re-produces phase-1's
           // own geometry — applying it would be a no-op, so only an ELK
           // outcome continues. `degraded` here means both engines failed;
@@ -1030,7 +1078,12 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     },
     [persist],
   );
-  refineRef.current = refineLayout;
+  refineRef.current = (...args) => {
+    // Fire-and-forget by design (the call sites never await refinement);
+    // the wrapper makes the float explicit instead of assigning an async
+    // function into a void slot, which reads as an accident.
+    void refineLayout(...args);
+  };
 
   /** Retry a degraded refinement: same board, same rules, fresh attempt. */
   const retryLayout = useCallback(() => {
@@ -1069,12 +1122,18 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
    */
   const commit = useCallback(
     (next: Workspace, ops: Operation[], label: string, conversation: ChatEntry[], name: string) => {
-      const { ws: positioned, scope } = laidOutScoped(next, touchedIdsOf(ops));
+      const needsLayout = opsNeedLayout(ops);
+      const { ws: positioned, scope } = needsLayout
+        ? laidOutScoped(next, touchedIdsOf(ops))
+        : { ws: next, scope: null };
       historyRef.current.commit(ops, label);
       setWorkspace(positioned);
       setTick((t) => t + 1);
       persist(positioned, conversation, name);
-      void refineLayout(positioned, scope, true);
+      if (scope) {
+        void refineLayout(positioned, scope, true);
+      }
+      return positioned;
     },
     [persist, refineLayout],
   );
@@ -1086,8 +1145,11 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
    */
   const commitAndShare = useCallback(
     (next: Workspace, ops: Operation[], label: string, conversation: ChatEntry[], name: string) => {
-      commit(next, ops, label, conversation, name);
-      if (!applyingRemote.current) syncRef.current?.commit(ops, label);
+      const positioned = commit(next, ops, label, conversation, name);
+      if (!applyingRemote.current) {
+        syncRef.current?.updateWorkspace(positioned);
+        syncRef.current?.commit(ops, label);
+      }
     },
     [commit],
   );
@@ -1109,6 +1171,11 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     if (!summary) return null;
     setBoardId(summary.id);
     setSharedBoardId(summary.id);
+    if (typeof window !== "undefined") {
+      const u = new URL(window.location.href);
+      u.searchParams.set("board", summary.id);
+      window.history.replaceState(null, "", u.toString());
+    }
     connectSync(summary.id, workspace);
     return summary.id;
   }, [projectName, workspace, boardId, connectSync]);
@@ -1218,6 +1285,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           chat,
           attachments,
           aborter.signal,
+          (phase) => setGenPhase(phase),
         );
         setStreamChars(0);
         setGenPhase("validating");
@@ -1291,7 +1359,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
                   ? {
                       turnKinds: provenance.turns
                         .map((t) => classifyTurn(t))
-                        .filter((k): k is NonNullable<ReturnType<typeof classifyTurn>> => Boolean(k)),
+                        .filter((k): k is NonNullable<ReturnType<typeof classifyTurn>> =>
+                          Boolean(k),
+                        ),
                     }
                   : {}),
               quote: provenance.turns.join(" ").slice(0, 240),
@@ -1308,9 +1378,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         // opens.
         const plan = attachments?.plan;
         const gated = plan ? gatePlanOps(enrichedOps) : null;
-        const planStampedOps: Operation[] = gated && plan
-          ? attachPlanProvenance(gated.allowed, plan.statementIds)
-          : enrichedOps;
+        const planStampedOps: Operation[] =
+          gated && plan ? attachPlanProvenance(gated.allowed, plan.statementIds) : enrichedOps;
         const planSkippedNote =
           gated && gated.skipped.length > 0
             ? { skippedOps: gated.skipped.map((s) => ({ op: s.op, reason: s.reason })) }
@@ -1349,8 +1418,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         // proposes), large=>5, never=>Infinity (destructive/external still
         // propose on the server path; kept simple here).
         const isLarge =
-          result.operations.length > proposalThreshold() &&
-          Object.keys(workspace.nodes).length > 0;
+          result.operations.length > proposalThreshold() && Object.keys(workspace.nodes).length > 0;
         setGenPhase("applying");
 
         if (isLarge) {
@@ -1379,14 +1447,18 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
                 request: text,
                 explanation,
                 ...(provenance?.meetingId ? { meetingId: provenance.meetingId } : {}),
-                ...(provenance?.turnRange || provenance?.turnKinds?.length || provenance?.turns?.length
+                ...(provenance?.turnRange ||
+                provenance?.turnKinds?.length ||
+                provenance?.turns?.length
                   ? {
                       provenance: {
                         // Stage C2: the full evidence record, so the server's
                         // approve-time enrichment (ADR 0022) can stamp the ops
                         // for every peer, not just the proposer's browser.
                         ...(provenance.turnRange ? { turnRange: provenance.turnRange } : {}),
-                        ...(provenance.turnKinds?.length ? { turnKinds: provenance.turnKinds } : {}),
+                        ...(provenance.turnKinds?.length
+                          ? { turnKinds: provenance.turnKinds }
+                          : {}),
                         ...(provenance.turns?.length
                           ? { quote: provenance.turns.join(" ").slice(0, 240) }
                           : {}),
@@ -1521,13 +1593,13 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         const turns = chat
           .filter((c) => c.role === "user" || c.role === "ai")
           .slice(-8)
-          .map((c) => ({ role: c.role === "user" ? ("user" as const) : ("ai" as const), text: c.text }));
+          .map((c) => ({
+            role: c.role === "user" ? ("user" as const) : ("ai" as const),
+            text: c.text,
+          }));
         const result = await askLucent(boardId, text, turns);
         if ("error" in result) {
-          const conversation: ChatEntry[] = [
-            ...withUser,
-            { role: "error", text: result.error },
-          ];
+          const conversation: ChatEntry[] = [...withUser, { role: "error", text: result.error }];
           setChat(conversation);
           persist(workspace, conversation, projectName);
           return;
@@ -1538,14 +1610,18 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
             role: "ai",
             text: result.answer,
             ...(result.citations.length
-              ? { citations: result.citations.map(({ kind, id, label, detail, why, turnRange }) => ({
-                  kind,
-                  id,
-                  label,
-                  ...(detail ? { detail } : {}),
-                  ...(why ? { why } : {}),
-                  ...(turnRange ? { turnRange } : {}),
-                })) }
+              ? {
+                  citations: result.citations.map(
+                    ({ kind, id, label, detail, why, turnRange }) => ({
+                      kind,
+                      id,
+                      label,
+                      ...(detail ? { detail } : {}),
+                      ...(why ? { why } : {}),
+                      ...(turnRange ? { turnRange } : {}),
+                    }),
+                  ),
+                }
               : {}),
             ...(result.hasMore ? { historyTruncated: true } : {}),
           },
@@ -1582,7 +1658,11 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
    * deep-linkability of the other two.
    */
   const onCitation = useCallback(
-    (citation: { kind: "node" | "meeting" | "revision"; id: string; turnRange?: [number, number] }) => {
+    (citation: {
+      kind: "node" | "meeting" | "revision";
+      id: string;
+      turnRange?: [number, number];
+    }) => {
       const params = new URLSearchParams(window.location.search);
       if (citation.kind === "node") {
         params.set("reveal", citation.id);
@@ -1691,7 +1771,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
             : {}),
         }
       : undefined;
-    const candidateOps = evidence ? attachProvenance(proposal.operations, evidence) : proposal.operations;
+    const candidateOps = evidence
+      ? attachProvenance(proposal.operations, evidence)
+      : proposal.operations;
     // The topic fold (Stage C5): a local proposal is the model's output —
     // fold its topics against the workspace before applying, mirroring the
     // server's approve-time fold. (The server path above folds at commit;
@@ -1741,7 +1823,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     // History replays ops, and ops carry no coordinates — positions come only
     // from the layout pass. Relayout here or every node renders at (0,0)
     // after the first undo (found live: a 33-node board stacked to a point).
-    const positioned = laidOut(next);
+    const needsLayout = opsNeedLayout(ops);
+    const positioned = needsLayout ? laidOut(next) : next;
     setWorkspace(positioned);
     setTick((t) => t + 1);
     if (ops.length > 0) {
@@ -1749,19 +1832,24 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       persist(positioned, chat, projectName);
       // Phase 2 (doc 18 Phase 4): the replayed board re-derives geometry, so
       // the ELK refinement is legitimate here too.
-      void refineLayout(positioned, { kind: "board" }, true);
+      if (needsLayout) {
+        void refineLayout(positioned, { kind: "board" }, true);
+      }
     }
   }, [chat, persist, projectName, refineLayout]);
   const redo = useCallback(() => {
     const { workspace: next, ops } = historyRef.current.redo();
     // Same as undo: the replayed workspace has no positions of its own.
-    const positioned = laidOut(next);
+    const needsLayout = opsNeedLayout(ops);
+    const positioned = needsLayout ? laidOut(next) : next;
     setWorkspace(positioned);
     setTick((t) => t + 1);
     if (ops.length > 0) {
       syncRef.current?.commit(ops, "redo");
       persist(positioned, chat, projectName);
-      void refineLayout(positioned, { kind: "board" }, true);
+      if (needsLayout) {
+        void refineLayout(positioned, { kind: "board" }, true);
+      }
     }
   }, [chat, persist, projectName, refineLayout]);
 
@@ -1769,7 +1857,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     (index: number) => {
       const { workspace: restored, ops } = historyRef.current.restoreTo(index);
       // Version restore replays history ops — same no-positions rule as undo.
-      const positioned = laidOut(restored);
+      const needsLayout = opsNeedLayout(ops);
+      const positioned = needsLayout ? laidOut(restored) : restored;
       setWorkspace(positioned);
       setTick((t) => t + 1);
       const conversation: ChatEntry[] = [
@@ -1783,7 +1872,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       if (ops.length > 0) syncRef.current?.commit(ops, "restore");
       persist(positioned, conversation, projectName);
       // Same phase-2 rule as undo/redo: restore re-derives geometry.
-      void refineLayout(positioned, { kind: "board" }, true);
+      if (needsLayout) {
+        void refineLayout(positioned, { kind: "board" }, true);
+      }
     },
     [chat, persist, projectName, refineLayout],
   );
@@ -1888,32 +1979,35 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
    *      state has landed.
    */
   const pendingNewBoardPrompt = useRef<string | null>(null);
-  const startNewBoardFor = useCallback((prompt: string) => {
-    const id = newProjectId();
-    const name = prompt.slice(0, 40).trim() || "New board";
-    const fresh = createWorkspace();
-    // Same synchronous write openProject's import path uses: the record
-    // exists, well-formed, before the pointer moves to it.
-    saveProject({ id, name, workspace: fresh, chat: [] });
-    historyRef.current = new OperationHistory(fresh, "initial");
-    setProjectId(id);
-    setProjectName(name);
-    setWorkspace(fresh);
-    setChat([]);
-    // Fresh project: no proposal record carries over.
-    proposalRecordRef.current = undefined;
-    proposalHistoryRef.current = [];
-    decidedRef.current = null;
-    setProposal(null);
-    setView("canvas");
-    setLastOpenProject(id);
-    pendingNewBoardPrompt.current = prompt;
-    setTick((t) => t + 1);
-    // Same isolation as newProject: the generated board is local, so the
-    // previous shared session (socket, role, ?board=) must not survive into it.
-    setSharedBoardId(null);
-    leaveSharedBoard();
-  }, [leaveSharedBoard]);
+  const startNewBoardFor = useCallback(
+    (prompt: string) => {
+      const id = newProjectId();
+      const name = prompt.slice(0, 40).trim() || "New board";
+      const fresh = createWorkspace();
+      // Same synchronous write openProject's import path uses: the record
+      // exists, well-formed, before the pointer moves to it.
+      saveProject({ id, name, workspace: fresh, chat: [] });
+      historyRef.current = new OperationHistory(fresh, "initial");
+      setProjectId(id);
+      setProjectName(name);
+      setWorkspace(fresh);
+      setChat([]);
+      // Fresh project: no proposal record carries over.
+      proposalRecordRef.current = undefined;
+      proposalHistoryRef.current = [];
+      decidedRef.current = null;
+      setProposal(null);
+      setView("canvas");
+      setLastOpenProject(id);
+      pendingNewBoardPrompt.current = prompt;
+      setTick((t) => t + 1);
+      // Same isolation as newProject: the generated board is local, so the
+      // previous shared session (socket, role, ?board=) must not survive into it.
+      setSharedBoardId(null);
+      leaveSharedBoard();
+    },
+    [leaveSharedBoard],
+  );
 
   useEffect(() => {
     const prompt = pendingNewBoardPrompt.current;
@@ -1936,69 +2030,77 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
    * chose it, so quietly opening an empty board would look like a successful
    * import of an empty board.
    */
-  const importWorkspace = useCallback((imported: unknown, name = "Imported board") => {
-    const review = reviewWorkspace(imported, "That file");
-    if (!review.workspace) {
-      setChat((c) => [
-        ...c,
-        { role: "error", text: review.error ?? "That file isn't a valid Lucent board" },
-      ]);
-      return;
-    }
-    const safe = review.workspace;
-    const id = newProjectId();
-    historyRef.current = new OperationHistory(safe, "imported");
-    setProjectId(id);
-    setProjectName(name);
-    setWorkspace(safe);
-    setChat([]);
-    // Imported boards carry no proposal state of their own.
-    proposalRecordRef.current = undefined;
-    proposalHistoryRef.current = [];
-    decidedRef.current = null;
-    setProposal(null);
-    setView("canvas");
-    setTick((t) => t + 1);
-    saveProject({ id, name, workspace: safe, chat: [] });
-    setLastOpenProject(id);
-    // An import creates a fresh LOCAL project; the shared session of whatever
-    // board was open before must not survive into it.
-    setSharedBoardId(null);
-    leaveSharedBoard();
-  }, [leaveSharedBoard]);
+  const importWorkspace = useCallback(
+    (imported: unknown, name = "Imported board") => {
+      const review = reviewWorkspace(imported, "That file");
+      if (!review.workspace) {
+        setChat((c) => [
+          ...c,
+          { role: "error", text: review.error ?? "That file isn't a valid Lucent board" },
+        ]);
+        return;
+      }
+      const safe = review.workspace;
+      const id = newProjectId();
+      historyRef.current = new OperationHistory(safe, "imported");
+      setProjectId(id);
+      setProjectName(name);
+      setWorkspace(safe);
+      setChat([]);
+      // Imported boards carry no proposal state of their own.
+      proposalRecordRef.current = undefined;
+      proposalHistoryRef.current = [];
+      decidedRef.current = null;
+      setProposal(null);
+      setView("canvas");
+      setTick((t) => t + 1);
+      saveProject({ id, name, workspace: safe, chat: [] });
+      setLastOpenProject(id);
+      // An import creates a fresh LOCAL project; the shared session of whatever
+      // board was open before must not survive into it.
+      setSharedBoardId(null);
+      leaveSharedBoard();
+    },
+    [leaveSharedBoard],
+  );
 
-  const openProject = useCallback((id: string) => {
-    const data = loadProject(id);
-    if (!data) return;
-    // Same untrusted input as the reload path — localStorage is writable by any
-    // XSS on this origin and holds boards written by older builds — but reported
-    // rather than silently defaulted: the user picked this project by name, so a
-    // blank canvas with no explanation would read as lost work. The board still
-    // opens (empty) so they are not stranded on a project they cannot leave.
-    const review = reviewWorkspace(data.workspace, "That saved board");
-    const safe = review.workspace ?? createWorkspace();
-    // An older build may have stored a project with no conversation at all.
-    const conversation: ChatEntry[] = Array.isArray(data.chat) ? data.chat : [];
-    historyRef.current = new OperationHistory(safe, "loaded");
-    setProjectId(data.id);
-    setProjectName(data.name);
-    setWorkspace(safe);
-    setChat(review.error ? [...conversation, { role: "error", text: review.error }] : conversation);
-    // Open THIS project's proposal state: a pending record reopens the panel;
-    // a decided one keeps its place in the slot but stays inert, and its
-    // history rides along.
-    proposalRecordRef.current = data.proposal;
-    proposalHistoryRef.current = data.proposalHistory ?? [];
-    decidedRef.current = null;
-    setProposal(data.proposal && proposalIsPending(data.proposal) ? data.proposal : null);
-    setView("canvas");
-    setTick((t) => t + 1);
-    setLastOpenProject(data.id);
-    // Same as newProject: opening a local project leaves the shared-board
-    // session, or the next reload swaps the user back into the shared board.
-    setSharedBoardId(null);
-    leaveSharedBoard();
-  }, [leaveSharedBoard]);
+  const openProject = useCallback(
+    (id: string) => {
+      const data = loadProject(id);
+      if (!data) return;
+      // Same untrusted input as the reload path — localStorage is writable by any
+      // XSS on this origin and holds boards written by older builds — but reported
+      // rather than silently defaulted: the user picked this project by name, so a
+      // blank canvas with no explanation would read as lost work. The board still
+      // opens (empty) so they are not stranded on a project they cannot leave.
+      const review = reviewWorkspace(data.workspace, "That saved board");
+      const safe = review.workspace ?? createWorkspace();
+      // An older build may have stored a project with no conversation at all.
+      const conversation: ChatEntry[] = Array.isArray(data.chat) ? data.chat : [];
+      historyRef.current = new OperationHistory(safe, "loaded");
+      setProjectId(data.id);
+      setProjectName(data.name);
+      setWorkspace(safe);
+      setChat(
+        review.error ? [...conversation, { role: "error", text: review.error }] : conversation,
+      );
+      // Open THIS project's proposal state: a pending record reopens the panel;
+      // a decided one keeps its place in the slot but stays inert, and its
+      // history rides along.
+      proposalRecordRef.current = data.proposal;
+      proposalHistoryRef.current = data.proposalHistory ?? [];
+      decidedRef.current = null;
+      setProposal(data.proposal && proposalIsPending(data.proposal) ? data.proposal : null);
+      setView("canvas");
+      setTick((t) => t + 1);
+      setLastOpenProject(data.id);
+      // Same as newProject: opening a local project leaves the shared-board
+      // session, or the next reload swaps the user back into the shared board.
+      setSharedBoardId(null);
+      leaveSharedBoard();
+    },
+    [leaveSharedBoard],
+  );
 
   /**
    * Open a board that lives on the server, given its id. The dashboard's

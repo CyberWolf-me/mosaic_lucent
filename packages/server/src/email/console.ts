@@ -9,9 +9,11 @@ import type { Mailer, MailMessage } from "./mailer.js";
  *
  *   [mail] to=ana@example.com subject="Verify your Lucent account"
  *
- * Bodies longer than ~200 chars are truncated with an ellipsis to keep the
- * dev console readable; the full text is still on the same line so a script
- * can parse it.
+ * Bodies longer than ~200 chars are previewed with an ellipsis to keep the
+ * dev console readable — but action URLs (verify/reset/invite links) are
+ * ALWAYS logged in full on the same line. A truncated token link once cost
+ * a live verification run its mailbox confirmations: readability must never
+ * eat the one string the developer actually needs from the line.
  */
 export class ConsoleMailer implements Mailer {
   constructor(private readonly opts: { prefix?: string } = {}) {}
@@ -20,9 +22,18 @@ export class ConsoleMailer implements Mailer {
     const prefix = this.opts.prefix ?? "mail";
     const bodyPreview = msg.text.length > 200 ? `${msg.text.slice(0, 197)}…` : msg.text;
     const singleLine = bodyPreview.replace(/\n+/g, " ");
+    const urls = uniqueUrls(msg.text).filter((url) => !singleLine.includes(url));
 
     console.log(
-      `[${prefix}] to=${msg.to} subject=${JSON.stringify(msg.subject)} body=${JSON.stringify(singleLine)}`,
+      `[${prefix}] to=${msg.to} subject=${JSON.stringify(msg.subject)} body=${JSON.stringify(singleLine)}${
+        urls.length > 0 ? ` urls=${JSON.stringify(urls)}` : ""
+      }`,
     );
   }
+}
+
+/** http(s) URLs in reading order, deduplicated. */
+function uniqueUrls(text: string): string[] {
+  const found = text.match(/https?:\/\/[^\s"')\]]+/g) ?? [];
+  return [...new Set(found)];
 }

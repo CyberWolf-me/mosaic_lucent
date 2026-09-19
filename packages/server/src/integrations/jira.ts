@@ -120,7 +120,7 @@ function adfWithMarker(text: string, marker: string): unknown {
 
 /** Extract the plain text out of an ADF doc (the marker search + the
  * description round-trip both need it). */
-function adfText(doc: unknown): string {
+function _adfText(doc: unknown): string {
   if (typeof doc !== "object" || doc === null) return "";
   const out: string[] = [];
   const walk = (node: Record<string, unknown>): void => {

@@ -20,10 +20,10 @@ export type PillMode = "build" | "ask";
 export type AIPhase = "understanding" | "constructing" | "validating" | "applying";
 
 const PHASE_LABEL: Record<AIPhase, string> = {
-  understanding: "Understanding…",
-  constructing: "Constructing…",
-  validating: "Validating…",
-  applying: "Applying…",
+  understanding: "Parsing intent…",
+  constructing: "Designing architecture…",
+  validating: "Optimizing layout…",
+  applying: "Rendering nodes…",
 };
 
 export function AIPill({
@@ -192,7 +192,7 @@ export function AIPill({
           <div className="segmented" style={{ flexShrink: 0 }} role="radiogroup" aria-label="Build or Ask mode">
             <button
               className={mode === "build" ? "active" : ""}
-              onClick={() => onModeChange!("build")}
+              onClick={() => onModeChange("build")}
               title="Describe what to build — Lucent changes the board"
               aria-pressed={mode === "build"}
               aria-label="Build mode"
@@ -201,7 +201,7 @@ export function AIPill({
             </button>
             <button
               className={mode === "ask" ? "active" : ""}
-              onClick={() => onModeChange!("ask")}
+              onClick={() => onModeChange("ask")}
               title="Ask about the board and its history — read-only, with citations"
               aria-pressed={mode === "ask"}
               aria-label="Ask mode"

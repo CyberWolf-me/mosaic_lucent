@@ -1,4 +1,4 @@
-import { safeParseOperations } from "@lucent/core";
+import { safeParseOperations, sanitizeRawOperations } from "@lucent/core";
 import type { GenerateResult, TokenUsage } from "../provider.js";
 import type { AnswerResult } from "../answer.js";
 import { answerArgumentsSchema } from "../answer.js";
@@ -56,8 +56,9 @@ export function completionMeta(
   };
 }
 
+
 function toResult(parsed: ToolArgs, source: string, meta?: CompletionMeta): GenerateResult {
-  const result = safeParseOperations(parsed.operations ?? []);
+  const result = safeParseOperations(sanitizeRawOperations(parsed.operations ?? []));
   if (!result.success) {
     throw new Error(`Model returned invalid operations (${source}): ${result.error.message}`);
   }

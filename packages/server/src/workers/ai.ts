@@ -72,11 +72,16 @@ export function imageGenerateHandler(deps: AiWorkerDeps) {
       ...(payload.size ? { size: payload.size } : {}),
     });
 
-    const image = (result as { image?: string; data?: string }).image ?? (result as { data?: string }).data ?? "";
+    const image =
+      (result as { image?: string; data?: string }).image ??
+      (result as { data?: string }).data ??
+      "";
     const outcome: ImageJobResult = {
       image,
       provider: deps.imageProvider.name,
-      ...((result as { model?: string }).model ? { model: (result as { model?: string }).model } : {}),
+      ...((result as { model?: string }).model
+        ? { model: (result as { model?: string }).model }
+        : {}),
     };
 
     // The result is announced through the outbox, never written to a board
@@ -118,6 +123,14 @@ export function shouldGenerateAsync(nodeCount: number, requested: boolean): bool
 /** The AI family's handler registry, as the worker process builds it. */
 export function buildAiHandlers(deps: AiWorkerDeps): Record<string, (job: Job) => Promise<void>> {
   return {
+    // NOTE (reserved, not broken): nothing enqueues `image.generate` yet —
+    // `/api/image` serves synchronously by decision, and the async path
+    // (shouldGenerateAsync above) has no enqueue call site. The handler,
+    // the claim path, and the outbox announcement exist so the first real
+    // async workload (a finalize-as-job pass, a batch image run) wires a
+    // producer rather than inventing the mechanism. Until then the
+    // AssetStored events it would emit have no consumer either — also by
+    // decision (main.ts outbox note).
     "image.generate": imageGenerateHandler(deps),
   };
 }

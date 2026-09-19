@@ -220,9 +220,25 @@ function AuthForms({
           <p
             style={{ fontSize: 10.5, color: "var(--ink-3)", lineHeight: 1.5, padding: "2px 2px 0" }}
           >
-            By creating an account you agree to our Terms and Privacy Policy. Your boards live on
-            this Lucent server; how prompts are handled depends on the AI provider it's configured
-            with.
+            By creating an account you agree to our{" "}
+            <a
+              href="/terms"
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ color: "var(--accent, #7aa2ff)", textDecoration: "underline" }}
+            >
+              Terms
+            </a>{" "}
+            and{" "}
+            <a
+              href="/privacy"
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ color: "var(--accent, #7aa2ff)", textDecoration: "underline" }}
+            >
+              Privacy Policy
+            </a>. Your boards live on this Lucent server; how prompts are handled depends on the AI
+            provider it's configured with.
           </p>
         )}
       </div>

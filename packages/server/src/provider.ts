@@ -44,6 +44,7 @@ export function selectProvider(
       apiKey: compatKey,
       baseUrl: compatUrl,
       model: env.LUCENT_AI_MODEL ?? "claude-opus-5-thinking",
+      fallbackModel: env.LUCENT_AI_FALLBACK_MODEL,
       name: env.LUCENT_AI_NAME ?? "gorouter",
       ...(timeoutMs === undefined ? {} : { timeoutMs }),
     });

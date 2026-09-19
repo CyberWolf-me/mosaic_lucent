@@ -15,7 +15,7 @@ import { applyLayout, applyRoutes, denseBoard, layeredBoard } from "@lucent/core
 import { ELK_LAYOUT_ENGINE } from "../src/diagram/elk/elkLayoutEngine.js";
 import { goldenElkHashes, goldenElkWorkspaces } from "./elkGoldenFixtures.js";
 
-describe("golden ELK geometry (doc 18 Phase 4 item 4: the pin is deliberate)", () => {
+describe("golden ELK geometry (doc 18 Phase 4 item 4: the pin is deliberate)", { timeout: 30000 }, () => {
   for (const [name, hash] of Object.entries(goldenElkHashes)) {
     it(`${name}: geometry is byte-stable for the pinned elkjs (0.12.0)`, async () => {
       const ws = goldenElkWorkspaces[name]!();

@@ -13,8 +13,10 @@ import { Telemetry } from "../src/telemetry.js";
 import { UsageTracker, limitsFromEnv } from "../src/usage.js";
 import { readConfig } from "../src/config.js";
 import {
+  DeepgramTtsService,
   GenericHttpTtsService,
   MockTtsService,
+  OpenAiTtsService,
   selectTtsService,
   type TtsService,
 } from "../src/tts.js";
@@ -48,6 +50,18 @@ describe("selectTtsService", () => {
     const out = await live.synthesize({ text: "hi" });
     expect(out.audio).toEqual(new Uint8Array([1, 2, 3]));
     expect(out.contentType).toBe("audio/mpeg");
+  });
+
+  it("selects the Deepgram adapter on provider=deepgram, sharing the project key", () => {
+    // One Deepgram project key serves every API: the TTS key falls back to
+    // the STT key, documented in tts.ts rather than magic.
+    const dg = selectTtsService({ LUCENT_STT_KEY: "k", LUCENT_TTS_PROVIDER: "deepgram" });
+    expect(dg.live).toBe(true);
+    expect(dg.name).toBe("deepgram");
+    expect(selectTtsService({ LUCENT_TTS_PROVIDER: "deepgram" }).live).toBe(false);
+    expect(() => selectTtsService({ LUCENT_TTS_PROVIDER: "deepvoxx" })).toThrow(
+      "LUCENT_TTS_PROVIDER",
+    );
   });
 });
 
@@ -99,6 +113,95 @@ describe("GenericHttpTtsService", () => {
       fetchImpl: stubFetch([], new Uint8Array(0)),
     });
     await expect(empty.synthesize({ text: "hi" })).rejects.toThrow("no audio");
+  });
+});
+
+describe("OpenAiTtsService (UNVERIFIED — no key has exercised this path)", () => {
+  function stubAudio(
+    seen: Array<{ url: string; headers: Record<string, string>; body: unknown }>,
+    audio: Uint8Array,
+    status = 200,
+  ): typeof fetch {
+    return (async (url: unknown, init: unknown) => {
+      const typed = init as { headers: Record<string, string>; body: string };
+      seen.push({ url: String(url), headers: typed.headers, body: JSON.parse(typed.body) });
+      return new Response(Buffer.from(audio), { status });
+    }) as typeof fetch;
+  }
+
+  it("posts model/input/voice with Bearer auth and returns bytes", async () => {
+    const seen: Array<{ url: string; headers: Record<string, string>; body: unknown }> = [];
+    const service = new OpenAiTtsService({
+      apiKey: "sk-test",
+      fetchImpl: stubAudio(seen, new Uint8Array([7, 7])),
+    });
+    expect(service.name).toBe("openai");
+    const out = await service.synthesize({ text: "hello" });
+    expect(seen).toHaveLength(1);
+    expect(seen[0]!.url).toBe("https://api.openai.com/v1/audio/speech");
+    expect(seen[0]!.headers.authorization).toBe("Bearer sk-test");
+    expect(seen[0]!.body).toEqual({ model: "tts-1", input: "hello", voice: "alloy" });
+    expect(out.audio).toEqual(new Uint8Array([7, 7]));
+    // Per-request voice wins.
+    await service.synthesize({ text: "hi", voice: "nova" });
+    expect(seen[1]!.body).toEqual({ model: "tts-1", input: "hi", voice: "nova" });
+  });
+
+  it("refuses empty text and loud failures alike", async () => {
+    const service = new OpenAiTtsService({
+      apiKey: "k",
+      fetchImpl: stubAudio([], new Uint8Array([1])),
+    });
+    await expect(service.synthesize({ text: "  " })).rejects.toThrow("nothing to speak");
+    const failing = new OpenAiTtsService({
+      apiKey: "k",
+      fetchImpl: stubAudio([], new Uint8Array([1]), 429),
+    });
+    await expect(failing.synthesize({ text: "hi" })).rejects.toThrow("429");
+  });
+});
+
+describe("DeepgramTtsService", () => {  function stubAudio(
+    seen: Array<{ url: string; headers: Record<string, string>; body: unknown }>,
+    audio: Uint8Array,
+    status = 200,
+  ): typeof fetch {
+    return (async (url: unknown, init: unknown) => {
+      const typed = init as { headers: Record<string, string>; body: string };
+      seen.push({ url: String(url), headers: typed.headers, body: JSON.parse(typed.body) });
+      return new Response(Buffer.from(audio), { status });
+    }) as typeof fetch;
+  }
+
+  it("speaks Aura-style: Token auth, model query, text body, bytes back", async () => {
+    const seen: Array<{ url: string; headers: Record<string, string>; body: unknown }> = [];
+    const service = new DeepgramTtsService({
+      apiKey: "dg-test",
+      fetchImpl: stubAudio(seen, new Uint8Array([5, 5, 5])),
+    });
+    expect(service.name).toBe("deepgram");
+    const out = await service.synthesize({ text: "hello" });
+    expect(seen).toHaveLength(1);
+    expect(seen[0]!.url).toBe("https://api.deepgram.com/v1/speak?model=aura-2-thalia-en");
+    expect(seen[0]!.headers.authorization).toBe("Token dg-test");
+    expect(seen[0]!.body).toEqual({ text: "hello" });
+    expect(out.audio).toEqual(new Uint8Array([5, 5, 5]));
+    // A per-request voice overrides the deployment default in the query.
+    await service.synthesize({ text: "hi", voice: "aura-2-atlas-en" });
+    expect(seen[1]!.url).toBe("https://api.deepgram.com/v1/speak?model=aura-2-atlas-en");
+  });
+
+  it("refuses empty text and loud failures alike", async () => {
+    const service = new DeepgramTtsService({
+      apiKey: "k",
+      fetchImpl: stubAudio([], new Uint8Array([1])),
+    });
+    await expect(service.synthesize({ text: "   " })).rejects.toThrow("nothing to speak");
+    const failing = new DeepgramTtsService({
+      apiKey: "k",
+      fetchImpl: stubAudio([], new Uint8Array([1]), 402),
+    });
+    await expect(failing.synthesize({ text: "hi" })).rejects.toThrow("402");
   });
 });
 

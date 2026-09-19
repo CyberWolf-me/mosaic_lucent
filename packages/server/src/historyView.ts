@@ -1,7 +1,7 @@
 import type { Operation } from "@lucent/core";
 import type { BoardStore, LoggedOpEntry, OperationActor } from "./boards.js";
 import type { UserStore } from "./accounts.js";
-import type { ProposalStore, StoredProposal } from "./proposals.js";
+import type { StoredProposal } from "./proposals.js";
 import { historyWindow, loadLogFromSeq, windowedEntries } from "./historyWindow.js";
 import type { HistoryWindow } from "./historyWindow.js";
 

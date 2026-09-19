@@ -305,6 +305,7 @@ describeIf("retention parity on Postgres", () => {
       .query("DELETE FROM meeting_transcripts WHERE board_id = $1", [boardId])
       .catch(() => {});
     await db.pool.query("DELETE FROM organizations WHERE id = $1", [orgId]).catch(() => {});
+    await db.pool.query("DELETE FROM users WHERE id LIKE 'usr_ret_%'", []).catch(() => {});
     await closeDb(db);
   });
 
@@ -323,6 +324,19 @@ describeIf("retention parity on Postgres", () => {
       effectiveSettings(await memOrgs.get(orgId)),
     );
 
+    // Postgres enforces the board/user FKs the twin cannot see: seed the
+    // chain raw (user → board) so the parity assertion compares stores,
+    // not constraints.
+    const userId = `usr_ret_${tag}`;
+    await db.pool.query(
+      "INSERT INTO users (id, email, name, password_hash, created_at) VALUES ($1, $2, $3, $4, 1) ON CONFLICT (id) DO NOTHING",
+      [userId, `${userId}@example.com`, "Retention", "x"],
+    );
+    await db.pool.query(
+      "INSERT INTO boards (id, org_id, owner_id, name, workspace, created_at, updated_at) VALUES ($1, $2, $3, $4, '{}'::jsonb, 1, 1) ON CONFLICT (id) DO NOTHING",
+      [boardId, orgId, userId, "Retention"],
+    );
+
     const pgMeet = new PostgresMeetingStore(db);
     const memMeet = new InMemoryMeetingStore();
     const now = 100 * DAY;
@@ -332,7 +346,7 @@ describeIf("retention parity on Postgres", () => {
       startedAt: 1_000,
       ...(endedAt === null ? { endedAt: null } : { endedAt }),
       turns: [{ speaker: "A", at: 1_000, text: "x" }],
-      createdBy: "usr_1",
+      createdBy: userId,
       createdAt: 1_000,
     });
     const pgOld = await pgMeet.insert(mk(now - 40 * DAY));

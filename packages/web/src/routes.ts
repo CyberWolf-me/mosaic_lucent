@@ -24,10 +24,20 @@ export type Route =
   /** `/reset?token=`: the "pick a new password" form. */
   | { kind: "reset-confirm"; token: string }
   | { kind: "verify"; token: string | null }
-  | { kind: "invite"; token: string | null };
+  | { kind: "invite"; token: string | null }
+  | { kind: "privacy" }
+  | { kind: "terms" };
 
 /** Paths this module owns. Anything else is the workspace. */
-export const ROUTE_PATHS = ["/login", "/signup", "/reset", "/verify", "/invite"] as const;
+export const ROUTE_PATHS = [
+  "/login",
+  "/signup",
+  "/reset",
+  "/verify",
+  "/invite",
+  "/privacy",
+  "/terms",
+] as const;
 
 /**
  * Where the server sends a customer who hit a plan limit: DEFAULT_UPGRADE_URL
@@ -74,6 +84,10 @@ export function parseRoute(pathname: string, search: string): Route {
       return { kind: "verify", token: tokenFromSearch(search) };
     case "/invite":
       return { kind: "invite", token: tokenFromSearch(search) };
+    case "/privacy":
+      return { kind: "privacy" };
+    case "/terms":
+      return { kind: "terms" };
     default:
       // Unknown paths are the workspace, not a 404: the canvas is the product,
       // and `?board=`/`?invite=` share links hang off whatever path it is on.
@@ -90,6 +104,8 @@ export type Screen =
   | { kind: "reset-confirm"; token: string }
   | { kind: "verify"; token: string | null }
   | { kind: "invite"; token: string | null }
+  | { kind: "privacy" }
+  | { kind: "terms" }
   | { kind: "app" };
 
 /**
@@ -100,15 +116,19 @@ export type Screen =
  *  - `loading` is never skipped for the workspace. Rendering the shell while
  *    `/api/auth/me` is still in flight flashed the authenticated UI at
  *    signed-out visitors.
- *  - `/verify` and `/reset?token=` render immediately whatever the auth status,
- *    because redeeming an email token needs no session - gating them behind the
- *    check only adds a spinner to a link that already works.
+ *  - `/verify`, `/reset?token=`, `/privacy`, and `/terms` render immediately whatever the auth status,
+ *    because viewing legal disclosures or redeeming an email token needs no session - gating them
+ *    behind the check only adds a spinner to a link that already works.
  *  - `/invite` does need a session, so a signed-out visitor gets the sign-in
  *    screen with the token left in the address bar; accepting resumes once they
  *    are in.
  */
 export function decideScreen(route: Route, auth: AuthStatus): Screen {
   switch (route.kind) {
+    case "privacy":
+      return { kind: "privacy" };
+    case "terms":
+      return { kind: "terms" };
     case "reset-confirm":
       return { kind: "reset-confirm", token: route.token };
     case "verify":
@@ -197,12 +217,25 @@ export function getViewQuery(): { view?: string; lens?: string } {
   };
 }
 
-export function setViewQuery(view: string, lens?: string): void {
+export function setViewQuery(view: string, lens?: string, push = false): void {
   if (typeof window === "undefined") return;
   const url = new URL(window.location.href);
-  if (view && view.trim().length > 0) url.searchParams.set("view", view);
+  const currentView = url.searchParams.get("view") || "";
+  const currentLens = url.searchParams.get("lens") || "";
+  const targetView = view && view.trim().length > 0 ? view : "";
+  const targetLens = lens && lens.trim().length > 0 ? lens : "";
+
+  if (currentView === targetView && currentLens === targetLens) return;
+
+  if (targetView) url.searchParams.set("view", targetView);
   else url.searchParams.delete("view");
-  if (lens && lens.trim().length > 0) url.searchParams.set("lens", lens);
+  if (targetLens) url.searchParams.set("lens", targetLens);
   else url.searchParams.delete("lens");
-  window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+
+  const nextUrl = `${url.pathname}${url.search}${url.hash}`;
+  if (push && currentView !== "" && currentView !== targetView) {
+    window.history.pushState({}, "", nextUrl);
+  } else {
+    window.history.replaceState({}, "", nextUrl);
+  }
 }

@@ -53,6 +53,22 @@ describe("handleGenerate", () => {
     );
     expect(result.status).toBe(422);
   });
+
+  it("accepts operations with empty string or omitted relationship on CONNECT_NODES", async () => {
+    const result = await handleGenerate(
+      fixedProvider([
+        { op: "CREATE_NODE", id: "n1", nodeType: "step", label: "Step 1" },
+        { op: "CREATE_NODE", id: "n2", nodeType: "step", label: "Step 2" },
+        { op: "CONNECT_NODES", source: "n1", target: "n2", relationship: "" },
+      ]),
+      { message: "connect steps", summary: emptySummary },
+    );
+    expect(result.status).toBe(200);
+    const body = result.body as { operations: Operation[] };
+    expect(body.operations).toHaveLength(3);
+    const connectOp = body.operations.find((o) => o.op === "CONNECT_NODES") as { relationship: string };
+    expect(connectOp.relationship).toBe("");
+  });
 });
 
 describe("richer board context", () => {

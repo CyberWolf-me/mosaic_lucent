@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import type { AddressInfo } from "node:net";
-import { MockImageProvider, MockProvider } from "@lucent/ai";
+import { MockImageProvider } from "@lucent/ai";
 import type { LLMProvider } from "@lucent/ai";
 import { applyOperations, createWorkspace, inverseOperations, type Operation } from "@lucent/core";
 import { createApp } from "../src/app.js";

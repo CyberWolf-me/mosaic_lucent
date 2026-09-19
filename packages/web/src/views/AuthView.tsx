@@ -71,7 +71,30 @@ function AuthShell({ children }: { children: React.ReactNode }) {
         {children}
       </div>
       <footer className="auth-footer">
-        By signing up you agree that board content is your data — we don't train on it.
+        <div>By continuing you agree that your data is yours — we never train AI models on it.</div>
+        <div style={{ marginTop: 8, display: "flex", justifyContent: "center", alignItems: "center", gap: 8 }}>
+          <a
+            href="/privacy"
+            onClick={(e) => {
+              e.preventDefault();
+              navigate("/privacy");
+            }}
+            style={{ color: "var(--accent, #7aa2ff)", textDecoration: "underline" }}
+          >
+            Privacy Policy
+          </a>
+          <span style={{ opacity: 0.5 }}>·</span>
+          <a
+            href="/terms"
+            onClick={(e) => {
+              e.preventDefault();
+              navigate("/terms");
+            }}
+            style={{ color: "var(--accent, #7aa2ff)", textDecoration: "underline" }}
+          >
+            Terms of Service
+          </a>
+        </div>
       </footer>
     </div>
   );

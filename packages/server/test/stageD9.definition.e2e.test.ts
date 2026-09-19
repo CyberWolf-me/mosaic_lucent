@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import type { AddressInfo } from "node:net";
-import { MockImageProvider, MockProvider } from "@lucent/ai";
+import { MockImageProvider } from "@lucent/ai";
 import { createWorkspace, type Operation } from "@lucent/core";
 import { createApp } from "../src/app.js";
 import { InMemoryUserStore } from "../src/accounts.js";
@@ -331,5 +331,8 @@ describe("Stage D9 definition of done — the narrowing agent, end to end", () =
     });
     expect(dup.body.duplicate).toBe(true);
     expect(h.wire.issues).toHaveLength(4);
-  });
+    // 30s budget, not the 5s default: this spins the full D1→D9 world and
+    // flakes past 5s under parallel-suite load (seen live 2026-09-17; ~380ms
+    // in isolation). A timeout here must mean stuck, not busy.
+  }, 30000);
 });

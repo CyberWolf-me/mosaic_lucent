@@ -107,7 +107,7 @@ describe("MockProvider statement semantics (Stage C2)", () => {
 
   it("a rejection flips the existing proposal's statement to rejected", async () => {
     const provider = new MockProvider();
-    let ws = applyOperations(createWorkspace(), [
+    const ws = applyOperations(createWorkspace(), [
       { op: "CREATE_NODE", id: "usage-pricing", nodeType: "idea", label: "Proposal: usage-based pricing" },
       { op: "SET_STATEMENT", id: "usage-pricing", statement: { kind: "proposal", status: "open", topic: "pricing" } },
     ]);

@@ -431,6 +431,7 @@ export async function streamGenerate(
   history?: ChatEntry[],
   attachments?: { images?: ImageAttachment[]; documents?: DocumentAttachment[] },
   externalSignal?: AbortSignal,
+  onPhase?: (phase: "understanding" | "constructing" | "validating" | "applying", message?: string) => void,
 ): Promise<GenerateResponse> {
   const controller = new AbortController();
   // UX-2: user cancellation shares the abort path with the activity timeout.
@@ -494,6 +495,16 @@ export async function streamGenerate(
 
   const handleFrame = (event: string, data: unknown): void => {
     touch();
+    if (event === "phase") {
+      const body = data as { phase?: unknown; message?: unknown };
+      if (typeof body.phase === "string") {
+        onPhase?.(
+          body.phase as "understanding" | "constructing" | "validating" | "applying",
+          typeof body.message === "string" ? body.message : undefined,
+        );
+      }
+      return;
+    }
     if (event === "delta") {
       const text = (data as { text?: unknown }).text;
       if (typeof text === "string") onDelta(text);

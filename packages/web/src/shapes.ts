@@ -96,8 +96,8 @@ export function createShapeOp(
   if (kind === "sticky") {
     return {
       ...base,
-      text: STICKY_TEXT[Math.floor(Math.random() * STICKY_TEXT.length)]!,
-      rotation: Math.random() * 4 - 2,
+      text: "",
+      rotation: Math.random() * 2 - 1,
       style: { fill: STICKY_COLORS[Math.floor(Math.random() * STICKY_COLORS.length)]! },
     };
   }
