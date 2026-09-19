@@ -15,6 +15,7 @@ import {
   VelocityTracker,
   ZOOM_MAX,
   ZOOM_MIN,
+  ZOOM_OVERSHOOT,
   approach,
   projectMomentum,
   softClampZoom,

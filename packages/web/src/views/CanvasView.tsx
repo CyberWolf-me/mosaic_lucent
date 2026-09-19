@@ -1048,7 +1048,13 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
       const p = snapPosition(x, y, others, 6, 8, size);
       if (commit) {
         setDragOverride(null);
-        setGuides([]);
+        // One haptic tick when the drop lands on an alignment guide: the
+        // causal gesture's payoff moment (skill §13), never on remote/AI
+        // moves. Reads current guides without subscribing to them.
+        setGuides((g) => {
+          if (g.length > 0) emitHaptic(8);
+          return [];
+        });
         const moving = workspace.shapes[id];
         const dx = p.x - (moving?.position.x ?? p.x);
         const dy = p.y - (moving?.position.y ?? p.y);
