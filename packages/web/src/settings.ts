@@ -54,13 +54,13 @@ export const DEFAULT_SETTINGS: Settings = {
   accent: "amber",
   gridStyle: "dots",
   motion: "full",
-  aiSound: true,
+  aiSound: false,
   autosave: true,
   activityIndicators: true,
   sttProvider: "browser",
   meetingMode: "intelligence",
-  livekitUrl: "",
-  livekitTokenUrl: "",
+  livekitUrl: "wss://lucent-bjeymvze.livekit.cloud",
+  livekitTokenUrl: "/api/livekit/token",
   livekitRoom: "lucent-voice",
   boardStyle: "clean",
   approvalThreshold: "large",
@@ -73,7 +73,12 @@ function createStore() {
   let state: Settings = DEFAULT_SETTINGS;
   try {
     const raw = localStorage.getItem(LS_KEY);
-    if (raw) state = { ...DEFAULT_SETTINGS, ...(JSON.parse(raw) as Partial<Settings>) };
+    if (raw) {
+      const parsed = JSON.parse(raw) as Partial<Settings>;
+      state = { ...DEFAULT_SETTINGS, ...parsed };
+      if (!state.livekitUrl?.trim()) state.livekitUrl = DEFAULT_SETTINGS.livekitUrl;
+      if (!state.livekitTokenUrl?.trim()) state.livekitTokenUrl = DEFAULT_SETTINGS.livekitTokenUrl;
+    }
   } catch {
     /* ignore */
   }

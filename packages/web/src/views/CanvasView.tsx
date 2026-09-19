@@ -56,7 +56,7 @@ import { useSettings } from "../settings.js";
 import { useToast } from "../ui/Toast.js";
 import { generateImage } from "../api.js";
 import { WireframeRenderer } from "../ui/WireframeRenderer.js";
-import { speakAnswer } from "../tts.js";
+import { speakAnswer, isTtsSpeaking } from "../tts.js";
 import { getSttProvider, isAnyVoiceSupported, type VoiceSession } from "../stt/index.js";
 import { VoiceAgentBar } from "../ui/VoiceAgentBar.js";
 import {
@@ -249,6 +249,7 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
     lens,
     syncStatus,
     boardId,
+    startSharing,
   } = useWorkspace();
   const [settings] = useSettings();
   const { notify } = useToast();
@@ -339,6 +340,7 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
   const voiceInitiatedRef = useRef(false);
   const accumulatedVoiceTextRef = useRef("");
   const voiceSilenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const voiceSessionIdRef = useRef(0);
   const lastSpokenChatIndexRef = useRef(chat.length);
 
   const shapes = Object.values(workspace.shapes);
@@ -357,20 +359,26 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
     }
   }, [chat, notify]);
 
-  // Speak the AI's explanation aloud when AI sound is enabled or when voice initiated the turn
+  // Speak the AI's explanation aloud ONLY when AI sound is explicitly enabled in settings
   useEffect(() => {
     if (chat.length > lastSpokenChatIndexRef.current) {
       const latest = chat[chat.length - 1];
       lastSpokenChatIndexRef.current = chat.length;
       if (latest && latest.role === "ai" && latest.text) {
         const toSpeak = latest.text.replace(/— review \d+ proposed changes\./i, "").trim();
-        if (toSpeak && (settings.aiSound || voiceInitiatedRef.current)) {
+        if (toSpeak && settings.aiSound) {
+          try {
+            voiceRef.current?.stop();
+          } catch {
+            /* ignore */
+          }
+          setListening(false);
           void speakAnswer(toSpeak);
-          voiceInitiatedRef.current = false;
         }
+        voiceInitiatedRef.current = false;
       }
     }
-  }, [chat, settings.aiSound]);
+  }, [chat, settings.aiSound, setListening]);
 
   // Leaving a diagram or losing all nodes resets any active mode.
   useEffect(() => {
@@ -759,6 +767,7 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
   ]);
 
   const stopVoiceSession = useCallback(() => {
+    voiceSessionIdRef.current++;
     if (voiceSilenceTimerRef.current) {
       clearTimeout(voiceSilenceTimerRef.current);
       voiceSilenceTimerRef.current = null;
@@ -773,7 +782,7 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
   }, [setListening]);
 
   const commitVoiceTurn = useCallback(() => {
-    const text = accumulatedVoiceTextRef.current.trim();
+    const text = (accumulatedVoiceTextRef.current || message).trim();
     stopVoiceSession();
     accumulatedVoiceTextRef.current = "";
     if (!text) return;
@@ -789,11 +798,11 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
         void send(text);
       }
     }
-  }, [stopVoiceSession, pillMode, ask, generateImageShape, send]);
+  }, [stopVoiceSession, message, pillMode, ask, generateImageShape, send]);
 
   const toggleVoice = useCallback(() => {
     if (listening) {
-      if (accumulatedVoiceTextRef.current.trim()) {
+      if ((accumulatedVoiceTextRef.current || message).trim()) {
         commitVoiceTurn();
       } else {
         stopVoiceSession();
@@ -806,6 +815,7 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
       );
       return;
     }
+    const sessionId = ++voiceSessionIdRef.current;
     accumulatedVoiceTextRef.current = "";
     if (voiceSilenceTimerRef.current) {
       clearTimeout(voiceSilenceTimerRef.current);
@@ -820,8 +830,12 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
       room: settings.livekitRoom,
     });
     const session = provider.start({
-      onStart: () => setListening(true),
+      onStart: () => {
+        if (voiceSessionIdRef.current !== sessionId) return;
+        setListening(true);
+      },
       onInterim: (t) => {
+        if (voiceSessionIdRef.current !== sessionId || isTtsSpeaking()) return;
         const current = accumulatedVoiceTextRef.current;
         setMessage(current ? `${current} ${t}` : t);
         if (voiceSilenceTimerRef.current) {
@@ -830,10 +844,12 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
         }
       },
       onStatus: (s) => {
+        if (voiceSessionIdRef.current !== sessionId) return;
         if (s === "transcribing") notify("Transcribing on device…");
         if (s === "connecting") notify("Connecting to LiveKit…");
       },
       onFinal: (t) => {
+        if (voiceSessionIdRef.current !== sessionId || isTtsSpeaking()) return;
         const cleaned = t.trim();
         if (cleaned) {
           accumulatedVoiceTextRef.current = (
@@ -844,12 +860,15 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
         if (voiceSilenceTimerRef.current) {
           clearTimeout(voiceSilenceTimerRef.current);
         }
-        // 1.5s natural pause window before committing turn
+        // 4.0s natural pause window before committing turn, giving the user ample time to speak
         voiceSilenceTimerRef.current = setTimeout(() => {
-          commitVoiceTurn();
-        }, 1500);
+          if (voiceSessionIdRef.current === sessionId && !isTtsSpeaking()) {
+            commitVoiceTurn();
+          }
+        }, 4000);
       },
       onError: (msg) => {
+        if (voiceSessionIdRef.current !== sessionId) return;
         stopVoiceSession();
         if (msg) notify(msg);
       },
@@ -857,14 +876,15 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
     if (session) {
       voiceRef.current = session;
       if (provider.id === "whisper") {
-        notify("Listening — on-device Whisper. First use downloads the model.");
+        notify("Listening — on-device Whisper. Speak your prompt…");
       }
       if (provider.id === "browser") {
-        notify("Listening — speak naturally, pause when done...");
+        notify("Listening — speak naturally. Tap mic again or hit Enter when done.");
       }
     }
   }, [
     listening,
+    message,
     commitVoiceTurn,
     stopVoiceSession,
     voiceSupported,
@@ -895,15 +915,21 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
       return;
     }
 
-    if (!boardId) {
-      notify("Please create or open a board first.");
+    let activeBoardId = boardId;
+    if (!activeBoardId) {
+      notify("Connecting board for voice session…");
+      activeBoardId = await startSharing();
+    }
+
+    if (!activeBoardId) {
+      notify("Voice agent call requires a board — please sign in or try again.");
       return;
     }
 
     try {
       notify("Connecting to LiveKit Voice Agent…");
       const ctrl = await startVoiceAgentSession({
-        boardId,
+        boardId: activeBoardId,
         onStateChange: (st) => {
           setVoiceAgentState(st);
         },
@@ -919,7 +945,7 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
     } catch (err) {
       notify(`Voice Agent connection failed: ${(err as Error).message}`);
     }
-  }, [boardId, voiceAgentState, notify]);
+  }, [boardId, voiceAgentState, notify, startSharing]);
 
   const toggleVoiceAgentMute = useCallback(async () => {
     if (!voiceAgentCtrlRef.current) return;
@@ -2008,7 +2034,7 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
   // (?view=canvas&lens=kanban) covers them. Each lens view is a full
   // surface (own TopBar/LeftRail/composer); the rail's Canvas button
   // returns to the visual lens. No separate destinations, no bouncing.
-  if (!showHero && lens !== "visual") {
+  if (lens !== "visual") {
     if (lens === "kanban") return <BoardView onOpenSettings={onOpenSettings} />;
     if (lens === "document") return <DocumentView onOpenSettings={onOpenSettings} />;
     if (lens === "wireframe") return <WireframeView onOpenSettings={onOpenSettings} />;
@@ -2037,6 +2063,14 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
             onChange={setMessage}
             onSubmit={submit}
             onSpeak={toggleVoice}
+            onStartVoiceCall={toggleVoiceAgent}
+            voiceAgentActive={
+              voiceAgentState !== "idle" &&
+              voiceAgentState !== "disconnected" &&
+              voiceAgentState !== "error"
+            }
+            listening={listening}
+            onGenImage={() => generateImageShape()}
             onBlankBoard={() => setBlankBoardStarted(true)}
             failedAttempt={heroFailure}
           />

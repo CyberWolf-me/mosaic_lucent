@@ -223,17 +223,6 @@ export function AIPill({
           <span className="pill-notice">
             You're viewing this board. Ask the owner for edit access to change it.
           </span>
-        ) : listening ? (
-          <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 12 }}>
-            <div className="waveform">
-              {bars.current.map((h, i) => (
-                <span key={i} style={{ animationDelay: `${i * 60}ms`, height: `${h}%` }} />
-              ))}
-            </div>
-            <span style={{ fontSize: 13, color: "var(--ink-1)", fontStyle: "italic" }}>
-              Listening…
-            </span>
-          </div>
         ) : (
           <>
             <label htmlFor={inputId} className="sr-only">
@@ -247,10 +236,30 @@ export function AIPill({
                 if (e.key === "Enter") onSubmit?.();
               }}
               placeholder={
-                placeholder ??
-                (askMode ? "Ask about this board's history…" : "Ask Lucent to build something…")
+                listening
+                  ? "Listening… speak your idea (tap mic or ↵ when done)"
+                  : placeholder ??
+                    (askMode ? "Ask about this board's history…" : "Ask Lucent to build something…")
               }
             />
+            {listening && (
+              <div
+                className="waveform"
+                style={{
+                  height: 18,
+                  padding: "0 6px",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 3,
+                  flexShrink: 0,
+                }}
+                title="Microphone active — speaking…"
+              >
+                {bars.current.slice(0, 6).map((h, i) => (
+                  <span key={i} style={{ animationDelay: `${i * 60}ms`, height: `${h}%` }} />
+                ))}
+              </div>
+            )}
           </>
         )}
         {!readOnly && <span className="kbd">⌘K</span>}
@@ -259,7 +268,13 @@ export function AIPill({
             <button
               className={`mic-btn ${listening ? "active" : ""}`}
               onClick={onToggleMic}
-              title={voiceSupported ? "Voice" : "Voice not supported in this browser"}
+              title={
+                listening
+                  ? "Stop listening & submit"
+                  : voiceSupported
+                    ? "Voice Dictation (transcribe speech into prompt)"
+                    : "Voice not supported in this browser"
+              }
               aria-label={listening ? "Stop voice input" : "Start voice input"}
               aria-pressed={listening}
               style={voiceSupported ? undefined : { opacity: 0.45 }}
@@ -273,7 +288,7 @@ export function AIPill({
                 title={
                   voiceAgentActive
                     ? "End live duplex voice call"
-                    : "Live Voice Call (ChatGPT / Grok-style duplex conversation with Lucent)"
+                    : "Live Conversational Call (ChatGPT / Grok-style duplex voice agent)"
                 }
                 aria-label="Live Voice Call"
                 aria-pressed={voiceAgentActive}
@@ -285,7 +300,9 @@ export function AIPill({
                         borderColor: "#a78bfa",
                         boxShadow: "0 0 12px rgba(139, 92, 246, 0.5)",
                       }
-                    : undefined
+                    : {
+                        borderColor: "rgba(139, 92, 246, 0.5)",
+                      }
                 }
               >
                 <Ico.Phone />

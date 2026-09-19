@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { buildBoardSvg } from "../board/geometry.js";
 import { useWorkspace } from "../workspace.js";
 import { Ico } from "../ui/icons.js";
@@ -42,6 +42,11 @@ export function MobileBoardView(): React.ReactElement {
     useWorkspace();
   const svg = useMemo(() => buildBoardSvg(workspace), [workspace]);
   const [scale, setScale] = useState(1);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [isPanning, setIsPanning] = useState(false);
+  const activePointersRef = useRef<Map<number, { x: number; y: number }>>(new Map());
+  const pinchStartDistRef = useRef<number | null>(null);
+  const pinchStartScaleRef = useRef<number>(1);
   const [commentOpen, setCommentOpen] = useState(false);
   const [commentText, setCommentText] = useState("");
   const [commentTarget, setCommentTarget] = useState<string | null>(null);
@@ -51,10 +56,60 @@ export function MobileBoardView(): React.ReactElement {
     const onResize = (): void => {
       if (!isMobileViewport()) {
         setScale(1);
+        setPan({ x: 0, y: 0 });
       }
     };
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
+  }, []);
+
+  const handlePointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>): void => {
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    activePointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    setIsPanning(true);
+    if (activePointersRef.current.size === 2) {
+      const pts = Array.from(activePointersRef.current.values());
+      pinchStartDistRef.current = Math.hypot(pts[0]!.x - pts[1]!.x, pts[0]!.y - pts[1]!.y);
+      pinchStartScaleRef.current = scale;
+    }
+  }, [scale]);
+
+  const handlePointerMove = useCallback((e: React.PointerEvent<HTMLDivElement>): void => {
+    const prev = activePointersRef.current.get(e.pointerId);
+    if (!prev) return;
+
+    if (activePointersRef.current.size === 1) {
+      const dx = e.clientX - prev.x;
+      const dy = e.clientY - prev.y;
+      setPan((p) => ({ x: p.x + dx, y: p.y + dy }));
+      activePointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    } else if (activePointersRef.current.size === 2) {
+      activePointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      const pts = Array.from(activePointersRef.current.values());
+      const currentDist = Math.hypot(pts[0]!.x - pts[1]!.x, pts[0]!.y - pts[1]!.y);
+      if (pinchStartDistRef.current && pinchStartDistRef.current > 0) {
+        const ratio = currentDist / pinchStartDistRef.current;
+        const nextScale = Math.min(4, Math.max(0.5, pinchStartScaleRef.current * ratio));
+        setScale(nextScale);
+      }
+    }
+  }, []);
+
+  const handlePointerUp = useCallback((e: React.PointerEvent<HTMLDivElement>): void => {
+    try {
+      if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+        e.currentTarget.releasePointerCapture(e.pointerId);
+      }
+    } catch {
+      // ignore
+    }
+    activePointersRef.current.delete(e.pointerId);
+    if (activePointersRef.current.size < 2) {
+      pinchStartDistRef.current = null;
+    }
+    if (activePointersRef.current.size === 0) {
+      setIsPanning(false);
+    }
   }, []);
 
   // Escape closes the comment sheets (target picker or composer).
@@ -125,13 +180,23 @@ export function MobileBoardView(): React.ReactElement {
 
       <div
         className="mobile-canvas"
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerCancel={handlePointerUp}
         onDoubleClick={() => {
           setScale(1);
+          setPan({ x: 0, y: 0 });
         }}
+        style={{ touchAction: "none", cursor: isPanning ? "grabbing" : "grab" }}
       >
         <div
           className="mobile-canvas-inner"
-          style={{ transform: `scale(${scale})` }}
+          style={{
+            transform: `translate3d(${pan.x}px, ${pan.y}px, 0) scale(${scale})`,
+            transition: isPanning ? "none" : "transform 120ms ease-out",
+            willChange: "transform",
+          }}
           // The SVG is static markup from buildBoardSvg: same origin, no
           // scripts, and the geometry module's escaping already covers text
           // content (svg-escaping.test.ts pins it).

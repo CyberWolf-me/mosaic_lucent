@@ -34,7 +34,7 @@ You are interacting with the user over a real-time duplex voice call while they 
   - MOVE_NODE: { op: "MOVE_NODE", id: string, position: { x: number, y: number } }
   - DELETE_NODE: { op: "DELETE_NODE", id: string }
   - CREATE_SHAPE: { op: "CREATE_SHAPE", id: string, kind: "sticky"|"box"|"circle"|"frame", x: number, y: number, width: number, height: number, text?: string, color?: string }
-  - CREATE_WIREFRAME: { op: "CREATE_WIREFRAME", id: string, kind: "button"|"input"|"card"|"table"|"modal"|"navbar"|"sidebar", x: number, y: number, width: number, height: number, props?: Record<string, unknown> }
+  - CREATE_WIREFRAME: { op: "CREATE_WIREFRAME", id: string, title: string, viewport?: "desktop"|"tablet"|"mobile", root: { kind: "screen", children?: Array<{ kind: "header"|"nav"|"sidebar"|"card"|"section"|"row"|"column"|"input"|"button"|"text"|"image"|"table", label?: string, placeholder?: string, variant?: "primary"|"secondary"|"ghost", children?: Array<any> }> } }
 - Always position nodes cleanly with spacing (e.g. horizontal flow x: 100, 350, 600, 850; vertical flow y: 100, 250, 400).
 - You have the 'get_board_summary' tool to inspect what is currently on the user's canvas. Call this if you need to know what exists before modifying or answering specific questions about the layout.
 
@@ -254,9 +254,10 @@ export default defineAgent({
       process.env.LUCENT_AI_KEY ||
       process.env.OPENAI_API_KEY ||
       "";
-    const llmBaseUrl =
+    let llmBaseUrl =
       process.env.LUCENT_AI_BASE_URL ||
       "https://kiosapi.com/v1";
+    llmBaseUrl = llmBaseUrl.replace(/\/chat\/completions\/?$/i, "").replace(/\/+$/, "");
     const llmModel =
       process.env.LUCENT_AI_MODEL ||
       "agnes-2.5-flash";

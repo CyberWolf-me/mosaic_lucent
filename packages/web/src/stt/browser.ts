@@ -1,5 +1,6 @@
 import type { SttProvider, VoiceHandlers, VoiceSession } from "./types.js";
 import { eventConsumerFromCallbacks, type VoiceEventHandlers } from "./events.js";
+import { isTtsSpeaking } from "../tts.js";
 
 /**
  * Web Speech API provider. Streams live interim words, but is Chrome/Edge-only
@@ -107,11 +108,17 @@ export const browserSttProvider: SttProvider = {
 
     const begin = () => {
       if (stopped) return;
-      recognition = new Ctor();
+      try {
+        recognition = new Ctor();
+      } catch {
+        return;
+      }
+      emittedThrough = -1;
       recognition.lang = "en-US";
       recognition.interimResults = true;
       recognition.continuous = true;
       recognition.onresult = (baseEvent) => {
+        if (stopped || isTtsSpeaking()) return;
         // Segment mode: the event carries an index where new results start.
         const event = baseEvent as unknown as SegmentedEvent;
         let interim = "";
@@ -121,7 +128,7 @@ export const browserSttProvider: SttProvider = {
           if (result?.isFinal === true) {
             // A finalized utterance: emit immediately (once, even if the
             // recognizer restarts and replays the list).
-            if (i > emittedThrough && transcript.trim()) {
+            if (i > emittedThrough && transcript.trim() && !stopped && !isTtsSpeaking()) {
               emittedThrough = i;
               handlers.onEvent({
                 type: "final",
@@ -134,20 +141,40 @@ export const browserSttProvider: SttProvider = {
             interim += transcript;
           }
         }
-        if (interim)
+        if (interim && !stopped && !isTtsSpeaking())
           handlers.onEvent({ type: "interim", text: interim, at: Date.now(), source: "browser" });
       };
       recognition.onerror = (event) => {
+        if (stopped) return;
         const msg = describeError(event?.error);
         if (msg) handlers.onError?.(msg);
       };
       recognition.onend = () => {
+        if (stopped) return;
         handlers.onStatus?.("idle");
-        // The recognizer stops itself on silence; continuous capture restarts
-        // it unless the session was asked to stop.
+        // Chrome stops recognition after any short silence. Continuously recreate
+        // and restart capture unless stopped or TTS is actively playing.
         if (!stopped) {
+          if (isTtsSpeaking()) {
+            const poll = setInterval(() => {
+              if (stopped) {
+                clearInterval(poll);
+                return;
+              }
+              if (!isTtsSpeaking()) {
+                clearInterval(poll);
+                try {
+                  begin();
+                  handlers.onStatus?.("listening");
+                } catch {
+                  /* restart raced with stop() */
+                }
+              }
+            }, 200);
+            return;
+          }
           try {
-            recognition?.start();
+            begin();
             handlers.onStatus?.("listening");
           } catch {
             /* restart raced with stop() — nothing to do */
@@ -191,6 +218,7 @@ export const browserSttProvider: SttProvider = {
         } catch {
           /* ignore */
         }
+        recognition = null;
       },
     };
   },

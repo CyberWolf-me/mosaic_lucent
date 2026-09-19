@@ -9,18 +9,20 @@ export function EmptyState({
   onSpeak,
   onBlankBoard,
   failedAttempt,
+  onStartVoiceCall,
+  voiceAgentActive,
+  listening,
+  onGenImage,
 }: {
   value: string;
   onChange: (v: string) => void;
   onSubmit: () => void;
   onSpeak: () => void;
   onBlankBoard?: () => void;
-  /**
-   * The last failed first-generation attempt (P1-RF-001): without this, a
-   * failed Begin returned to a pristine hero and the error + retry lived only
-   * in the collapsed conversation — the user's request looked like it
-   * vanished. Present → the failure and its retry share the hero.
-   */
+  onStartVoiceCall?: () => void;
+  voiceAgentActive?: boolean;
+  listening?: boolean;
+  onGenImage?: () => void;
   failedAttempt?: { text: string; retryPrompt?: string } | null;
 }) {
   const { notify } = useToast();
@@ -191,10 +193,54 @@ export function EmptyState({
             lineHeight: 1.5,
           }}
         />
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <button className="icon-btn" style={{ background: "var(--canvas-3)" }} onClick={onSpeak}>
-            <Ico.Mic2 /> Speak
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          {onStartVoiceCall && (
+            <button
+              className={`icon-btn voice-call-btn ${voiceAgentActive ? "active" : ""}`}
+              style={{
+                background: voiceAgentActive
+                  ? "linear-gradient(135deg, #8b5cf6, #6366f1)"
+                  : "rgba(139, 92, 246, 0.15)",
+                color: voiceAgentActive ? "#ffffff" : "#a78bfa",
+                border: "1px solid rgba(139, 92, 246, 0.45)",
+                fontWeight: 600,
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                boxShadow: voiceAgentActive ? "0 0 12px rgba(139, 92, 246, 0.5)" : undefined,
+              }}
+              onClick={onStartVoiceCall}
+              title="Live Duplex Voice Call (Talk conversationally with Lucent AI co-pilot)"
+            >
+              <Ico.Phone style={{ width: 14, height: 14 }} />
+              {voiceAgentActive ? "In Call…" : "Live Call"}
+            </button>
+          )}
+          <button
+            className={`icon-btn ${listening ? "active" : ""}`}
+            style={{
+              background: listening ? "rgba(239, 68, 68, 0.2)" : "var(--canvas-3)",
+              color: listening ? "var(--sig-red)" : "inherit",
+              border: listening ? "1px solid var(--sig-red)" : undefined,
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+            }}
+            onClick={onSpeak}
+            title={listening ? "Listening… click to submit" : "Voice Dictation (transcribe speech into prompt)"}
+          >
+            <Ico.Mic2 /> {listening ? "Listening…" : "Speak"}
           </button>
+          {onGenImage && (
+            <button
+              className="icon-btn"
+              style={{ background: "var(--canvas-3)", display: "inline-flex", alignItems: "center", gap: 6 }}
+              onClick={onGenImage}
+              title="Generate reference image or logo with AI"
+            >
+              <Ico.Sparkle /> Image / Logo
+            </button>
+          )}
           <button
             className="icon-btn"
             onClick={() =>

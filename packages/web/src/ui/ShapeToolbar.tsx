@@ -420,7 +420,7 @@ export function ShapeElement({
                 if (e.key === "Escape") setEditing(false);
               }}
               onMouseDown={(e) => e.stopPropagation()}
-          onPointerDown={(e) => e.stopPropagation()}
+              onPointerDown={(e) => e.stopPropagation()}
               style={{
                 font: "inherit",
                 color: "inherit",
@@ -635,7 +635,7 @@ export function ShapeElement({
           }
         }}
         onMouseDown={(e) => e.stopPropagation()}
-          onPointerDown={(e) => e.stopPropagation()}
+        onPointerDown={(e) => e.stopPropagation()}
         rows={1}
         style={{
           font: "inherit",
@@ -662,7 +662,7 @@ export function ShapeElement({
           if (e.key === "Escape") setEditing(false);
         }}
         onMouseDown={(e) => e.stopPropagation()}
-          onPointerDown={(e) => e.stopPropagation()}
+        onPointerDown={(e) => e.stopPropagation()}
         style={{
           font: "inherit",
           color: "inherit",

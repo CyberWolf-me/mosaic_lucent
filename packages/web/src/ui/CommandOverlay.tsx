@@ -411,8 +411,10 @@ export function CommandOverlay({
           position: "fixed",
           inset: 0,
           zIndex: 300,
-          background: "oklch(0.10 0.005 60 / 0.55)",
+          background: "oklch(0.10 0.005 252 / 0.65)",
           backdropFilter: "blur(6px)",
+          WebkitBackdropFilter: "blur(6px)",
+          animation: "scrim-in 0.18s ease-out backwards",
         }}
       />
       <div
@@ -433,6 +435,8 @@ export function CommandOverlay({
           boxShadow: "var(--elev-3)",
           overflow: "hidden",
           backdropFilter: "blur(24px)",
+          WebkitBackdropFilter: "blur(24px)",
+          animation: "dialog-in 0.2s var(--e-out) backwards",
         }}
       >
         <div

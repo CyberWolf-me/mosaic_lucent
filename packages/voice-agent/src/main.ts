@@ -46,5 +46,7 @@ cli.runApp(
   new ServerOptions({
     agent: agentEntryPath,
     agentName: "lucent-voice-agent",
+    numIdleProcesses: 0,
+    initializeProcessTimeout: 60_000,
   }),
 );

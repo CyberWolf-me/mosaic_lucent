@@ -5,6 +5,7 @@ import { CommandOverlay } from "./CommandOverlay.js";
 import { NotificationTray } from "./NotificationTray.js";
 import { ProfileMenu } from "./ProfileMenu.js";
 import { getSessionUser } from "../session.js";
+import { Dialog } from "./primitives.js";
 import { useWorkspace, type CanvasLens, type View } from "../workspace.js";
 import {
   classifyBoard,
@@ -144,7 +145,7 @@ export function TopBar({
             title="Meeting mode"
             aria-label="Meeting mode"
           >
-            <Ico.Present /> Present
+            <Ico.Present /> Meeting
           </button>
           <button
             className="icon-btn"
@@ -192,6 +193,13 @@ function ShareDialog({ onClose }: { onClose: () => void }) {
   const [tier, setTier] = useState<BoardTier | null>(null);
   const [tierError, setTierError] = useState<string | null>(null);
   const [tierSaving, setTierSaving] = useState(false);
+  const [closing, setClosing] = useState(false);
+
+  const requestClose = () => {
+    if (closing) return;
+    setClosing(true);
+    setTimeout(onClose, 150);
+  };
 
   // Load the member list whenever the dialog opens on a shared board, so role
   // changes and removals act on current data rather than a stale snapshot.
@@ -215,12 +223,12 @@ function ShareDialog({ onClose }: { onClose: () => void }) {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.preventDefault();
-        onClose();
+        requestClose();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, [requestClose]);
 
   const refreshMembers = async () => {
     if (!boardId) return;
@@ -309,7 +317,18 @@ function ShareDialog({ onClose }: { onClose: () => void }) {
 
   return createPortal(
     <>
-      <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 200 }} />
+      <div
+        onClick={requestClose}
+        style={{
+          position: "fixed",
+          inset: 0,
+          zIndex: 200,
+          background: "oklch(0.10 0.005 252 / 0.45)",
+          backdropFilter: "blur(4px)",
+          WebkitBackdropFilter: "blur(4px)",
+          animation: closing ? "scrim-out 0.15s ease-in both" : "scrim-in 0.18s ease-out backwards",
+        }}
+      />
       <div
         style={{
           position: "fixed",
@@ -323,7 +342,12 @@ function ShareDialog({ onClose }: { onClose: () => void }) {
           borderRadius: "var(--r-lg)",
           boxShadow: "var(--elev-3)",
           backdropFilter: "blur(20px)",
+          WebkitBackdropFilter: "blur(20px)",
           color: "var(--ink-0)",
+          transformOrigin: "top right",
+          animation: closing
+            ? "inspector-out 0.15s var(--e-in-out) both"
+            : "inspector-in 0.2s var(--e-out) both",
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
@@ -331,7 +355,7 @@ function ShareDialog({ onClose }: { onClose: () => void }) {
           <div style={{ fontSize: 13, fontVariationSettings: "'wght' 550" }}>Share workspace</div>
           <div style={{ flex: 1 }} />
           <button
-            onClick={onClose}
+            onClick={requestClose}
             style={{ padding: 4, color: "var(--ink-3)" }}
             aria-label="Close share dialog"
           >
@@ -788,45 +812,21 @@ function ConfirmNewWorkspace({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
-  const cancelRef = useRef<HTMLButtonElement>(null);
-  useEffect(() => {
-    // Move focus into the dialog so keyboard/AT users land on it, and Escape
-    // cancels. Focus the safe "Keep working here" action, not the destructive one.
-    cancelRef.current?.focus();
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        onCancel();
-      }
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [onCancel]);
-
   return (
-    <>
-      <div className="modal-scrim" onClick={onCancel} />
-      <div
-        className="confirm-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-label="Start a new workspace"
-      >
-        <div className="confirm-title">Start a new workspace?</div>
-        <div className="confirm-body">
-          This board stays saved in Projects, but the canvas will be cleared and you'll start from
-          an empty board.
-        </div>
-        <div className="confirm-actions">
-          <button ref={cancelRef} className="btn ghost" onClick={onCancel}>
-            Keep working here
-          </button>
-          <button className="btn amber" onClick={onConfirm}>
-            New workspace
-          </button>
-        </div>
+    <Dialog onClose={onCancel} title="Start a new workspace?">
+      <div className="confirm-body">
+        This board stays saved in Projects, but the canvas will be cleared and you'll start from
+        an empty board.
       </div>
-    </>
+      <div className="confirm-actions">
+        <button className="btn ghost" onClick={onCancel} autoFocus>
+          Keep working here
+        </button>
+        <button className="btn amber" onClick={onConfirm}>
+          New workspace
+        </button>
+      </div>
+    </Dialog>
   );
 }
 

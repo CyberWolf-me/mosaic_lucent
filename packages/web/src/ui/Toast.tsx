@@ -24,12 +24,22 @@ const Ctx = createContext<ToastApi | null>(null);
 
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
+  const [leavingIds, setLeavingIds] = useState<Set<number>>(new Set());
 
   const notify = useCallback((text: string, icon?: ReactNode, tone?: ToastTone) => {
     const id = Date.now() + Math.random();
     setToasts((t) => [...t, { id, text, icon, tone }]);
+    // Trigger symmetric exit animation 220ms before unmount (skill §7)
+    setTimeout(() => {
+      setLeavingIds((prev) => new Set(prev).add(id));
+    }, 2380);
     setTimeout(() => {
       setToasts((t) => t.filter((x) => x.id !== id));
+      setLeavingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
     }, 2600);
   }, []);
 
@@ -40,7 +50,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
         {toasts.map((t) => (
           <div
             key={t.id}
-            className="toast"
+            className={`toast${leavingIds.has(t.id) ? " leaving" : ""}`}
             role={t.tone === "error" ? "alert" : "status"}
             aria-live={t.tone === "error" ? "assertive" : "polite"}
           >

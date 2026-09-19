@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Ico } from "../ui/icons.js";
 import { TEMPLATES } from "../templates.js";
 import { useWorkspace, type View } from "../workspace.js";
@@ -22,6 +22,33 @@ export function TemplatePicker({ onClose }: { onClose: () => void }) {
   const [source, setSource] = useState<"builtin" | "team">("builtin");
   const [team, setTeam] = useState<OrgTemplate[] | null>(null);
   const [teamLoadFailed, setTeamLoadFailed] = useState(false);
+  const [closing, setClosing] = useState(false);
+  const timerRef = useRef<number | null>(null);
+
+  const handleClose = useCallback(() => {
+    if (closing) return;
+    setClosing(true);
+    timerRef.current = window.setTimeout(onClose, 140);
+  }, [closing, onClose]);
+
+  useEffect(() => {
+    return () => {
+      if (timerRef.current !== null) {
+        window.clearTimeout(timerRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        handleClose();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [handleClose]);
 
   // Fetch the active org's templates once on mount. The list is short enough
   // that re-rendering on every selection change would be wasted work; the
@@ -64,21 +91,25 @@ export function TemplatePicker({ onClose }: { onClose: () => void }) {
     if (source === "builtin") {
       const t = TEMPLATES.find((x) => x.id === id);
       if (!t) return;
-      return applyBatch(t.build(), t.name, notify, applyManual, setView, onClose);
+      return applyBatch(t.build(), t.name, notify, applyManual, setView, handleClose);
     }
     if (team === null) return;
-    void applyTeamTemplate(id, team, applyManual, notify, setView, onClose);
+    void applyTeamTemplate(id, team, applyManual, notify, setView, handleClose);
     return;
   };
 
   return (
     <>
-      <div className="modal-scrim" onClick={onClose} />
-      <div className="template-modal" role="dialog" aria-label="Templates">
+      <div className={`modal-scrim ${closing ? "closing" : ""}`} onClick={handleClose} />
+      <div
+        className={`template-modal ${closing ? "closing" : ""}`}
+        role="dialog"
+        aria-label="Templates"
+      >
         <div className="tpl-head">
           <div style={{ fontSize: 15, fontVariationSettings: "'wght' 560" }}>Templates</div>
           <div style={{ flex: 1 }} />
-          <button className="icon-btn" onClick={onClose}>
+          <button className="icon-btn" onClick={handleClose}>
             <Ico.X />
           </button>
         </div>

@@ -143,6 +143,8 @@ button {
   background: none;
   border: 0;
   cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
 }
 
 input,
@@ -152,6 +154,7 @@ textarea {
   background: none;
   border: 0;
   outline: 0;
+  touch-action: manipulation;
 }
 
 /* Visible keyboard focus for every interactive element (WCAG 2.4.7). Mouse
@@ -170,10 +173,22 @@ textarea:focus-visible {
   *,
   *::before,
   *::after {
-    animation-duration: 0.001ms !important;
+    animation-duration: 0.18s !important;
     animation-iteration-count: 1 !important;
-    transition-duration: 0.001ms !important;
+    transition-duration: 0.18s !important;
     scroll-behavior: auto !important;
+  }
+  .modal-scrim,
+  .confirm-dialog,
+  .shape-inspector,
+  .right-panel,
+  .toast,
+  .screen-switcher,
+  .template-modal,
+  .settings-modal {
+    transform: none !important;
+    filter: none !important;
+    transition: opacity 0.18s ease-out !important;
   }
 }
 
@@ -381,13 +396,12 @@ html[data-grid="none"] .canvas-grid {
   z-index: 100;
   gap: 14px;
   white-space: nowrap;
-  /* The title-block edge: a 1px hairline that runs along the bottom of the
-     chrome, so the chrome reads as a drafted header rather than a floating
-     toolbar. The whole chrome concept here borrows from an architect's
-     sheet title block — name on the left, scale/kind stamp on the right,
-     hairline rule under both. */
-  border-bottom: 1px solid var(--stroke-1);
-  background: linear-gradient(to bottom, var(--canvas-0), var(--canvas-1) 60%, var(--canvas-1));
+  /* Translucent floating material with light catch (skill §12) */
+  background: oklch(0.12 0.012 252 / 0.82);
+  backdrop-filter: blur(20px) saturate(1.6);
+  -webkit-backdrop-filter: blur(20px) saturate(1.6);
+  border-bottom: 1px solid oklch(1 0 0 / 0.08);
+  box-shadow: 0 1px 0 0 oklch(0 0 0 / 0.2);
 }
 .top-bar .crumb,
 .top-bar .crumb-sep {
@@ -650,6 +664,7 @@ html[data-grid="none"] .canvas-grid {
   align-items: center;
   gap: 10px;
   animation: pill-in 0.25s var(--e-out) both;
+  transition: left 0.35s cubic-bezier(0.16, 1, 0.3, 1);
 }
 @keyframes pill-in {
   from {
@@ -690,7 +705,9 @@ html[data-grid="none"] .canvas-grid {
   box-shadow: var(--elev-3);
   transition:
     box-shadow 0.3s var(--e-out),
-    border-color 0.3s var(--e-out);
+    border-color 0.3s var(--e-out),
+    width 0.35s cubic-bezier(0.16, 1, 0.3, 1),
+    min-width 0.35s cubic-bezier(0.16, 1, 0.3, 1);
 }
 .ai-pill.listening {
   border-color: oklch(0.82 0.15 75 / 0.5);
@@ -1086,6 +1103,30 @@ html[data-grid="none"] .canvas-grid {
 }
 
 /* ================= Panels ================= */
+@keyframes panel-slide-in {
+  from {
+    opacity: 0;
+    transform: translateX(20px);
+    filter: blur(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+    filter: blur(0);
+  }
+}
+@keyframes panel-slide-out {
+  from {
+    opacity: 1;
+    transform: translateX(0);
+    filter: blur(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(20px);
+    filter: blur(4px);
+  }
+}
 .right-panel {
   position: absolute;
   top: 60px;
@@ -1101,6 +1142,10 @@ html[data-grid="none"] .canvas-grid {
   flex-direction: column;
   overflow: hidden;
   box-shadow: var(--elev-2);
+  animation: panel-slide-in 0.24s var(--e-out) both;
+}
+.right-panel.leaving {
+  animation: panel-slide-out 0.18s var(--e-in-out) both;
 }
 .panel-head {
   padding: 14px 16px 12px;
@@ -1209,7 +1254,16 @@ html[data-grid="none"] .canvas-grid {
   gap: 6px;
   font-size: 12.5px;
   font-variation-settings: "wght" 500;
-  transition: all 0.15s var(--e-out);
+  transition:
+    background 0.15s var(--e-out),
+    color 0.15s var(--e-out),
+    border-color 0.15s var(--e-out),
+    transform 0.08s var(--e-out),
+    box-shadow 0.15s var(--e-out);
+}
+.btn:active {
+  transform: scale(0.97);
+  transition: transform 70ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 .btn.primary {
   background: var(--ink-0);
@@ -1260,6 +1314,27 @@ html[data-grid="none"] .canvas-grid {
   }
   50% {
     height: 100%;
+  }
+}
+@keyframes voice-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.5;
+    transform: scale(0.85);
+  }
+}
+@keyframes voice-fade-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 8px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
   }
 }
 
@@ -1545,7 +1620,12 @@ html[data-theme="light"] .connectors path.emerging {
 }
 
 /* Selection HUD popover */
-html[data-theme="light"] .top-bar,
+html[data-theme="light"] .top-bar {
+  background: oklch(0.985 0.004 252 / 0.85);
+  border-bottom: 1px solid oklch(0 0 0 / 0.08);
+  box-shadow: 0 1px 0 0 oklch(1 1 1 / 0.4);
+  color: inherit;
+}
 html[data-theme="light"] .stack {
   color: inherit;
 }
@@ -2116,21 +2196,43 @@ html[data-theme="light"] .shape.diamond {
 /* Rail / toolbar buttons get a springy press. */
 .rail-btn,
 .tool,
-.icon-btn {
+.icon-btn,
+.screen-switcher button,
+.segmented button,
+.tpl-card {
   transition:
     background 0.15s var(--e-out),
     color 0.15s var(--e-out),
-    transform 0.12s var(--e-out),
+    transform 0.08s var(--e-out),
     box-shadow 0.15s var(--e-out);
 }
 .rail-btn:active,
 .tool:active,
-.icon-btn:active {
-  transform: scale(0.94);
+.icon-btn:active,
+.screen-switcher button:active,
+.context-menu [role="menuitem"]:active,
+.context-menu button:active,
+.tpl-card:active,
+.segmented button:active,
+.insp-btn:active {
+  transform: scale(0.97) !important;
+  transition: transform 70ms cubic-bezier(0.2, 0.8, 0.2, 1) !important;
 }
 .rail-btn:hover,
 .tool:hover {
   transform: translateY(-1px);
+}
+
+/* Tap target hit area expansion (Apple HIG 44px minimum) */
+.shape-toolbar .tool::before,
+.top-bar .icon-btn::before,
+.settings-nav button::before,
+.screen-switcher button::before {
+  content: "";
+  position: absolute;
+  inset: -6px;
+  border-radius: inherit;
+  pointer-events: auto;
 }
 
 /* Ephemeral toast for actions without a dedicated screen. */
@@ -2919,6 +3021,30 @@ html[data-theme="light"] .segmented button.active {
 /* ============================================================
    SHAPE INSPECTOR (manual board Tier 2, docs/13)
    ============================================================ */
+@keyframes inspector-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(-6px);
+    filter: blur(4px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+    filter: blur(0);
+  }
+}
+@keyframes inspector-out {
+  from {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+    filter: blur(0);
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.96) translateY(-6px);
+    filter: blur(4px);
+  }
+}
 .shape-inspector {
   position: absolute;
   top: 116px;
@@ -2934,7 +3060,11 @@ html[data-theme="light"] .segmented button.active {
   border: 1px solid var(--stroke-2);
   box-shadow: var(--elev-3);
   backdrop-filter: blur(20px);
-  animation: toast-in 0.25s var(--e-out) both;
+  transform-origin: top right;
+  animation: inspector-in 0.2s var(--e-out) both;
+}
+.shape-inspector.leaving {
+  animation: inspector-out 0.15s var(--e-in-out) both;
 }
 .insp-label {
   font-size: 12px;
@@ -3235,6 +3365,10 @@ html[data-board="sketch"] .frame-tag {
   border-radius: 18px;
   box-shadow: var(--elev-3);
   overflow: hidden;
+  animation: dialog-in 0.2s var(--e-out) backwards;
+}
+.template-modal.closing {
+  animation: dialog-out 0.14s var(--e-in-out) both;
 }
 .tpl-head {
   display: flex;
@@ -4671,6 +4805,8 @@ html[data-theme="light"] .badge-react {
   background: var(--canvas-2);
   border: 1px solid var(--stroke-1);
   cursor: grab;
+  user-select: none;
+  touch-action: none;
   transition:
     border-color 0.12s var(--e-out),
     box-shadow 0.12s var(--e-out),

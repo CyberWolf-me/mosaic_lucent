@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { IssueStatusCategory, Node, Operation } from "@lucent/core";
 import {
   actionNodes,
@@ -15,6 +15,13 @@ import { fetchIntegrationLinks, type IntegrationLink } from "../boards.js";
 import { Ico } from "../ui/icons.js";
 import { useWorkspace } from "../workspace.js";
 
+interface ActiveDrag {
+  id: string;
+  originCategory: IssueStatusCategory;
+  dx: number;
+  dy: number;
+}
+
 /**
  * Kanban board (Jira-style). Every node carrying issue fields is a card, sorted
  * into a To Do / In Progress / Done column by its status category. Dragging a
@@ -24,7 +31,7 @@ import { useWorkspace } from "../workspace.js";
 export function BoardView({ onOpenSettings }: { onOpenSettings: (section?: string) => void }) {
   const { workspace, chat, send, setView, applyManual, boardId } = useWorkspace();
   const [message, setMessage] = useState("");
-  const [dragId, setDragId] = useState<string | null>(null);
+  const [activeDrag, setActiveDrag] = useState<ActiveDrag | null>(null);
   const [overCol, setOverCol] = useState<IssueStatusCategory | null>(null);
 
   const submit = () => {
@@ -70,14 +77,54 @@ export function BoardView({ onOpenSettings }: { onOpenSettings: (section?: strin
     return map;
   }, [links]);
 
-  const moveTo = (id: string, category: IssueStatusCategory) => {
-    const node = workspace.nodes[id];
-    if (!node?.issue || node.issue.statusCategory === category) return;
-    // Keep a human-readable status too, defaulting to the column's own label.
-    const label = BOARD_COLUMNS.find((c) => c.category === category)!.label;
-    const ops: Operation[] = [{ op: "UPDATE_ISSUE", id, status: label, statusCategory: category }];
-    applyManual(ops, `Move "${node.label}" to ${label}`);
-  };
+  const moveTo = useCallback(
+    (id: string, category: IssueStatusCategory) => {
+      const node = workspace.nodes[id];
+      if (!node?.issue || node.issue.statusCategory === category) return;
+      // Keep a human-readable status too, defaulting to the column's own label.
+      const label = BOARD_COLUMNS.find((c) => c.category === category)!.label;
+      const ops: Operation[] = [{ op: "UPDATE_ISSUE", id, status: label, statusCategory: category }];
+      applyManual(ops, `Move "${node.label}" to ${label}`);
+    },
+    [applyManual, workspace.nodes],
+  );
+
+  const handleDragMove = useCallback(
+    (
+      id: string,
+      originCategory: IssueStatusCategory,
+      dx: number,
+      dy: number,
+      clientX: number,
+      clientY: number,
+    ) => {
+      setActiveDrag({ id, originCategory, dx, dy });
+      if (typeof document !== "undefined" && typeof document.elementsFromPoint === "function") {
+        const elements = document.elementsFromPoint(clientX, clientY);
+        let found: IssueStatusCategory | null = null;
+        for (const el of elements) {
+          const cat = el.getAttribute("data-column-category") as IssueStatusCategory | null;
+          if (cat) {
+            found = cat;
+            break;
+          }
+        }
+        setOverCol(found);
+      }
+    },
+    [],
+  );
+
+  const handleDragEnd = useCallback(
+    (id: string, targetCategory: IssueStatusCategory | null) => {
+      if (targetCategory) {
+        moveTo(id, targetCategory);
+      }
+      setActiveDrag(null);
+      setOverCol(null);
+    },
+    [moveTo],
+  );
 
   /** Keyboard move: shift a card one column left/right (WCAG 2.1.1). */
   const nudgeCard = (id: string, dir: -1 | 1) => {
@@ -123,19 +170,10 @@ export function BoardView({ onOpenSettings }: { onOpenSettings: (section?: strin
             return (
               <div
                 key={col.category}
+                data-column-category={col.category}
                 className={`board-column ${overCol === col.category ? "over" : ""}`}
                 role="listitem"
                 aria-label={`${col.label}, ${cards.length} item${cards.length === 1 ? "" : "s"}`}
-                onDragOver={(e) => {
-                  e.preventDefault();
-                  setOverCol(col.category);
-                }}
-                onDragLeave={() => setOverCol((c) => (c === col.category ? null : c))}
-                onDrop={() => {
-                  if (dragId) moveTo(dragId, col.category);
-                  setDragId(null);
-                  setOverCol(null);
-                }}
               >
                 <div className="board-column-head">
                   <h2 className="board-column-title">{col.label}</h2>
@@ -152,12 +190,16 @@ export function BoardView({ onOpenSettings }: { onOpenSettings: (section?: strin
                       derived={derived.get(n.id)}
                       decisions={decisionsByNode.get(n.id)}
                       link={linksByNode.get(n.id)}
-                      dragging={dragId === n.id}
-                      onDragStart={() => setDragId(n.id)}
-                      onDragEnd={() => {
-                        setDragId(null);
-                        setOverCol(null);
-                      }}
+                      isDragging={activeDrag?.id === n.id}
+                      dragOffset={
+                        activeDrag?.id === n.id
+                          ? { dx: activeDrag.dx, dy: activeDrag.dy }
+                          : undefined
+                      }
+                      onDragMove={(dx, dy, cx, cy) =>
+                        handleDragMove(n.id, col.category, dx, dy, cx, cy)
+                      }
+                      onDragEnd={(targetCat) => handleDragEnd(n.id, targetCat)}
                       onNudge={(dir) => nudgeCard(n.id, dir)}
                     />
                   ))}
@@ -207,8 +249,9 @@ function IssueCard({
   derived,
   decisions,
   link,
-  dragging,
-  onDragStart,
+  isDragging,
+  dragOffset,
+  onDragMove,
   onDragEnd,
   onNudge,
 }: {
@@ -219,13 +262,81 @@ function IssueCard({
   decisions?: string[];
   /** Stage D6: the board's external link for this card (the ↗ chip). */
   link?: { externalId: string; url?: string; syncedAt: number };
-  dragging: boolean;
-  onDragStart: () => void;
-  onDragEnd: () => void;
+  isDragging: boolean;
+  dragOffset?: { dx: number; dy: number };
+  onDragMove: (dx: number, dy: number, clientX: number, clientY: number) => void;
+  onDragEnd: (targetCategory: IssueStatusCategory | null) => void;
   onNudge: (dir: -1 | 1) => void;
 }) {
   const { notify } = useToast();
   const issue = node.issue!;
+  const pointerStartRef = useRef<{ x: number; y: number; pointerId: number } | null>(null);
+  const isMovingRef = useRef(false);
+
+  const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return;
+    const target = e.target as HTMLElement | null;
+    if (target && (target.closest("a") || target.closest("button") || target.closest("input"))) {
+      return;
+    }
+    e.currentTarget.setPointerCapture(e.pointerId);
+    pointerStartRef.current = { x: e.clientX, y: e.clientY, pointerId: e.pointerId };
+    isMovingRef.current = false;
+  };
+
+  const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!pointerStartRef.current || pointerStartRef.current.pointerId !== e.pointerId) return;
+    const dx = e.clientX - pointerStartRef.current.x;
+    const dy = e.clientY - pointerStartRef.current.y;
+    if (!isMovingRef.current) {
+      if (Math.hypot(dx, dy) < 4) return;
+      isMovingRef.current = true;
+    }
+    onDragMove(dx, dy, e.clientX, e.clientY);
+  };
+
+  const handlePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!pointerStartRef.current || pointerStartRef.current.pointerId !== e.pointerId) return;
+    try {
+      if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+        e.currentTarget.releasePointerCapture(e.pointerId);
+      }
+    } catch {
+      // ignore
+    }
+    const wasMoving = isMovingRef.current;
+    pointerStartRef.current = null;
+    isMovingRef.current = false;
+
+    if (wasMoving) {
+      let finalCategory: IssueStatusCategory | null = null;
+      if (typeof document !== "undefined" && typeof document.elementsFromPoint === "function") {
+        const elements = document.elementsFromPoint(e.clientX, e.clientY);
+        for (const el of elements) {
+          const cat = el.getAttribute("data-column-category") as IssueStatusCategory | null;
+          if (cat) {
+            finalCategory = cat;
+            break;
+          }
+        }
+      }
+      onDragEnd(finalCategory);
+    }
+  };
+
+  const handlePointerCancel = (e: React.PointerEvent<HTMLDivElement>) => {
+    try {
+      if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+        e.currentTarget.releasePointerCapture(e.pointerId);
+      }
+    } catch {
+      // ignore
+    }
+    pointerStartRef.current = null;
+    isMovingRef.current = false;
+    onDragEnd(null);
+  };
+
   // A full sentence for AT: label, type, status, who it's assigned to,
   // (Stage D1) the deadline, and (Stage D3) derived blockers/risks, and
   // (Stage E1) the decisions that caused the work.
@@ -250,13 +361,26 @@ function IssueCard({
     issue.status !== "cancelled";
   return (
     <div
-      className={`issue-card ${dragging ? "dragging" : ""}`}
-      draggable
+      className={`issue-card ${isDragging ? "dragging" : ""}`}
       tabIndex={0}
       role="button"
       aria-label={cardLabel}
-      onDragStart={onDragStart}
-      onDragEnd={onDragEnd}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+      onPointerCancel={handlePointerCancel}
+      style={
+        isDragging && dragOffset
+          ? {
+              transform: `translate3d(${dragOffset.dx}px, ${dragOffset.dy}px, 0) rotate(1.5deg) scale(1.02)`,
+              boxShadow: "var(--elev-3)",
+              zIndex: 100,
+              cursor: "grabbing",
+              opacity: 0.96,
+              transition: "none",
+            }
+          : undefined
+      }
       onKeyDown={(e) => {
         // Enter/Space on a card is a no-op by design: the card is already
         // focused, and moving it is the arrow-key path below.

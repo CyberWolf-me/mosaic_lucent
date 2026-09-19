@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Ico } from "../ui/icons.js";
 import { useWorkspace } from "../workspace.js";
 import type { Operation } from "@lucent/core";
@@ -7,21 +7,47 @@ import type { Operation } from "@lucent/core";
  * to the real pending proposal + apply-as-one-commit action (docs/15). */
 export function ProposalPanel() {
   const { proposal, applyProposal, cancelProposal, chat } = useWorkspace();
+  const [closing, setClosing] = useState(false);
+  const timerRef = useRef<number | null>(null);
 
   useEffect(() => {
-    if (!proposal) return;
+    return () => {
+      if (timerRef.current !== null) {
+        window.clearTimeout(timerRef.current);
+      }
+    };
+  }, []);
+
+  const handleCancel = useCallback(() => {
+    if (closing) return;
+    setClosing(true);
+    timerRef.current = window.setTimeout(() => {
+      cancelProposal();
+    }, 180);
+  }, [closing, cancelProposal]);
+
+  const handleApply = useCallback(() => {
+    if (closing) return;
+    setClosing(true);
+    timerRef.current = window.setTimeout(() => {
+      applyProposal();
+    }, 180);
+  }, [closing, applyProposal]);
+
+  useEffect(() => {
+    if (!proposal || closing) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.preventDefault();
-        cancelProposal();
+        handleCancel();
       } else if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
         e.preventDefault();
-        applyProposal();
+        handleApply();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [proposal, applyProposal, cancelProposal]);
+  }, [proposal, closing, handleCancel, handleApply]);
 
   if (!proposal) return null;
 
@@ -36,7 +62,7 @@ export function ProposalPanel() {
   const skipped = proposalSkipped ?? chatSkipped ?? [];
 
   return (
-    <div className="right-panel">
+    <div className={`right-panel ${closing ? "leaving" : ""}`}>
       <div className="panel-head">
         <div>
           <div className="panel-title" style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -63,7 +89,7 @@ export function ProposalPanel() {
             </div>
           )}
         </div>
-        <button className="icon-btn" style={{ padding: 6, height: 28 }} onClick={cancelProposal}>
+        <button className="icon-btn" style={{ padding: 6, height: 28 }} onClick={handleCancel}>
           <Ico.X />
         </button>
       </div>
@@ -117,12 +143,12 @@ export function ProposalPanel() {
         ))}
       </div>
       <div className="panel-foot">
-        <button className="btn ghost" onClick={cancelProposal} title="Cancel proposal (Esc)">
+        <button className="btn ghost" onClick={handleCancel} title="Cancel proposal (Esc)">
           Cancel <span style={{ opacity: 0.6, fontSize: 10, marginLeft: 4 }}>Esc</span>
         </button>
         <button
           className="btn amber"
-          onClick={applyProposal}
+          onClick={handleApply}
           title="Apply all changes (⌘Enter or Ctrl+Enter)"
         >
           <Ico.Check /> Apply all{" "}

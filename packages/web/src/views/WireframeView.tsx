@@ -23,11 +23,14 @@ export function WireframeView({ onOpenSettings }: { onOpenSettings: (section?: s
     const text = message.trim();
     if (!text) return;
     setMessage("");
+    // Ensure prompt explicitly specifies CREATE_WIREFRAME so the AI produces a real UI structure
+    const prompt = /\b(?:wireframe|ui mockup|prototype|mockup)\b/i.test(text)
+      ? text
+      : `Create a wireframe UI mockup for: ${text}. Emit a CREATE_WIREFRAME operation with root kind "screen".`;
     // A generated wireframe lands on the canvas as a CREATE_WIREFRAME op; switch
-    // there so the result is visible instead of silently changing the board
-    // behind this view (matches ER/Sequence/Document).
+    // to canvas so the interactive frame and rendered UI are visible.
     setView("canvas");
-    void send(text);
+    void send(prompt);
   };
 
   const wireframes = Object.values(workspace.wireframes);

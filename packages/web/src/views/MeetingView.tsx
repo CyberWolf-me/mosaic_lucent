@@ -13,7 +13,7 @@ import {
   type VoiceAnswer,
 } from "../meeting-voice.js";
 import { useMeetingSession } from "../meeting-room/MeetingSessionContext.js";
-import { speakAnswer } from "../tts.js";
+import { speakAnswer, isTtsSpeaking } from "../tts.js";
 import type { VoiceHandlers } from "../stt/index.js";
 import {
   MEETING_MODES,
@@ -387,7 +387,7 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
       },
       onFinal: (text, meta) => {
         const t = text.trim();
-        if (!t) return;
+        if (!t || isTtsSpeaking()) return;
         engineRef.current.noteFinal(Date.now());
         const speaker =
           meta?.speaker ??

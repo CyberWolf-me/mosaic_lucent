@@ -34,6 +34,24 @@ function essentials(text: string): string | null {
   return clean === "" ? null : clean;
 }
 
+let _activeTtsCount = 0;
+
+/**
+ * Returns true if TTS audio is actively playing through the computer speakers.
+ * STT input must be suppressed while this is true to prevent acoustic echo loops.
+ */
+export function isTtsSpeaking(): boolean {
+  return _activeTtsCount > 0;
+}
+
+function notifyTtsStart(): void {
+  _activeTtsCount++;
+}
+
+function notifyTtsEnd(): void {
+  _activeTtsCount = Math.max(0, _activeTtsCount - 1);
+}
+
 export const browserTtsProvider: TtsProvider = {
   id: "browser",
 
@@ -59,8 +77,16 @@ export const browserTtsProvider: TtsProvider = {
     const done = new Promise<void>((resolve) => {
       resolveDone = resolve;
     });
-    utterance.onend = () => resolveDone();
-    utterance.onerror = () => resolveDone();
+    notifyTtsStart();
+    let finished = false;
+    const cleanup = () => {
+      if (finished) return;
+      finished = true;
+      notifyTtsEnd();
+      resolveDone();
+    };
+    utterance.onend = () => cleanup();
+    utterance.onerror = () => cleanup();
     synth.cancel();
     synth.speak(utterance);
     let stopped = false;
@@ -68,11 +94,8 @@ export const browserTtsProvider: TtsProvider = {
       stop() {
         if (stopped) return;
         stopped = true;
-        // Cancel only our utterance's aftermath: a full cancel() would cut
-        // a queued utterance from elsewhere, but this seam owns the channel
-        // while a meeting answer plays — documented, single-speaker rule.
         synth.cancel();
-        resolveDone();
+        cleanup();
       },
       done,
     };
@@ -87,10 +110,6 @@ export const hostedTtsProvider: TtsProvider = {
   id: "hosted",
 
   isSupported() {
-    // Playback is a plain <audio> element; support is near-universal.
-    // Whether the SERVER has a voice configured is answered at speak time
-    // (503), not probed here — probing would spend nothing but still lie
-    // about liveness between the probe and the speak.
     return typeof window !== "undefined" && typeof window.Audio !== "undefined";
   },
 
@@ -119,19 +138,22 @@ export const hostedTtsProvider: TtsProvider = {
     const done = new Promise<void>((resolve) => {
       resolveDone = resolve;
     });
-    audio.onended = () => {
+    notifyTtsStart();
+    let finished = false;
+    const cleanup = () => {
+      if (finished) return;
+      finished = true;
+      notifyTtsEnd();
       URL.revokeObjectURL(url);
       resolveDone();
     };
-    audio.onerror = () => {
-      URL.revokeObjectURL(url);
-      resolveDone();
-    };
+    audio.onended = () => cleanup();
+    audio.onerror = () => cleanup();
     let stopped = false;
     try {
       await audio.play();
     } catch {
-      URL.revokeObjectURL(url);
+      cleanup();
       throw new Error("Audio playback was blocked — interact with the page, then try again.");
     }
     return {
@@ -139,8 +161,7 @@ export const hostedTtsProvider: TtsProvider = {
         if (stopped) return;
         stopped = true;
         audio.pause();
-        URL.revokeObjectURL(url);
-        resolveDone();
+        cleanup();
       },
       done,
     };
