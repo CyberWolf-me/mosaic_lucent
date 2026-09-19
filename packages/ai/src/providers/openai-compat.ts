@@ -99,6 +99,33 @@ function withAutoToolChoice(bodyText: string): string {
 }
 
 /**
+ * Gateways or upstreams (such as muse-spark via kiosapi) reject tools containing
+ * recursive schemas with "Recursive JSON schemas are not currently supported".
+ * When detected, we strip recursive self-references and retry immediately.
+ */
+function isRecursiveSchemaUnsupported(status: number, detail: string): boolean {
+  return status === 400 && /recursive.*schema/i.test(detail);
+}
+
+function withNonRecursiveTools(bodyText: string): string {
+  const body = JSON.parse(bodyText) as Record<string, unknown>;
+  if (Array.isArray(body.tools)) {
+    body.tools = JSON.parse(JSON.stringify(body.tools), (key, value) => {
+      if (key === "children" && value && typeof value === "object" && value.items && value.items["$ref"]) {
+        return { type: "array", items: { type: "object", additionalProperties: true } };
+      }
+      return value;
+    });
+    for (const t of body.tools as Array<{ function?: { parameters?: Record<string, unknown> } }>) {
+      if (t.function?.parameters?.$defs) {
+        delete t.function.parameters.$defs;
+      }
+    }
+  }
+  return JSON.stringify(body);
+}
+
+/**
  * Salvage a chat-completion object from a response that arrived as an SSE body
  * (kilo-auto via kiosapi answers `stream:false` requests with `data: {...}`
  * framing). Returns the last parseable frame; surfaces the original JSON error
@@ -142,6 +169,8 @@ export class OpenAICompatibleProvider implements LLMProvider {
   private readonly timeoutMs: number;
   /** Flips after the first "only auto is supported" 400 — see the helper. */
   private forceAutoToolChoice = false;
+  /** Flips after the first "recursive schemas not supported" 400. */
+  private forceNonRecursiveTools = false;
 
   constructor(options: OpenAICompatOptions) {
     if (!options.apiKey) throw new Error("OpenAICompatibleProvider requires an apiKey");
@@ -220,6 +249,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
       // streaming path (streamOperations) opts back in per call.
       stream: false,
     });
+    if (this.forceNonRecursiveTools) body = withNonRecursiveTools(body);
 
     let lastDetail = "";
     let lastStatus = 0;
@@ -256,6 +286,14 @@ export class OpenAICompatibleProvider implements LLMProvider {
         if (isToolChoiceUnsupported(lastStatus, lastDetail) && !this.forceAutoToolChoice) {
           this.forceAutoToolChoice = true;
           body = withAutoToolChoice(body);
+          attempt--;
+          continue;
+        }
+        // Recursive schema unsupported upstream: strip recursive refs and
+        // retry immediately (not counted against the retry ladder).
+        if (isRecursiveSchemaUnsupported(lastStatus, lastDetail) && !this.forceNonRecursiveTools) {
+          this.forceNonRecursiveTools = true;
+          body = withNonRecursiveTools(body);
           attempt--;
           continue;
         }
@@ -572,8 +610,8 @@ export class OpenAICompatibleProvider implements LLMProvider {
         ]
       : text;
 
-    const makeStreamBody = () =>
-      JSON.stringify({
+    const makeStreamBody = () => {
+      let b = JSON.stringify({
         model: modelToUse,
         messages: [
           { role: "system", content: SYSTEM_PROMPT },
@@ -590,6 +628,9 @@ export class OpenAICompatibleProvider implements LLMProvider {
         // Not every gateway honours this; absence just means no usage chunk.
         stream_options: { include_usage: true },
       });
+      if (this.forceNonRecursiveTools) b = withNonRecursiveTools(b);
+      return b;
+    };
 
     const openStream = () =>
       this.fetchImpl(this.baseUrl, {
@@ -616,6 +657,14 @@ export class OpenAICompatibleProvider implements LLMProvider {
       !this.forceAutoToolChoice
     ) {
       this.forceAutoToolChoice = true;
+      response = await openStream();
+    }
+    if (
+      !response.ok &&
+      isRecursiveSchemaUnsupported(response.status, await response.text().catch(() => "")) &&
+      !this.forceNonRecursiveTools
+    ) {
+      this.forceNonRecursiveTools = true;
       response = await openStream();
     }
     for (let attempt = 1; !response.ok && attempt < this.maxRetries; attempt++) {

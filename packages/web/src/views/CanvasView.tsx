@@ -55,6 +55,8 @@ import { useWorkspace } from "../workspace.js";
 import { useSettings } from "../settings.js";
 import { useToast } from "../ui/Toast.js";
 import { generateImage } from "../api.js";
+import { WireframeRenderer } from "../ui/WireframeRenderer.js";
+import { speakAnswer } from "../tts.js";
 import { getSttProvider, isAnyVoiceSupported, type VoiceSession } from "../stt/index.js";
 import { nextZ, normalizeZ, shapeId } from "../shapes.js";
 import { resolveEmbed } from "../embed.js";
@@ -120,14 +122,87 @@ export function parseExplicitImageIntent(text: string): string | null {
     /^(?:please\s+)?(?:generate|create|make|draw)\s+(?:an?\s+)?(?:reference\s+)?(?:image|picture|photo|illustration|logo|icon|graphic)\s+(?:of|for)\s+(.+)$/i,
     /^(?:please\s+)?(?:generate|create|make|draw)\s+(?:an?\s+)?(?:reference\s+image|reference\s+picture|reference\s+photo)\s*[:-]?\s*(.+)$/i,
     /^(?:imagine|render\s+image)\s+(?:of\s+)?(.+)$/i,
-    /^(?:create|generate)\s+a\s+logo\s+(?:for|of)\s+(.+)$/i,
+    /^(?:create|generate|make)\s+a\s+logo\s+(?:for|of)\s+(.+)$/i,
+    /^(?:can\s+you\s+)?(?:make|create|draw|generate)\s+(?:a\s+)?logo(?:\s+(?:for|of)\s+(.+))?$/i,
+    /^(?:nope\s*[,.]?\s*)?(?:please\s+)?(?:use|switch\s+to|try)\s+(?:ai\s+)?image\s+generation(?:\s+(?:for|of|to\s+make)\s+(.+))?$/i,
+    /^(?:nope\s*[,.]?\s*)?(?:generate|create|make)\s+(?:an?\s+)?(?:ai\s+)?image\s+instead(?:\s+(?:for|of)\s+(.+))?$/i,
+    /^(?:please\s+)?(?:use|try)\s+(?:image\s+mode|the\s+image\s+model)(?:\s+(?:for|to\s+make)\s+(.+))?$/i,
   ];
   for (const p of patterns) {
     const m = trimmed.match(p);
-    if (m && m[1]) return m[1].trim();
+    if (m) {
+      return (m[1] && m[1].trim()) || "reference image or logo for the current board";
+    }
   }
   return null;
 }
+
+/**
+ * Synthesize rich context for image generation using board entities, project name,
+ * and recent conversation turns when the user's prompt is conversational or relative
+ * (e.g. "make a logo for the brand we discussed", "nope use image generation").
+ */
+export function enrichImagePromptWithContext(
+  prompt: string,
+  workspace?: { nodes?: Record<string, { label?: string }>; shapes?: Record<string, { label?: string; text?: string }> },
+  chat?: Array<{ role: string; text: string }>,
+  projectName?: string,
+): string {
+  const p = prompt.trim();
+  const needsContext =
+    p === "reference image or logo for the current board" ||
+    /\b(the brand|the project|we discussed|discussed earlier|our logo|this logo|the app|the restaurant|instead|image generation)\b/i.test(p) ||
+    p.length < 25;
+
+  if (!needsContext) return p;
+
+  const hints: string[] = [];
+  if (projectName && projectName !== "Untitled" && projectName !== "Personal") {
+    hints.push(projectName);
+  }
+
+  if (chat && chat.length > 0) {
+    for (let i = chat.length - 1; i >= Math.max(0, chat.length - 6); i--) {
+      const msg = chat[i]?.text ?? "";
+      const matchBrand = msg.match(/\b(?:for|named|called|restaurant name|brand name)\s+([A-Z][a-zA-Z0-9_-]+)/i);
+      if (matchBrand && matchBrand[1] && !hints.includes(matchBrand[1])) {
+        hints.push(matchBrand[1]);
+      }
+      const matchDomain = msg.match(/\b([a-zA-Z\s]+platform|[a-zA-Z\s]+restaurant|[a-zA-Z\s]+service|[a-zA-Z\s]+app)\b/i);
+      if (matchDomain && matchDomain[1]) {
+        const cleaned = matchDomain[1].trim();
+        if (cleaned.length < 40 && !hints.some((h) => h.toLowerCase().includes(cleaned.toLowerCase()))) {
+          hints.push(cleaned);
+        }
+      }
+    }
+  }
+
+  if (workspace?.nodes) {
+    const nodeLabels = Object.values(workspace.nodes)
+      .map((n) => n.label?.trim() || "")
+      .filter((l) => l.length > 0 && l.length < 25);
+    for (const l of nodeLabels.slice(0, 3)) {
+      if (!hints.some((h) => h.toLowerCase().includes(l.toLowerCase()))) {
+        hints.push(l);
+      }
+    }
+  }
+
+  const contextStr = hints.slice(0, 3).join(", ");
+  if (!contextStr) return p;
+
+  if (/\blogo\b/i.test(p) || p === "reference image or logo for the current board") {
+    return `Professional, modern, clean logo for ${contextStr}. High resolution, vector aesthetic.`;
+  }
+  return `High-quality visual reference illustration of ${p} for ${contextStr}.`;
+}
+
+const ON_CANVAS_WF_SIZE: Record<string, { w: number; label: string }> = {
+  desktop: { w: 820, label: "Desktop · 1440" },
+  tablet: { w: 620, label: "Tablet · 834" },
+  mobile: { w: 360, label: "Mobile · 390" },
+};
 
 /**
  * The canvas view. Its sub-state (empty / generating / main / proposing /
@@ -255,6 +330,10 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
   const controls = useRef<ViewportControls | null>(null);
   const voiceRef = useRef<VoiceSession | null>(null);
   const voiceSupported = isAnyVoiceSupported();
+  const voiceInitiatedRef = useRef(false);
+  const accumulatedVoiceTextRef = useRef("");
+  const voiceSilenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastSpokenChatIndexRef = useRef(chat.length);
 
   const shapes = Object.values(workspace.shapes);
   const nodeCount = Object.keys(workspace.nodes).length;
@@ -271,6 +350,21 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
       notify(last.text);
     }
   }, [chat, notify]);
+
+  // Speak the AI's explanation aloud when AI sound is enabled or when voice initiated the turn
+  useEffect(() => {
+    if (chat.length > lastSpokenChatIndexRef.current) {
+      const latest = chat[chat.length - 1];
+      lastSpokenChatIndexRef.current = chat.length;
+      if (latest && latest.role === "ai" && latest.text) {
+        const toSpeak = latest.text.replace(/— review \d+ proposed changes\./i, "").trim();
+        if (toSpeak && (settings.aiSound || voiceInitiatedRef.current)) {
+          void speakAnswer(toSpeak);
+          voiceInitiatedRef.current = false;
+        }
+      }
+    }
+  }, [chat, settings.aiSound]);
 
   // Leaving a diagram or losing all nodes resets any active mode.
   useEffect(() => {
@@ -579,8 +673,9 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
   // Supports both manual toolbar prompt and conversational voice/chat prompts.
   const generateImageShape = useCallback(
     async (customPrompt?: string) => {
-      const prompt = customPrompt ?? window.prompt("Describe an image for Lucent to generate:");
-      if (!prompt) return;
+      const rawPrompt = customPrompt ?? window.prompt("Describe an image for Lucent to generate:");
+      if (!rawPrompt) return;
+      const prompt = enrichImagePromptWithContext(rawPrompt, workspace, chat, projectName);
       notify("Generating reference image with Lucent Imagine…");
       try {
         const { src, explanation } = await generateImage(prompt, "landscape");
@@ -604,12 +699,18 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
           ],
           "Generate image",
         );
-        if (explanation) notify(explanation);
+        if (explanation) {
+          notify(explanation);
+          if (settings.aiSound || voiceInitiatedRef.current) {
+            void speakAnswer(explanation);
+            voiceInitiatedRef.current = false;
+          }
+        }
       } catch (err) {
         notify((err as Error).message);
       }
     },
-    [applyManual, notify, shapes, viewportBox],
+    [applyManual, notify, shapes, viewportBox, workspace, chat, projectName, settings.aiSound],
   );
 
   const submit = useCallback(() => {
@@ -651,10 +752,46 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
     notify,
   ]);
 
+  const stopVoiceSession = useCallback(() => {
+    if (voiceSilenceTimerRef.current) {
+      clearTimeout(voiceSilenceTimerRef.current);
+      voiceSilenceTimerRef.current = null;
+    }
+    try {
+      voiceRef.current?.stop();
+    } catch {
+      /* ignore */
+    }
+    voiceRef.current = null;
+    setListening(false);
+  }, [setListening]);
+
+  const commitVoiceTurn = useCallback(() => {
+    const text = accumulatedVoiceTextRef.current.trim();
+    stopVoiceSession();
+    accumulatedVoiceTextRef.current = "";
+    if (!text) return;
+    setMessage("");
+    voiceInitiatedRef.current = true;
+    if (pillMode === "ask") {
+      void ask(text);
+    } else {
+      const imgPrompt = parseExplicitImageIntent(text);
+      if (imgPrompt) {
+        void generateImageShape(imgPrompt);
+      } else {
+        void send(text);
+      }
+    }
+  }, [stopVoiceSession, pillMode, ask, generateImageShape, send]);
+
   const toggleVoice = useCallback(() => {
     if (listening) {
-      voiceRef.current?.stop();
-      setListening(false);
+      if (accumulatedVoiceTextRef.current.trim()) {
+        commitVoiceTurn();
+      } else {
+        stopVoiceSession();
+      }
       return;
     }
     if (!voiceSupported) {
@@ -662,6 +799,11 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
         "Voice input isn't supported in this browser — try Chrome or Edge, or type your idea.",
       );
       return;
+    }
+    accumulatedVoiceTextRef.current = "";
+    if (voiceSilenceTimerRef.current) {
+      clearTimeout(voiceSilenceTimerRef.current);
+      voiceSilenceTimerRef.current = null;
     }
     const provider = getSttProvider(settings.sttProvider);
     // Hosted providers need their connection details before start(); settings is
@@ -673,30 +815,36 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
     });
     const session = provider.start({
       onStart: () => setListening(true),
-      onInterim: (t) => setMessage(t),
+      onInterim: (t) => {
+        const current = accumulatedVoiceTextRef.current;
+        setMessage(current ? `${current} ${t}` : t);
+        if (voiceSilenceTimerRef.current) {
+          clearTimeout(voiceSilenceTimerRef.current);
+          voiceSilenceTimerRef.current = null;
+        }
+      },
       onStatus: (s) => {
         if (s === "transcribing") notify("Transcribing on device…");
         if (s === "connecting") notify("Connecting to LiveKit…");
       },
       onFinal: (t) => {
-        setListening(false);
-        // P1-AI-001: voice honors the same Build/Ask contract as the
-        // keyboard. Ask mode routes the utterance to the read-only ask()
-        // pipeline — it used to call send() unconditionally, so a spoken
-        // question could mutate the board while the pill said "Ask".
-        if (pillMode === "ask") {
-          void ask(t);
-        } else {
-          const imgPrompt = parseExplicitImageIntent(t);
-          if (imgPrompt) {
-            void generateImageShape(imgPrompt);
-          } else {
-            void send(t);
-          }
+        const cleaned = t.trim();
+        if (cleaned) {
+          accumulatedVoiceTextRef.current = (
+            accumulatedVoiceTextRef.current ? `${accumulatedVoiceTextRef.current} ${cleaned}` : cleaned
+          ).trim();
+          setMessage(accumulatedVoiceTextRef.current);
         }
+        if (voiceSilenceTimerRef.current) {
+          clearTimeout(voiceSilenceTimerRef.current);
+        }
+        // 1.5s natural pause window before committing turn
+        voiceSilenceTimerRef.current = setTimeout(() => {
+          commitVoiceTurn();
+        }, 1500);
       },
       onError: (msg) => {
-        setListening(false);
+        stopVoiceSession();
         if (msg) notify(msg);
       },
     });
@@ -706,22 +854,20 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
         notify("Listening — on-device Whisper. First use downloads the model.");
       }
       if (provider.id === "browser") {
-        notify("Listening — describe what to build or change...");
+        notify("Listening — speak naturally, pause when done...");
       }
     }
   }, [
     listening,
-    send,
-    ask,
-    pillMode,
-    setListening,
-    notify,
+    commitVoiceTurn,
+    stopVoiceSession,
     voiceSupported,
+    notify,
     settings.sttProvider,
     settings.livekitUrl,
     settings.livekitTokenUrl,
     settings.livekitRoom,
-    generateImageShape,
+    setListening,
   ]);
 
   const addShape = useCallback(
@@ -1906,6 +2052,44 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
                     setMenu({ x: cx, y: cy, regionId: regionForSelection() });
                   }}
                 />
+              );
+            })}
+            {Object.values(workspace.wireframes).map((wf, idx) => {
+              const size = ON_CANVAS_WF_SIZE[wf.viewport] ?? ON_CANVAS_WF_SIZE.desktop!;
+              const wfX = 1150 + idx * (size.w + 60);
+              const wfY = 100;
+              return (
+                <div
+                  key={wf.id}
+                  className="frame"
+                  style={{
+                    position: "absolute",
+                    left: wfX,
+                    top: wfY,
+                    width: size.w,
+                    zIndex: 2,
+                    background: "var(--canvas-2)",
+                    borderRadius: 14,
+                    boxShadow: "0 12px 36px rgba(0,0,0,0.35)",
+                    border: "1px solid var(--stroke-2)",
+                    padding: "32px 16px 16px",
+                  }}
+                >
+                  <div className="frame-label" style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
+                    <Ico.Grid /> {wf.title} · Wireframe · {size.label}
+                  </div>
+                  <div className="wf-browser">
+                    <div className="wf-browser-bar">
+                      <span className="wf-dot" />
+                      <span className="wf-dot" />
+                      <span className="wf-dot" />
+                      <div className="wf-url">app.local/{wf.id}</div>
+                    </div>
+                    <div className="wf-canvas" style={{ maxHeight: 600, overflowY: "auto" }}>
+                      <WireframeRenderer wireframe={wf} />
+                    </div>
+                  </div>
+                </div>
               );
             })}
             {tool === "pen" && canEdit && (

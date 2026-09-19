@@ -328,7 +328,7 @@ describe("livekit provider events", () => {
     const c = collector();
     const session = livekitSttProvider.startWithEvents!(c.handlers);
     expect(session).not.toBeNull();
-    await flush();
+    await flush(30);
     expect(c.isStarted()).toBe(true);
 
     const onTx = lkHandlers()["transcriptionReceived"]!;
