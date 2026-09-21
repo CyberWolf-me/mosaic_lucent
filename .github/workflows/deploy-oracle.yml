@@ -43,6 +43,7 @@ jobs:
             packages/server/dist \
             packages/server/migrations \
             packages/mcp/dist \
+            packages/voice-agent/dist \
             packages/web/dist \
             ecosystem.config.cjs \
             package.json \
@@ -69,14 +70,14 @@ jobs:
 
             echo "Updating web static assets in /var/www/lucent..."
             mkdir -p /var/www/lucent
-            rsync -rlt --no-o --no-g --delete /home/opc/lucent/packages/web/dist/ /var/www/lucent/
+            sudo rsync -a --delete /home/opc/lucent/packages/web/dist/ /var/www/lucent/ || rsync -rl --no-t --no-o --no-g --delete /home/opc/lucent/packages/web/dist/ /var/www/lucent/
 
             echo "Applying pending database migrations..."
             cd /home/opc/lucent
             npm run db:migrate -w @lucent/server || true
 
             echo "Performing zero-downtime PM2 cluster reload..."
-            pm2 reload ecosystem.config.cjs --update-env
+            pm2 startOrReload ecosystem.config.cjs --update-env
 
             echo "Deployment to Oracle Cloud completed successfully."
           EOF

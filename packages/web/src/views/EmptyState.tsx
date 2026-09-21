@@ -34,87 +34,28 @@ export function EmptyState({
   ];
 
   return (
-    <div
-      style={{
-        position: "absolute",
-        inset: 0,
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        justifyContent: "center",
-        gap: 22,
-        padding: "0 40px",
-      }}
-    >
-      <div
-        style={{
-          position: "absolute",
-          width: 640,
-          height: 640,
-          background: "radial-gradient(circle, oklch(0.82 0.15 75 / 0.06) 0%, transparent 60%)",
-          pointerEvents: "none",
-        }}
-      />
+    <div className="empty-hero">
+      <div className="empty-ambient-glow" />
 
-      <div
-        style={{
-          fontFamily: "var(--font-mono)",
-          fontSize: 10,
-          letterSpacing: "0.14em",
-          textTransform: "uppercase",
-          color: "var(--ink-3)",
-          display: "flex",
-          gap: 8,
-          alignItems: "center",
-        }}
-      >
-        <span
-          style={{
-            width: 6,
-            height: 6,
-            borderRadius: 999,
-            background: "var(--amber-1)",
-            boxShadow: "0 0 10px var(--amber-glow)",
-          }}
-        />
-        Lucent · Session ready
+      <div className="empty-badge">
+        <span className="empty-badge-dot" />
+        Lucent · Studio ready
       </div>
 
-      <h1
-        style={{
-          fontSize: 48,
-          letterSpacing: "-0.028em",
-          fontVariationSettings: "'wght' 400",
-          textAlign: "center",
-          lineHeight: 1.05,
-          maxWidth: 720,
-          background: "linear-gradient(180deg, oklch(0.99 0 0), oklch(0.72 0.006 60))",
-          WebkitBackgroundClip: "text",
-          WebkitTextFillColor: "transparent",
-          backgroundClip: "text",
-        }}
-      >
+      <h1 className="empty-title">
         What are you thinking about?
       </h1>
 
-      <p
-        style={{
-          fontSize: 14,
-          color: "var(--ink-2)",
-          maxWidth: 460,
-          textAlign: "center",
-          lineHeight: 1.55,
-        }}
-      >
-        Describe an idea, a system, a flow. Lucent turns your words into a visual workspace you can
-        shape as you talk.
+      <p className="empty-sub">
+        Describe an idea, a system, a flow. Lucent turns your words into an editable visual workspace
+        you can shape as you talk.
       </p>
 
       {failedAttempt && (
         <div
           role="alert"
           style={{
-            width: 620,
+            width: 640,
             maxWidth: "100%",
             display: "flex",
             alignItems: "center",
@@ -123,6 +64,7 @@ export function EmptyState({
             border: "1px solid var(--sig-red)",
             borderRadius: "var(--r-lg)",
             background: "oklch(from var(--canvas-2) l c h / 0.85)",
+            backdropFilter: "blur(16px)",
           }}
         >
           <span style={{ color: "var(--sig-red)", fontSize: 15 }}>⚠</span>
@@ -159,39 +101,19 @@ export function EmptyState({
         </div>
       )}
 
-      <div
-        style={{
-          width: 620,
-          marginTop: 12,
-          background: "oklch(from var(--canvas-2) l c h / 0.75)",
-          backdropFilter: "blur(20px) saturate(1.5)",
-          border: "1px solid var(--stroke-2)",
-          borderRadius: "var(--r-xl)",
-          padding: 16,
-          display: "flex",
-          flexDirection: "column",
-          gap: 14,
-          boxShadow: "var(--elev-2)",
-        }}
-      >
+      <div className="empty-omnibar">
         <label className="sr-only" htmlFor="empty-state-prompt">
           Describe what you want to build
         </label>
         <input
           id="empty-state-prompt"
+          className="empty-input"
           value={value}
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter") onSubmit();
           }}
           placeholder="e.g. I'm building an e-commerce platform. Customers browse, add to cart, checkout, pay with Stripe…"
-          style={{
-            fontSize: 15,
-            color: "var(--ink-0)",
-            width: "100%",
-            padding: "2px 4px",
-            lineHeight: 1.5,
-          }}
         />
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
           {onStartVoiceCall && (
@@ -199,15 +121,15 @@ export function EmptyState({
               className={`icon-btn voice-call-btn ${voiceAgentActive ? "active" : ""}`}
               style={{
                 background: voiceAgentActive
-                  ? "linear-gradient(135deg, #8b5cf6, #6366f1)"
-                  : "rgba(139, 92, 246, 0.15)",
-                color: voiceAgentActive ? "#ffffff" : "#a78bfa",
-                border: "1px solid rgba(139, 92, 246, 0.45)",
+                  ? "linear-gradient(135deg, var(--sig-violet), oklch(0.55 0.18 280))"
+                  : "oklch(from var(--sig-violet) l c h / 0.12)",
+                color: voiceAgentActive ? "var(--canvas-0)" : "var(--sig-violet)",
+                border: "1px solid oklch(from var(--sig-violet) l c h / 0.35)",
                 fontWeight: 600,
                 display: "inline-flex",
                 alignItems: "center",
                 gap: 6,
-                boxShadow: voiceAgentActive ? "0 0 12px rgba(139, 92, 246, 0.5)" : undefined,
+                boxShadow: voiceAgentActive ? "0 0 16px oklch(from var(--sig-violet) l c h / 0.4)" : undefined,
               }}
               onClick={onStartVoiceCall}
               title="Live Duplex Voice Call (Talk conversationally with Lucent AI co-pilot)"
@@ -219,7 +141,7 @@ export function EmptyState({
           <button
             className={`icon-btn ${listening ? "active" : ""}`}
             style={{
-              background: listening ? "rgba(239, 68, 68, 0.2)" : "var(--canvas-3)",
+              background: listening ? "oklch(from var(--sig-red) l c h / 0.18)" : "var(--canvas-3)",
               color: listening ? "var(--sig-red)" : "inherit",
               border: listening ? "1px solid var(--sig-red)" : undefined,
               display: "inline-flex",
@@ -258,7 +180,7 @@ export function EmptyState({
           </span>
           <button
             className="btn amber"
-            style={{ flex: "none", padding: "0 16px", height: 34 }}
+            style={{ flex: "none", padding: "0 18px", height: 34 }}
             onClick={onSubmit}
           >
             Begin <Ico.Arrow />
@@ -272,22 +194,15 @@ export function EmptyState({
           gap: 8,
           flexWrap: "wrap",
           justifyContent: "center",
-          maxWidth: 700,
-          marginTop: 6,
+          maxWidth: 720,
+          marginTop: 4,
         }}
       >
         {suggestions.map((s, i) => (
           <button
             key={i}
+            className="empty-chip"
             onClick={() => onChange(s)}
-            style={{
-              fontSize: 12,
-              color: "var(--ink-2)",
-              padding: "6px 12px",
-              border: "1px solid var(--stroke-1)",
-              borderRadius: 999,
-              background: "oklch(from var(--canvas-1) l c h / 0.5)",
-            }}
           >
             {s}
           </button>
@@ -296,15 +211,8 @@ export function EmptyState({
 
       {onBlankBoard && (
         <button
+          className="empty-blank-btn"
           onClick={onBlankBoard}
-          style={{
-            fontSize: 12.5,
-            color: "var(--ink-2)",
-            marginTop: 4,
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 6,
-          }}
         >
           or start with a blank board <Ico.Arrow />
         </button>

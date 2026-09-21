@@ -725,6 +725,7 @@ export function LeftRail({
             <button
               key={it.id}
               className={`rail-btn ${active ? "active" : ""}`}
+              data-tip={it.label}
               title={it.label}
               aria-label={it.label}
               aria-current={active ? "page" : undefined}
@@ -742,6 +743,7 @@ export function LeftRail({
             <button
               key={it.id}
               className={`rail-btn ${active ? "active" : ""}`}
+              data-tip={it.label}
               title={it.label}
               aria-label={it.label}
               aria-current={active ? "page" : undefined}
@@ -759,6 +761,7 @@ export function LeftRail({
         <div style={{ flex: 1 }} />
         <button
           className={`rail-btn ${view === "history" ? "active" : ""}`}
+          data-tip="History"
           title="History"
           aria-label="History"
           aria-current={view === "history" ? "page" : undefined}
@@ -768,6 +771,7 @@ export function LeftRail({
         </button>
         <button
           className="rail-btn"
+          data-tip="Search · ⌘K"
           title="Search · ⌘K"
           aria-label="Search"
           onClick={() => setSearchOpen(true)}
@@ -780,6 +784,7 @@ export function LeftRail({
             easy to wipe a board while reaching for a view. */}
         <button
           className="rail-btn"
+          data-tip="New workspace"
           title="New workspace"
           aria-label="New workspace"
           onClick={() => (hasWork ? setConfirmNew(true) : newProject())}

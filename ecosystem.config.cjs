@@ -16,5 +16,20 @@ module.exports = {
       listen_timeout: 10000,
       kill_timeout: 5000,
     },
+    {
+      name: "lucent-voice-agent",
+      script: "./packages/voice-agent/dist/main.js",
+      args: "start",
+      cwd: "/home/opc/lucent",
+      instances: 1,
+      exec_mode: "fork",
+      node_args: "--env-file=packages/server/.env",
+      env: {
+        NODE_ENV: "production",
+      },
+      max_memory_restart: "1G",
+      autorestart: true,
+      restart_delay: 5000,
+    },
   ],
 };

@@ -295,13 +295,13 @@ export function AIPill({
                 style={
                   voiceAgentActive
                     ? {
-                        background: "linear-gradient(135deg, #8b5cf6, #6366f1)",
-                        color: "#ffffff",
-                        borderColor: "#a78bfa",
-                        boxShadow: "0 0 12px rgba(139, 92, 246, 0.5)",
+                        background: "var(--sig-violet)",
+                        color: "var(--canvas-0)",
+                        borderColor: "var(--sig-violet)",
+                        boxShadow: "0 0 14px oklch(from var(--sig-violet) l c h / 0.45)",
                       }
                     : {
-                        borderColor: "rgba(139, 92, 246, 0.5)",
+                        borderColor: "oklch(from var(--sig-violet) l c h / 0.4)",
                       }
                 }
               >
