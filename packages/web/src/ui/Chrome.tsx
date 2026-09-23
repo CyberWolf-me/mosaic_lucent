@@ -1,19 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState, type SVGProps } from "react";
 import { createPortal } from "react-dom";
-import { Ico } from "./icons.js";
+import { Ico, ToolIco } from "./icons.js";
 import { NotificationTray } from "./NotificationTray.js";
 import { ProfileMenu } from "./ProfileMenu.js";
 import { getSessionUser } from "../session.js";
 import { Dialog } from "./primitives.js";
 import { useWorkspace, type CanvasLens, type View } from "../workspace.js";
-import {
-  HomeIcon,
-  IntelIcon,
-  ActionIcon,
-  BellIcon,
-  useNotifCount,
-  AtelierNotificationPopover,
-} from "./atelierAtoms.js";
 import {
   classifyBoard,
   createShareLink,
@@ -63,25 +55,7 @@ export function TopBar({
 
   return (
     <div className="top-bar">
-      <button
-        className="brand"
-        onClick={() => setView("home")}
-        title="Lucent Home"
-        aria-label="Home"
-        style={{
-          background: "none",
-          border: 0,
-          padding: 0,
-          cursor: "pointer",
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
-          fontFamily: "var(--font-serif)",
-          fontSize: 16,
-          fontWeight: 500,
-          color: "var(--ink-0)",
-        }}
-      >
+      <button className="brand" onClick={() => setView("home")} title="Home" aria-label="Home">
         <div className="brand-mark" />
         <span>Lucent</span>
       </button>
@@ -155,35 +129,18 @@ export function TopBar({
               <Ico.Eye /> View only
             </span>
           )}
-          <button className="icon-btn" onClick={() => setShare(true)} aria-label="Share workspace">
+          <button className="icon-btn" onClick={() => setShare(true)} aria-label="Share board">
             <Ico.Share /> Share
           </button>
           <button
             className="icon-btn"
             onClick={() => setView("meeting")}
-            title="Meeting mode"
-            aria-label="Meeting mode"
+            title="Start or join a meeting on this board"
+            aria-label="Meeting"
           >
             <Ico.Present /> Meeting
           </button>
-          <button
-            className="icon-btn"
-            onClick={() => setView("admin")}
-            title="Workspace admin"
-            aria-label="Workspace admin"
-          >
-            Admin
-          </button>
-          <button
-            className="icon-btn"
-            onClick={() => setView("analytics")}
-            title="Workspace analytics"
-            aria-label="Workspace analytics"
-          >
-            Analytics
-          </button>
-          <div style={{ width: 8 }} />
-          <ProfileMenu onOpenSettings={onOpenSettings} />
+          <ProfileMenu onOpenSettings={onOpenSettings} onNavigate={setView} />
         </>
       </div>
       {share && <ShareDialog onClose={() => setShare(false)} />}
@@ -682,15 +639,62 @@ function ShareDialog({ onClose }: { onClose: () => void }) {
   );
 }
 
-const ATELIER_RAIL_ITEMS: { id: string; icon: () => React.ReactNode; label: string; view: View }[] = [
-  { id: "home", icon: () => <HomeIcon />, label: "Home", view: "home" },
-  { id: "workspace", icon: () => <Ico.Folder />, label: "Workspace", view: "workspace" },
-  { id: "board", icon: () => <Ico.Layers />, label: "Board", view: "canvas" },
-  { id: "meeting", icon: () => <Ico.Present />, label: "Meeting", view: "meeting" },
-  { id: "intel", icon: () => <IntelIcon />, label: "Intelligence", view: "intelligence" },
-  { id: "exec", icon: () => <ActionIcon />, label: "Execution", view: "execution" },
-  { id: "history", icon: () => <Ico.History />, label: "History", view: "history" },
+/**
+ * Asks the app-level command palette (App.tsx owns it) to open. An event
+ * rather than a prop so any surface — the rail, Home's composer, an empty
+ * state — can summon the one palette without threading callbacks.
+ */
+export const OPEN_PALETTE_EVENT = "lucent:open-command-palette";
+
+export function openCommandPalette(): void {
+  window.dispatchEvent(new CustomEvent(OPEN_PALETTE_EVENT));
+}
+
+/** Same pattern for the settings modal; `detail` is the section to open. */
+export const OPEN_SETTINGS_EVENT = "lucent:open-settings";
+
+export function requestSettings(section?: string): void {
+  window.dispatchEvent(new CustomEvent(OPEN_SETTINGS_EVENT, { detail: section }));
+}
+
+/**
+ * The seven places a team works (Atelier IA). Ordered by the product's own
+ * loop: see what needs you → pick a board → shape it → talk it through →
+ * understand what was decided → carry it out → trace how it got here.
+ */
+const RAIL_ITEMS: { id: string; icon: keyof typeof Ico; label: string; view: View }[] = [
+  { id: "home", icon: "Home", label: "Home", view: "home" },
+  { id: "boards", icon: "Folder", label: "Boards", view: "dashboard" },
+  { id: "canvas", icon: "Layers", label: "Canvas", view: "canvas" },
+  { id: "meeting", icon: "Present", label: "Meeting", view: "meeting" },
+  { id: "intelligence", icon: "Sparkle", label: "Intelligence", view: "intelligence" },
+  { id: "execution", icon: "Gauge", label: "Execution", view: "execution" },
+  { id: "history", icon: "History", label: "History", view: "history" },
 ];
+
+/**
+ * Canvas lenses (UX-1): the same board, re-rendered. They nest under Canvas
+ * and only unfold while the canvas is the active surface — one model, many
+ * representations, without seven more icons competing on every screen.
+ */
+const RAIL_LENSES: { id: string; label: string; lens: CanvasLens; Icon: (p: SVGProps<SVGSVGElement>) => JSX.Element }[] = [
+  { id: "visual", label: "Diagram", lens: "visual", Icon: Ico.Flow },
+  { id: "kanban", label: "Kanban", lens: "kanban", Icon: Ico.Kanban },
+  { id: "document", label: "Document", lens: "document", Icon: Ico.Book },
+  { id: "wireframe", label: "Wireframe", lens: "wireframe", Icon: ToolIco.Frame },
+  { id: "sequence", label: "Sequence", lens: "sequence", Icon: Ico.Sequence },
+  { id: "er", label: "ER diagram", lens: "er", Icon: Ico.Table },
+];
+
+/** Legacy lens views that still route as views; they belong to Canvas. */
+const CANVAS_VIEWS: ReadonlySet<View> = new Set([
+  "canvas",
+  "board",
+  "document",
+  "wireframe",
+  "sequence",
+  "er",
+]);
 
 export function LeftRail({
   side = "left",
@@ -699,9 +703,7 @@ export function LeftRail({
   side?: "left" | "right";
   onOpenSettings?: (section?: string) => void;
 }) {
-  const { view, setView, newProject, workspace } = useWorkspace();
-  const notifCount = useNotifCount();
-  const [notifOpen, setNotifOpen] = useState(false);
+  const { view, setView, lens, setLens, newProject, workspace } = useWorkspace();
   const [confirmNew, setConfirmNew] = useState(false);
 
   // Does the current board hold work worth warning about before replacing it?
@@ -710,123 +712,83 @@ export function LeftRail({
     Object.keys(workspace.shapes).length > 0 ||
     Object.keys(workspace.wireframes).length > 0;
 
+  const onCanvas = CANVAS_VIEWS.has(view);
+
   return (
     <>
-      <div className={`left-rail ${side === "right" ? "on-right" : ""}`}>
+      <nav className={`left-rail ${side === "right" ? "on-right" : ""}`} aria-label="Main">
         <button
-          className="rail-btn-new"
-          style={{
-            width: 38,
-            height: 38,
-            borderRadius: 10,
-            background: "var(--bloom-2)",
-            color: "white",
-            display: "grid",
-            placeItems: "center",
-            boxShadow: "0 4px 12px -3px var(--bloom-glow)",
-            marginBottom: 6,
-            border: 0,
-            cursor: "pointer",
-          }}
-          title="New workspace · ⌘N"
-          aria-label="New workspace"
+          className="rail-new"
+          data-tip="New board"
+          title="New board"
+          aria-label="New board"
           onClick={() => (hasWork ? setConfirmNew(true) : newProject())}
         >
           <Ico.Plus />
         </button>
-
-        {ATELIER_RAIL_ITEMS.map((it) => {
-          const active =
-            it.id === "board"
-              ? view === "canvas" ||
-                view === "main" ||
-                view === "board" ||
-                view === "empty" ||
-                view === "generating" ||
-                view === "proposing"
-              : it.id === "meeting"
-                ? view === "meeting" || view === "meeting_board" || view === "voice"
-                : it.id === "intel"
-                  ? view === "intelligence" ||
-                    view === "decisions" ||
-                    view === "actions" ||
-                    view === "knowledge"
-                  : it.id === "exec"
-                    ? view === "execution" || view === "projects" || view === "task"
-                    : view === it.view;
+        {RAIL_ITEMS.map((it) => {
+          const Icon = Ico[it.icon];
+          const active = it.id === "canvas" ? onCanvas : view === it.view;
           return (
-            <button
-              key={it.id}
-              className={`rail-btn ${active ? "active" : ""}`}
-              data-tip={it.label}
-              title={it.label}
-              aria-label={it.label}
-              aria-current={active ? "page" : undefined}
-              onClick={() => setView(it.view)}
-            >
-              {it.icon()}
-            </button>
+            <div key={it.id} className="rail-group">
+              <button
+                className={`rail-btn ${active ? "active" : ""}`}
+                data-tip={it.label}
+                title={it.label}
+                aria-label={it.label}
+                aria-current={active ? "page" : undefined}
+                onClick={() => setView(it.view)}
+              >
+                <Icon />
+              </button>
+              {it.id === "canvas" && onCanvas && (
+                <div className="rail-lenses" role="group" aria-label="Canvas lenses">
+                  {RAIL_LENSES.map((l) => {
+                    const on = view === "canvas" && lens === l.lens;
+                    return (
+                      <button
+                        key={l.id}
+                        className={`rail-lens ${on ? "active" : ""}`}
+                        data-tip={l.label}
+                        title={l.label}
+                        aria-label={`${l.label} lens`}
+                        aria-pressed={on}
+                        onClick={() => {
+                          // setView first: setView("canvas") resets to the visual
+                          // lens, so the explicit lens applies after.
+                          setView("canvas");
+                          setLens(l.lens);
+                        }}
+                      >
+                        <l.Icon />
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
           );
         })}
-
         <div style={{ flex: 1 }} />
-
         <button
           className="rail-btn"
           data-tip="Search · ⌘K"
           title="Search · ⌘K"
           aria-label="Search"
-          onClick={() => window.dispatchEvent(new CustomEvent("lucent:open-command-overlay"))}
+          onClick={openCommandPalette}
         >
           <Ico.Search />
         </button>
-
         <button
-          className={`rail-btn ${view === "notif" ? "active" : ""}`}
-          data-tip="Notifications"
-          title="Notifications"
-          aria-label="Notifications"
-          onClick={() => setNotifOpen((v) => !v)}
-          style={{ position: "relative" }}
+          className="rail-btn"
+          data-tip="Settings · ⌘,"
+          title="Settings · ⌘,"
+          aria-label="Settings"
+          onClick={() => (onOpenSettings ? onOpenSettings() : requestSettings())}
         >
-          <BellIcon />
-          {notifCount > 0 && (
-            <span
-              style={{
-                position: "absolute",
-                top: 4,
-                right: 4,
-                minWidth: 15,
-                height: 15,
-                borderRadius: 999,
-                background: "var(--madder)",
-                color: "white",
-                fontFamily: "var(--font-mono)",
-                fontSize: 9,
-                fontWeight: 700,
-                padding: "0 4px",
-                display: "grid",
-                placeItems: "center",
-                border: "2px solid var(--paper-0)",
-              }}
-            >
-              {notifCount}
-            </span>
-          )}
+          <ToolIco.Settings />
         </button>
-
-        <button
-          className={`rail-btn ${view === "admin" ? "active" : ""}`}
-          data-tip="Admin"
-          title="Admin"
-          aria-label="Admin"
-          onClick={() => (onOpenSettings ? onOpenSettings("admin") : setView("admin"))}
-        >
-          <Ico.Settings />
-        </button>
-      </div>
-
-      {notifOpen && <AtelierNotificationPopover onClose={() => setNotifOpen(false)} />}
+      </nav>
       {confirmNew && (
         <ConfirmNewWorkspace
           onCancel={() => setConfirmNew(false)}
@@ -891,7 +853,7 @@ export function ZoomBadge({
       style={{
         position: "absolute",
         bottom: 20,
-        right: 24,
+        left: 20,
         zIndex: 25,
         display: "flex",
         alignItems: "center",
@@ -952,8 +914,8 @@ export function StatusBadge({ children }: { children: React.ReactNode }) {
       style={{
         position: "absolute",
         bottom: 20,
-        right: 220,
-        zIndex: 24,
+        right: 20,
+        zIndex: 25,
         display: "flex",
         alignItems: "center",
         gap: 8,

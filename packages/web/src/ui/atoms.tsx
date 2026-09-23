@@ -8,14 +8,15 @@ import {
   type ReactNode,
   type SVGProps,
 } from "react";
-import { routedVertices } from "@lucent/core";
+import { routedVertices, type StatementFields } from "@lucent/core";
 import type { DotColor } from "../scene.js";
+import { KIND_LABEL, KIND_TINT, statusLabel } from "../statementUi.js";
+import { StatementGlyph } from "./StatementGlyph.js";
 import {
   DRAG_HYSTERESIS_PX,
   VelocityTracker,
   ZOOM_MAX,
   ZOOM_MIN,
-  ZOOM_OVERSHOOT,
   approach,
   projectMomentum,
   softClampZoom,
@@ -26,6 +27,18 @@ import {
  * CanvasViewport uses local React state for pan/zoom (no window bus) and
  * exposes zoom to a child via render callback.
  */
+
+/** "2026-09-26" → "Sep 26" (the year only when it isn't this year). */
+export function formatDue(iso: string): string {
+  const d = new Date(`${iso}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return iso;
+  const sameYear = d.getFullYear() === new Date().getFullYear();
+  return d.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    ...(sameYear ? {} : { year: "numeric" }),
+  });
+}
 
 export function clamp(n: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, n));
@@ -133,6 +146,11 @@ export interface NodeCardProps {
   statement?: { kind: string; status: string };
   /** The chip's tint, by kind (statementUi.KIND_TINT at the call site). */
   statementTint?: string;
+  /** Action statements: who owns it (issue assignee) and when it is due. */
+  statementOwner?: string;
+  statementDue?: string;
+  /** The statement came out of a meeting — the card says so (✦). */
+  fromMeeting?: boolean;
   /**
    * BPMN lens shape (docs/19 V1 core, rendered by Lucent — no external
    * toolkit): event → circle (thin=start, thick=end), gateway → diamond
@@ -166,13 +184,21 @@ export const NodeCard = memo(function NodeCard({
   onEditConsumed,
   statement,
   statementTint,
+  statementOwner,
+  statementDue,
+  fromMeeting = false,
   bpmnShape,
 }: NodeCardProps) {
   const drag = useRef<{ sx: number; sy: number; moved: boolean } | null>(null);
   const [dragging, setDragging] = useState(false);
 
+  // A node that carries a statement renders as a statement card: the kind
+  // is the headline, not a chip under the label. The BPMN lens keeps its
+  // own shapes, so only ordinary cards take the statement treatment.
+  const stmt = statement && !bpmnShape ? (statement as StatementFields) : null;
   const cls = [
     "node",
+    stmt ? `stmt stmt-${stmt.kind} is-${stmt.status}` : "",
     state,
     appear ? "appear" : "",
     dimmed ? "dimmed" : "",
@@ -316,6 +342,7 @@ export const NodeCard = memo(function NodeCard({
         ...(opacity !== undefined && opacity !== 1
           ? { opacity, transition: "opacity 160ms ease" }
           : {}),
+        ...(stmt ? ({ "--stmt-tint": statementTint ?? KIND_TINT[stmt.kind] } as CSSProperties) : {}),
         animationDelay: state === "emerging" ? `${delay}ms, ${delay + 400}ms` : `${delay}ms`,
       }}
     >
@@ -345,7 +372,14 @@ export const NodeCard = memo(function NodeCard({
           )}
         </span>
       )}
-      {meta && (
+      {stmt && (
+        <div className="stmt-head">
+          <StatementGlyph kind={stmt.kind} size={11} />
+          <span className="stmt-kind">{KIND_LABEL[stmt.kind].one}</span>
+          <span className="stmt-status">{statusLabel(stmt.kind, stmt.status)}</span>
+        </div>
+      )}
+      {!stmt && meta && (
         <div className="node-meta">
           {mark ? (
             <span className="node-mark" style={{ color: mark.tint }}>
@@ -379,8 +413,27 @@ export const NodeCard = memo(function NodeCard({
       ) : (
         <div className="node-title">{title}</div>
       )}
-      {sub && <div className="node-sub">{sub}</div>}
-      {statement && (
+      {!stmt && sub && <div className="node-sub">{sub}</div>}
+      {stmt && (statementOwner || statementDue || fromMeeting) && (
+        <div className="stmt-foot">
+          {statementOwner && (
+            <span className="stmt-owner">
+              <span className="stmt-owner-dot" aria-hidden>
+                {statementOwner.trim().charAt(0).toUpperCase()}
+              </span>
+              {statementOwner}
+            </span>
+          )}
+          {statementDue && <span className="stmt-due">due {formatDue(statementDue)}</span>}
+          {fromMeeting && (
+            <span className="stmt-src" title="Extracted from a meeting">
+              ✦ meeting
+            </span>
+          )}
+        </div>
+      )}
+      {/* BPMN-shaped nodes keep their shape; the statement rides as a chip. */}
+      {!stmt && statement && (
         <div
           className="node-statement-chip"
           style={{
@@ -909,7 +962,7 @@ export function CanvasViewport({
     panRendered.current = n;
     setPan(n);
   };
-  const endPanDrag = (e: React.PointerEvent) => {
+  const endPanDrag = (_e: React.PointerEvent) => {
     const d = drag.current;
     if (!d.dragging) return;
     drag.current.dragging = false;

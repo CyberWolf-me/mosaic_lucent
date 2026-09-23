@@ -83,12 +83,18 @@ function createStore() {
     const raw = localStorage.getItem(LS_KEY);
     if (raw) {
       const parsed = JSON.parse(raw) as Partial<Settings>;
-      // If user hasn't yet migrated to v2 Atelier light default, force light & bloom initially
+      // One-time move onto Atelier's paper default — but only for settings
+      // that are still the old factory defaults (dark theme + the retired
+      // amber accent). The old store saved the whole object on any change, so
+      // "dark" is usually the default rather than a choice; a user who picked
+      // light, system, or a different accent keeps exactly what they chose.
       if (!migrated) {
-        parsed.theme = "light";
-        parsed.accent = "bloom";
+        if (parsed.theme === "dark" && (parsed.accent as string | undefined) === "amber") {
+          parsed.theme = "light";
+          parsed.accent = "bloom";
+          localStorage.setItem(LS_KEY, JSON.stringify({ ...DEFAULT_SETTINGS, ...parsed }));
+        }
         localStorage.setItem(MIGRATION_KEY, "true");
-        localStorage.setItem(LS_KEY, JSON.stringify({ ...DEFAULT_SETTINGS, ...parsed }));
       }
       state = { ...DEFAULT_SETTINGS, ...parsed };
       // A retired accent (amber/violet/cyan/rose/mono) stored before the Atelier

@@ -16,7 +16,14 @@ import {
  * logged in. Dead menu items (Notifications, Workspace members) are gone rather
  * than pretending to work.
  */
-export function ProfileMenu({ onOpenSettings }: { onOpenSettings: (section?: string) => void }) {
+export function ProfileMenu({
+  onOpenSettings,
+  onNavigate,
+}: {
+  onOpenSettings: (section?: string) => void;
+  /** Org-level pages (admin, analytics) live here rather than in every top bar. */
+  onNavigate?: (view: "admin" | "analytics") => void;
+}) {
   const [user, setUser] = useState<SessionUser | null>(getSessionUser());
   const [open, setOpen] = useState(false);
 
@@ -34,6 +41,10 @@ export function ProfileMenu({ onOpenSettings }: { onOpenSettings: (section?: str
     clearSession();
     setUser(null);
     setOpen(false);
+    // A full navigation, not a state flip: the signed-out user must not keep
+    // looking at the previous account's board, chat, and meeting state that
+    // the in-memory workspace still holds.
+    window.location.assign("/login");
   };
 
   const initials = user
@@ -101,10 +112,29 @@ export function ProfileMenu({ onOpenSettings }: { onOpenSettings: (section?: str
               >
                 <Ico.Book /> Plan &amp; usage
               </button>
-              <div className="menu-sep" />
-              <button className="menu-item">
-                <ToolIco.Kbd /> Keyboard shortcuts <span className="k">?</span>
-              </button>
+              {onNavigate && (
+                <>
+                  <div className="menu-sep" />
+                  <button
+                    className="menu-item"
+                    onClick={() => {
+                      setOpen(false);
+                      onNavigate("admin");
+                    }}
+                  >
+                    <Ico.Team /> Workspace admin
+                  </button>
+                  <button
+                    className="menu-item"
+                    onClick={() => {
+                      setOpen(false);
+                      onNavigate("analytics");
+                    }}
+                  >
+                    <Ico.Gauge /> Analytics
+                  </button>
+                </>
+              )}
               <div className="menu-sep" />
               <button className="menu-item danger" onClick={signOut}>
                 <ToolIco.Logout /> Sign out

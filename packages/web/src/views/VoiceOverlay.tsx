@@ -16,15 +16,18 @@ export function VoiceOverlay({
   onCancel?: () => void;
 }) {
   useEffect(() => {
+    if (!onSubmit && !onCancel) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
+      // The composer owns Enter/Escape while it has focus (it submits the
+      // same transcript); handling them here too sent the turn twice.
+      const t = e.target as HTMLElement | null;
+      if (e.defaultPrevented || t?.tagName === "INPUT" || t?.tagName === "TEXTAREA") return;
+      if (e.key === "Escape" && onCancel) {
         e.preventDefault();
-        onCancel?.();
-      } else if (e.key === "Enter" && !e.shiftKey) {
+        onCancel();
+      } else if (e.key === "Enter" && !e.shiftKey && onSubmit && transcript.trim()) {
         e.preventDefault();
-        if (transcript.trim()) {
-          onSubmit?.();
-        }
+        onSubmit();
       }
     };
     window.addEventListener("keydown", onKey);

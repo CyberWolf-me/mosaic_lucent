@@ -20,15 +20,67 @@ export const STATEMENT_KINDS = [
 
 export const STATEMENT_STATUSES = ["open", "resolved", "rejected", "superseded"] as const;
 
-/** The amber family the ✦ provenance affordances established. */
+/**
+ * The statement language (Atelier). One tint per kind, used everywhere a
+ * statement appears — canvas card, Intelligence row, meeting brief, Home —
+ * so "cobalt diamond" means *decision* on every surface. The tokens live in
+ * lucent.css (`--kind-*`) so dark mode and accents re-point them in one place.
+ */
 export const KIND_TINT: Record<StatementFields["kind"], string> = {
-  decision: "var(--amber-2)",
-  proposal: "var(--ink-2)",
-  question: "var(--sig-violet)",
-  action: "var(--sig-green)",
-  requirement: "var(--ink-1)",
-  risk: "var(--sig-red)",
+  decision: "var(--kind-decision)",
+  proposal: "var(--kind-proposal)",
+  question: "var(--kind-question)",
+  action: "var(--kind-action)",
+  requirement: "var(--kind-requirement)",
+  risk: "var(--kind-risk)",
 };
+
+/** The kind as a person would say it, singular and plural. */
+export const KIND_LABEL: Record<StatementFields["kind"], { one: string; many: string }> = {
+  decision: { one: "Decision", many: "Decisions" },
+  proposal: { one: "Proposal", many: "Proposals" },
+  question: { one: "Question", many: "Open questions" },
+  action: { one: "Action", many: "Actions" },
+  requirement: { one: "Requirement", many: "Requirements" },
+  risk: { one: "Risk", many: "Risks" },
+};
+
+/**
+ * The status in the kind's own vocabulary. "resolved" means something
+ * different for each kind — a resolved decision is *decided*, a resolved
+ * question is *answered*, a resolved risk is *mitigated* — and saying the
+ * specific word is what lets a reader trust the board at a glance.
+ */
+export function statusLabel(
+  kind: StatementFields["kind"],
+  status: StatementFields["status"],
+): string {
+  if (status === "rejected") return "Rejected";
+  if (status === "superseded") return "Superseded";
+  if (status === "resolved") {
+    return {
+      decision: "Decided",
+      proposal: "Accepted",
+      question: "Answered",
+      action: "Done",
+      requirement: "Met",
+      risk: "Mitigated",
+    }[kind];
+  }
+  return {
+    decision: "Pending",
+    proposal: "Proposed",
+    question: "Open",
+    action: "Open",
+    requirement: "Open",
+    risk: "Open",
+  }[kind];
+}
+
+/** Rejected and superseded statements are history, not current truth. */
+export function statementIsHistory(status: StatementFields["status"]): boolean {
+  return status === "rejected" || status === "superseded";
+}
 
 /**
  * The chip text: kind + status. Resolved/superseded/rejected render dimmed by

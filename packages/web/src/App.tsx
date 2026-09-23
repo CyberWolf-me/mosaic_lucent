@@ -19,17 +19,10 @@ import { ErView } from "./views/ErView.js";
 import { BoardView } from "./views/BoardView.js";
 import { DocumentView } from "./views/DocumentView.js";
 import { HomeView } from "./views/HomeView.js";
-import { WorkspaceView } from "./views/WorkspaceView.js";
-import { ReviewQueueView } from "./views/ReviewQueueView.js";
-import { IntegrationsView } from "./views/IntegrationsView.js";
 import { NotificationsView } from "./views/NotificationsView.js";
-import { VoiceView } from "./views/VoiceView.js";
-import { IAView } from "./views/IAView.js";
-import { DesignSystemView } from "./views/DesignSystemView.js";
 import { CommandOverlay } from "./ui/CommandOverlay.js";
-import { ScreenSwitcher } from "./ui/ScreenSwitcher.js";
-import { TweaksPanel } from "./ui/TweaksPanel.js";
-import { AtelierScreenFrame } from "./ui/AtelierScreenFrame.js";
+import { OPEN_PALETTE_EVENT, OPEN_SETTINGS_EVENT } from "./ui/Chrome.js";
+import { VALID_LENSES, VALID_VIEWS, landingView } from "./landing.js";
 import { MeetingSessionProvider } from "./meeting-room/MeetingSessionContext.js";
 import { MeetingHuddleDock } from "./meeting-room/MeetingHuddleDock.js";
 import { LegalView } from "./views/LegalView.js";
@@ -66,59 +59,13 @@ import { primeCsrfToken } from "./http.js";
  *    with its token ignored, which made verification, password reset and org
  *    invites dead ends in a build that otherwise sent all three emails.
  */
-const VALID_VIEWS: ReadonlySet<string> = new Set([
-  "home",
-  "workspace",
-  "review",
-  "integrations",
-  "dashboard",
-  "canvas",
-  "canvas-live",
-  "legacy",
-  "main",
-  "knowledge",
-  "history",
-  "meeting",
-  "intelligence",
-  "execution",
-  "wireframe",
-  "sequence",
-  "er",
-  "board",
-  "document",
-  "admin",
-  "analytics",
-  "system",
-  "ia",
-  "empty",
-  "generating",
-  "proposing",
-  "meeting_board",
-  "voice",
-  "decisions",
-  "actions",
-  "projects",
-  "task",
-  "ask",
-  "notif",
-]);
-const VALID_LENSES: ReadonlySet<string> = new Set([
-  "visual",
-  "kanban",
-  "document",
-  "wireframe",
-  "sequence",
-  "er",
-]);
-
 function Router({ onOpenSettings }: { onOpenSettings: (section?: string) => void }) {
   const { view, setView, lens, setLens } = useWorkspace();
   // UX-1 & UX-P1-002: initial deep-link read + browser Back/Forward popstate synchronization.
   useEffect(() => {
     const syncFromLocation = () => {
       const q = getViewQuery();
-      const hasBoard = typeof window !== "undefined" && new URLSearchParams(window.location.search).has("board");
-      const targetView = q.view ?? (hasBoard ? "main" : "home");
+      const targetView = q.view ?? landingView();
       if (VALID_VIEWS.has(targetView)) {
         setView(targetView as View);
       }
@@ -134,69 +81,51 @@ function Router({ onOpenSettings }: { onOpenSettings: (section?: string) => void
   // Write view/lens back to the URL. Pushes history on user navigation between
   // views, while reusing replaceState on initial mount or no-op when URL already matches.
   useEffect(() => {
-    setViewQuery(view, (view === "canvas" || view === "main") ? lens : undefined, true);
+    setViewQuery(view, view === "canvas" ? lens : undefined, true);
   }, [view, lens]);
   // Org pages sit *on top of* the board, so their Back returns to the canvas
   // — the surface the user came from. It deliberately does NOT touch the
   // browser history stack: views are React state and never push history
   // entries, so `window.history.back()` stepped out of the app entirely (to
   // the sign-in page or off the site), which is what users saw.
-  const backFromOrgPage = () => setView("main");
+  const backFromOrgPage = () => setView("canvas");
   switch (view) {
-    case "main":
-    case "board":
-    case "canvas":
-    case "empty":
-    case "canvas-live":
-    case "legacy":
-      return <MobileGate desktop={<CanvasView onOpenSettings={onOpenSettings} />} />;
     case "home":
       return <HomeView onOpenSettings={onOpenSettings} />;
-    case "workspace":
-      return <WorkspaceView onOpenSettings={onOpenSettings} />;
-    case "admin":
-      return <AdminView onBack={backFromOrgPage} />;
-    case "analytics":
-      return <AnalyticsView onBack={backFromOrgPage} />;
-    case "review":
-      return <ReviewQueueView onOpenSettings={onOpenSettings} />;
-    case "integrations":
-      return <IntegrationsView onOpenSettings={onOpenSettings} />;
-    case "notif":
+    case "notifications":
       return <NotificationsView onOpenSettings={onOpenSettings} />;
-    case "voice":
-      return <VoiceView onOpenSettings={onOpenSettings} />;
-    case "ia":
-      return <IAView onOpenSettings={onOpenSettings} />;
-    case "system":
-      return <DesignSystemView onOpenSettings={onOpenSettings} />;
-    case "meeting":
-    case "meeting_board":
-      return <MeetingView onOpenSettings={onOpenSettings} />;
-    case "intelligence":
-    case "decisions":
-    case "actions":
-    case "knowledge":
-    case "ask":
-      return <IntelligenceView onOpenSettings={onOpenSettings} />;
-    case "execution":
-    case "projects":
-    case "task":
-      return <ExecutionView onOpenSettings={onOpenSettings} />;
-    case "history":
-      return <HistoryView onOpenSettings={onOpenSettings} />;
     case "dashboard":
       return <DashboardView onOpenSettings={onOpenSettings} />;
+    case "history":
+      return <HistoryView onOpenSettings={onOpenSettings} />;
+    case "meeting":
+      return <MeetingView onOpenSettings={onOpenSettings} />;
+    case "intelligence":
+      return <IntelligenceView onOpenSettings={onOpenSettings} />;
+    case "execution":
+      return <ExecutionView onOpenSettings={onOpenSettings} />;
     case "wireframe":
       return <WireframeView onOpenSettings={onOpenSettings} />;
     case "sequence":
       return <SequenceView onOpenSettings={onOpenSettings} />;
     case "er":
       return <ErView onOpenSettings={onOpenSettings} />;
+    case "board":
+      return <BoardView onOpenSettings={onOpenSettings} />;
     case "document":
       return <DocumentView onOpenSettings={onOpenSettings} />;
+    case "admin":
+      return <AdminView onBack={backFromOrgPage} />;
+    case "analytics":
+      return <AnalyticsView onBack={backFromOrgPage} />;
+    case "canvas":
     default:
-      return <AtelierScreenFrame screenKey={view} />;
+      // G2: a phone-shaped viewport with content gets the read-only mobile
+      // view instead of the desktop canvas. The gate (not the route) makes
+      // the choice, so one board URL serves both, and the empty-board case
+      // falls through to the hero prompt because describing-by-keyboard is
+      // fine on mobile.
+      return <MobileGate desktop={<CanvasView onOpenSettings={onOpenSettings} />} />;
   }
 }
 
@@ -231,53 +160,10 @@ function SessionBoot() {
   );
 }
 
-function AtelierGlobalChrome() {
-  const { view, setView } = useWorkspace();
-  const [switcherOpen, setSwitcherOpen] = useState(false);
-  const [tweaksOpen, setTweaksOpen] = useState(false);
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      const inInput =
-        (e.target as HTMLElement)?.tagName === "INPUT" ||
-        (e.target as HTMLElement)?.tagName === "TEXTAREA";
-      if ((e.metaKey || e.ctrlKey) && (e.key === "j" || e.key === "J")) {
-        e.preventDefault();
-        setSwitcherOpen((o) => !o);
-        return;
-      }
-      if ((e.metaKey || e.ctrlKey) && e.key === "/") {
-        e.preventDefault();
-        setTweaksOpen((o) => !o);
-        return;
-      }
-      if (inInput) return;
-      if (e.key === "Escape") {
-        setSwitcherOpen(false);
-        setTweaksOpen(false);
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, []);
-
-  return (
-    <>
-      <ScreenSwitcher
-        currentKey={view}
-        open={switcherOpen}
-        setOpen={setSwitcherOpen}
-        onGo={(key) => setView(key as View)}
-      />
-      <TweaksPanel open={tweaksOpen} setOpen={setTweaksOpen} />
-    </>
-  );
-}
-
 export function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsSection, setSettingsSection] = useState("appearance");
-  const [commandOverlayOpen, setCommandOverlayOpen] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
   /** Bumped after a sign-in / sign-up so the session check runs again. */
   const [authTick, setAuthTick] = useState(0);
   const locale = useMemo(() => resolveLocale(navigator.language), []);
@@ -305,17 +191,26 @@ export function App() {
         e.preventDefault();
         setSettingsOpen(true);
       }
-      if ((e.metaKey || e.ctrlKey) && (e.key === "k" || e.key === "K")) {
+      // One palette for the whole app, owned here rather than by whichever
+      // rail happens to be mounted: ⌘K has to work on every surface.
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
-        setCommandOverlayOpen((o) => !o);
+        setPaletteOpen((open) => !open);
       }
     };
-    const onTriggerSearch = () => setCommandOverlayOpen(true);
+    const onOpenPalette = () => setPaletteOpen(true);
+    const onOpenSettingsEvent = (e: Event) => {
+      const section = (e as CustomEvent<string | undefined>).detail;
+      if (section) setSettingsSection(section);
+      setSettingsOpen(true);
+    };
     window.addEventListener("keydown", onKey);
-    window.addEventListener("lucent:open-command-overlay", onTriggerSearch);
+    window.addEventListener(OPEN_PALETTE_EVENT, onOpenPalette);
+    window.addEventListener(OPEN_SETTINGS_EVENT, onOpenSettingsEvent);
     return () => {
       window.removeEventListener("keydown", onKey);
-      window.removeEventListener("lucent:open-command-overlay", onTriggerSearch);
+      window.removeEventListener(OPEN_PALETTE_EVENT, onOpenPalette);
+      window.removeEventListener(OPEN_SETTINGS_EVENT, onOpenSettingsEvent);
     };
   }, []);
 
@@ -410,11 +305,10 @@ export function App() {
                 <main id="main-content">
                   <Router onOpenSettings={openSettings} />
                 </main>
-                <AtelierGlobalChrome />
                 <MeetingHuddleDock />
-                {commandOverlayOpen && (
+                {paletteOpen && (
                   <CommandOverlay
-                    onClose={() => setCommandOverlayOpen(false)}
+                    onClose={() => setPaletteOpen(false)}
                     onOpenSettings={openSettings}
                   />
                 )}

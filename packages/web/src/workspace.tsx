@@ -72,6 +72,7 @@ import {
   type PersistedProposal,
 } from "./persistence.js";
 import { settingsStore } from "./settings.js";
+import { initialLocation } from "./landing.js";
 
 /**
  * Central workspace state: the real @lucent/core Workspace + History, the
@@ -82,15 +83,8 @@ import { settingsStore } from "./settings.js";
 
 export type View =
   | "home"
-  | "workspace"
-  | "review"
-  | "integrations"
   | "dashboard"
   | "canvas"
-  | "canvas-live"
-  | "legacy"
-  | "main"
-  | "knowledge"
   | "history"
   | "meeting"
   | "intelligence"
@@ -102,19 +96,16 @@ export type View =
   | "document"
   | "admin"
   | "analytics"
-  | "system"
-  | "ia"
-  | "empty"
-  | "generating"
-  | "proposing"
-  | "meeting_board"
-  | "voice"
-  | "decisions"
-  | "actions"
-  | "projects"
-  | "task"
-  | "ask"
-  | "notif";
+  | "notifications";
+
+/** Views that are really canvas lenses (UX-1), and the lens each one means. */
+const LEGACY_LENS_VIEWS: Partial<Record<View, CanvasLens>> = {
+  board: "kanban",
+  document: "document",
+  wireframe: "wireframe",
+  sequence: "sequence",
+  er: "er",
+};
 
 /** Canvas sub-state is derived from the data, not stored separately. */
 export type CanvasPhase = "empty" | "generating" | "main" | "proposing" | "voice";
@@ -606,16 +597,16 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       restored ? "loaded" : "initial",
     ),
   );
-  const initialView = useMemo<View>(() => {
-    if (typeof window === "undefined") return "home";
-    const params = new URLSearchParams(window.location.search);
-    const q = params.get("view");
-    if (q) return q as View;
-    const hasBoard = params.has("board");
-    return hasBoard ? "canvas" : "home";
-  }, []);
-  const [view, setViewState] = useState<View>(initialView);
-  const [lens, setLens] = useState<CanvasLens>("visual");
+  // Seeded from the address bar (landing.ts explains why a fixed "canvas"
+  // broke every view deep link). Legacy lens views fold into canvas + lens,
+  // exactly as setView does below.
+  const [initialLocationRef] = useState(initialLocation);
+  const [view, setViewState] = useState<View>(() =>
+    LEGACY_LENS_VIEWS[initialLocationRef.view] ? "canvas" : initialLocationRef.view,
+  );
+  const [lens, setLens] = useState<CanvasLens>(
+    () => LEGACY_LENS_VIEWS[initialLocationRef.view] ?? initialLocationRef.lens,
+  );
   /**
    * UX-1: legacy board-like views are canvas lenses now. Keep the `View` type
    * unchanged for compat, but fold those cases into canvas+lens so one board

@@ -1,6 +1,5 @@
 import { useState } from "react";
-import { TopBar, StatusBadge } from "../ui/Chrome.js";
-import { GlobalRail } from "../ui/atelierAtoms.js";
+import { TopBar, LeftRail, StatusBadge } from "../ui/Chrome.js";
 import { AIPill } from "../ui/AIPill.js";
 import { Ico } from "../ui/icons.js";
 import { useWorkspace } from "../workspace.js";
@@ -22,10 +21,11 @@ export function ErView({ onOpenSettings }: { onOpenSettings: (section?: string) 
   const model = toEr(workspace);
 
   return (
-    <div style={{ position: "absolute", inset: 0, overflow: "hidden", background: "var(--paper-1)" }}>
-      <div className="paper-bg" />
-      <div className="paper-grid" />
-      <div className="paper-grain" />
+    <div style={{ position: "absolute", inset: 0 }}>
+      <div style={{ position: "absolute", inset: 0 }}>
+        <div className="canvas-grid" />
+        <div className="canvas-vignette" />
+      </div>
       <TopBar
         crumbs={[
           { label: "Personal" },
@@ -34,7 +34,7 @@ export function ErView({ onOpenSettings }: { onOpenSettings: (section?: string) 
         ]}
         onOpenSettings={onOpenSettings}
       />
-      <GlobalRail active="board" onOpenSettings={onOpenSettings} />
+      <LeftRail />
 
       {model.entities.length === 0 ? (
         <div className="view-empty">

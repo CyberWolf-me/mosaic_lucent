@@ -1841,7 +1841,7 @@ export function GlobalRail({
           cursor: "pointer",
         }}
         title="New · ⌘N"
-        onClick={() => setView("empty")}
+        onClick={() => setView("canvas")}
       >
         <Ico.Plus />
       </button>

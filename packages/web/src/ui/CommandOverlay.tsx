@@ -109,95 +109,81 @@ export function CommandOverlay({
         run: { kind: "export" },
       },
       {
-        id: "v-canvas",
-        label: "Open canvas",
-        hint: "Semantic diagram",
+        id: "v-home",
+        label: "Go to Home",
+        hint: "What needs you · What changed",
         group: "view",
-        run: { kind: "view", view: "canvas" },
+        run: { kind: "view", view: "home" },
       },
       {
-        id: "v-dash",
-        label: "Go to dashboard",
-        hint: "Personal · Home",
+        id: "v-boards",
+        label: "Browse boards",
+        hint: "Every board in this workspace",
         group: "view",
         run: { kind: "view", view: "dashboard" },
       },
       {
-        id: "v-history",
-        label: "Open workspace history",
-        hint: "Version timeline",
+        id: "v-canvas",
+        label: "Open canvas",
+        hint: "The current board",
         group: "view",
-        run: { kind: "view", view: "history" },
+        run: { kind: "view", view: "canvas" },
       },
       {
         id: "v-meeting",
-        label: "Start meeting mode",
-        hint: "Extract from convo",
+        label: "Start a meeting",
+        hint: "Lucent listens and builds the board",
         group: "view",
         run: { kind: "view", view: "meeting" },
       },
       {
         id: "v-intelligence",
         label: "Open intelligence",
-        hint: "Decisions · Actions · Risks",
+        hint: "Decisions · Questions · Actions · Risks",
         group: "view",
         run: { kind: "view", view: "intelligence" },
       },
       {
+        id: "v-execution",
+        label: "Open execution",
+        hint: "Actions · Owners · Blockers · Sync",
+        group: "view",
+        run: { kind: "view", view: "execution" },
+      },
+      {
+        id: "v-history",
+        label: "Open history",
+        hint: "Every change, and who made it",
+        group: "view",
+        run: { kind: "view", view: "history" },
+      },
+      {
+        id: "v-notifications",
+        label: "Open notifications",
+        hint: "Invites · Mentions · Replies",
+        group: "view",
+        run: { kind: "view", view: "notifications" },
+      },
+      {
         id: "v-wireframe",
-        label: "Open wireframe",
-        hint: "Checkout · 1440",
+        label: "Open wireframe lens",
+        hint: "Screens drawn from the board",
         group: "view",
         run: { kind: "view", view: "wireframe" },
       },
       {
         id: "v-sequence",
-        label: "Open sequence",
-        hint: "Message flow",
+        label: "Open sequence lens",
+        hint: "Message flow between components",
         group: "view",
         run: { kind: "view", view: "sequence" },
       },
       {
-        id: "v-home",
-        label: "Go to Home",
-        hint: "Atelier · Workspace overview",
-        group: "view",
-        run: { kind: "view", view: "home" },
-      },
-      {
-        id: "v-workspace",
-        label: "Open Workspace",
-        hint: "Boards · Meetings · Team",
-        group: "view",
-        run: { kind: "view", view: "workspace" },
-      },
-      {
         id: "v-admin",
-        label: "Open Admin & Organization",
-        hint: "Members · Audit · SAML & SCIM",
+        label: "Open workspace admin",
+        hint: "Members · Audit · SSO & SCIM",
         group: "view",
         run: { kind: "view", view: "admin" },
-      },
-      {
-        id: "v-review",
-        label: "Open Review Queue",
-        hint: "Proposals · Changes",
-        group: "view",
-        run: { kind: "view", view: "review" },
-      },
-      {
-        id: "v-execution",
-        label: "Open Execution & Tasks",
-        hint: "Linear · GitHub · Jira",
-        group: "view",
-        run: { kind: "view", view: "execution" },
-      },
-      {
-        id: "v-integrations",
-        label: "Manage Integrations",
-        hint: "Connected Services",
-        group: "view",
-        run: { kind: "view", view: "integrations" },
       },
     ],
     [],
@@ -214,7 +200,12 @@ export function CommandOverlay({
     if (!needle) return [];
     const hits: PaletteBoardHit[] = [];
     for (const n of Object.values(workspace.nodes)) {
-      if (n.label.toLowerCase().includes(needle) || n.nodeType.toLowerCase().includes(needle)) {
+      // A statement node is listed once, as its statement (kind · status),
+      // not a second time as a plain node.
+      if (
+        !n.statement &&
+        (n.label.toLowerCase().includes(needle) || n.nodeType.toLowerCase().includes(needle))
+      ) {
         hits.push({ id: n.id, title: n.label, hint: `Node · ${n.nodeType}` });
       }
       if (n.statement) {

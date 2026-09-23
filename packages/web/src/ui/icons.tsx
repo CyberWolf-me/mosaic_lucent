@@ -7,7 +7,50 @@ import type { SVGProps } from "react";
 
 type P = SVGProps<SVGSVGElement>;
 
+/** A 14px outline glyph in the set's stroke — the lens icons share it. */
+function glyph(children: React.ReactNode) {
+  return function Glyph(p: P) {
+    return (
+      <svg
+        width="14"
+        height="14"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        {...p}
+      >
+        {children}
+      </svg>
+    );
+  };
+}
+
 export const Ico = {
+  /** Kanban lens: three columns of unequal depth. */
+  Kanban: glyph(
+    <>
+      <rect x="3.5" y="4" width="4.5" height="14" rx="1.2" />
+      <rect x="9.75" y="4" width="4.5" height="9" rx="1.2" />
+      <rect x="16" y="4" width="4.5" height="11.5" rx="1.2" />
+    </>,
+  ),
+  /** Sequence lens: two lifelines and the messages between them. */
+  Sequence: glyph(
+    <>
+      <path d="M6 3v18M18 3v18" strokeDasharray="2 2.4" />
+      <path d="M6 8h11M15 6l2 2-2 2M18 15H7M9 13l-2 2 2 2" />
+    </>,
+  ),
+  /** ER lens: a table with a header row and a key column. */
+  Table: glyph(
+    <>
+      <rect x="3.5" y="4.5" width="17" height="15" rx="1.8" />
+      <path d="M3.5 9.5h17M9 9.5v10" />
+    </>,
+  ),
   Home: (p: P) => (
     <svg
       width="16"

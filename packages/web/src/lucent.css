@@ -1,0 +1,819 @@
+/* ============================================================
+   LUCENT — product layer (Atelier)
+
+   Loaded after styles.css. atelier.css owns the tokens (paper, ink,
+   bloom, the Plex trio); styles.css is the legacy component sheet. This
+   file owns what makes the product read as one system:
+
+     1. the shell       — top bar, rail, lenses
+     2. the kit         — page header, cards, chips, empty states
+     3. the statement language — how a decision, question, risk,
+        action or proposal looks, everywhere it appears
+
+   Rule of the house: every surface shows real workspace data or an
+   honest empty state. Nothing in here styles a placeholder.
+   ============================================================ */
+
+/* ---------------------------------------------------------------
+   1 · Shell
+   --------------------------------------------------------------- */
+
+.top-bar {
+  height: 56px;
+  gap: 10px;
+  padding: 0 18px 0 20px;
+  background: linear-gradient(
+    180deg,
+    oklch(from var(--paper-1) l c h / 0.92),
+    oklch(from var(--paper-1) l c h / 0.72)
+  );
+  backdrop-filter: blur(20px) saturate(1.3);
+  -webkit-backdrop-filter: blur(20px) saturate(1.3);
+  border-bottom: 1px solid oklch(from var(--paper-4) l c h / 0.55);
+}
+.top-bar .brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 6px 4px 2px;
+  border-radius: var(--r-sm);
+  font-family: var(--font-serif);
+  font-size: 16px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  color: var(--ink-0);
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+.top-bar .brand:hover .brand-mark {
+  transform: rotate(0deg);
+}
+.top-bar .brand-mark {
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  transition: transform 0.25s var(--e-spring);
+}
+.top-bar .crumb {
+  font-size: 13px;
+  color: var(--ink-2);
+  padding: 4px 8px;
+  border-radius: 6px;
+}
+.top-bar button.crumb:hover,
+.top-bar .crumb.editable:hover {
+  background: oklch(from var(--paper-3) l c h / 0.6);
+  color: var(--ink-0);
+}
+.top-bar .crumb.current {
+  color: var(--ink-0);
+  font-weight: 500;
+}
+.top-bar .crumb-sep {
+  color: var(--ink-4);
+  margin: 0 -2px;
+}
+.top-bar .actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.top-bar .icon-btn {
+  height: 32px;
+  padding: 0 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border-radius: var(--r-sm);
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--ink-1);
+  background: oklch(from var(--paper-0) l c h / 0.6);
+  border: 1px solid oklch(from var(--paper-4) l c h / 0.6);
+  transition:
+    background 0.12s var(--e-out),
+    border-color 0.12s var(--e-out),
+    color 0.12s var(--e-out);
+}
+.top-bar .icon-btn:hover {
+  background: var(--paper-0);
+  border-color: var(--ink-4);
+  color: var(--ink-0);
+}
+.top-bar .icon-btn svg {
+  width: 14px;
+  height: 14px;
+}
+.top-bar .notif-btn {
+  width: 32px;
+  padding: 0;
+  justify-content: center;
+}
+.top-bar .avatar-btn {
+  margin-left: 4px;
+  padding: 0;
+  border: 0;
+  background: none;
+  border-radius: 999px;
+}
+.top-bar .avatar {
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--paper-0);
+  background: var(--ink-1);
+  border: 2px solid var(--paper-0);
+  box-shadow: var(--shadow-1);
+}
+
+/* The rail: seven places, a New button, and the canvas's lenses. */
+.left-rail {
+  top: 68px;
+  bottom: 16px;
+  left: 12px;
+  width: 56px;
+  gap: 2px;
+  padding: 8px 0;
+  /* No overflow clipping: the hover labels hang outside the rail. Short
+     viewports compact the buttons instead (below). */
+  background: oklch(from var(--paper-0) l c h / 0.86);
+  border: 1px solid oklch(from var(--paper-4) l c h / 0.5);
+  border-radius: 18px;
+  box-shadow: var(--shadow-2);
+}
+.left-rail .rail-group {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+.left-rail .rail-btn {
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  color: var(--ink-2);
+  background: transparent;
+  border: 0;
+}
+.left-rail .rail-btn svg {
+  width: 17px;
+  height: 17px;
+}
+.left-rail .rail-btn:hover {
+  background: var(--paper-2);
+  color: var(--ink-0);
+}
+.left-rail .rail-btn.active {
+  background: var(--ink-0);
+  color: var(--paper-0);
+  box-shadow: 0 6px 14px -8px oklch(0.2 0.03 45 / 0.6);
+}
+.left-rail .rail-btn.active::after {
+  display: none;
+}
+.rail-new {
+  width: 40px;
+  height: 40px;
+  margin-bottom: 8px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 12px;
+  color: #fff;
+  background: var(--bloom-2);
+  box-shadow: 0 6px 16px -6px var(--bloom-glow);
+  cursor: pointer;
+  transition:
+    background 0.15s var(--e-out),
+    transform 0.15s var(--e-out);
+}
+.rail-new:hover {
+  background: var(--bloom-1);
+}
+.rail-new:active {
+  transform: scale(0.95);
+}
+.rail-new svg {
+  width: 17px;
+  height: 17px;
+}
+.rail-lenses {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  margin: 2px 0 6px;
+  padding: 4px 0;
+  width: 40px;
+  border-radius: 12px;
+  background: oklch(from var(--paper-3) l c h / 0.55);
+  animation: rail-lenses-in 0.22s var(--e-out);
+}
+@keyframes rail-lenses-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+.rail-lens {
+  width: 32px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 8px;
+  color: var(--ink-3);
+  background: transparent;
+  cursor: pointer;
+  position: relative;
+  transition:
+    background 0.12s var(--e-out),
+    color 0.12s var(--e-out);
+}
+.rail-lens svg {
+  width: 14px;
+  height: 14px;
+}
+.rail-lens:hover {
+  color: var(--ink-0);
+  background: oklch(from var(--paper-0) l c h / 0.9);
+}
+.rail-lens.active {
+  color: var(--bloom-2);
+  background: var(--paper-0);
+  box-shadow: var(--shadow-1);
+}
+.rail-lens[data-tip]::after,
+.rail-new[data-tip]::after {
+  content: attr(data-tip);
+  position: absolute;
+  left: calc(100% + 14px);
+  top: 50%;
+  transform: translate(-4px, -50%);
+  padding: 5px 9px;
+  border-radius: 7px;
+  font-family: var(--font-sans);
+  font-size: 11.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  color: var(--paper-0);
+  background: var(--ink-0);
+  box-shadow: var(--shadow-2);
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    opacity 0.12s var(--e-out),
+    transform 0.12s var(--e-out);
+  z-index: 60;
+}
+.rail-new {
+  position: relative;
+}
+.rail-lens[data-tip]:hover::after,
+.rail-new[data-tip]:hover::after {
+  opacity: 1;
+  transform: translate(0, -50%);
+}
+
+@media (max-height: 760px) {
+  .left-rail .rail-btn,
+  .rail-new {
+    width: 36px;
+    height: 34px;
+  }
+  .rail-lens {
+    height: 24px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rail-lenses {
+    animation: none;
+  }
+  .top-bar .brand-mark {
+    transition: none;
+  }
+}
+
+/* ---------------------------------------------------------------
+   3 · The statement language
+   One tint per kind. Decision is the product's own cobalt: a decided
+   thing is the most important object on any board.
+   --------------------------------------------------------------- */
+
+:root {
+  --kind-decision: var(--bloom-2);
+  --kind-proposal: var(--ink-2);
+  --kind-question: oklch(0.58 0.14 68);
+  --kind-action: oklch(0.5 0.13 150);
+  --kind-requirement: oklch(0.42 0.03 250);
+  --kind-risk: oklch(0.55 0.19 27);
+}
+html[data-theme="dark"] {
+  --kind-decision: var(--bloom-1);
+  --kind-proposal: var(--ink-2);
+  --kind-question: oklch(0.8 0.13 78);
+  --kind-action: oklch(0.74 0.13 150);
+  --kind-requirement: oklch(0.78 0.03 250);
+  --kind-risk: oklch(0.72 0.16 27);
+}
+
+/* Statement cards on the canvas. Same geometry the layout reserved; the
+   difference is hierarchy — the kind is the headline, the owner and the
+   source are the footnote, and a settled or superseded statement looks
+   settled or superseded without anyone having to read a chip. */
+.node.stmt {
+  justify-content: flex-start;
+  gap: 5px;
+  padding: 10px 12px 10px 14px;
+  border-color: oklch(from var(--stmt-tint) l c h / 0.32);
+  background:
+    linear-gradient(90deg, var(--stmt-tint) 0 3px, transparent 3px),
+    linear-gradient(
+      180deg,
+      oklch(from var(--stmt-tint) l c h / 0.07),
+      oklch(from var(--stmt-tint) l c h / 0.02)
+    ),
+    var(--paper-0);
+}
+html[data-theme="dark"] .node.stmt {
+  background:
+    linear-gradient(90deg, var(--stmt-tint) 0 3px, transparent 3px),
+    linear-gradient(
+      180deg,
+      oklch(from var(--stmt-tint) l c h / 0.12),
+      oklch(from var(--stmt-tint) l c h / 0.04)
+    ),
+    var(--paper-2);
+}
+.node.stmt:hover {
+  border-color: oklch(from var(--stmt-tint) l c h / 0.6);
+}
+.node.stmt.selected {
+  border-color: var(--stmt-tint);
+  box-shadow:
+    0 0 0 3px oklch(from var(--stmt-tint) l c h / 0.18),
+    var(--shadow-2);
+}
+.stmt-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--stmt-tint);
+}
+.stmt-head .stmt-status {
+  margin-left: auto;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  color: var(--stmt-tint);
+  background: oklch(from var(--stmt-tint) l c h / 0.1);
+}
+.node.stmt .node-title {
+  font-size: 13px;
+  line-height: 1.35;
+  font-weight: 500;
+}
+/* A decided decision reads in the serif: it is the voice of the record. */
+.node.stmt-decision.is-resolved .node-title {
+  font-family: var(--font-serif);
+  font-size: 14px;
+  letter-spacing: -0.01em;
+}
+.node.stmt-decision.is-resolved .stmt-status {
+  color: var(--paper-0);
+  background: var(--stmt-tint);
+}
+/* A proposal is not a decision yet: outline, not fill. */
+.node.stmt-proposal {
+  border-style: dashed;
+  border-color: oklch(from var(--stmt-tint) l c h / 0.5);
+  background: oklch(from var(--paper-0) l c h / 0.7);
+}
+/* History, not current truth. */
+.node.stmt.is-superseded,
+.node.stmt.is-rejected {
+  opacity: 0.62;
+  filter: saturate(0.4);
+}
+.node.stmt.is-superseded .node-title,
+.node.stmt.is-rejected .node-title {
+  text-decoration: line-through;
+  text-decoration-color: oklch(from var(--ink-2) l c h / 0.6);
+}
+.node.stmt-action.is-resolved .node-title {
+  color: var(--ink-2);
+}
+.stmt-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: auto;
+  min-width: 0;
+  font-size: 10.5px;
+  color: var(--ink-2);
+  white-space: nowrap;
+  overflow: hidden;
+}
+.stmt-owner {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 500;
+  color: var(--ink-1);
+}
+.stmt-owner-dot {
+  width: 15px;
+  height: 15px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  font-family: var(--font-mono);
+  font-size: 8.5px;
+  font-weight: 700;
+  color: var(--paper-0);
+  background: var(--stmt-tint);
+}
+.stmt-due {
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+.stmt-src {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.03em;
+  color: var(--bloom-2);
+}
+
+/* ---------------------------------------------------------------
+   2 · Kit — pages, headers, cards, chips, empty states
+   --------------------------------------------------------------- */
+
+.page-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  background: var(--paper-1);
+  pointer-events: none;
+}
+.page {
+  position: absolute;
+  top: 56px;
+  left: 80px;
+  right: 0;
+  bottom: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  z-index: 1;
+  outline: none;
+  scroll-padding-top: 24px;
+}
+.page-inner {
+  margin: 0 auto;
+  padding: 36px 40px 72px;
+}
+.page-narrow {
+  max-width: 820px;
+}
+.page-default {
+  max-width: 1120px;
+}
+.page-wide {
+  max-width: 1360px;
+}
+@media (max-width: 900px) {
+  .page-inner {
+    padding: 24px 20px 56px;
+  }
+}
+
+.page-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 28px;
+}
+.page-header-text {
+  min-width: 0;
+}
+.eyebrow {
+  margin-bottom: 10px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.page-title {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: 38px;
+  font-weight: 400;
+  line-height: 1.08;
+  letter-spacing: -0.02em;
+  color: var(--ink-0);
+  text-wrap: balance;
+}
+.page-title em {
+  font-style: italic;
+  color: var(--bloom-2);
+}
+.page-lede {
+  margin: 8px 0 0;
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-size: 16px;
+  line-height: 1.45;
+  color: var(--ink-2);
+  text-wrap: pretty;
+}
+.page-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.section-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 28px 0 12px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.section-label:first-child {
+  margin-top: 0;
+}
+.section-count {
+  padding: 0 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  letter-spacing: 0.02em;
+  color: var(--ink-2);
+  background: oklch(from var(--paper-3) l c h / 0.8);
+}
+.section-action {
+  margin-left: auto;
+  letter-spacing: 0.02em;
+  text-transform: none;
+}
+
+.filter-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.filter-chip {
+  height: 30px;
+  padding: 0 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border-radius: 999px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--ink-1);
+  background: oklch(from var(--paper-0) l c h / 0.6);
+  border: 1px solid oklch(from var(--paper-4) l c h / 0.6);
+  cursor: pointer;
+  transition: all 0.12s var(--e-out);
+}
+.filter-chip:hover {
+  border-color: var(--ink-4);
+  color: var(--ink-0);
+}
+.filter-chip.on {
+  color: var(--paper-0);
+  background: var(--ink-0);
+  border-color: var(--ink-0);
+}
+.filter-count {
+  min-width: 16px;
+  padding: 0 5px;
+  border-radius: 999px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 16px;
+  text-align: center;
+  color: var(--ink-2);
+  background: oklch(from var(--paper-3) l c h / 0.9);
+}
+.filter-chip.on .filter-count {
+  color: var(--ink-0);
+  background: var(--paper-0);
+}
+
+.card {
+  position: relative;
+  background: var(--paper-0);
+  border: 1px solid oklch(from var(--paper-4) l c h / 0.6);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-1);
+}
+html[data-theme="dark"] .card {
+  background: var(--paper-2);
+}
+.card.interactive {
+  cursor: pointer;
+  transition:
+    transform 0.15s var(--e-out),
+    box-shadow 0.15s var(--e-out),
+    border-color 0.15s var(--e-out);
+}
+.card.interactive:hover {
+  transform: translateY(-1px);
+  border-color: var(--ink-4);
+  box-shadow: var(--shadow-2);
+}
+
+.stat-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  padding: 16px 18px;
+  text-align: left;
+  background: var(--paper-0);
+  border: 1px solid oklch(from var(--paper-4) l c h / 0.6);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-1);
+}
+html[data-theme="dark"] .stat-tile {
+  background: var(--paper-2);
+}
+button.stat-tile {
+  font: inherit;
+  cursor: pointer;
+  transition:
+    transform 0.15s var(--e-out),
+    box-shadow 0.15s var(--e-out);
+}
+button.stat-tile:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-2);
+}
+.stat-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.stat-value {
+  font-family: var(--font-serif);
+  font-size: 32px;
+  line-height: 1;
+  letter-spacing: -0.02em;
+}
+.stat-sub {
+  font-size: 12px;
+  color: var(--ink-2);
+}
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 6px;
+  padding: 44px 24px;
+  border: 1px dashed oklch(from var(--paper-4) l c h / 0.9);
+  border-radius: var(--r-md);
+  background: oklch(from var(--paper-0) l c h / 0.45);
+}
+.empty-state.compact {
+  padding: 20px 18px;
+  gap: 4px;
+}
+.empty-glyph {
+  margin-bottom: 6px;
+  color: var(--ink-3);
+}
+.empty-title {
+  font-family: var(--font-serif);
+  font-size: 17px;
+  color: var(--ink-0);
+}
+.empty-state.compact .empty-title {
+  font-size: 14.5px;
+}
+.empty-body {
+  max-width: 440px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--ink-2);
+  text-wrap: pretty;
+}
+.empty-action {
+  margin-top: 10px;
+  display: flex;
+  gap: 8px;
+}
+
+.kind-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--kind);
+  white-space: nowrap;
+}
+.kind-badge-status {
+  padding: 1px 6px;
+  border-radius: 999px;
+  letter-spacing: 0.04em;
+  background: oklch(from var(--kind) l c h / 0.1);
+}
+.kind-badge.history {
+  color: var(--ink-3);
+}
+.kind-badge.history .kind-badge-status {
+  background: oklch(from var(--ink-3) l c h / 0.12);
+}
+
+.prov-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  height: 24px;
+  padding: 0 9px;
+  border-radius: 999px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--ink-2);
+  background: oklch(from var(--paper-2) l c h / 0.8);
+  border: 1px solid oklch(from var(--paper-4) l c h / 0.55);
+  white-space: nowrap;
+}
+button.prov-chip {
+  cursor: pointer;
+  transition: all 0.12s var(--e-out);
+}
+button.prov-chip:hover {
+  color: var(--bloom-2);
+  border-color: var(--bloom-wash-2);
+  background: var(--bloom-wash);
+}
+.prov-chip .prov-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.avatar-chip {
+  display: inline-grid;
+  place-items: center;
+  flex-shrink: 0;
+  border-radius: 999px;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: #fff;
+  border: 1.5px solid var(--paper-0);
+}
+
+.btn-atelier.sm {
+  height: 30px;
+  padding: 0 12px;
+  font-size: 12.5px;
+}
+.btn-atelier.quiet {
+  color: var(--ink-2);
+  background: transparent;
+  border-color: transparent;
+}
+.btn-atelier.quiet:hover:not(:disabled) {
+  color: var(--ink-0);
+  background: oklch(from var(--paper-3) l c h / 0.6);
+}

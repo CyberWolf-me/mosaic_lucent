@@ -388,63 +388,9 @@ function LoginForm(props: { onMode: (m: Mode) => void; onDone: () => void }) {
     );
   }
 
-  async function demoLogin() {
-    setBusy(true);
-    setError(null);
-    let result = await attemptLogin("alex@northbeam.co", "Password123!");
-    if (result.kind === "error") {
-      await attemptSignup("Alex Kim", "alex@northbeam.co", "Password123!");
-      result = await attemptLogin("alex@northbeam.co", "Password123!");
-    }
-    if (result.kind === "error") {
-      setError(result.message);
-      setBusy(false);
-      return;
-    }
-    props.onDone();
-  }
-
   return (
     <form onSubmit={submitPassword} className="auth-form">
       <h1>{t("auth.signin.title", locale())}</h1>
-      <button
-        type="button"
-        onClick={demoLogin}
-        disabled={busy}
-        style={{
-          width: "100%",
-          padding: "10px 14px",
-          borderRadius: 8,
-          background: "var(--bloom-2, #3b82f6)",
-          color: "white",
-          fontWeight: 600,
-          fontSize: 13,
-          border: "none",
-          cursor: "pointer",
-          marginBottom: 14,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          gap: 8,
-        }}
-      >
-        <span>✦</span> Continue as Alex Kim (Demo)
-      </button>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 10,
-          margin: "4px 0 14px",
-          color: "var(--ink-3)",
-          fontSize: 11,
-          letterSpacing: "0.06em",
-        }}
-      >
-        <div style={{ flex: 1, height: 1, background: "oklch(from var(--paper-4) l c h / 0.6)" }} />
-        <span>OR PASSWORD</span>
-        <div style={{ flex: 1, height: 1, background: "oklch(from var(--paper-4) l c h / 0.6)" }} />
-      </div>
       <Field
         label={t("auth.email.label", locale())}
         type="email"

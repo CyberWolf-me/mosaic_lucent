@@ -124,7 +124,7 @@ export function HomeView({ onOpenSettings }: { onOpenSettings: (section?: string
       } catch {
         /* ignore */
       }
-      setView("knowledge");
+      setView("intelligence");
     } else {
       // Describe / generate a canvas diagram
       setView("canvas");
@@ -428,7 +428,7 @@ export function HomeView({ onOpenSettings }: { onOpenSettings: (section?: string
             label="Total boards"
             value={totalBoards.toString()}
             sub={`${projects.length} local · ${cloudBoards.length} cloud`}
-            onClick={() => setView("workspace")}
+            onClick={() => setView("dashboard")}
           />
         </div>
 

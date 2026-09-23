@@ -543,6 +543,15 @@ export function DiagramLayer({
             {...(n.statement && !hideNodeDetail
               ? { statementTint: KIND_TINT[n.statement.kind] }
               : {})}
+            {...(n.statement && !hideNodeDetail && n.issue?.assignee
+              ? { statementOwner: n.issue.assignee }
+              : {})}
+            {...(n.statement && !hideNodeDetail && n.issue?.dueDate
+              ? { statementDue: n.issue.dueDate }
+              : {})}
+            fromMeeting={Boolean(
+              n.statement && (n.provenance?.meetingId ?? n.statement.provenance?.meetingId),
+            )}
             // The BPMN lens (docs/19): shapes are a presentation choice of
             // the lens, computed per node from its region's kind. Undefined
             // on every non-BPMN board — the ordinary card renders.
