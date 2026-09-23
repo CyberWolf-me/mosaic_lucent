@@ -1,6 +1,7 @@
 import type { Shape, Workspace } from "@lucent/core";
 import { routeStyleFor, routedVertices } from "@lucent/core";
 import { DIAGRAM_LABELS } from "../scene.js";
+import { glyphSvg, nodeGlyphNow } from "../icons/exportSvg.js";
 
 /**
  * Pure board geometry helpers, extracted from CanvasView so they can be unit
@@ -354,8 +355,11 @@ export function buildBoardSvg(workspace: Workspace, pad = 40): string {
     const y = n.position?.y ?? 0;
     const width = n.size?.width ?? 160;
     const height = n.size?.height ?? 64;
+    // The card's icon, top-left like the canvas meta row (docs/26 §6.2).
+    const glyph = nodeGlyphNow(n);
     parts.push(
       `<rect x="${x}" y="${y}" width="${width}" height="${height}" rx="8" fill="#1b1b1e" stroke="#555"/>` +
+        (glyph ? glyphSvg(glyph, x + 9, y + 8, 14, "#c8c8cc") : "") +
         `<text x="${x + width / 2}" y="${y + height / 2}" fill="#eee" font-family="sans-serif" font-size="13" text-anchor="middle" dominant-baseline="middle">${escapeXml(n.label)}</text>`,
     );
   }

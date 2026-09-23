@@ -261,6 +261,10 @@ function describe(op: Operation): { op: OpBadge; title: string; sub: string } {
       return { op: "mod", title: op.id, sub: `Rename to "${op.text}"` };
     case "CHANGE_NODE_TYPE":
       return { op: "mod", title: op.id, sub: `Change type to ${op.nodeType}` };
+    case "SET_NODE_ICON":
+      return op.icon
+        ? { op: "mod", title: op.id, sub: `Icon: ${op.icon.split(":")[1]}` }
+        : { op: "mod", title: op.id, sub: "Automatic icon" };
     case "SET_ISSUE":
       return op.issue
         ? { op: "mod", title: op.id, sub: `${op.issue.type} · ${op.issue.status}` }

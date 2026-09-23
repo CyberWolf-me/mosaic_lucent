@@ -147,6 +147,7 @@ export function validateOperations(workspace: Workspace, ops: Operation[]): Vali
         break;
       case "CHANGE_TEXT":
       case "CHANGE_NODE_TYPE":
+      case "SET_NODE_ICON":
       case "MOVE_NODE":
         if (!nodes.has(op.id)) err(`node "${op.id}" does not exist`);
         break;

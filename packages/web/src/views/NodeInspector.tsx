@@ -24,6 +24,10 @@ import { formatDue } from "../ui/atoms.js";
 import { Avatar, Button, KindBadge } from "../ui/kit.js";
 import { StatementGlyph } from "../ui/StatementGlyph.js";
 import { Ico } from "../ui/icons.js";
+import { autoIconFor } from "../icons/auto.js";
+import { IconSvg, NodeIcon, brandInk } from "../icons/Icon.js";
+import { loadIconIndex, useIcon, type IconIndex } from "../icons/registry.js";
+import { SUGGESTED_ICONS, searchIcons, type IconHit } from "../icons/search.js";
 
 /**
  * The node inspector: what a node IS on this board, not how it looks.
@@ -82,7 +86,14 @@ export function NodeInspector({
     <aside className="node-inspector" aria-label={`Details: ${node.label}`}>
       <header className="ni-head">
         <div className="ni-eyebrow">
-          {st ? <KindBadge kind={st.kind} status={st.status} /> : <span>{typeMeta}</span>}
+          {st ? (
+            <KindBadge kind={st.kind} status={st.status} />
+          ) : (
+            <>
+              <NodeIcon icon={node.icon} fallback={autoIconFor(node.label, node.nodeType)} size={13} />
+              <span>{typeMeta}</span>
+            </>
+          )}
           {region && <span className="ni-region">· {region}</span>}
         </div>
         <h2 className={`ni-title ${st?.kind === "decision" && st.status === "resolved" ? "serif" : ""}`}>
@@ -102,6 +113,8 @@ export function NodeInspector({
         />
         <Work node={node} workspace={workspace} onSelectNode={onSelectNode} />
         <Connections node={node} workspace={workspace} onSelectNode={onSelectNode} />
+        {/* A statement card shows its statement glyph, not an icon. */}
+        {canEdit && !st && <IconSection node={node} onApply={onApply} />}
         {canEdit && <StatementSection node={node} workspace={workspace} onApply={onApply} />}
       </div>
 
@@ -123,6 +136,152 @@ export function NodeInspector({
 }
 
 /* ------------------------------------------------------------------ */
+
+function iconName(ref: string): string {
+  return ref.slice(ref.indexOf(":") + 1).replace(/-/g, " ");
+}
+
+/**
+ * The node's icon (docs/26 §6.2): the one it shows, where that came from,
+ * and a picker over the registry — Iconoir concepts and Simple Icons brand
+ * marks. Choosing is a SET_NODE_ICON, so it is validated, shared and undoable
+ * like any edit; "Automatic" clears it back to the label's own icon.
+ */
+function IconSection({
+  node,
+  onApply,
+}: {
+  node: Node;
+  onApply: (ops: Operation[], label: string) => boolean;
+}) {
+  const auto = autoIconFor(node.label, node.nodeType);
+  const chosen = useIcon(node.icon);
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [index, setIndex] = useState<IconIndex | null>(null);
+
+  // The name index (~50 KB gzipped) loads on the first keystroke, not with
+  // the board: most people never search for an icon.
+  useEffect(() => {
+    if (open && query && !index) void loadIconIndex().then(setIndex);
+  }, [open, query, index]);
+
+  const hits = useMemo(() => (index && query.trim() ? searchIcons(index, query, 36) : null), [index, query]);
+  const suggestions = useMemo<IconHit[]>(
+    () =>
+      [...new Set([...(auto ? [auto] : []), ...SUGGESTED_ICONS])].map((ref) => ({
+        ref,
+        set: ref.startsWith("simple:") ? "simple" : "iconoir",
+        name: iconName(ref),
+      })),
+    [auto],
+  );
+
+  const choose = (ref: string | null) => {
+    onApply([{ op: "SET_NODE_ICON", id: node.id, icon: ref }], ref ? "Set icon" : "Automatic icon");
+    setOpen(false);
+    setQuery("");
+  };
+
+  const source = node.icon
+    ? chosen === null
+      ? "Chosen · not in this version of the library — showing the automatic one"
+      : "Chosen"
+    : auto
+      ? "Automatic · from the label"
+      : "None · the label names nothing Lucent recognises";
+  const shown = chosen?.title ?? (node.icon ? iconName(node.icon) : auto ? iconName(auto) : null);
+
+  return (
+    <section className="ni-section">
+      <div className="ni-label">Icon</div>
+      <div className="ni-icon-row">
+        <span className="ni-icon-current" aria-hidden>
+          <NodeIcon icon={node.icon} fallback={auto} size={18} />
+        </span>
+        <span className="ni-icon-what">
+          {shown && <span className="ni-icon-name">{shown}</span>}
+          <span className="ni-icon-source">{source}</span>
+        </span>
+        <span className="ni-icon-buttons">
+          {node.icon && (
+            <Button size="sm" variant="ghost" onClick={() => choose(null)}>
+              Automatic
+            </Button>
+          )}
+          <Button size="sm" variant="ghost" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
+            {open ? "Close" : "Change"}
+          </Button>
+        </span>
+      </div>
+      {chosen?.set === "simple" && (
+        <p className="ni-icon-note">
+          {chosen.title} is a trademark of its owner, shown to identify it
+          {chosen.guidelines ? (
+            <>
+              {" "}
+              ·{" "}
+              <a href={chosen.guidelines} target="_blank" rel="noreferrer noopener">
+                logo guidelines
+              </a>
+            </>
+          ) : null}
+        </p>
+      )}
+      {open && (
+        <div className="ni-icon-picker">
+          <input
+            className="ni-icon-search"
+            autoFocus
+            aria-label="Search icons and brands"
+            placeholder="Search icons and brands — database, stripe…"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && hits?.[0]) choose(hits[0].ref);
+              if (e.key === "Escape") {
+                e.stopPropagation();
+                setOpen(false);
+              }
+            }}
+          />
+          <div className="ni-icon-grid" role="listbox" aria-label="Icons">
+            {(hits ?? suggestions).map((hit) => (
+              <IconChoice key={hit.ref} hit={hit} selected={hit.ref === node.icon} onChoose={choose} />
+            ))}
+          </div>
+          {query.trim() && !index && <p className="ni-none">Loading the library…</p>}
+          {hits && hits.length === 0 && <p className="ni-none">No icon or brand matches “{query.trim()}”.</p>}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function IconChoice({
+  hit,
+  selected,
+  onChoose,
+}: {
+  hit: IconHit;
+  selected: boolean;
+  onChoose: (ref: string) => void;
+}) {
+  const glyph = useIcon(hit.ref);
+  return (
+    <button
+      className={`ni-icon-choice${selected ? " is-selected" : ""}`}
+      role="option"
+      aria-selected={selected}
+      aria-label={hit.name}
+      title={hit.set === "simple" ? `${hit.name} (brand)` : hit.name}
+      onClick={() => onChoose(hit.ref)}
+      style={glyph?.set === "simple" && brandInk(glyph.hex) ? { color: brandInk(glyph.hex) } : undefined}
+    >
+      {glyph ? <IconSvg glyph={glyph} size={18} /> : <span className="ni-icon-loading" />}
+    </button>
+  );
+}
 
 function evidenceOf(node: Node): ProvenanceFields | undefined {
   // The op-level field first (ADR 0022), then the statement's own evidence,

@@ -1,6 +1,7 @@
 import * as z from "zod/v4";
 import { createWorkspace, type Workspace } from "./model.js";
 import {
+  iconRef,
   isImageDataUrl,
   optionalCssColor,
   optionalImageSrc,
@@ -44,6 +45,10 @@ const nodeSchema = z.object({
   position: z.object({ x: z.number(), y: z.number() }).optional(),
   size: z.object({ width: z.number().positive(), height: z.number().positive() }).optional(),
   pinned: z.boolean().optional(),
+  // docs/26 §6.2. Looser than the op schema on purpose: a malformed icon on a
+  // stored board is dropped (the label's automatic icon renders), never a
+  // reason to refuse the whole board.
+  icon: iconRef.optional().catch(undefined),
   issue: z
     .object({
       type: z.enum(["epic", "story", "task", "subtask", "bug"]),

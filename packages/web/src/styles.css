@@ -920,12 +920,23 @@ html[data-theme="light"] .ai-pill {
   align-items: center;
   gap: 5px;
 }
-/* Technology glyph in place of the generic dot; tinted via inline color. */
+/* The BPMN gateway marker; tinted via inline color. */
 .node .node-mark {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
+}
+/* A registry icon (docs/26 §6.2) in place of the generic dot. Concept icons
+   take a firmer ink than the caption beside them; brand marks carry their own
+   colour inline (icons/Icon.tsx brandInk). The negative margin keeps the
+   row the height the layout engine reserved for it. */
+.node .node-icon {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  color: var(--ink-1);
+  margin: -2px 1px -2px 0;
 }
 .node .node-title {
   font-size: 13px;

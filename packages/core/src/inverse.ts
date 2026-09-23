@@ -68,6 +68,7 @@ export function inverseOperations(ops: readonly Operation[], before: Workspace):
             // Creation evidence travels with the restore (Stage C2): the
             // node's origin is as much a fact to undo as its position.
             ...(captured.node.provenance ? { provenance: { ...captured.node.provenance } } : {}),
+            ...(captured.node.icon ? { icon: captured.node.icon } : {}),
           },
           // Restoring the node's position and pin state is what makes undo feel
           // exact: a node the user placed by hand would otherwise pop back at
@@ -126,6 +127,12 @@ export function inverseOperations(ops: readonly Operation[], before: Workspace):
         const prev = walking.nodes[op.id]?.nodeType;
         if (prev !== undefined && prev !== op.nodeType)
           inverses.unshift({ op: "CHANGE_NODE_TYPE", id: op.id, nodeType: prev });
+        break;
+      }
+      case "SET_NODE_ICON": {
+        const node = walking.nodes[op.id];
+        if (node && (node.icon ?? null) !== op.icon)
+          inverses.unshift({ op: "SET_NODE_ICON", id: op.id, icon: node.icon ?? null });
         break;
       }
       case "SET_ISSUE": {

@@ -17,6 +17,7 @@ import * as z from "zod/v4";
  *    renders differently under every theme.
  *  - httpUrl: an absolute http(s) URL. The paste path in embed.ts already
  *    enforced this; the op path bypassed it, which is what M0.5 closes.
+ *  - iconRef: `iconoir:<name>` or `simple:<slug>` — a registry key, never markup.
  *
  * Length caps are deliberately loose (kilobytes, not tens of bytes) so a real
  * label or a long URL passes. The point is to refuse hostile values, not to
@@ -40,6 +41,16 @@ export const SVG_PATH_MAX_LENGTH = 4_000;
 const CSS_COLOR =
   /^(#[0-9a-fA-F]{3,8}|(?:rgba?|hsla?|oklch|oklab)\((?:[0-9.,\s%/+-]|deg)+\))$/;
 
+/**
+ * Icon references (docs/26 §6.2): `iconoir:<name>` for a concept icon,
+ * `simple:<slug>` for a brand mark. A reference names an entry in the web
+ * registry; it is never markup, so a model can only ever pick an icon, not
+ * draw one. Existence is deliberately NOT checked here: the registry is
+ * versioned data outside core, and a reference it doesn't know renders the
+ * label's automatic icon instead of failing the board.
+ */
+const ICON_REF = /^(iconoir|simple):[a-z0-9][a-z0-9_-]{0,63}$/;
+
 /** http(s) absolute URL — the only URLs we ever render. */
 const HTTP_URL = /^https?:\/\/[^\s<>"']+$/i;
 
@@ -60,6 +71,39 @@ export const httpUrl = z
   .string()
   .max(2_000, "url exceeds the maximum length")
   .refine((s) => HTTP_URL.test(s), "value is not an http(s) URL");
+
+export const iconRef = z
+  .string()
+  .refine(
+    (s) => ICON_REF.test(s),
+    "value is not an icon reference (iconoir:<name> or simple:<slug>)",
+  );
+
+/** True for a well-formed icon reference. */
+export function isIconRef(value: string): boolean {
+  return ICON_REF.test(value);
+}
+
+/**
+ * Best-effort repair of a model-written icon reference: case, stray spaces,
+ * and the prefixes models reach for ("si:", "simple-icons:", "simpleicons:").
+ * Returns undefined when nothing well-formed can be made of it — the caller
+ * drops the field rather than lose the node over an icon.
+ */
+export function normalizeIconRef(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const raw = value.trim().toLowerCase().replace(/\s+/g, "-");
+  const m = /^([a-z-]+):(.+)$/.exec(raw);
+  if (!m) return undefined;
+  const set = m[1] === "iconoir" ? "iconoir" : /^(simple|si|simple-?icons?)$/.test(m[1]!) ? "simple" : "";
+  if (!set) return undefined;
+  // Simple Icons slugs carry no dashes ("Node.js" → nodedotjs is the
+  // registry's job; six have an underscore), so a kebab brand name from the
+  // model loses its dashes.
+  const name = set === "simple" ? m[2]!.replace(/-/g, "") : m[2]!;
+  const ref = `${set}:${name}`;
+  return ICON_REF.test(ref) ? ref : undefined;
+}
 
 /**
  * Optional variants. Declared once here rather than calling `.optional()` at

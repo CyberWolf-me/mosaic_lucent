@@ -1,5 +1,11 @@
 import * as z from "zod/v4";
-import { optionalCssColor, optionalImageSrc, optionalSvgPathData } from "./schemaPrimitives.js";
+import {
+  iconRef,
+  normalizeIconRef,
+  optionalCssColor,
+  optionalImageSrc,
+  optionalSvgPathData,
+} from "./schemaPrimitives.js";
 
 /**
  * The AI never manipulates the canvas directly. It emits these structured
@@ -220,6 +226,11 @@ const operationSchema = z.discriminatedUnion("op", [
      * a node's origin does not change when its label or layout does.
      */
     provenance: provenanceFieldsSchema.optional(),
+    /**
+     * A registry icon (docs/26 §6.2): "iconoir:<name>" or "simple:<slug>".
+     * Omit it and the renderer derives one from the label.
+     */
+    icon: iconRef.optional(),
   }),
   z.object({
     op: z.literal("DELETE_NODE"),
@@ -234,6 +245,16 @@ const operationSchema = z.discriminatedUnion("op", [
     op: z.literal("CHANGE_NODE_TYPE"),
     id: z.string().min(1),
     nodeType: z.string().min(1),
+  }),
+  /**
+   * Choose a node's icon (docs/26 §6.2): "iconoir:<name>" for a concept,
+   * "simple:<slug>" for a brand mark. `null` clears it back to the icon the
+   * renderer derives from the label. Presentation-only: never re-lays out.
+   */
+  z.object({
+    op: z.literal("SET_NODE_ICON"),
+    id: z.string().min(1),
+    icon: iconRef.nullable(),
   }),
   /**
    * Attach or replace the work-tracking fields on a node, turning it into a
@@ -616,6 +637,17 @@ export function sanitizeRawOperations(raw: unknown): unknown {
       if (typeof copy.label !== "string") {
         copy.label = String(copy.label ?? copy.id ?? "");
       }
+      // A malformed icon costs the icon, never the node: repair what can be
+      // repaired ("SI:Stripe" → "simple:stripe") and drop the rest.
+      if (copy.icon !== undefined) {
+        const icon = normalizeIconRef(copy.icon);
+        if (icon) copy.icon = icon;
+        else delete copy.icon;
+      }
+    }
+    if (copy.op === "SET_NODE_ICON" && copy.icon !== null && copy.icon !== undefined) {
+      // Unrepairable → a clear, which is what "no usable icon" means.
+      copy.icon = normalizeIconRef(copy.icon) ?? null;
     }
     if (copy.op === "CONNECT_NODES" || copy.op === "DISCONNECT_NODES") {
       if (copy.relationship === null || copy.relationship === undefined) {

@@ -6,12 +6,12 @@ import {
   memo,
   type CSSProperties,
   type ReactNode,
-  type SVGProps,
 } from "react";
 import { routedVertices, type StatementFields } from "@lucent/core";
 import type { DotColor } from "../scene.js";
 import { KIND_LABEL, KIND_TINT, statusLabel } from "../statementUi.js";
 import { StatementGlyph } from "./StatementGlyph.js";
+import { NodeIcon } from "../icons/Icon.js";
 import {
   DRAG_HYSTERESIS_PX,
   VelocityTracker,
@@ -119,8 +119,10 @@ export interface NodeCardProps {
   appear?: boolean;
   dimmed?: boolean;
   onClick?: (additive: boolean) => void;
-  /** Recognizable technology glyph + tint, when the label names one. */
-  mark?: { tint: string; Glyph: (p: SVGProps<SVGSVGElement>) => JSX.Element } | null;
+  /** The node's chosen registry icon ("simple:postgresql"), if any (docs/26 §6.2). */
+  icon?: string | undefined;
+  /** The icon its label earns (icons/auto.ts): shown when none was chosen. */
+  autoIcon?: string | null | undefined;
   /** Enable Miro-style click-drag repositioning. */
   draggable?: boolean;
   /** Viewport zoom factor, so drag distance maps to content space. */
@@ -174,7 +176,8 @@ export const NodeCard = memo(function NodeCard({
   appear = false,
   dimmed = false,
   onClick,
-  mark,
+  icon,
+  autoIcon,
   draggable = false,
   scale = 1,
   opacity,
@@ -381,10 +384,8 @@ export const NodeCard = memo(function NodeCard({
       )}
       {!stmt && meta && (
         <div className="node-meta">
-          {mark ? (
-            <span className="node-mark" style={{ color: mark.tint }}>
-              <mark.Glyph width={12} height={12} />
-            </span>
+          {icon || autoIcon ? (
+            <NodeIcon icon={icon} fallback={autoIcon} />
           ) : (
             dot && <span className={`node-dot ${dot}`} />
           )}

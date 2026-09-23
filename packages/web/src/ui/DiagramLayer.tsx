@@ -7,7 +7,7 @@ import {
   type Workspace,
 } from "@lucent/core";
 import { anchor, ConnectorDefs, makePath, NodeCard, type NodeState } from "./atoms.js";
-import { techMarkFor } from "./techMarks.js";
+import { autoIconFor } from "../icons/auto.js";
 import { KIND_TINT } from "../statementUi.js";
 import { DIAGRAM_LABELS, bpmnShapeFor, facesFor } from "../scene.js";
 import {
@@ -496,7 +496,6 @@ export function DiagramLayer({
         else if (selected === n.id || selectedNodes?.has(n.id)) state = "selected";
         const dimmed = spotlightId != null && spotlightId !== n.id;
         const lit = spotlightId != null && spotlightId === n.id;
-        const mark = techMarkFor(n.label);
         // The staggered entrance reads as a reveal on a small board, but once
         // culling is on cards mount as the camera moves, and a per-index delay
         // would make an ordinary pan look like the board loading in slow motion.
@@ -526,7 +525,8 @@ export function DiagramLayer({
               ? {}
               : { sub: n.nodeType })}
             dot={n.dot}
-            mark={mark}
+            icon={workspace.nodes[n.id]?.icon}
+            autoIcon={autoIconFor(n.label, n.nodeType)}
             state={lit ? "selected" : state}
             dimmed={dimmed}
             appear

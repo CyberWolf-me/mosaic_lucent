@@ -9,7 +9,6 @@ import {
   Z_OVERLAY_PEN,
 } from "../src/shapes.js";
 import { TEMPLATES } from "../src/templates.js";
-import { techMarkFor } from "../src/ui/techMarks.js";
 
 /**
  * Shape z used to be Date.now(), which overflows the CSS z-index ceiling
@@ -81,37 +80,5 @@ describe("templates", () => {
         }
       }
     }
-  });
-});
-
-describe("techMarkFor", () => {
-  it("recognizes common technologies by label", () => {
-    expect(techMarkFor("PostgreSQL")?.label).toBe("PostgreSQL");
-    expect(techMarkFor("Redis cache")?.label).toBe("Redis");
-    expect(techMarkFor("Stripe")?.label).toBe("Payments");
-    expect(techMarkFor("Google OAuth")?.label).toBe("Google");
-    expect(techMarkFor("Kubernetes cluster")?.label).toBe("Kubernetes");
-  });
-
-  it("prefers the more specific phrase", () => {
-    // "google oauth" must win over the bare "google" key.
-    expect(techMarkFor("Sign in with Google OAuth")?.label).toBe("Google");
-    // "graph database" must not fall through to the generic database mark.
-    expect(techMarkFor("Graph database")?.label).toBe("Graph");
-  });
-
-  it("matches whole words only", () => {
-    expect(techMarkFor("Cardboard supplier")).toBeNull();
-    expect(techMarkFor("Dbxyz")).toBeNull();
-  });
-
-  it("returns null for an unrecognized label", () => {
-    expect(techMarkFor("Customer")).toBeNull();
-    expect(techMarkFor("Review order summary")).toBeNull();
-  });
-
-  it("is case-insensitive", () => {
-    expect(techMarkFor("REDIS")?.label).toBe("Redis");
-    expect(techMarkFor("postgres")?.label).toBe("PostgreSQL");
   });
 });

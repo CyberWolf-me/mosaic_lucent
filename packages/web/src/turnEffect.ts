@@ -62,6 +62,7 @@ export function turnEffect(ops: readonly Operation[]): TurnEffect {
         break;
       case "CHANGE_TEXT":
       case "CHANGE_NODE_TYPE":
+      case "SET_NODE_ICON":
       case "UPDATE_SHAPE":
       case "SET_ISSUE":
       case "UPDATE_ISSUE":

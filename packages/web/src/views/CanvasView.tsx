@@ -32,6 +32,8 @@ import { VoiceOverlay } from "./VoiceOverlay.js";
 import { StatementGlyph } from "../ui/StatementGlyph.js";
 import { PresentMode } from "./PresentMode.js";
 import { PenLayer } from "./PenLayer.js";
+import { preloadIcons } from "../icons/registry.js";
+import { nodeIconRefs } from "../icons/exportSvg.js";
 import { MarqueeLayer } from "./MarqueeLayer.js";
 import { cullRect, visibleShapes } from "../board/culling.js";
 import { ShapeDrawLayer } from "./ShapeDrawLayer.js";
@@ -1780,7 +1782,9 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
   }, [objectCount]);
 
   // Export the current board (nodes + shapes) as a downloadable SVG snapshot.
-  const exportSvg = useCallback(() => {
+  // Icons first: culled cards never loaded theirs, and the export is sync.
+  const exportSvg = useCallback(async () => {
+    await preloadIcons(nodeIconRefs(Object.values(workspace.nodes)));
     const svg = buildBoardSvg(workspace);
     const blob = new Blob([svg], { type: "image/svg+xml" });
     const url = URL.createObjectURL(blob);
@@ -1793,7 +1797,8 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
   }, [workspace, projectName, notify]);
 
   // Rasterize the SVG snapshot to a PNG via an offscreen canvas.
-  const exportPng = useCallback(() => {
+  const exportPng = useCallback(async () => {
+    await preloadIcons(nodeIconRefs(Object.values(workspace.nodes)));
     const svg = buildBoardSvg(workspace);
     const svgBlob = new Blob([svg], { type: "image/svg+xml" });
     const url = URL.createObjectURL(svgBlob);
@@ -1913,7 +1918,8 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
   // host element avoids the cross-origin script path entirely: the SVG lives in
   // a sandboxed document that the parent can't talk to, and the print dialog is
   // triggered programmatically on its `contentWindow`.
-  const exportPdf = useCallback(() => {
+  const exportPdf = useCallback(async () => {
+    await preloadIcons(nodeIconRefs(Object.values(workspace.nodes)));
     const svg = buildBoardSvg(workspace);
     const host = document.createElement("div");
     host.style.position = "fixed";

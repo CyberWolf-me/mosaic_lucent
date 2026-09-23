@@ -75,6 +75,7 @@ export function applyOperation(workspace: Workspace, op: Operation): Workspace {
         // Creation evidence (Stage C2): stored once, untouched by every later
         // op. A node's origin is not part of its mutable state.
         ...(op.provenance ? { provenance: op.provenance } : {}),
+        ...(op.icon ? { icon: op.icon } : {}),
       };
       if (op.groupId) {
         const group = next.groups[op.groupId];
@@ -132,6 +133,15 @@ export function applyOperation(workspace: Workspace, op: Operation): Workspace {
     case "CHANGE_NODE_TYPE": {
       const node = next.nodes[op.id];
       if (node) next.nodes[op.id] = { ...node, nodeType: op.nodeType };
+      break;
+    }
+
+    case "SET_NODE_ICON": {
+      const node = next.nodes[op.id];
+      if (node) {
+        const { icon: _prev, ...rest } = node;
+        next.nodes[op.id] = op.icon === null ? rest : { ...rest, icon: op.icon };
+      }
       break;
     }
 

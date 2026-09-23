@@ -498,6 +498,117 @@ body:has(.node-inspector) .minimap {
   font-size: 12px;
   color: var(--madder);
 }
+
+/* The icon section (docs/26 §6.2): what the node shows, and the picker. */
+.ni-icon-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.ni-icon-current {
+  flex-shrink: 0;
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 9px;
+  color: var(--ink-1);
+  background: var(--paper-0);
+  border: 1px solid oklch(from var(--paper-4) l c h / 0.7);
+}
+.ni-icon-current .node-icon {
+  display: inline-flex;
+}
+.ni-icon-what {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.ni-icon-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12.5px;
+  color: var(--ink-0);
+  text-transform: capitalize;
+}
+.ni-icon-source {
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--ink-3);
+}
+.ni-icon-buttons {
+  display: flex;
+  gap: 2px;
+  flex-shrink: 0;
+}
+.ni-icon-note {
+  margin: 8px 0 0;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--ink-3);
+}
+.ni-icon-note a {
+  color: var(--ink-2);
+}
+.ni-icon-picker {
+  margin-top: 10px;
+}
+.ni-icon-search {
+  width: 100%;
+  padding: 7px 9px;
+  border-radius: 8px;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--ink-0);
+  background: var(--paper-0);
+  border: 1px solid oklch(from var(--paper-4) l c h / 0.8);
+}
+.ni-icon-search:focus-visible {
+  outline: none;
+  border-color: var(--bloom-2);
+  box-shadow: 0 0 0 3px var(--bloom-wash);
+}
+.ni-icon-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(36px, 1fr));
+  gap: 4px;
+  margin-top: 8px;
+  max-height: 208px;
+  overflow-y: auto;
+}
+.ni-icon-choice {
+  aspect-ratio: 1;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border-radius: 8px;
+  color: var(--ink-1);
+  background: transparent;
+  border: 1px solid transparent;
+  cursor: pointer;
+}
+.ni-icon-choice:hover {
+  background: var(--paper-2);
+  border-color: oklch(from var(--paper-4) l c h / 0.7);
+}
+.ni-icon-choice:focus-visible {
+  outline: none;
+  border-color: var(--bloom-2);
+  box-shadow: 0 0 0 3px var(--bloom-wash);
+}
+.ni-icon-choice.is-selected {
+  border-color: var(--bloom-2);
+  background: oklch(from var(--bloom-1) l c h / 0.08);
+}
+.ni-icon-loading {
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+  background: var(--paper-3);
+}
 @media (prefers-reduced-motion: reduce) {
   .node-inspector {
     animation: none;

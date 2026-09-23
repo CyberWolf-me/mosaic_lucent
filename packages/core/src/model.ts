@@ -48,6 +48,13 @@ export interface Node {
    */
   pinned?: boolean;
   /**
+   * An icon from the registry (docs/26 §6.2): `iconoir:<name>` for a concept,
+   * `simple:<slug>` for a brand mark ("simple:postgresql"). Absent means the
+   * renderer derives one from the label, if any; set means someone chose it.
+   * Presentation-only: it never changes the node's size or the layout.
+   */
+  icon?: string;
+  /**
    * Optional work-tracking fields (Jira-style). Present when a node represents a
    * unit of work rather than a diagram element, so the same semantic node can be
    * shown as an architecture box or as a Kanban card. All fields optional so a

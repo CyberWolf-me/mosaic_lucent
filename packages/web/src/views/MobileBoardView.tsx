@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { buildBoardSvg } from "../board/geometry.js";
+import { nodeIconRefs } from "../icons/exportSvg.js";
+import { preloadIcons } from "../icons/registry.js";
 import { useWorkspace } from "../workspace.js";
 import { Ico } from "../ui/icons.js";
 
@@ -40,7 +42,22 @@ export function isMobileViewport(
 export function MobileBoardView(): React.ReactElement {
   const { workspace, boardId, syncStatus, peers, applyManual, readOnly, projectName } =
     useWorkspace();
-  const svg = useMemo(() => buildBoardSvg(workspace), [workspace]);
+  // The mobile board is the SVG export, which draws only loaded icons: warm
+  // this board's buckets, then redraw once with them (docs/26 §6.2).
+  const [iconsLoaded, setIconsLoaded] = useState(0);
+  useEffect(() => {
+    let live = true;
+    void preloadIcons(nodeIconRefs(Object.values(workspace.nodes))).then(() => {
+      if (live) setIconsLoaded((n) => n + 1);
+    });
+    return () => {
+      live = false;
+    };
+  }, [workspace.nodes]);
+  // iconsLoaded is the recompute signal: the export reads icons from the
+  // registry's module cache, which React can't see change.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const svg = useMemo(() => buildBoardSvg(workspace), [workspace, iconsLoaded]);
   const [scale, setScale] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [isPanning, setIsPanning] = useState(false);

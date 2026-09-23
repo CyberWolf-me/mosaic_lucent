@@ -248,6 +248,14 @@ generated from it, so a new family is an additive change.
   logos remain their owners' trademarks — used only to identify the named
   product, never as Lucent branding; the picker links each brand's guidelines.
 
+**Status (2026-09-24):** built — the generated registry (Iconoir 7.12 +
+Simple Icons 16.32, hash-bucketed, loaded on demand), `node.icon` with
+`CREATE_NODE.icon` and `SET_NODE_ICON`, automatic icons from labels (replacing
+`techMarks.tsx`), the inspector's icon picker, prompt v13, and icons in the
+SVG/PNG/PDF export and the mobile board (ADR 0043). The standalone icon shape
+folds into V2: "icon → vector" makes a registry glyph an editable `vector`
+shape, so there is one recolourable vector object, not two.
+
 ### 6.3 Vector Studio — SVG as a first-class, editable object
 
 **Model.** A new shape kind `vector` holding **structured paths, not markup**:
