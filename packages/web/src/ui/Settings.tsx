@@ -30,6 +30,16 @@ import type {
 } from "../billing.js";
 import { buildSupportReport, formatSupportReport } from "../support.js";
 import { useWorkspaceOptional } from "../workspace.js";
+import {
+  fetchOrg,
+  inviteToOrg,
+  listOrgInvites,
+  loadOrgs,
+  revokeOrgInvite,
+  type OrgDetail,
+  type OrgInvite,
+  type OrgSummary as OrgMembership,
+} from "../orgs.js";
 
 /** Profile menu, preferences modal, and shape toolbar. Ported from settings.jsx. */
 
@@ -1029,40 +1039,185 @@ export function SettingsModal({
             </>
           )}
 
-          {section === "team" && (
-            <>
-              <h2>Workspace members</h2>
-              <div className="subtitle">4 people in Personal.</div>
-              <div className="setting-row">
-                <div className="label" style={{ marginBottom: 12 }}>
-                  Invite by email
-                </div>
-                <div style={{ display: "flex", gap: 8 }}>
-                  <input
-                    placeholder="name@company.com"
-                    style={{
-                      flex: 1,
-                      padding: "9px 12px",
-                      background: "var(--paper-1)",
-                      border: "1px solid oklch(from var(--paper-4) l c h / 0.6)",
-                      borderRadius: 8,
-                      fontSize: 13,
-                      color: "var(--ink-0)",
-                    }}
-                  />
-                  <button className="btn primary" style={{ padding: "0 18px" }}>
-                    Send invite
-                  </button>
-                </div>
-              </div>
-            </>
-          )}
+          {section === "team" && <TeamPane />}
 
           {section === "billing" && <BillingPane />}
 
           {section === "support" && <SupportPane />}
         </div>
       </div>
+    </>
+  );
+}
+
+/**
+ * The team pane: the current workspace's real members, and — for an owner —
+ * a working invite (POST /api/orgs/:id/invites) with the pending list and
+ * revoke. It replaced a pane that said "4 people in Personal" to everyone and
+ * whose Send invite button did nothing.
+ */
+function TeamPane() {
+  const [org, setOrg] = useState<OrgMembership | null>(null);
+  const [detail, setDetail] = useState<OrgDetail | null>(null);
+  const [invites, setInvites] = useState<OrgInvite[]>([]);
+  const [status, setStatus] = useState<"loading" | "ready" | "signed-out" | "error">("loading");
+  const [email, setEmail] = useState("");
+  const [role, setRole] = useState<"editor" | "viewer">("editor");
+  const [sending, setSending] = useState(false);
+  const [note, setNote] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
+
+  const load = async () => {
+    if (!getSessionUser()) {
+      setStatus("signed-out");
+      return;
+    }
+    try {
+      const { current } = await loadOrgs();
+      setOrg(current);
+      if (!current) {
+        setStatus("ready");
+        return;
+      }
+      const d = await fetchOrg(current.id);
+      setDetail(d);
+      setInvites(d?.role === "owner" ? await listOrgInvites(current.id) : []);
+      setStatus("ready");
+    } catch {
+      setStatus("error");
+    }
+  };
+
+  useEffect(() => {
+    void load();
+  }, []);
+
+  const isOwner = detail?.role === "owner";
+
+  const send = async () => {
+    if (!org || !email.includes("@")) return;
+    setSending(true);
+    setNote(null);
+    const res = await inviteToOrg(org.id, email.trim(), role);
+    setSending(false);
+    if (!res.ok) {
+      setNote({ tone: "error", text: res.error });
+      return;
+    }
+    setNote({ tone: "ok", text: `Invite sent to ${email.trim()}. It expires in 7 days.` });
+    setEmail("");
+    setInvites(await listOrgInvites(org.id));
+  };
+
+  const revoke = async (id: string) => {
+    if (!org) return;
+    const res = await revokeOrgInvite(org.id, id);
+    if (!res.ok) setNote({ tone: "error", text: res.error });
+    setInvites(await listOrgInvites(org.id));
+  };
+
+  return (
+    <>
+      <h2>Workspace members</h2>
+      {status === "loading" && <div className="subtitle">Loading members…</div>}
+      {status === "signed-out" && (
+        <div className="subtitle">Sign in to see who is in your workspace and invite people.</div>
+      )}
+      {status === "error" && (
+        <div className="subtitle" role="alert">
+          Couldn't load your workspace. Check your connection and reopen this pane.
+        </div>
+      )}
+      {status === "ready" && !org && (
+        <div className="subtitle">You aren't a member of any workspace yet.</div>
+      )}
+      {status === "ready" && org && (
+        <>
+          <div className="subtitle">
+            {detail
+              ? `${detail.members.length} ${detail.members.length === 1 ? "person" : "people"} in ${org.name}.`
+              : org.name}
+          </div>
+          {detail && (
+            <div className="setting-row">
+              {detail.members.map((m) => (
+                <div key={m.userId} className="team-member">
+                  <div className="avatar" aria-hidden>
+                    {initialsFor(m.name || m.email)}
+                  </div>
+                  <div className="team-member-who">
+                    <div className="team-member-name">{m.name || m.email}</div>
+                    <div className="team-member-email">{m.email}</div>
+                  </div>
+                  <span className="team-member-role">{m.role}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          {isOwner ? (
+            <div className="setting-row">
+              <div className="label" style={{ marginBottom: 10 }}>
+                Invite by email
+              </div>
+              <form
+                className="team-invite"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  void send();
+                }}
+              >
+                <input
+                  type="email"
+                  required
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="name@company.com"
+                  aria-label="Email to invite"
+                />
+                <select
+                  value={role}
+                  onChange={(e) => setRole(e.target.value as "editor" | "viewer")}
+                  aria-label="Role"
+                >
+                  <option value="editor">Editor</option>
+                  <option value="viewer">Viewer</option>
+                </select>
+                <button className="btn primary" type="submit" disabled={sending || !email.includes("@")}>
+                  {sending ? "Sending…" : "Send invite"}
+                </button>
+              </form>
+              {note && (
+                <div className={`team-note ${note.tone}`} role={note.tone === "error" ? "alert" : "status"}>
+                  {note.text}
+                </div>
+              )}
+              {invites.length > 0 && (
+                <div className="team-pending">
+                  <div className="label">Pending invites</div>
+                  {invites.map((i) => (
+                    <div key={i.id} className="team-member">
+                      <div className="team-member-who">
+                        <div className="team-member-name">{i.email}</div>
+                        <div className="team-member-email">
+                          {i.role} · expires {new Date(i.expiresAt).toLocaleDateString()}
+                        </div>
+                      </div>
+                      <button className="btn ghost" type="button" onClick={() => void revoke(i.id)}>
+                        Revoke
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="setting-row">
+              <div className="subtitle" style={{ margin: 0 }}>
+                Only the workspace's owners can invite people.
+              </div>
+            </div>
+          )}
+        </>
+      )}
     </>
   );
 }

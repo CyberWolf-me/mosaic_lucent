@@ -1,11 +1,28 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  applyLayout,
+  applyOperations,
+  computeLayout,
+  createWorkspace,
+  statementNodes,
+  type DiagramKind,
+  type StatementFields,
+  type Workspace,
+} from "@lucent/core";
 import { Ico } from "../ui/icons.js";
-import { ProfileMenu } from "../ui/ProfileMenu.js";
-import { NotificationTray } from "../ui/NotificationTray.js";
-import { useWorkspace } from "../workspace.js";
-import { listProjects, loadProject, type ProjectMeta } from "../persistence.js";
+import { Button, Card, EmptyState, FilterChips, Page, PageHeader, type FilterItem } from "../ui/kit.js";
+import { StatementGlyph } from "../ui/StatementGlyph.js";
+import { Dialog } from "../ui/primitives.js";
+import { reviewWorkspace, useWorkspace } from "../workspace.js";
+import {
+  boardIdOfMirror,
+  deleteProject,
+  listProjects,
+  loadProject,
+  mirrorProjectId,
+  saveProject,
+} from "../persistence.js";
 import { MiniPreview, type MiniKind } from "./MiniPreview.js";
-import { createWorkspace, applyOperations, type DiagramKind } from "@lucent/core";
 import { csvToStickyOps } from "../board/serialize.js";
 import {
   classifyImport,
@@ -15,74 +32,176 @@ import {
   svgToOps,
 } from "../board/importers.js";
 import { useToast } from "../ui/Toast.js";
-import { getSessionUser, hasSession } from "../session.js";
-import { loadOrgs, type OrgSummary } from "../orgs.js";
+import { hasSession } from "../session.js";
+import { loadOrgs, setCurrentOrgId, type OrgSummary } from "../orgs.js";
 import { listBoards, type BoardSummary } from "../boards.js";
-import { TEMPLATES } from "../templates.js";
+import { KIND_TINT, statementIsHistory } from "../statementUi.js";
+import { TEMPLATES, type Template } from "../templates.js";
 
-/** Project dashboard, ported from reference/screen_dashboard.jsx and wired to
- * real localStorage projects plus cloud boards and sample templates. */
+/**
+ * Boards — every board this person can open, in one grid (Atelier, fig. 12).
+ *
+ * Three sources, each labelled for what it is: projects saved in this browser
+ * (`persistence`), the active org's server boards and the boards shared with
+ * this user (`listBoards`). Local boards are read whole from localStorage, so
+ * their cards carry a real sketch of the board and a real count of what it
+ * has decided and left open; server boards are NOT fetched one by one, so
+ * their cards say only what the list endpoint says.
+ */
 
-interface DisplayProject extends ProjectMeta {
-  kind: string;
-  mini: MiniKind;
-  nodes: number;
-  accent?: boolean;
-  isCloud?: boolean;
-  isShared?: boolean;
-  isTemplate?: boolean;
-  templateId?: string;
+/** Where a card's board lives. `copy` is this browser's autosave of a server board. */
+type Scope = "local" | "team" | "shared" | "copy";
+
+type Filter = "all" | "local" | "team" | "shared" | "templates";
+
+interface StatementTally {
+  /** Current decisions: pending or decided, not rejected/superseded. */
+  decisions: number;
+  decided: number;
+  openQuestions: number;
+  openRisks: number;
+  openActions: number;
 }
 
-const DIAGRAM_TO_KIND: Record<DiagramKind, { kind: string; mini: MiniKind }> = {
-  flowchart: { kind: "Flows", mini: "flow" },
-  architecture: { kind: "Architecture", mini: "arch" },
-  mindmap: { kind: "Mind maps", mini: "mind" },
-  journey: { kind: "User journeys", mini: "journey" },
-  decisiontree: { kind: "Decision trees", mini: "flow" },
-  process: { kind: "Process maps", mini: "flow" },
-  orgchart: { kind: "Org charts", mini: "mind" },
-  bpmn: { kind: "BPMN processes", mini: "flow" },
+interface BoardEntry {
+  /** Local project id, or the server board id for team/shared boards. */
+  id: string;
+  name: string;
+  updatedAt: number;
+  scope: Scope;
+  /** Server board a `copy` belongs to. */
+  boardId?: string;
+  nodes: number;
+  /** Manual-layer objects (stickies, frames…), when the workspace was read. */
+  shapes?: number;
+  /** Singular diagram kind, when the workspace was read. */
+  kind?: string;
+  sketch: Sketch | null;
+  /** Only for boards read from this browser; absent means "not known here". */
+  tally?: StatementTally;
+}
+
+const KIND_NAME: Record<DiagramKind, string> = {
+  flowchart: "Flowchart",
+  architecture: "Architecture",
+  mindmap: "Mind map",
+  journey: "User journey",
+  decisiontree: "Decision tree",
+  process: "Process map",
+  orgchart: "Org chart",
+  bpmn: "BPMN process",
+};
+
+const SCOPE_BADGE: Record<Scope, { label: string; title: string }> = {
+  local: { label: "Local", title: "Saved in this browser only" },
+  team: { label: "Team", title: "Stored on the server for your workspace" },
+  shared: { label: "Shared", title: "Shared with you by someone else" },
+  copy: {
+    label: "Offline copy",
+    title: "This browser's copy of a server board that isn't in the list right now",
+  },
 };
 
 export function DashboardView({ onOpenSettings }: { onOpenSettings: (section?: string) => void }) {
-  const { newProject, openProject, openBoard, importWorkspace, setView } = useWorkspace();
+  const {
+    newProject,
+    openProject,
+    openBoard,
+    importWorkspace,
+    projectId,
+    boardId: openBoardId,
+    setProjectName,
+  } = useWorkspace();
   const { notify } = useToast();
-  const [filter, setFilter] = useState("all");
+  const [filter, setFilter] = useState<Filter>("all");
+  const [kindFilter, setKindFilter] = useState("all");
   const [search, setSearch] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
+  const templatesRef = useRef<HTMLDivElement>(null);
 
+  const [orgs, setOrgs] = useState<OrgSummary[]>([]);
   const [currentOrg, setCurrentOrg] = useState<OrgSummary | null>(null);
   const [cloudBoards, setCloudBoards] = useState<BoardSummary[]>([]);
   const [sharedBoards, setSharedBoards] = useState<BoardSummary[]>([]);
+  // "idle" when signed out: there is no server list to wait for.
+  const [cloudState, setCloudState] = useState<"idle" | "loading" | "ready" | "offline">(() =>
+    hasSession() ? "loading" : "idle",
+  );
+
+  // Bumped after a rename/delete so the localStorage read runs again.
+  const [localRev, setLocalRev] = useState(0);
+  const [renaming, setRenaming] = useState<BoardEntry | null>(null);
+  const [renameDraft, setRenameDraft] = useState("");
+  const [deleting, setDeleting] = useState<BoardEntry | null>(null);
 
   useEffect(() => {
-    let cancelled = false;
     if (!hasSession()) return;
+    let cancelled = false;
     void (async () => {
       try {
-        const { current } = await loadOrgs();
+        const { orgs: list, current } = await loadOrgs();
         if (cancelled) return;
+        setOrgs(list);
         setCurrentOrg(current);
-        if (current) {
-          const [orgBoards, shared] = await Promise.all([
-            listBoards(current.id),
-            listBoards(current.id, "shared"),
-          ]);
-          if (!cancelled) {
-            setCloudBoards(orgBoards);
-            const orgBoardIds = new Set(orgBoards.map((b) => b.id));
-            setSharedBoards(shared.filter((b) => !orgBoardIds.has(b.id)));
-          }
-        }
+        if (!current) setCloudState("ready");
       } catch {
-        /* offline or backend unavailable: local projects remain accessible */
+        // Offline or backend unavailable: local boards remain accessible.
+        if (!cancelled) setCloudState("offline");
       }
     })();
     return () => {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (!currentOrg) return;
+    let cancelled = false;
+    setCloudState("loading");
+    void (async () => {
+      try {
+        const [orgBoards, shared] = await Promise.all([
+          listBoards(currentOrg.id),
+          listBoards(currentOrg.id, "shared"),
+        ]);
+        if (cancelled) return;
+        setCloudBoards(orgBoards);
+        const orgBoardIds = new Set(orgBoards.map((b) => b.id));
+        setSharedBoards(shared.filter((b) => !orgBoardIds.has(b.id)));
+        setCloudState("ready");
+      } catch {
+        if (!cancelled) setCloudState("offline");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [currentOrg]);
+
+  const switchOrg = (id: string) => {
+    const next = orgs.find((o) => o.id === id);
+    if (!next || next.id === currentOrg?.id) return;
+    setCurrentOrgId(next.id);
+    setCloudBoards([]);
+    setSharedBoards([]);
+    setCurrentOrg(next);
+  };
+
+  /**
+   * Hand a board to the workspace only once it passes the same schema check
+   * importWorkspace applies. That check's refusal is otherwise written into
+   * the canvas chat — on this page, where the chat isn't shown, a refused
+   * import or template looked like a button that did nothing.
+   */
+  const adopt = (ws: unknown, name: string, what: string): boolean => {
+    const review = reviewWorkspace(ws, what);
+    if (!review.workspace) {
+      notify(review.error ?? `${what} isn't a valid Lucent board.`);
+      return false;
+    }
+    importWorkspace(review.workspace, name);
+    return true;
+  };
 
   const onImportFile = (file: File) => {
     const reader = new FileReader();
@@ -98,7 +217,7 @@ export function DashboardView({ onOpenSettings }: { onOpenSettings: (section?: s
           // Accept either a raw workspace or a saved project { workspace }.
           const ws = data.workspace ?? data;
           if (ws && typeof ws === "object" && ws.nodes) {
-            importWorkspace(ws, name);
+            adopt(ws, name, "That file");
             return;
           }
           notify("That JSON doesn't look like a Lucent board.");
@@ -138,7 +257,7 @@ export function DashboardView({ onOpenSettings }: { onOpenSettings: (section?: s
         return;
       }
 
-      importWorkspace(applyOperations(createWorkspace({ name }), ops), name);
+      if (!adopt(applyOperations(createWorkspace({ name }), ops), name, "That file")) return;
       notify(`Imported ${ops.length} object${ops.length > 1 ? "s" : ""} from ${file.name}.`);
     };
 
@@ -147,549 +266,885 @@ export function DashboardView({ onOpenSettings }: { onOpenSettings: (section?: s
     reader.readAsText(file);
   };
 
-  const localSaved: DisplayProject[] = useMemo(() => {
-    return listProjects().map((p) => {
-      const data = loadProject(p.id);
-      const ws = data?.workspace;
-      const mapped = ws
-        ? DIAGRAM_TO_KIND[ws.diagramKind]
-        : { kind: "Workspace", mini: "arch" as MiniKind };
-      return {
-        ...p,
-        kind: mapped.kind,
-        mini: mapped.mini,
-        nodes: ws ? Object.keys(ws.nodes).length : 0,
-        isCloud: false,
-      };
-    });
-  }, []);
+  const localBoards: BoardEntry[] = useMemo(() => {
+    // `localRev` is the re-read trigger after a rename or delete.
+    void localRev;
+    return readLocalBoards();
+  }, [localRev]);
 
-  const allCloudProjects: DisplayProject[] = useMemo(() => {
-    const combined: BoardSummary[] = [...cloudBoards, ...sharedBoards];
+  const serverBoards: BoardEntry[] = useMemo(() => {
+    const list: BoardEntry[] = [];
     const seen = new Set<string>();
-    const list: DisplayProject[] = [];
-    for (const b of combined) {
-      if (seen.has(b.id)) continue;
+    const add = (b: BoardSummary, scope: Scope) => {
+      if (seen.has(b.id)) return;
       seen.add(b.id);
-      const isShared = sharedBoards.some((sb) => sb.id === b.id);
+      // This browser's autosave of the board, when it has one, supplies the
+      // thumbnail. Its statement counts are NOT shown: the copy can be behind
+      // the server, and a stale "2 open questions" would read as current.
+      const copy = loadProject(mirrorProjectId(b.id))?.workspace;
       list.push({
         id: b.id,
         name: b.name,
         updatedAt: b.updatedAt,
-        kind: "Workspace",
-        mini: "arch",
+        scope,
         nodes: b.nodes ?? 0,
-        isCloud: true,
-        isShared,
+        sketch: copy ? sketchOf(copy) : null,
       });
-    }
+    };
+    for (const b of cloudBoards) add(b, "team");
+    for (const b of sharedBoards) add(b, "shared");
     return list;
   }, [cloudBoards, sharedBoards]);
 
-  const projects: DisplayProject[] = useMemo(() => {
-    const cloudIds = new Set(allCloudProjects.map((p) => p.id));
-    const localOnly = localSaved.filter((p) => !cloudIds.has(p.id));
-    return [...allCloudProjects, ...localOnly].sort((a, b) => b.updatedAt - a.updatedAt);
-  }, [allCloudProjects, localSaved]);
+  const boards: BoardEntry[] = useMemo(() => {
+    const serverIds = new Set(serverBoards.map((b) => b.id));
+    // A local copy of a board the server list already shows is the same board;
+    // listing both put every opened team board on the grid twice.
+    const locals = localBoards.filter(
+      (p) => !serverIds.has(p.id) && !(p.boardId && serverIds.has(p.boardId)),
+    );
+    return [...serverBoards, ...locals].sort((a, b) => b.updatedAt - a.updatedAt);
+  }, [serverBoards, localBoards]);
 
-  const templateProjects: DisplayProject[] = useMemo(() => {
-    return TEMPLATES.map((t) => ({
-      id: `tpl_${t.id}`,
-      name: t.name,
-      updatedAt: Date.now(),
-      kind: t.kind,
-      mini: (t.id === "mindmap-seed" ? "mind" : t.id === "swot" ? "arch" : "flow") as MiniKind,
-      nodes: 0,
-      accent: true,
-      isTemplate: true,
-      templateId: t.id,
-    }));
-  }, []);
+  const templates = useMemo(() => TEMPLATES.map(templateEntry), []);
 
-  const filtered = useMemo(() => {
-    let list = projects;
-    if (filter === "recents") list = list.slice(0, 6);
-    else if (filter === "shared") list = projects.filter((p) => p.isShared);
-    else if (filter === "templates") list = templateProjects;
-    else if (!["all", "recents", "shared", "templates"].includes(filter)) {
-      list = projects.filter((p) => p.kind === filter);
+  const counts = useMemo(() => {
+    const c = { local: 0, team: 0, shared: 0 };
+    for (const b of boards) {
+      if (b.scope === "local" || b.scope === "copy") c.local += 1;
+      else c[b.scope] += 1;
     }
-    if (search) {
-      const q = search.toLowerCase();
+    return c;
+  }, [boards]);
+
+  const kinds = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const b of boards) if (b.kind) m.set(b.kind, (m.get(b.kind) ?? 0) + 1);
+    return [...m.entries()].sort((a, b) => b[1] - a[1]);
+  }, [boards]);
+
+  const localTotals = useMemo(() => {
+    const t = { decisions: 0, openQuestions: 0 };
+    for (const b of boards) {
+      if (!b.tally) continue;
+      t.decisions += b.tally.decisions;
+      t.openQuestions += b.tally.openQuestions;
+    }
+    return t;
+  }, [boards]);
+
+  const q = search.trim().toLowerCase();
+  const filtered = useMemo(() => {
+    let list = boards;
+    if (filter === "local") list = list.filter((b) => b.scope === "local" || b.scope === "copy");
+    else if (filter === "team") list = list.filter((b) => b.scope === "team");
+    else if (filter === "shared") list = list.filter((b) => b.scope === "shared");
+    if (kindFilter !== "all") list = list.filter((b) => b.kind === kindFilter);
+    if (q) {
       list = list.filter(
-        (p) => p.name.toLowerCase().includes(q) || p.kind.toLowerCase().includes(q),
+        (b) => b.name.toLowerCase().includes(q) || (b.kind ?? "").toLowerCase().includes(q),
       );
     }
     return list;
-  }, [filter, search, projects, templateProjects]);
+  }, [boards, filter, kindFilter, q]);
 
-  const sidebarTop = [
-    { id: "all", label: "All projects", count: projects.length, icon: <Ico.Grid /> },
-    { id: "recents", label: "Recents", count: Math.min(projects.length, 6), icon: <Ico.History /> },
-    { id: "shared", label: "Shared", count: sharedBoards.length, icon: <Ico.Share /> },
-    { id: "templates", label: "Templates", count: TEMPLATES.length, icon: <Ico.Book /> },
-  ];
-  const byArtifact = [
-    { id: "Architecture", label: "Architecture", icon: <Ico.Layers /> },
-    { id: "User journeys", label: "User journeys", icon: <Ico.Journey /> },
-    { id: "Flows", label: "Flows", icon: <Ico.Flow /> },
-    { id: "Wireframes", label: "Wireframes", icon: <Ico.Grid /> },
-    { id: "Mind maps", label: "Mind maps", icon: <Ico.Mind /> },
-    { id: "Sequence", label: "Sequence", icon: <Ico.Flow /> },
-  ];
+  const filteredTemplates = useMemo(
+    () =>
+      q
+        ? templates.filter(
+            (t) => t.name.toLowerCase().includes(q) || t.kind.toLowerCase().includes(q),
+          )
+        : templates,
+    [templates, q],
+  );
 
-  const open = async (p: DisplayProject) => {
-    if (p.isTemplate && p.templateId) {
-      const template = TEMPLATES.find((t) => t.id === p.templateId);
-      if (template) {
-        const ops = template.build();
-        const ws = applyOperations(createWorkspace({ name: template.name }), ops);
-        importWorkspace(ws, template.name);
-      }
+  const openEntry = async (b: BoardEntry) => {
+    if (b.scope === "local") {
+      openProject(b.id);
       return;
     }
-    if (p.isCloud) {
-      const ok = await openBoard(p.id);
-      if (!ok) {
-        openProject(p.id);
-      }
+    // A server board is opened live (its realtime room), never from the local
+    // copy: opening the copy as a local project used to leave the shared
+    // session and fork the board silently.
+    const serverId = b.scope === "copy" ? b.boardId! : b.id;
+    let ok = false;
+    try {
+      ok = await openBoard(serverId);
+    } catch {
+      ok = false;
+    }
+    if (ok) return;
+    const localSlot = b.scope === "copy" ? b.id : mirrorProjectId(b.id);
+    if (loadProject(localSlot)) {
+      openProject(localSlot);
+      notify("Couldn't reach that board on the server — opened this browser's copy.");
     } else {
-      openProject(p.id);
+      notify("That board isn't available to you any more.");
     }
   };
 
-  const user = getSessionUser();
-  const firstName = user?.name ? user.name.trim().split(/\s+/)[0] : "there";
-  const hour = new Date().getHours();
-  const timeGreeting = hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
+  const startFromTemplate = (t: Template) => {
+    const ws = applyOperations(createWorkspace({ name: t.name }), t.build());
+    adopt(ws, t.name, `The ${t.name} template`);
+  };
+
+  const showTemplates = () => {
+    setFilter("templates");
+    // After the grid swaps in; focus the section so keyboard users land on it.
+    window.requestAnimationFrame(() => templatesRef.current?.focus());
+  };
+
+  const commitRename = () => {
+    if (!renaming) return;
+    const next = renameDraft.trim();
+    if (!next || next === renaming.name) {
+      setRenaming(null);
+      return;
+    }
+    if (renaming.id === projectId) setProjectName(next);
+    const data = loadProject(renaming.id);
+    if (data) {
+      const { updatedAt: _updatedAt, ...record } = data;
+      saveProject({ ...record, name: next });
+    }
+    setRenaming(null);
+    setLocalRev((r) => r + 1);
+    notify(`Renamed to “${next}”.`);
+  };
+
+  const commitDelete = () => {
+    if (!deleting) return;
+    deleteProject(deleting.id);
+    notify(`Deleted “${deleting.name}”.`);
+    setDeleting(null);
+    setLocalRev((r) => r + 1);
+  };
+
+  const orgLabel = currentOrg?.name ?? "Personal";
+  const filterItems: FilterItem<Filter>[] = [
+    { id: "all", label: "All", count: boards.length },
+    ...(counts.local > 0
+      ? [{ id: "local" as const, label: "On this device", count: counts.local }]
+      : []),
+    ...(counts.team > 0 ? [{ id: "team" as const, label: "Team", count: counts.team }] : []),
+    ...(counts.shared > 0
+      ? [{ id: "shared" as const, label: "Shared with me", count: counts.shared }]
+      : []),
+    { id: "templates", label: "Templates", count: TEMPLATES.length },
+  ];
+
+  const lede =
+    boards.length === 0 && cloudState === "loading"
+      ? "Looking for your boards…"
+      : boardsLede(boards.length, counts, orgLabel, localTotals);
+  const now = Date.now();
+  const firstRun = boards.length === 0 && cloudState !== "loading";
 
   return (
-    <div
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: "var(--canvas-1)",
-        color: "var(--ink-0)",
-        overflow: "hidden",
-      }}
+    <Page
+      crumbs={[{ label: "Boards", current: true }]}
+      boardScoped={false}
+      onOpenSettings={onOpenSettings}
+      width="wide"
     >
-      <div
-        className="top-bar"
-        style={{ borderBottom: "1px solid var(--stroke-1)", background: "var(--canvas-1)" }}
-      >
-        <button
-          className="brand"
-          onClick={() => setView("dashboard")}
-          title="Home"
-          aria-label="Lucent home"
-          style={{ background: "none", border: 0, padding: 0, cursor: "pointer" }}
-        >
-          <div className="logo" />
-          <span>Lucent</span>
-        </button>
-        <span className="crumb-sep">/</span>
-        <span className="crumb current">{currentOrg?.name ?? "Personal"}</span>
-        <div className="spacer" />
-        <div className="actions">
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-              padding: "5px 12px 5px 10px",
-              background: "var(--canvas-2)",
-              border: "1px solid var(--stroke-1)",
-              borderRadius: 999,
-              width: 240,
-            }}
-          >
-            <Ico.Search style={{ color: "var(--ink-3)" }} />
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search projects…"
-              style={{ flex: 1, fontSize: 12, color: "var(--ink-0)" }}
-            />
-          </div>
-          <input
-            ref={fileRef}
-            type="file"
-            accept=".json,.csv,.tsv,.svg,.pdf,.md,.markdown,.txt,application/json,text/csv,image/svg+xml,application/pdf,text/plain,text/markdown"
-            style={{ display: "none" }}
-            onChange={(e) => {
-              const f = e.target.files?.[0];
-              if (f) onImportFile(f);
-              e.currentTarget.value = "";
-            }}
-          />
-          <button className="icon-btn" onClick={() => fileRef.current?.click()}>
-            <Ico.Attach /> Import
-          </button>
-          <button className="icon-btn primary" onClick={newProject}>
-            <Ico.Plus /> New workspace
-          </button>
-          {/* This view draws its own header instead of going through Chrome, so
-              the tray Chrome mounts for every other surface has to be mounted
-              again here -- otherwise notifications vanish on the one screen a
-              user lands on after following a link from an email. */}
-          <NotificationTray />
-          <ProfileMenu onOpenSettings={onOpenSettings} />
-        </div>
-      </div>
-
-      <div
-        style={{
-          position: "absolute",
-          top: 52,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          display: "grid",
-          gridTemplateColumns: "240px 1fr",
-          overflow: "hidden",
+      <PageHeader
+        eyebrow={`Boards · ${orgLabel}`}
+        title={
+          <>
+            Every board, <em>one memory</em>
+          </>
+        }
+        lede={lede}
+        actions={
+          <>
+            <Button variant="ghost" onClick={() => fileRef.current?.click()}>
+              <Ico.Attach /> Import
+            </Button>
+            <Button variant="ghost" onClick={showTemplates}>
+              <Ico.Book /> From template
+            </Button>
+            <Button variant="primary" onClick={newProject}>
+              <Ico.Plus /> New board
+            </Button>
+          </>
+        }
+      />
+      <input
+        ref={fileRef}
+        type="file"
+        className="boards-file"
+        tabIndex={-1}
+        aria-hidden="true"
+        accept=".json,.csv,.tsv,.svg,.pdf,.md,.markdown,.txt,application/json,text/csv,image/svg+xml,application/pdf,text/plain,text/markdown"
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f) onImportFile(f);
+          e.currentTarget.value = "";
         }}
-      >
-        <aside
-          style={{
-            borderRight: "1px solid var(--stroke-1)",
-            padding: "18px 12px",
-            background: "var(--canvas-0)",
-            overflowY: "auto",
-          }}
-        >
-          {sidebarTop.map((it) => (
-            <SidebarItem
-              key={it.id}
-              icon={it.icon}
-              label={it.label}
-              count={it.count}
-              active={filter === it.id}
-              onClick={() => setFilter(it.id)}
+      />
+
+      {firstRun && filter !== "templates" ? (
+        <>
+          <EmptyState
+            glyph={<Ico.Folder width={22} height={22} />}
+            title="Your first board starts with a sentence"
+            body="Describe a system, a flow or a decision — typed or spoken — and Lucent builds a board you can edit. Each board shows up here with what it has decided and what is still open."
+            action={
+              <>
+                <Button variant="primary" onClick={newProject}>
+                  <Ico.Plus /> New board
+                </Button>
+                <Button variant="ghost" onClick={() => fileRef.current?.click()}>
+                  <Ico.Attach /> Import a file
+                </Button>
+              </>
+            }
+          />
+          {cloudState === "offline" && <OfflineNote />}
+          <div className="section-label boards-section">
+            <span>Or start from a template</span>
+            <span className="section-count">{templates.length}</span>
+          </div>
+          <TemplateGrid templates={templates} onUse={startFromTemplate} />
+        </>
+      ) : (
+        <>
+          <div className="boards-toolbar">
+            <FilterChips
+              items={filterItems}
+              value={filter}
+              onChange={(id) => setFilter(id)}
+              label="Which boards"
             />
-          ))}
-          <div style={{ height: 20 }} />
-          <div
-            style={{
-              fontFamily: "var(--font-mono)",
-              fontSize: 10,
-              letterSpacing: "0.1em",
-              textTransform: "uppercase",
-              color: "var(--ink-3)",
-              padding: "6px 10px",
-            }}
-          >
-            By artifact
+            <div className="boards-toolbar-end">
+              {orgs.length > 1 && (
+                <label className="boards-select-wrap">
+                  <span className="sr-only">Workspace</span>
+                  <select
+                    className="boards-select"
+                    value={currentOrg?.id ?? ""}
+                    onChange={(e) => switchOrg(e.target.value)}
+                  >
+                    {orgs.map((o) => (
+                      <option key={o.id} value={o.id}>
+                        {o.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+              {filter !== "templates" && kinds.length > 1 && (
+                <label className="boards-select-wrap">
+                  <span className="sr-only">Diagram kind</span>
+                  <select
+                    className="boards-select"
+                    value={kindFilter}
+                    onChange={(e) => setKindFilter(e.target.value)}
+                  >
+                    <option value="all">All kinds</option>
+                    {kinds.map(([k, n]) => (
+                      <option key={k} value={k}>
+                        {k} · {n}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+              <label className="boards-search">
+                <Ico.Search width={13} height={13} aria-hidden="true" />
+                <span className="sr-only">
+                  {filter === "templates" ? "Search templates" : "Search boards"}
+                </span>
+                <input
+                  type="search"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder={filter === "templates" ? "Search templates" : "Search boards"}
+                />
+              </label>
+            </div>
           </div>
-          {byArtifact.map((it) => (
-            <SidebarItem
-              key={it.id}
-              icon={it.icon}
-              label={it.label}
-              active={filter === it.id}
-              onClick={() => setFilter(it.id)}
-              small
+
+          {cloudState === "loading" && (
+            <p className="boards-note" role="status">
+              Loading boards from {orgLabel}…
+            </p>
+          )}
+          {cloudState === "offline" && <OfflineNote />}
+
+          {filter === "templates" ? (
+            <div
+              ref={templatesRef}
+              tabIndex={-1}
+              className="boards-focus-target"
+              aria-label="Templates"
+            >
+              {filteredTemplates.length === 0 ? (
+                <EmptyState
+                  compact
+                  title={`No template matches “${search.trim()}”`}
+                  action={
+                    <Button size="sm" onClick={() => setSearch("")}>
+                      Clear search
+                    </Button>
+                  }
+                />
+              ) : (
+                <TemplateGrid templates={filteredTemplates} onUse={startFromTemplate} />
+              )}
+            </div>
+          ) : filtered.length === 0 && boards.length === 0 && cloudState === "loading" ? null : filtered.length === 0 ? (
+            <EmptyState
+              compact
+              title={q ? `No board matches “${search.trim()}”` : "No boards in this view"}
+              body={
+                q
+                  ? "Search looks at board names and diagram kinds."
+                  : "Switch back to all boards, or start a new one."
+              }
+              action={
+                <>
+                  {q && (
+                    <Button size="sm" onClick={() => setSearch("")}>
+                      Clear search
+                    </Button>
+                  )}
+                  {(filter !== "all" || kindFilter !== "all") && (
+                    <Button
+                      size="sm"
+                      onClick={() => {
+                        setFilter("all");
+                        setKindFilter("all");
+                      }}
+                    >
+                      Show all boards
+                    </Button>
+                  )}
+                </>
+              }
             />
-          ))}
-        </aside>
-
-        <main
-          style={{ overflowY: "auto", padding: "32px 40px 60px", background: "var(--canvas-1)" }}
-        >
-          <div style={{ display: "flex", alignItems: "baseline", gap: 12, marginBottom: 6 }}>
-            <h1
-              style={{
-                fontSize: 30,
-                fontVariationSettings: "'wght' 450",
-                letterSpacing: "-0.025em",
-                color: "var(--ink-0)",
-              }}
-            >
-              {timeGreeting}, {firstName}
-            </h1>
-            <span className="mono" style={{ fontSize: 11, color: "var(--ink-3)" }}>
-              {projects.length} workspaces
-            </span>
-          </div>
-          <p style={{ fontSize: 14, color: "var(--ink-2)", maxWidth: 520 }}>
-            Pick up where you left off, or describe something new and let Lucent build it with you.
-          </p>
-
-          <div
-            style={{
-              marginTop: 22,
-              padding: 18,
-              border: "1px solid var(--stroke-1)",
-              borderRadius: "var(--r-lg)",
-              background: "linear-gradient(180deg, var(--canvas-2), var(--canvas-1))",
-              display: "flex",
-              alignItems: "center",
-              gap: 16,
-            }}
-          >
-            <div
-              style={{
-                width: 40,
-                height: 40,
-                borderRadius: "var(--r-md)",
-                background: "linear-gradient(135deg, var(--amber-2), var(--amber-3))",
-                color: "var(--canvas-0)",
-                display: "grid",
-                placeItems: "center",
-                boxShadow: "0 0 24px -6px var(--amber-glow)",
-              }}
-            >
-              <Ico.Sparkle />
-            </div>
-            <div style={{ flex: 1 }}>
-              <div
-                style={{ fontSize: 14, fontVariationSettings: "'wght' 520", color: "var(--ink-0)" }}
-              >
-                Start a workspace by describing your idea
-              </div>
-              <div style={{ fontSize: 12.5, color: "var(--ink-2)", marginTop: 2 }}>
-                Type or speak — architecture, flow, wireframe, journey, or something new.
-              </div>
-            </div>
-            <button
-              onClick={newProject}
-              className="icon-btn primary"
-              style={{ padding: "9px 16px", gap: 6 }}
-            >
-              New workspace <Ico.Arrow />
-            </button>
-          </div>
-
-          <div
-            style={{
-              marginTop: 32,
-              marginBottom: 12,
-              display: "flex",
-              alignItems: "baseline",
-              gap: 12,
-            }}
-          >
-            <h2
-              style={{ fontSize: 15, fontVariationSettings: "'wght' 520", color: "var(--ink-0)" }}
-            >
-              Recent workspaces
-            </h2>
-            <span
-              className="mono"
-              style={{
-                fontSize: 10.5,
-                color: "var(--ink-3)",
-                letterSpacing: "0.05em",
-                textTransform: "uppercase",
-              }}
-            >
-              {filtered.length} projects
-            </span>
-          </div>
-
-          {filtered.length === 0 ? (
-            <div
-              style={{
-                padding: "60px 40px",
-                textAlign: "center",
-                border: "1px dashed var(--stroke-1)",
-                borderRadius: 12,
-                background: "var(--canvas-0)",
-              }}
-            >
-              <div
-                style={{
-                  fontSize: 15,
-                  color: "var(--ink-0)",
-                  fontVariationSettings: "'wght' 500",
-                  marginBottom: 6,
-                }}
-              >
-                Nothing here yet
-              </div>
-              <div style={{ fontSize: 13, color: "var(--ink-2)", marginBottom: 18 }}>
-                Describe something new and Lucent will build it.
-              </div>
-              <button className="icon-btn primary" onClick={newProject}>
-                <Ico.Plus /> New workspace
-              </button>
-            </div>
           ) : (
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))",
-                gap: 14,
-              }}
-            >
-              {filtered.map((p) => (
-                <ProjectCard key={p.id} project={p} onOpen={() => open(p)} />
+            <div className="boards-grid">
+              {filtered.map((b) => (
+                <BoardCard
+                  key={`${b.scope}:${b.id}`}
+                  board={b}
+                  now={now}
+                  isOpen={
+                    b.scope === "local" || b.scope === "copy"
+                      ? b.id === projectId
+                      : b.id === openBoardId
+                  }
+                  onOpen={() => void openEntry(b)}
+                  onRename={
+                    b.scope === "local"
+                      ? () => {
+                          setRenameDraft(b.name);
+                          setRenaming(b);
+                        }
+                      : undefined
+                  }
+                  // The open board can't be deleted from here: its next
+                  // autosave would write it straight back.
+                  onDelete={
+                    b.scope === "local" && b.id !== projectId ? () => setDeleting(b) : undefined
+                  }
+                />
               ))}
             </div>
           )}
-        </main>
-      </div>
-    </div>
-  );
-}
-
-function SidebarItem({
-  icon,
-  label,
-  count,
-  active,
-  onClick,
-  small,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  count?: number | null;
-  active: boolean;
-  onClick: () => void;
-  small?: boolean;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 10,
-        width: "100%",
-        padding: small ? "7px 10px" : "8px 10px",
-        borderRadius: 6,
-        fontSize: small ? 12.5 : 13,
-        color: active ? "var(--ink-0)" : "var(--ink-1)",
-        background: active ? "var(--canvas-3)" : "transparent",
-        fontVariationSettings: active ? "'wght' 520" : "'wght' 450",
-        marginBottom: small ? 1 : 2,
-        position: "relative",
-      }}
-    >
-      {active && (
-        <span
-          style={{
-            position: "absolute",
-            left: -12,
-            top: 8,
-            bottom: 8,
-            width: 2,
-            background: "var(--amber-2)",
-            borderRadius: "0 2px 2px 0",
-            boxShadow: "0 0 6px var(--amber-glow)",
-          }}
-        />
+        </>
       )}
-      {icon}
-      <span style={{ flex: 1, textAlign: "left" }}>{label}</span>
-      {count != null && (
-        <span className="mono" style={{ fontSize: small ? 10 : 10.5, color: "var(--ink-3)" }}>
-          {count}
-        </span>
-      )}
-    </button>
-  );
-}
 
-function ProjectCard({ project, onOpen }: { project: DisplayProject; onOpen: () => void }) {
-  return (
-    <div
-      onClick={onOpen}
-      style={{
-        background: "var(--canvas-0)",
-        border: "1px solid var(--stroke-1)",
-        borderRadius: 12,
-        overflow: "hidden",
-        cursor: "pointer",
-        transition: "all 0.15s var(--e-out)",
-      }}
-      onMouseEnter={(e) => {
-        e.currentTarget.style.borderColor = "var(--stroke-3)";
-        e.currentTarget.style.transform = "translateY(-1px)";
-      }}
-      onMouseLeave={(e) => {
-        e.currentTarget.style.borderColor = "var(--stroke-1)";
-        e.currentTarget.style.transform = "translateY(0)";
-      }}
-    >
-      <div
-        style={{
-          height: 110,
-          background: project.accent
-            ? "linear-gradient(180deg, var(--amber-glow-soft), var(--canvas-1))"
-            : "linear-gradient(180deg, var(--canvas-1), var(--canvas-0))",
-          padding: 14,
-          borderBottom: "1px solid var(--stroke-1)",
-        }}
-      >
-        <MiniPreview kind={project.mini} accent={project.accent} />
-      </div>
-      <div style={{ padding: "12px 14px 14px" }}>
-        <div
-          style={{
-            fontSize: 13.5,
-            color: "var(--ink-0)",
-            fontVariationSettings: "'wght' 520",
-            display: "flex",
-            alignItems: "center",
-            gap: 6,
-          }}
-        >
-          <span
-            style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}
+      {renaming && (
+        <Dialog onClose={() => setRenaming(null)} title="Rename board">
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              commitRename();
+            }}
           >
-            {project.name}
-          </span>
-          {project.isCloud && (
-            <span
-              title={project.isShared ? "Shared with you" : "Cloud board"}
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 3,
-                fontSize: 10,
-                color: "var(--ink-3)",
-                background: "var(--canvas-2)",
-                padding: "2px 6px",
-                borderRadius: 4,
-                border: "1px solid var(--stroke-1)",
-              }}
-            >
-              {project.isShared ? (
-                <Ico.Share width={10} height={10} />
-              ) : (
-                <Ico.Layers width={10} height={10} />
-              )}
-              <span>{project.isShared ? "Shared" : "Cloud"}</span>
+            <label className="boards-dialog-field">
+              <span className="sr-only">Board name</span>
+              <input
+                className="boards-dialog-input"
+                value={renameDraft}
+                maxLength={120}
+                onFocus={(e) => e.currentTarget.select()}
+                onChange={(e) => setRenameDraft(e.target.value)}
+              />
+            </label>
+            <div className="confirm-actions">
+              <Button variant="ghost" onClick={() => setRenaming(null)}>
+                Cancel
+              </Button>
+              <Button variant="primary" type="submit" disabled={!renameDraft.trim()}>
+                Rename
+              </Button>
+            </div>
+          </form>
+        </Dialog>
+      )}
+
+      {deleting && (
+        <Dialog onClose={() => setDeleting(null)} title={`Delete “${deleting.name}”?`}>
+          <div className="confirm-body">
+            This removes the board and its conversation from this browser. It can&apos;t be undone.
+          </div>
+          <div className="confirm-actions">
+            <Button variant="ghost" onClick={() => setDeleting(null)}>
+              Keep it
+            </Button>
+            <Button variant="danger" onClick={commitDelete}>
+              Delete board
+            </Button>
+          </div>
+        </Dialog>
+      )}
+    </Page>
+  );
+}
+
+function OfflineNote() {
+  return (
+    <p className="boards-note" role="status">
+      Couldn&apos;t reach the server, so team and shared boards aren&apos;t listed. Everything saved
+      in this browser is here.
+    </p>
+  );
+}
+
+/** The header's lede: real counts only, and only the ones that are known. */
+function boardsLede(
+  total: number,
+  counts: { local: number; team: number; shared: number },
+  orgLabel: string,
+  totals: { decisions: number; openQuestions: number },
+): string {
+  if (total === 0) {
+    return "Nothing here yet. A board is where a conversation turns into structure you can edit.";
+  }
+  const where: string[] = [];
+  if (counts.local > 0) where.push(`${counts.local} on this device`);
+  if (counts.team > 0) where.push(`${counts.team} in ${orgLabel}`);
+  if (counts.shared > 0) where.push(`${counts.shared} shared with you`);
+  let text = `${plural(total, "board")}`;
+  if (where.length > 1) text += ` — ${joinList(where)}`;
+  else if (counts.local === total) text += " saved on this device";
+  text += ".";
+  const held: string[] = [];
+  if (totals.decisions > 0) held.push(plural(totals.decisions, "decision"));
+  if (totals.openQuestions > 0) held.push(plural(totals.openQuestions, "open question"));
+  if (held.length > 0) {
+    const subject =
+      counts.local > 1
+        ? "The boards on this device hold"
+        : counts.local === total
+          ? "It holds"
+          : "The board on this device holds";
+    text += ` ${subject} ${joinList(held)}.`;
+  }
+  return text;
+}
+
+function BoardCard({
+  board,
+  now,
+  isOpen,
+  onOpen,
+  onRename,
+  onDelete,
+}: {
+  board: BoardEntry;
+  now: number;
+  isOpen: boolean;
+  onOpen: () => void;
+  onRename?: () => void;
+  onDelete?: () => void;
+}) {
+  const badge = SCOPE_BADGE[board.scope];
+  const meta = [
+    board.kind ?? (board.scope === "team" || board.scope === "shared" ? "Server board" : "Board"),
+    ...(board.nodes > 0 || !board.shapes ? [plural(board.nodes, "node")] : []),
+    ...(board.shapes ? [plural(board.shapes, "shape")] : []),
+    updatedLabel(board.updatedAt, now),
+  ];
+  return (
+    <Card interactive className="boards-card">
+      <button
+        type="button"
+        className="boards-card-open"
+        onClick={onOpen}
+        title={`Open ${board.name}`}
+      >
+        <div className="boards-thumb">
+          {board.sketch ? (
+            <BoardSketch sketch={board.sketch} />
+          ) : (
+            <span className="boards-thumb-empty mono-caps">
+              {board.nodes > 0 && (board.scope === "team" || board.scope === "shared")
+                ? "Preview after first open"
+                : "Empty board"}
             </span>
           )}
-          {project.accent && (
-            <span
-              style={{
-                width: 5,
-                height: 5,
-                borderRadius: 999,
-                background: "var(--amber-2)",
-                boxShadow: "0 0 6px var(--amber-glow)",
-              }}
-            />
+          <span className="boards-badges">
+            <span className={`boards-badge ${board.scope}`} title={badge.title}>
+              {badge.label}
+            </span>
+            {isOpen && <span className="boards-badge open">Open now</span>}
+          </span>
+        </div>
+        <div className="boards-card-body">
+          <div className="boards-card-name">{board.name}</div>
+          <div className="boards-card-meta mono" title={new Date(board.updatedAt).toLocaleString()}>
+            {meta.join(" · ")}
+          </div>
+          {board.tally ? (
+            <TallyRow tally={board.tally} />
+          ) : (
+            <div className="boards-tally none">
+              Open it to see what it has decided and left open.
+            </div>
           )}
         </div>
-        <div
-          className="mono"
-          style={{
-            marginTop: 6,
-            fontSize: 11,
-            color: "var(--ink-3)",
-            display: "flex",
-            alignItems: "center",
-            gap: 6,
-          }}
-        >
-          <span>{project.kind}</span>
-          <span>·</span>
-          <span>{project.nodes} nodes</span>
+      </button>
+      {(onRename || onDelete) && (
+        <div className="boards-card-tools">
+          {onRename && (
+            <button
+              type="button"
+              className="boards-tool"
+              onClick={onRename}
+              aria-label={`Rename ${board.name}`}
+            >
+              Rename
+            </button>
+          )}
+          {onDelete && (
+            <button
+              type="button"
+              className="boards-tool danger"
+              onClick={onDelete}
+              aria-label={`Delete ${board.name}`}
+            >
+              Delete
+            </button>
+          )}
         </div>
-      </div>
+      )}
+    </Card>
+  );
+}
+
+function TallyRow({ tally }: { tally: StatementTally }) {
+  const all: { kind: StatementFields["kind"]; n: number; label: string; title: string }[] = [
+    {
+      kind: "decision",
+      n: tally.decisions,
+      label: plural(tally.decisions, "decision"),
+      title: `${tally.decided} decided · ${tally.decisions - tally.decided} pending`,
+    },
+    {
+      kind: "question",
+      n: tally.openQuestions,
+      label: plural(tally.openQuestions, "open question"),
+      title: plural(tally.openQuestions, "question") + " still open",
+    },
+    {
+      kind: "risk",
+      n: tally.openRisks,
+      label: plural(tally.openRisks, "open risk"),
+      title: plural(tally.openRisks, "risk") + " not yet mitigated",
+    },
+    {
+      kind: "action",
+      n: tally.openActions,
+      label: plural(tally.openActions, "open action"),
+      title: plural(tally.openActions, "action") + " not done",
+    },
+  ];
+  const items = all.filter((i) => i.n > 0);
+  if (items.length === 0) {
+    return <div className="boards-tally none">No decisions or open questions yet</div>;
+  }
+  return (
+    <ul className="boards-tally">
+      {items.map((i) => (
+        <li key={i.kind} title={i.title}>
+          <StatementGlyph kind={i.kind} size={11} />
+          {i.label}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+interface TemplateEntry {
+  template: Template;
+  name: string;
+  kind: string;
+  sketch: Sketch | null;
+  mini: MiniKind;
+}
+
+function TemplateGrid({
+  templates,
+  onUse,
+}: {
+  templates: TemplateEntry[];
+  onUse: (t: Template) => void;
+}) {
+  return (
+    <div className="boards-grid">
+      {templates.map((t) => (
+        <Card key={t.template.id} interactive className="boards-card">
+          <button
+            type="button"
+            className="boards-card-open"
+            onClick={() => onUse(t.template)}
+            title={`New board from the ${t.name} template`}
+          >
+            <div className="boards-thumb template">
+              {t.sketch ? <BoardSketch sketch={t.sketch} /> : <MiniPreview kind={t.mini} />}
+              <span className="boards-badges">
+                <span className="boards-badge template">Template</span>
+              </span>
+            </div>
+            <div className="boards-card-body">
+              <div className="boards-card-name">{t.name}</div>
+              <div className="boards-card-meta mono">{t.kind} · creates a new board</div>
+            </div>
+          </button>
+        </Card>
+      ))}
     </div>
   );
+}
+
+/* ------------------------------------------------------------------ sketch */
+
+type SketchTone = "node" | "frame" | "sticky" | "shape" | StatementFields["kind"];
+
+interface SketchBox {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  tone: SketchTone;
+  round?: boolean;
+}
+
+interface Sketch {
+  view: { x: number; y: number; w: number; h: number };
+  boxes: SketchBox[];
+  lines: [number, number, number, number][];
+}
+
+/** Enough marks to read a board's shape; a 2,000-node board needn't draw them all. */
+const SKETCH_CAP = 260;
+
+/**
+ * The board, drawn small from its own geometry: the layout engine's node
+ * positions, the manual layer's frames and stickies, and the edges between
+ * nodes. Null when nothing on the board has a position yet.
+ */
+function sketchOf(ws: Workspace): Sketch | null {
+  const boxes: SketchBox[] = [];
+  const centre = new Map<string, [number, number]>();
+  for (const s of Object.values(ws.shapes ?? {})) {
+    if (!s.position || !s.size || s.kind === "draw" || s.kind === "text") continue;
+    boxes.push({
+      x: s.position.x,
+      y: s.position.y,
+      w: s.size.width,
+      h: s.size.height,
+      tone: s.kind === "frame" ? "frame" : s.kind === "sticky" ? "sticky" : "shape",
+      round: s.kind === "ellipse",
+    });
+  }
+  for (const n of Object.values(ws.nodes)) {
+    if (!n.position) continue;
+    const w = n.size?.width ?? 160;
+    const h = n.size?.height ?? 72;
+    boxes.push({
+      x: n.position.x,
+      y: n.position.y,
+      w,
+      h,
+      tone: n.statement?.kind ?? "node",
+    });
+    centre.set(n.id, [n.position.x + w / 2, n.position.y + h / 2]);
+  }
+  if (boxes.length === 0) return null;
+  const lines: [number, number, number, number][] = [];
+  for (const e of Object.values(ws.edges)) {
+    const a = centre.get(e.source);
+    const b = centre.get(e.target);
+    if (a && b) lines.push([a[0], a[1], b[0], b[1]]);
+    if (lines.length >= SKETCH_CAP) break;
+  }
+  // Frames sit behind everything they contain.
+  boxes.sort((p, q) => Number(p.tone !== "frame") - Number(q.tone !== "frame"));
+  const drawn = boxes.slice(0, SKETCH_CAP);
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const b of drawn) {
+    minX = Math.min(minX, b.x);
+    minY = Math.min(minY, b.y);
+    maxX = Math.max(maxX, b.x + b.w);
+    maxY = Math.max(maxY, b.y + b.h);
+  }
+  const pad = Math.max(maxX - minX, maxY - minY) * 0.05 + 8;
+  return {
+    view: { x: minX - pad, y: minY - pad, w: maxX - minX + pad * 2, h: maxY - minY + pad * 2 },
+    boxes: drawn,
+    lines,
+  };
+}
+
+function BoardSketch({ sketch }: { sketch: Sketch }) {
+  const { view } = sketch;
+  return (
+    <svg
+      className="boards-sketch"
+      viewBox={`${view.x} ${view.y} ${view.w} ${view.h}`}
+      preserveAspectRatio="xMidYMid meet"
+      aria-hidden="true"
+    >
+      {sketch.lines.map(([x1, y1, x2, y2], i) => (
+        <line
+          key={`l${i}`}
+          className="boards-sk-edge"
+          x1={x1}
+          y1={y1}
+          x2={x2}
+          y2={y2}
+          vectorEffect="non-scaling-stroke"
+        />
+      ))}
+      {sketch.boxes.map((b, i) => {
+        const statement = b.tone in KIND_TINT;
+        const cls = statement ? "boards-sk-statement" : `boards-sk-${b.tone}`;
+        const style = statement
+          ? { ["--kind" as string]: KIND_TINT[b.tone as StatementFields["kind"]] }
+          : undefined;
+        return b.round ? (
+          <ellipse
+            key={`b${i}`}
+            className={cls}
+            cx={b.x + b.w / 2}
+            cy={b.y + b.h / 2}
+            rx={b.w / 2}
+            ry={b.h / 2}
+            vectorEffect="non-scaling-stroke"
+          />
+        ) : (
+          <rect
+            key={`b${i}`}
+            className={cls}
+            style={style}
+            x={b.x}
+            y={b.y}
+            width={b.w}
+            height={b.h}
+            rx={Math.min(b.w, b.h) * (b.tone === "frame" ? 0.04 : 0.14)}
+            vectorEffect="non-scaling-stroke"
+          />
+        );
+      })}
+    </svg>
+  );
+}
+
+/* ------------------------------------------------------------- data reads */
+
+function readLocalBoards(): BoardEntry[] {
+  return listProjects().map((p) => {
+    const ws = loadProject(p.id)?.workspace;
+    const copyOf = boardIdOfMirror(p.id);
+    return {
+      id: p.id,
+      name: p.name,
+      updatedAt: p.updatedAt,
+      scope: copyOf ? "copy" : "local",
+      ...(copyOf ? { boardId: copyOf } : {}),
+      nodes: ws ? Object.keys(ws.nodes).length : 0,
+      shapes: ws ? Object.keys(ws.shapes ?? {}).length : 0,
+      // A board with no diagram nodes has no diagram kind worth naming: a
+      // sticky-only board would otherwise read as "Flowchart", the default.
+      ...(ws && Object.keys(ws.nodes).length > 0
+        ? { kind: KIND_NAME[ws.diagramKind] ?? "Board" }
+        : {}),
+      sketch: ws ? sketchOf(ws) : null,
+      ...(ws ? { tally: tallyOf(ws) } : {}),
+    };
+  });
+}
+
+function tallyOf(ws: Workspace): StatementTally {
+  const t: StatementTally = {
+    decisions: 0,
+    decided: 0,
+    openQuestions: 0,
+    openRisks: 0,
+    openActions: 0,
+  };
+  for (const n of statementNodes(ws)) {
+    const s = n.statement!;
+    if (s.kind === "decision") {
+      if (statementIsHistory(s.status)) continue;
+      t.decisions += 1;
+      if (s.status === "resolved") t.decided += 1;
+    } else if (s.status === "open") {
+      if (s.kind === "question") t.openQuestions += 1;
+      else if (s.kind === "risk") t.openRisks += 1;
+      else if (s.kind === "action") t.openActions += 1;
+    }
+  }
+  return t;
+}
+
+/** A template's own board, built and laid out once so its card shows it. */
+function templateEntry(t: Template): TemplateEntry {
+  const mini: MiniKind = t.id === "mindmap-seed" ? "mind" : t.id === "swot" ? "arch" : "flow";
+  let sketch: Sketch | null = null;
+  try {
+    let ws = applyOperations(createWorkspace({ name: t.name }), t.build());
+    if (Object.values(ws.nodes).some((n) => !n.position)) ws = applyLayout(ws, computeLayout(ws));
+    sketch = sketchOf(ws);
+  } catch {
+    sketch = null;
+  }
+  return { template: t, name: t.name, kind: t.kind, sketch, mini };
+}
+
+/* ---------------------------------------------------------------- wording */
+
+function plural(n: number, noun: string): string {
+  return `${n} ${noun}${n === 1 ? "" : "s"}`;
+}
+
+function joinList(parts: string[]): string {
+  if (parts.length <= 1) return parts.join("");
+  return `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
+}
+
+function updatedLabel(at: number, now: number): string {
+  const mins = Math.floor(Math.max(0, now - at) / 60_000);
+  if (mins < 1) return "updated just now";
+  if (mins < 60) return `updated ${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `updated ${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days === 1) return "updated yesterday";
+  if (days < 7) return `updated ${days}d ago`;
+  const d = new Date(at);
+  const sameYear = d.getFullYear() === new Date(now).getFullYear();
+  return `updated ${d.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    ...(sameYear ? {} : { year: "numeric" }),
+  })}`;
 }

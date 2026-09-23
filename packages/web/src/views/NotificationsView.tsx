@@ -2,13 +2,8 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react
 import { useWorkspace } from "../workspace.js";
 import { navigate } from "../routes.js";
 import { useToast } from "../ui/Toast.js";
-import { Ico } from "../ui/icons.js";
-import {
-  AtelierAppShell,
-  SectionHeader,
-  RiskIcon,
-  BellIcon,
-} from "../ui/atelierAtoms.js";
+import { Ico, ToolIco } from "../ui/icons.js";
+import { Button, EmptyState, FilterChips, Page, PageHeader, SectionLabel } from "../ui/kit.js";
 import {
   fetchNotifications,
   markAllNotificationsRead,
@@ -16,74 +11,103 @@ import {
   describeNotification,
   notificationAge,
   notificationTimestamp,
+  type NotificationFailure,
   type NotificationView,
   type NotificationIcon,
 } from "../notifications.js";
 
 /**
- * Screen 21 — Notifications (full page).
+ * Notifications (full page).
  *
- * Replaces the embedded v2 prototype iframe with a native React view wired to
- * the real `/api/notifications` endpoints. Rows group into "Needs you" (unread)
- * and "Earlier" (read); the badge count is always taken from the server's
- * response, matching the tray popover the rail already shipped.
+ * The page twin of the top bar's tray, wired to the same `/api/notifications`
+ * routes. Rows split into "Unread" and "Earlier"; the unread count is always
+ * the server's (every read/mark response carries it), never one derived from
+ * whichever rows happen to be loaded — the contract `notifications.ts` sets.
  */
 
+const PAGE_SIZE = 50;
+
 const ICON_FOR: Record<NotificationIcon, ReactNode> = {
-  invite: <Ico.Folder />,
-  member: <Ico.Comment />,
-  role: <RiskIcon />,
+  invite: <Ico.Share />,
+  member: <Ico.Team />,
+  role: <Ico.Lock />,
   comment: <Ico.Comment />,
-  bell: <BellIcon />,
+  bell: <ToolIco.Bell />,
 };
 
-const COLOR_FOR: Record<NotificationIcon, string> = {
-  invite: "var(--bloom-2)",
-  member: "var(--moss)",
-  role: "var(--saffron)",
-  comment: "oklch(0.55 0.11 220)",
-  bell: "var(--ink-2)",
-};
+type LoadState =
+  | { kind: "loading" }
+  | { kind: "ready" }
+  | { kind: "failed"; failure: NotificationFailure };
+
+type Filter = "all" | "unread";
 
 export function NotificationsView({
   onOpenSettings,
 }: {
-  onOpenSettings?: (section?: string) => void;
+  onOpenSettings: (section?: string) => void;
 }) {
-  const { setView } = useWorkspace() as unknown as { setView: (v: string) => void };
+  const { setView } = useWorkspace();
   const { notify } = useToast();
   const [rows, setRows] = useState<NotificationView[]>([]);
-  const [state, setState] = useState<"loading" | "ready" | "empty" | "error">("loading");
+  const [unread, setUnread] = useState(0);
+  const [cursor, setCursor] = useState<string | null>(null);
+  const [state, setState] = useState<LoadState>({ kind: "loading" });
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [filter, setFilter] = useState<Filter>("all");
 
   const load = useCallback(async () => {
-    const res = await fetchNotifications({ limit: 50 });
+    setState({ kind: "loading" });
+    const res = await fetchNotifications({ limit: PAGE_SIZE });
     if (!res.ok) {
-      // A deployment without a notification store (503) or a signed-out session
-      // both read as "nothing to show" here rather than a scary error wall.
-      setState(res.failure === "error" || res.failure === "offline" ? "error" : "empty");
       setRows([]);
+      setCursor(null);
+      setState({ kind: "failed", failure: res.failure });
       return;
     }
-    const views = res.value.notifications.map(describeNotification);
-    setRows(views);
-    setState(views.length === 0 ? "empty" : "ready");
+    setRows(res.value.notifications.map(describeNotification));
+    setUnread(res.value.unread);
+    setCursor(res.value.nextCursor);
+    setState({ kind: "ready" });
   }, []);
 
   useEffect(() => {
     void load();
   }, [load]);
 
-  const { needsYou, earlier } = useMemo(() => {
-    const unread = rows.filter((r) => !r.read);
-    const read = rows.filter((r) => r.read);
-    return { needsYou: unread, earlier: read };
-  }, [rows]);
+  const loadMore = async () => {
+    if (!cursor || loadingMore) return;
+    setLoadingMore(true);
+    const res = await fetchNotifications({ limit: PAGE_SIZE, cursor });
+    setLoadingMore(false);
+    if (!res.ok) {
+      notify("Couldn't load older notifications — try again.");
+      return;
+    }
+    setRows((prev) => {
+      const seen = new Set(prev.map((r) => r.id));
+      return [
+        ...prev,
+        ...res.value.notifications.map(describeNotification).filter((r) => !seen.has(r.id)),
+      ];
+    });
+    setUnread(res.value.unread);
+    setCursor(res.value.nextCursor);
+  };
+
+  const { unreadRows, earlier } = useMemo(
+    () => ({ unreadRows: rows.filter((r) => !r.read), earlier: rows.filter((r) => r.read) }),
+    [rows],
+  );
 
   const openRow = async (row: NotificationView) => {
     if (!row.read) {
       const res = await markNotificationRead(row.id);
       if (res.ok) {
         setRows((prev) => prev.map((r) => (r.id === row.id ? { ...r, read: true } : r)));
+        setUnread(res.value.count);
+      } else if (!row.href) {
+        notify("Couldn't mark that as read — try again.");
       }
     }
     if (row.href) navigate(row.href);
@@ -91,251 +115,238 @@ export function NotificationsView({
 
   const markAll = async () => {
     const res = await markAllNotificationsRead();
-    if (res.ok) {
-      setRows((prev) => prev.map((r) => ({ ...r, read: true })));
-      setState((s) => (rows.length === 0 ? "empty" : s));
-      notify("All notifications marked read", <Ico.Check />, "success");
+    if (!res.ok) {
+      notify("Couldn't mark those as read — try again.");
+      return;
     }
+    setRows((prev) => prev.map((r) => ({ ...r, read: true })));
+    setUnread(res.value.count);
+    notify("All notifications marked read", <Ico.Check />, "success");
   };
 
-  const unreadCount = needsYou.length;
+  const ready = state.kind === "ready";
+  const now = Date.now();
 
   return (
-    <AtelierAppShell
-      activeArea="notif"
+    <Page
       crumbs={[{ label: "Notifications", current: true }]}
+      boardScoped={false}
       onOpenSettings={onOpenSettings}
+      width="narrow"
     >
-      <div style={{ padding: "32px 40px 60px", maxWidth: 900, margin: "0 auto" }}>
-        <SectionHeader
-          eyebrow="Notifications"
-          title="Notifications"
-          meta={
-            state === "ready"
-              ? `${unreadCount} need${unreadCount === 1 ? "s" : ""} you · ${rows.length} total`
-              : undefined
+      <PageHeader
+        eyebrow="Notifications"
+        title={
+          ready && rows.length > 0 ? (
+            unread > 0 ? (
+              <>
+                {unread} {unread === 1 ? "thing" : "things"} <em>need{unread === 1 ? "s" : ""} you</em>
+              </>
+            ) : (
+              <>
+                You&apos;re <em>all caught up</em>
+              </>
+            )
+          ) : (
+            "Notifications"
+          )
+        }
+        lede="Invites, new teammates, access changes, mentions and replies — for your account, across every workspace."
+        actions={
+          ready && unread > 0 ? (
+            <Button variant="ghost" onClick={() => void markAll()}>
+              <Ico.Check /> Mark all read
+            </Button>
+          ) : undefined
+        }
+      />
+
+      {state.kind === "loading" && <NotifSkeleton />}
+
+      {state.kind === "failed" && <FailedState failure={state.failure} onRetry={() => void load()} />}
+
+      {ready && rows.length === 0 && (
+        <EmptyState
+          glyph={<ToolIco.Bell width={22} height={22} />}
+          title="Nothing here yet"
+          body="You'll hear here when someone invites you to a board or workspace, joins a board you shared, changes your access, or mentions or replies to you in a comment. Share a board from its top bar to bring someone in."
+          action={
+            <Button variant="primary" onClick={() => setView("dashboard")}>
+              <Ico.Folder /> Go to your boards
+            </Button>
           }
-          actions={
-            <>
-              <button
-                className="icon-btn"
-                onClick={markAll}
-                disabled={unreadCount === 0}
-                title="Mark all as read"
-              >
-                Mark all read
-              </button>
-              <button
-                className="icon-btn"
-                onClick={() => onOpenSettings?.("notifications")}
-                title="Notification preferences"
-              >
-                <Ico.Settings /> Preferences
-              </button>
-            </>
-          }
-        />
-
-        {state === "loading" && <NotifSkeleton />}
-
-        {state === "error" && (
-          <NotifMessage
-            title="Couldn't load notifications"
-            body="The notification service didn't respond. Try again in a moment."
-            action={
-              <button className="btn ghost" onClick={() => void load()}>
-                Retry
-              </button>
-            }
-          />
-        )}
-
-        {state === "empty" && (
-          <NotifMessage
-            title="You're all caught up"
-            body="Invites, mentions, and extracted decisions will show up here. Start a meeting or share a board to get things moving."
-            action={
-              <button className="btn bloom" onClick={() => setView("meeting_board")}>
-                Start a meeting
-              </button>
-            }
-          />
-        )}
-
-        {state === "ready" && (
-          <>
-            {needsYou.length > 0 && (
-              <NotifGroup label={`Needs you · ${needsYou.length}`}>
-                {needsYou.map((r) => (
-                  <NotifRow key={r.id} row={r} onOpen={() => void openRow(r)} />
-                ))}
-              </NotifGroup>
-            )}
-            {earlier.length > 0 && (
-              <NotifGroup label="Earlier">
-                {earlier.map((r) => (
-                  <NotifRow key={r.id} row={r} onOpen={() => void openRow(r)} />
-                ))}
-              </NotifGroup>
-            )}
-          </>
-        )}
-      </div>
-    </AtelierAppShell>
-  );
-}
-
-function NotifGroup({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div style={{ marginBottom: 28 }}>
-      <div className="mono-caps" style={{ marginBottom: 10 }}>
-        {label}
-      </div>
-      <div style={{ display: "grid", gap: 6 }}>{children}</div>
-    </div>
-  );
-}
-
-function NotifRow({ row, onOpen }: { row: NotificationView; onOpen: () => void }) {
-  const color = COLOR_FOR[row.icon];
-  return (
-    <button
-      onClick={onOpen}
-      title={notificationTimestamp(row.createdAt)}
-      style={{
-        padding: "12px 14px",
-        borderRadius: "var(--r-sm)",
-        background: "var(--paper-0)",
-        border: "1px solid oklch(from var(--paper-4) l c h / 0.5)",
-        display: "flex",
-        alignItems: "flex-start",
-        gap: 12,
-        textAlign: "left",
-        cursor: "pointer",
-        transition: "all 0.12s var(--e-out)",
-        opacity: row.read ? 0.6 : 1,
-      }}
-      onMouseEnter={(e) => {
-        e.currentTarget.style.background = "var(--paper-1)";
-      }}
-      onMouseLeave={(e) => {
-        e.currentTarget.style.background = "var(--paper-0)";
-      }}
-    >
-      {!row.read && (
-        <span
-          style={{
-            width: 6,
-            height: 6,
-            borderRadius: 999,
-            background: "var(--bloom-2)",
-            flexShrink: 0,
-            marginTop: 8,
-            boxShadow: "0 0 6px var(--bloom-glow)",
-          }}
         />
       )}
-      <div
-        style={{
-          width: 28,
-          height: 28,
-          borderRadius: 7,
-          background: `oklch(from ${color} l c h / 0.14)`,
-          color,
-          display: "grid",
-          placeItems: "center",
-          flexShrink: 0,
-        }}
-      >
-        {ICON_FOR[row.icon]}
-      </div>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 13.5, fontWeight: 500, color: "var(--ink-0)", marginBottom: 3 }}>
-          {row.title}
-        </div>
-        <div
-          style={{
-            fontSize: 12,
-            color: "var(--ink-2)",
-            lineHeight: 1.4,
-            fontFamily: "var(--font-serif)",
-            fontStyle: "italic",
-          }}
-        >
-          {row.body ?? row.category}
-        </div>
-      </div>
-      <span
-        className="mono"
-        style={{ fontSize: 10.5, color: "var(--ink-3)", whiteSpace: "nowrap" }}
-      >
-        {notificationAge(row.createdAt, Date.now())}
-      </span>
-    </button>
+
+      {ready && rows.length > 0 && (
+        <>
+          <div className="boards-notif-toolbar">
+            <FilterChips
+              items={[
+                { id: "all", label: "All", count: rows.length },
+                { id: "unread", label: "Unread", count: unread },
+              ]}
+              value={filter}
+              onChange={setFilter}
+              label="Show notifications"
+            />
+          </div>
+
+          {unreadRows.length > 0 && (
+            <section className="boards-notif-group" aria-label="Unread">
+              <SectionLabel count={unreadRows.length}>Unread</SectionLabel>
+              <ul className="boards-notif-list">
+                {unreadRows.map((r) => (
+                  <NotifRow key={r.id} row={r} now={now} onOpen={() => void openRow(r)} />
+                ))}
+              </ul>
+            </section>
+          )}
+
+          {filter === "unread" && unreadRows.length === 0 && (
+            <EmptyState
+              compact
+              title={unread > 0 ? "Unread notifications are further back" : "Nothing unread"}
+              body={
+                unread > 0
+                  ? "They're older than what's loaded. Load older notifications, or mark them all read."
+                  : undefined
+              }
+              action={
+                <Button size="sm" onClick={() => setFilter("all")}>
+                  Show all
+                </Button>
+              }
+            />
+          )}
+
+          {filter === "all" && earlier.length > 0 && (
+            <section className="boards-notif-group" aria-label="Earlier">
+              <SectionLabel count={earlier.length}>Earlier</SectionLabel>
+              <ul className="boards-notif-list">
+                {earlier.map((r) => (
+                  <NotifRow key={r.id} row={r} now={now} onOpen={() => void openRow(r)} />
+                ))}
+              </ul>
+            </section>
+          )}
+
+          {cursor && (
+            <div className="boards-notif-more">
+              <Button size="sm" onClick={() => void loadMore()} disabled={loadingMore}>
+                {loadingMore ? "Loading…" : "Load older"}
+              </Button>
+            </div>
+          )}
+        </>
+      )}
+    </Page>
   );
 }
 
-function NotifMessage({
-  title,
-  body,
-  action,
+function NotifRow({
+  row,
+  now,
+  onOpen,
 }: {
-  title: string;
-  body: string;
-  action?: ReactNode;
+  row: NotificationView;
+  now: number;
+  onOpen: () => void;
 }) {
-  return (
-    <div
-      style={{
-        display: "grid",
-        placeItems: "center",
-        gap: 10,
-        textAlign: "center",
-        padding: "64px 24px",
-        border: "1px dashed oklch(from var(--paper-4) l c h / 0.7)",
-        borderRadius: "var(--r-lg)",
-        background: "oklch(from var(--paper-0) l c h / 0.5)",
-      }}
-    >
-      <div
-        style={{
-          width: 40,
-          height: 40,
-          borderRadius: 10,
-          background: "var(--bloom-wash)",
-          color: "var(--bloom-2)",
-          display: "grid",
-          placeItems: "center",
-        }}
+  const body = (
+    <>
+      <span className={`boards-notif-ico ${row.icon}`} aria-hidden="true">
+        {ICON_FOR[row.icon]}
+      </span>
+      <span className="boards-notif-main">
+        <span className="boards-notif-meta">
+          <span className="mono-caps">{row.category}</span>
+          {!row.read && <span className="boards-notif-new">Unread</span>}
+        </span>
+        <span className="boards-notif-title">{row.title}</span>
+        {row.body !== null && <span className="boards-notif-body">{row.body}</span>}
+      </span>
+      <time
+        className="boards-notif-age mono"
+        dateTime={new Date(row.createdAt).toISOString()}
+        title={notificationTimestamp(row.createdAt)}
       >
-        <BellIcon />
-      </div>
-      <div style={{ fontFamily: "var(--font-serif)", fontSize: 20, color: "var(--ink-0)" }}>
-        {title}
-      </div>
-      <div style={{ fontSize: 13.5, color: "var(--ink-2)", maxWidth: 420, lineHeight: 1.5 }}>
+        {notificationAge(row.createdAt, now)}
+      </time>
+    </>
+  );
+  // A read row with nowhere to go is information, not a control.
+  if (row.read && !row.href) {
+    return (
+      <li>
+        <div className="boards-notif-row read static">{body}</div>
+      </li>
+    );
+  }
+  return (
+    <li>
+      <button
+        type="button"
+        className={`boards-notif-row ${row.read ? "read" : "unread"}`}
+        onClick={onOpen}
+        title={row.href ? undefined : "Mark as read"}
+      >
         {body}
-      </div>
-      {action && <div style={{ marginTop: 6 }}>{action}</div>}
+      </button>
+    </li>
+  );
+}
+
+function FailedState({
+  failure,
+  onRetry,
+}: {
+  failure: NotificationFailure;
+  onRetry: () => void;
+}) {
+  if (failure === "signed-out") {
+    return (
+      <EmptyState
+        compact
+        title="Sign in to see your notifications"
+        body="Notifications belong to your account, so they need a signed-in session."
+      />
+    );
+  }
+  if (failure === "unavailable") {
+    return (
+      <EmptyState
+        compact
+        title="Notifications aren't switched on for this server"
+        body="Whoever runs this Lucent deployment hasn't configured a notification store, so nothing is recorded here."
+      />
+    );
+  }
+  return (
+    <div role="alert">
+      <EmptyState
+        compact
+        title="Couldn't load notifications"
+        body={
+          failure === "offline"
+            ? "The Lucent server didn't answer. Check your connection and try again."
+            : "The notification service returned an error. Try again in a moment."
+        }
+        action={
+          <Button size="sm" onClick={onRetry}>
+            Retry
+          </Button>
+        }
+      />
     </div>
   );
 }
 
 function NotifSkeleton() {
   return (
-    <div style={{ display: "grid", gap: 6 }}>
+    <div className="boards-notif-skeleton" role="status" aria-label="Loading notifications">
       {[0, 1, 2, 3].map((i) => (
-        <div
-          key={i}
-          style={{
-            height: 58,
-            borderRadius: "var(--r-sm)",
-            background:
-              "linear-gradient(90deg, var(--paper-2) 25%, var(--paper-1) 37%, var(--paper-2) 63%)",
-            backgroundSize: "400% 100%",
-            animation: "skeleton-shimmer 1.4s ease infinite",
-          }}
-        />
+        <div key={i} />
       ))}
     </div>
   );

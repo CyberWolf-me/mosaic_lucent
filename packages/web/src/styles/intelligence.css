@@ -1,0 +1,540 @@
+/* Atelier · intelligence — owned by the intelligence surface. Kit and statement
+   language live in lucent.css; this file holds only what is specific here.
+   The legacy intel-layout, intel-kpi, intel-tabs and intel-panel rules in
+   styles.css are no longer rendered; nothing here reuses those names. */
+
+/* ---------------------------------------------------------------- layout */
+
+.intel-tabs-row {
+  margin: -6px 0 26px;
+}
+
+.intel-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 36px;
+  align-items: start;
+}
+@media (max-width: 1100px) {
+  .intel-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.intel-main {
+  min-width: 0;
+}
+
+.intel-side {
+  display: flex;
+  flex-direction: column;
+  gap: 30px;
+  min-width: 0;
+}
+
+/* --------------------------------------------------------------- sections */
+
+.intel-section + .intel-section {
+  margin-top: 30px;
+}
+.intel-section-head {
+  margin: 0 0 10px;
+  font: inherit;
+}
+.intel-section-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 4px 2px;
+  background: none;
+  border: 0;
+  border-radius: var(--r-xs);
+  cursor: pointer;
+  text-align: left;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+}
+.intel-section-toggle:hover {
+  color: var(--ink-0);
+}
+.intel-section-name {
+  color: var(--kind);
+}
+.intel-chevron {
+  margin-left: auto;
+  color: var(--ink-3);
+  transition: transform 0.15s var(--e-out);
+}
+.intel-chevron.closed {
+  transform: rotate(-90deg);
+}
+
+.intel-rows {
+  display: grid;
+  gap: 10px;
+}
+
+.intel-settled-label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 8px 0 0;
+  font-size: 10px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.intel-settled-label::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: oklch(from var(--paper-4) l c h / 0.6);
+}
+
+.intel-missing {
+  margin: 30px 0 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--ink-3);
+}
+
+/* -------------------------------------------------------- a statement row */
+
+.intel-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 16px 18px 14px;
+  outline: none;
+  transition:
+    border-color 0.2s var(--e-out),
+    box-shadow 0.2s var(--e-out),
+    opacity 0.2s var(--e-out);
+}
+.intel-row.overdue {
+  box-shadow:
+    inset 3px 0 0 var(--madder),
+    var(--shadow-1);
+}
+.intel-row.settled {
+  background: oklch(from var(--paper-0) l c h / 0.55);
+  box-shadow: none;
+}
+html[data-theme="dark"] .intel-row.settled {
+  background: oklch(from var(--paper-2) l c h / 0.5);
+}
+.intel-row.history {
+  opacity: 0.62;
+}
+.intel-row.flash,
+.intel-row:focus-visible {
+  border-color: var(--bloom-1);
+  box-shadow: 0 0 0 3px var(--bloom-wash);
+}
+
+.intel-check {
+  flex-shrink: 0;
+  width: 15px;
+  height: 15px;
+  margin: 2px 0 0;
+  accent-color: var(--ink-0);
+  color-scheme: light;
+  cursor: pointer;
+}
+html[data-theme="dark"] .intel-check {
+  color-scheme: dark;
+}
+
+.intel-row-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.intel-row-top {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 8px;
+  min-height: 20px;
+}
+
+.intel-topic {
+  max-width: 220px;
+  padding: 1px 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border-radius: 999px;
+  font-size: 10.5px;
+  line-height: 16px;
+  color: var(--ink-2);
+  background: oklch(from var(--paper-3) l c h / 0.7);
+  border: 1px solid oklch(from var(--paper-4) l c h / 0.5);
+}
+
+.intel-flag {
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 10px;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+.intel-flag.alert {
+  color: var(--madder);
+  background: oklch(from var(--madder) l c h / 0.1);
+}
+
+.intel-ext {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--bloom-2);
+  text-decoration: none;
+  white-space: nowrap;
+}
+/* "Show on board" sits at the row's top-right; after an external-link
+   chip the link takes the push instead. */
+.intel-row-top > .prov-chip {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.intel-row-top > .intel-ext + .prov-chip {
+  margin-left: 0;
+}
+.intel-ext:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.intel-row-label {
+  align-self: flex-start;
+  max-width: 100%;
+  padding: 0;
+  background: none;
+  border: 0;
+  border-radius: 4px;
+  cursor: pointer;
+  text-align: left;
+  font-family: var(--font-sans);
+  font-size: 15px;
+  font-weight: 500;
+  line-height: 1.35;
+  color: var(--ink-0);
+  text-wrap: pretty;
+  overflow-wrap: anywhere;
+}
+.intel-row-label.serif {
+  font-family: var(--font-serif);
+  font-size: 18px;
+  font-weight: 400;
+  letter-spacing: -0.01em;
+}
+.intel-row-label:hover {
+  color: var(--bloom-2);
+}
+.intel-row.settled:not(.decided) .intel-row-label {
+  color: var(--ink-1);
+}
+.intel-row.history .intel-row-label {
+  color: var(--ink-2);
+  text-decoration: line-through;
+  text-decoration-color: oklch(from var(--ink-3) l c h / 0.6);
+}
+
+.intel-quote {
+  margin: 0;
+  padding: 8px 14px;
+  border-left: 2px solid var(--kind);
+  border-radius: 0 var(--r-xs) var(--r-xs) 0;
+  background: oklch(from var(--kind) l c h / 0.06);
+  font-style: italic;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--ink-1);
+}
+.intel-quote-by {
+  margin-left: 8px;
+  font-style: normal;
+  font-size: 10.5px;
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+
+.intel-lineage {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  font-size: 10.5px;
+  color: var(--ink-3);
+}
+.intel-lineage button {
+  padding: 0;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  font: inherit;
+  color: var(--bloom-2);
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+}
+.intel-lineage em {
+  font-style: italic;
+}
+
+.intel-derived {
+  font-size: 10.5px;
+  line-height: 1.45;
+}
+.intel-derived.alert {
+  color: var(--madder);
+}
+.intel-derived.caution {
+  color: oklch(from var(--saffron) calc(l - 0.22) c h);
+}
+html[data-theme="dark"] .intel-derived.caution {
+  color: var(--saffron);
+}
+
+.intel-row-foot {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  margin-top: 2px;
+}
+.intel-row-foot .prov-chip {
+  max-width: 280px;
+}
+.intel-owner {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--ink-1);
+}
+.intel-meta {
+  font-size: 10.5px;
+  color: var(--ink-3);
+}
+.intel-meta.alert {
+  color: var(--madder);
+}
+
+/* ------------------------------------------------- plan from selection */
+
+.intel-plan-bar {
+  position: sticky;
+  bottom: 18px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: fit-content;
+  margin: 22px 0 0 auto;
+  padding: 8px 8px 8px 18px;
+  background: var(--paper-0);
+  border: 1px solid oklch(from var(--paper-4) l c h / 0.8);
+  border-radius: 999px;
+  box-shadow: var(--shadow-3);
+  animation: intel-rise 0.2s var(--e-out);
+}
+.intel-plan-count {
+  margin-right: 4px;
+  font-size: 13px;
+  color: var(--ink-1);
+}
+@keyframes intel-rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+/* ------------------------------------------------------- side column */
+
+.intel-side-list {
+  display: grid;
+  gap: 10px;
+}
+.intel-side-hint {
+  margin: -4px 0 12px;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--ink-3);
+}
+
+.intel-rec {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 16px;
+}
+.intel-rec-eyebrow {
+  font-size: 10px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--bloom-2);
+}
+.intel-rec-topics {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.intel-rec-approx {
+  font-family: var(--font-serif);
+  font-size: 15px;
+  color: var(--ink-3);
+}
+.intel-rec-evidence {
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--ink-2);
+}
+.intel-rec-preview {
+  padding: 10px 12px;
+  border-radius: var(--r-sm);
+  background: oklch(from var(--paper-3) l c h / 0.55);
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--ink-1);
+}
+.intel-rec-preview ul {
+  margin: 6px 0 0;
+  padding-left: 16px;
+}
+.intel-rec-preview li {
+  font-size: 12px;
+  color: var(--ink-2);
+}
+.intel-rec-preview li.more {
+  font-style: italic;
+  color: var(--ink-3);
+}
+.intel-rec-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 2px;
+}
+.intel-error {
+  font-size: 12px;
+  color: var(--madder);
+}
+
+.intel-inbound {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+}
+.intel-inbound.pending:not(.warning) {
+  box-shadow:
+    inset 3px 0 0 var(--saffron),
+    var(--shadow-1);
+}
+.intel-inbound.decided {
+  opacity: 0.6;
+  box-shadow: none;
+}
+.intel-inbound-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.intel-inbound-label {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  background: none;
+  border: 0;
+  border-radius: 4px;
+  cursor: pointer;
+  text-align: left;
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--ink-0);
+}
+.intel-inbound-label:hover {
+  color: var(--bloom-2);
+}
+.intel-inbound-line {
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--ink-2);
+}
+.intel-inbound.warning .intel-inbound-line {
+  color: var(--madder);
+}
+.intel-inbound-outcome {
+  font-size: 10px;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+/* ------------------------------------------------- header + empty board */
+
+.intel-badge {
+  min-width: 16px;
+  padding: 0 5px;
+  border-radius: 999px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 16px;
+  text-align: center;
+  color: var(--graphite);
+  background: var(--saffron);
+}
+.intel-note {
+  font-size: 10.5px;
+  color: var(--ink-3);
+}
+
+.intel-empty {
+  display: grid;
+  gap: 30px;
+}
+.intel-empty > .empty-state {
+  padding: 64px 24px 56px;
+}
+.intel-empty .empty-body {
+  max-width: 520px;
+}
+.intel-empty-glyphs {
+  display: inline-flex;
+  gap: 12px;
+}
+
+/* ------------------------------------------------------------- focus */
+
+.intel-section-toggle:focus-visible,
+.intel-row-label:focus-visible,
+.intel-lineage button:focus-visible,
+.intel-inbound-label:focus-visible,
+.intel-ext:focus-visible {
+  outline: 2px solid var(--bloom-1);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .intel-row,
+  .intel-chevron {
+    transition: none;
+  }
+  .intel-plan-bar {
+    animation: none;
+  }
+}
+
+.intel-side .empty-title {
+  line-height: 1.3;
+}

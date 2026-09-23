@@ -1,11 +1,23 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
-import { TopBar, LeftRail } from "../ui/Chrome.js";
+import type { FormEvent, ReactNode } from "react";
 import { Ico } from "../ui/icons.js";
+import {
+  Avatar,
+  Button,
+  EmptyState,
+  FilterChips,
+  KindBadge,
+  Page,
+  PageHeader,
+  ProvenanceChip,
+} from "../ui/kit.js";
+import { StatementGlyph } from "../ui/StatementGlyph.js";
+import { KIND_LABEL } from "../statementUi.js";
 import { useWorkspace } from "../workspace.js";
 import { useToast } from "../ui/Toast.js";
 import { useSettings } from "../settings.js";
 import { getSttProvider, isAnyVoiceSupported, type VoiceSession } from "../stt/index.js";
-import { askLucent } from "../boards.js";
+import { askLucent, type AskCitation } from "../boards.js";
 import {
   ConversationalLeaseManager,
   voiceAnswerCard,
@@ -41,22 +53,37 @@ import {
   sliceBatch,
 } from "../meeting-engine.js";
 import { isLiveProvenance, objectsByTurn, pointsAtLive } from "../meetingTimeline.js";
+import {
+  TOPIC_BREAK_LINE,
+  citationTurns,
+  formatElapsed,
+  meetingBrief,
+  speakersOf,
+  type BriefItem,
+  type BriefSection,
+} from "../meetingBrief.js";
 
 /**
  * Meeting mode (E3 / R3): live capture into a transcript that persists per
  * board, plus one-click extraction into the board's diagram.
  *
- * This was a labelled design preview (hardcoded sample, "NOT RECORDING"
- * badge). The real flow reuses the same STT seam the canvas drives — one
- * provider, one `start(handlers)`, finals arrive as text — with one
- * difference: the canvas sends every final to the model; this view
- * accumulates them as turns, drafts a classification per line, and saves
- * the whole transcript to the board on demand.
+ * The view is a document and its source, side by side. The document column
+ * is the meeting BRIEF — the decisions, actions, open questions and risks the
+ * meeting put on the board, each one a click from the turns that produced it
+ * (meetingBrief.ts decides; this file lays it out). The right column is the
+ * transcript those citations land on.
+ *
+ * The real flow reuses the same STT seam the canvas drives — one provider,
+ * one `start(handlers)`, finals arrive as text — with one difference: the
+ * canvas sends every final to the model; this view accumulates them as
+ * turns, drafts a classification per line, and checkpoints the transcript to
+ * the board as it is captured.
  *
  * Diarisation is honest about what each provider gives: LiveKit segments
  * carry speaker identity; Web Speech and on-device Whisper have no speaker
  * concept, so every turn is "You" and the view says so rather than inventing
- * a false distinction.
+ * a false distinction. Meetings have no title in the data model, so the
+ * title is the moment the meeting started — never an invented subject.
  *
  * Extraction routes through the normal `send()` pipeline: the same
  * validation, metering, history and undo as any other generation. There is
@@ -64,13 +91,14 @@ import { isLiveProvenance, objectsByTurn, pointsAtLive } from "../meetingTimelin
  * minutes is a diagram like any other.
  */
 
-const extractColor: Record<NonNullable<MeetingTurn["kind"]>, string> = {
-  problem: "var(--sig-red)",
-  hypothesis: "var(--amber-1)",
-  solution: "var(--sig-green)",
-  decision: "var(--sig-violet)",
-  action: "var(--sig-blue)",
-  requirement: "var(--amber-2)",
+/** The draft turn classification, tinted with the nearest statement kind. */
+const TURN_TINT: Record<NonNullable<MeetingTurn["kind"]>, string> = {
+  problem: "var(--kind-risk)",
+  hypothesis: "var(--kind-question)",
+  solution: "var(--kind-proposal)",
+  decision: "var(--kind-decision)",
+  action: "var(--kind-action)",
+  requirement: "var(--kind-requirement)",
 };
 
 const KIND_ORDER: Array<NonNullable<MeetingTurn["kind"]>> = [
@@ -81,6 +109,11 @@ const KIND_ORDER: Array<NonNullable<MeetingTurn["kind"]>> = [
   "action",
   "requirement",
 ];
+
+type TurnFilter = "all" | NonNullable<MeetingTurn["kind"]>;
+
+/** A spoken or typed answer; typed asks keep the resolved citations. */
+type AnswerCard = VoiceAnswer & { links?: AskCitation[] };
 
 /**
  * Splice topic-break markers into a turn slice for extraction prompts (UX-5).
@@ -93,10 +126,74 @@ function withTopicBreaks(list: MeetingTurn[], breaks: number[]): MeetingTurn[] {
   const marks = new Set(breaks);
   const out: MeetingTurn[] = [];
   for (let i = 0; i <= list.length; i++) {
-    if (marks.has(i)) out.push({ speaker: "You", at: Date.now(), text: "── topic break ──" });
+    if (marks.has(i)) out.push({ speaker: "You", at: Date.now(), text: TOPIC_BREAK_LINE });
     if (i < list.length) out.push(list[i]!);
   }
   return out;
+}
+
+function fmtDay(ms: number): string {
+  return new Date(ms).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+function fmtClock(ms: number): string {
+  return new Date(ms).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+}
+
+function fmtDuration(ms: number): string {
+  const minutes = Math.round(ms / 60_000);
+  return minutes < 1 ? "under a minute" : `${minutes} min`;
+}
+
+function fmtDue(iso: string): string {
+  const d = new Date(`${iso}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+function todayIso(): string {
+  const d = new Date();
+  const pad = (n: number): string => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+function plural(n: number, one: string, many = `${one}s`): string {
+  return `${n} ${n === 1 ? one : many}`;
+}
+
+/** Case-insensitive match marking for transcript search. */
+function highlight(text: string, query: string): ReactNode {
+  const q = query.trim().toLowerCase();
+  if (!q) return text;
+  const lower = text.toLowerCase();
+  const out: ReactNode[] = [];
+  let from = 0;
+  let at = lower.indexOf(q, from);
+  while (at !== -1) {
+    if (at > from) out.push(text.slice(from, at));
+    out.push(
+      <mark key={at} className="meet-mark">
+        {text.slice(at, at + q.length)}
+      </mark>,
+    );
+    from = at + q.length;
+    at = lower.indexOf(q, from);
+  }
+  if (from < text.length) out.push(text.slice(from));
+  return out;
+}
+
+/** The brief's section heading, in the kind's own words. */
+function sectionHeading(section: BriefSection): string {
+  if (section.kind === "action") return "Action items";
+  if (section.kind === "question") {
+    return section.items.every((i) => i.status === "open") ? "Open questions" : "Questions";
+  }
+  return KIND_LABEL[section.kind].many;
+}
+
+function prefersReducedMotion(): boolean {
+  return window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
 }
 
 export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: string) => void }) {
@@ -126,11 +223,13 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
   const [extractQueued, setExtractQueued] = useState(0);
   const engineRef = useRef(createMeetingEngine());
   const [lastExtractStatus, setLastExtractStatus] = useState<string | null>(null);
-  // M6.1: spoken answers (text). Session-local, never stored — answers are
-  // reads, not minutes. One in flight at a time; a question arriving while
-  // busy waits for the next trigger rather than overlapping speech.
-  const [voiceAnswers, setVoiceAnswers] = useState<VoiceAnswer[]>([]);
+  // M6.1: spoken answers (text) and typed asks. Session-local, never stored —
+  // answers are reads, not minutes. One in flight at a time; a question
+  // arriving while busy waits for the next trigger rather than overlapping.
+  const [voiceAnswers, setVoiceAnswers] = useState<AnswerCard[]>([]);
   const answerInFlight = useRef(false);
+  const [askDraft, setAskDraft] = useState("");
+  const [askBusy, setAskBusy] = useState(false);
   // M6.2: server/local speech for answers. Session-local mute; the playback
   // ref lets stopRecording (and the next answer) cancel audio in flight —
   // the turn-taking basis V8 builds on.
@@ -192,11 +291,18 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
   // Render-local — the saved transcript is never rewritten — and spliced
   // into extraction prompts as "── topic break ──" lines.
   const [topicBreaks, setTopicBreaks] = useState<number[]>([]);
+  // The transcript column: open/closed, and which list it shows. The video
+  // room's dock still names the old "extract" panel; that button now scrolls
+  // the brief into view instead (see onRoomPanel).
   const [panelOpen, setPanelOpen] = useState(true);
-  const [activePanel, setActivePanel] = useState<"transcript" | "extract" | "saved">("transcript");
+  const [activePanel, setActivePanel] = useState<"transcript" | "saved">("transcript");
+  const [callOpen, setCallOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [turnFilter, setTurnFilter] = useState<TurnFilter>("all");
+  const turnsListRef = useRef<HTMLDivElement | null>(null);
 
   // M6.1–M6.3: Conversational Lease Platform
-  const { activeLease, setActiveLease, peers, leave } = useMeetingSession();
+  const { activeLease, setActiveLease, peers, leave, status: roomStatus } = useMeetingSession();
   const leaseManagerRef = useRef<ConversationalLeaseManager>(
     new ConversationalLeaseManager({ leaseDurationMs: 15_000, maxFollowUpTurns: 3 }),
   );
@@ -246,6 +352,15 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
 
+  // The REC pill's clock: real elapsed time since capture started.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!recording) return;
+    setNow(Date.now());
+    const tick = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(tick);
+  }, [recording]);
+
   // Phase D: the behavior profile. Sanitized at the use site (stored
   // settings predate the field and may hold anything); the capture loop
   // reads only the effective behavior, the UI shows the selected mode.
@@ -279,10 +394,12 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
 
   // The turn jump (Stage C1): an Ask citation set ?turn=<start> (alongside
   // ?meeting=). Once the transcript is on screen, scroll the turn into view
-  // and flash it — the reverse-provenance interaction: evidence → the exact
-  // words that produced it. Index-based, like turnRange itself; consumed on
-  // read so a reload doesn't re-flash.
-  const [turnFlash, setTurnFlash] = useState<number | null>(null);
+  // and keep it marked — the reverse-provenance interaction: evidence → the
+  // exact words that produced it. Index-based, like turnRange itself;
+  // consumed on read so a reload doesn't re-jump. Brief citations reuse the
+  // same state; `seq` re-fires the scroll when the same turn is asked twice.
+  const [turnFocus, setTurnFocus] = useState<{ turn: number; seq: number } | null>(null);
+  const focusSeqRef = useRef(0);
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const turn = params.get("turn");
@@ -290,15 +407,11 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
     params.delete("turn");
     window.history.replaceState(null, "", `?${params.toString()}`);
     const idx = Number(turn);
-    if (Number.isInteger(idx) && idx >= 0) setTurnFlash(idx);
+    if (Number.isInteger(idx) && idx >= 0) {
+      focusSeqRef.current += 1;
+      setTurnFocus({ turn: idx, seq: focusSeqRef.current });
+    }
   }, []);
-  useEffect(() => {
-    if (turnFlash === null) return;
-    const el = document.querySelector(`[data-turn="${turnFlash}"]`);
-    el?.scrollIntoView({ block: "center", behavior: "smooth" });
-    const t = setTimeout(() => setTurnFlash(null), 1600);
-    return () => clearTimeout(t);
-  }, [turnFlash, selectedMeeting]);
 
   const leaveRef = useRef(leave);
   leaveRef.current = leave;
@@ -347,7 +460,10 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
         const q = question.trim();
         const result = await askLucent(targetBoardId, q);
         const card = voiceAnswerCard(q, result);
-        setVoiceAnswers((prev) => [...prev, card]);
+        setVoiceAnswers((prev) => [
+          ...prev,
+          { ...card, ...("error" in result ? {} : { links: result.citations }) },
+        ]);
 
         // M6.2: read the answer aloud unless muted. Errors stay text.
         if (!voiceMutedRef.current && !card.error && card.answer !== "") {
@@ -477,9 +593,10 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
       voiceRef.current = session;
       setStartedAt(Date.now());
       // A fresh capture starts a fresh transcript; the saved list keeps the
-      // prior meetings.
+      // prior meetings. The document follows the capture.
       turnsRef.current = [];
       setTurns([]);
+      setSelectedMeeting(null);
       setVoiceAnswers([]);
       persistedCountRef.current = 0;
       setExtractQueued(0);
@@ -509,6 +626,26 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
     }
   };
 
+  /**
+   * After a capture is durably stored, the document switches to the stored
+   * record: its real id is what the board's provenance names, and it can no
+   * longer be "saved" a second time. Skipped when a new capture has started
+   * in the meantime (the async end must not yank the view off it).
+   */
+  const openStoredCapture = (stored: MeetingTranscript, captured: MeetingTurn[]): void => {
+    setSaved((prev) =>
+      prev.some((m) => m.id === stored.id)
+        ? prev.map((m) => (m.id === stored.id ? stored : m))
+        : [stored, ...prev],
+    );
+    if (voiceRef.current === null && turnsRef.current === captured) {
+      setSelectedMeeting(stored);
+      turnsRef.current = [];
+      setTurns([]);
+      setStartedAt(null);
+    }
+  };
+
   const stopRecording = (): void => {
     voiceRef.current?.stop();
     voiceRef.current = null;
@@ -529,13 +666,14 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
       void (async () => {
         await checkpointTurns().catch(() => {});
         const ended = await endMeeting(boardId, ending);
-        if (ended) {
-          // The saved list updates in place: the record it already holds
-          // gained its boundary.
-          setSaved((prev) => prev.map((m) => (m.id === ended.id ? ended : m)));
+        // The ended record joins the saved list (it was never added at
+        // start, so the old in-place update left it missing until reload).
+        if (ended) openStoredCapture(ended, captured);
+        // A capture started while this end was in flight owns these refs now.
+        if (voiceRef.current === null) {
+          persistedCountRef.current = 0;
+          liveMeetingIdRef.current = null;
         }
-        persistedCountRef.current = 0;
-        liveMeetingIdRef.current = null;
       })();
     } else if (captured.length > 0 && boardId) {
       // Fallback save when capture ran without the server transcript (local
@@ -548,7 +686,7 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
           mode: selectedMode,
         });
         if (stored) {
-          setSaved((prev) => [stored, ...prev]);
+          openStoredCapture(stored, captured);
           notify("Meeting saved.");
         } else {
           notify("Couldn't save the meeting — use Save meeting to retry.");
@@ -676,20 +814,39 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
       return;
     }
     setSaved((prev) => [stored, ...prev]);
+    turnsRef.current = [];
     setTurns([]);
     setStartedAt(null);
+    setSelectedMeeting(stored);
     notify("Meeting saved to this board.");
   };
 
   const onExtract = (meeting: MeetingTranscript): void => {
-    const prompt = promptFromTranscript({
-      ...meeting,
-      turns: withTopicBreaks(meeting.turns, topicBreaks),
-    });
+    const spliced = withTopicBreaks(meeting.turns, topicBreaks);
+    const prompt = promptFromTranscript({ ...meeting, turns: spliced });
     setView("canvas");
     // send() lands on the canvas with the prompt, through the standard
     // generate path — the user watches the diagram appear like any other.
-    void send(prompt);
+    // Stamped with the meeting's provenance (whole-transcript range), the
+    // same shape "Re-extract from here" sends: without it the statements this
+    // creates could not be traced back to the meeting, and its brief would
+    // stay empty after a successful extraction.
+    void send(
+      prompt,
+      undefined,
+      meeting.turns.length > 0
+        ? {
+            provenance: {
+              meetingId: meeting.id,
+              turns: spliced.map((t) => t.text),
+              turnRange: [0, meeting.turns.length - 1],
+              turnKinds: meeting.turns
+                .map((t) => t.kind)
+                .filter((k): k is NonNullable<MeetingTurn["kind"]> => Boolean(k)),
+            },
+          }
+        : undefined,
+    );
   };
 
   const shown = selectedMeeting;
@@ -710,7 +867,8 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
   useEffect(() => {
     setTopicBreaks([]);
   }, [shownId]);
-  // Reverse provenance (Stage C3): which board objects each turn of the  // SELECTED meeting produced. Computed from the workspace this browser
+  // Reverse provenance (Stage C3): which board objects each turn of the
+  // SELECTED meeting produced. Computed from the workspace this browser
   // already holds — C2 put provenance in the state, so no server call is
   // needed. Live capture shows none: its turns are still flowing and the
   // affordance belongs to the closed record.
@@ -761,6 +919,24 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
     return byTurn;
   }, [workspace, shown, liveKeys, turns.length]);
 
+  // The brief (meetingBrief.ts): the statements this meeting put on the board.
+  // A live capture without a server transcript is the "live-session"
+  // placeholder — the brief checks those stamps against the live turns.
+  const briefId = shown ? shown.id : (liveMeetingId ?? "live-session");
+  const brief = useMemo(
+    () => meetingBrief(workspace, { id: briefId, turns: displayTurns }),
+    [workspace, briefId, displayTurns],
+  );
+  // Per past meeting, how many statements it produced — for the meetings list.
+  const savedStatementCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const m of saved) counts.set(m.id, meetingBrief(workspace, { id: m.id }).total);
+    return counts;
+  }, [workspace, saved]);
+
+  const speakers = useMemo(() => speakersOf(displayTurns), [displayTurns]);
+  const turnBase = shown?.startedAt ?? startedAt ?? displayTurns[0]?.at ?? null;
+
   const markTopicBreak = (): void => {
     const at = displayTurns.length;
     if (topicBreaks.includes(at)) {
@@ -809,551 +985,991 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
     onCitation({ kind: "node", id });
   };
 
-  return (
-    <div style={{ position: "absolute", inset: 0 }}>
-      <div style={{ position: "absolute", inset: 0 }}>
-        <div className="canvas-grid" />
-        <div className="canvas-vignette" />
-      </div>
-      <TopBar
-        crumbs={[
-          { label: "Personal" },
-          { label: projectName, view: "canvas" },
-          { label: "Meeting", current: true },
-        ]}
-        onOpenSettings={onOpenSettings}
-      />
-      <LeftRail onOpenSettings={onOpenSettings} />
+  // ---- Citations: brief → transcript turn -------------------------------
+  const jumpToTurn = (turn: number): void => {
+    setQuery("");
+    setTurnFilter("all");
+    setPanelOpen(true);
+    setActivePanel("transcript");
+    focusSeqRef.current += 1;
+    setTurnFocus({ turn, seq: focusSeqRef.current });
+  };
+  // Scroll the focused turn to the middle of the transcript list. Manual
+  // rather than scrollIntoView: the list sits in a sticky column inside the
+  // page scroller, and scrollIntoView would drag the whole page along.
+  useEffect(() => {
+    if (!turnFocus || !panelOpen || activePanel !== "transcript") return;
+    const list = turnsListRef.current;
+    const el = list?.querySelector<HTMLElement>(`[data-turn="${turnFocus.turn}"]`);
+    if (!list || !el) return;
+    list.scrollTo({
+      top: Math.max(0, el.offsetTop - list.clientHeight / 2 + el.offsetHeight / 2),
+      behavior: prefersReducedMotion() ? "auto" : "smooth",
+    });
+  }, [turnFocus, shownId, displayTurns.length, panelOpen, activePanel]);
 
-      <div className="meeting-layout">
-        <NativeRoom
-          boardId={boardId}
-          isRecording={recording}
-          onToggleRecording={() => {
-            if (recording) stopRecording();
-            else startRecording();
-          }}
-          panelOpen={panelOpen}
-          onTogglePanel={(p) => {
-            if (panelOpen && activePanel === p) {
-              setPanelOpen(false);
-            } else {
-              setPanelOpen(true);
-              setActivePanel(p);
+  const openMeeting = (m: MeetingTranscript | null): void => {
+    setSelectedMeeting(m);
+    setTurnFocus(null);
+    setQuery("");
+    setTurnFilter("all");
+  };
+
+  // Ask citations: a node opens on the canvas; a turn of a meeting this board
+  // holds opens here; a revision opens History.
+  const followAskCitation = (c: AskCitation): void => {
+    if (c.kind !== "meeting") {
+      onCitation(c);
+      return;
+    }
+    const here = shown ? shown.id : liveMeetingId;
+    if (c.id === here) {
+      if (c.turnRange) jumpToTurn(c.turnRange[0]);
+      return;
+    }
+    const match = saved.find((m) => m.id === c.id);
+    if (!match) {
+      notify("That meeting isn't in this board's list.");
+      return;
+    }
+    openMeeting(match);
+    if (c.turnRange) jumpToTurn(c.turnRange[0]);
+  };
+
+  // The typed Ask bar: askLucent over the board, answered with citations.
+  // Text in, text out — never spoken, and outside the voice lease.
+  const onAsk = async (e?: FormEvent): Promise<void> => {
+    e?.preventDefault();
+    const q = askDraft.trim();
+    if (!q || askBusy) return;
+    if (answerInFlight.current) {
+      notify("Lucent is answering — one question at a time.");
+      return;
+    }
+    let target = boardId;
+    if (!target) target = await startSharing();
+    if (!target) {
+      notify("Asking Lucent needs a saved board — please sign in or share the board.");
+      return;
+    }
+    answerInFlight.current = true;
+    setAskBusy(true);
+    try {
+      const result = await askLucent(target, q);
+      const card = voiceAnswerCard(q, result);
+      setVoiceAnswers((prev) => [
+        ...prev,
+        { ...card, ...("error" in result ? {} : { links: result.citations }) },
+      ]);
+      setAskDraft("");
+    } finally {
+      answerInFlight.current = false;
+      setAskBusy(false);
+    }
+  };
+
+  // The video room's dock buttons: minutes/saved toggle this column; its
+  // "extracted statements" button now means the brief.
+  const onRoomPanel = (p: "transcript" | "extract" | "saved"): void => {
+    if (p === "extract") {
+      document
+        .getElementById("meet-brief")
+        ?.scrollIntoView({ block: "start", behavior: prefersReducedMotion() ? "auto" : "smooth" });
+      return;
+    }
+    if (panelOpen && activePanel === p) {
+      setPanelOpen(false);
+    } else {
+      setPanelOpen(true);
+      setActivePanel(p);
+    }
+  };
+
+  // ---- Derived presentation ---------------------------------------------
+  const phase: "live" | "saved" | "unsaved" | "none" =
+    recording && !shown ? "live" : shown ? "saved" : turns.length > 0 ? "unsaved" : "none";
+  const meetingStart = shown?.startedAt ?? startedAt ?? displayTurns[0]?.at ?? null;
+  const title =
+    meetingStart !== null
+      ? `Meeting · ${fmtDay(meetingStart)}, ${fmtClock(meetingStart)}`
+      : "Meeting";
+  const shownMode = shown?.mode && isMeetingMode(shown.mode) ? shown.mode : null;
+
+  const filteredTurns = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return displayTurns
+      .map((t, i) => ({ t, i }))
+      .filter(
+        ({ t }) =>
+          (turnFilter === "all" || t.kind === turnFilter) &&
+          (!q || t.text.toLowerCase().includes(q) || t.speaker.toLowerCase().includes(q)),
+      );
+  }, [displayTurns, query, turnFilter]);
+  const filtering = query.trim() !== "" || turnFilter !== "all";
+  const kindCounts = useMemo(() => {
+    const counts = new Map<NonNullable<MeetingTurn["kind"]>, number>();
+    for (const t of displayTurns) if (t.kind) counts.set(t.kind, (counts.get(t.kind) ?? 0) + 1);
+    return counts;
+  }, [displayTurns]);
+
+  const recPill = recording ? (
+    shown ? (
+      <button
+        type="button"
+        className="meet-rec"
+        onClick={() => openMeeting(null)}
+        title="Recording continues — return to the live capture"
+      >
+        <span className="meet-rec-dot" aria-hidden />
+        REC · {formatElapsed(now - (startedAt ?? now))}
+      </button>
+    ) : (
+      <span className="meet-rec">
+        <span className="meet-rec-dot" aria-hidden />
+        REC · {formatElapsed(now - (startedAt ?? now))}
+      </span>
+    )
+  ) : shown ? (
+    <span className="meet-ended">
+      {shown.endedAt ? `Ended · ${fmtClock(shown.endedAt)}` : "No end recorded"}
+    </span>
+  ) : null;
+
+  const statusLine = recording
+    ? !extracts
+      ? "Recording the transcript only — Record mode extracts nothing."
+      : (lastExtractStatus ??
+        (extractQueued > 0 ? `${plural(extractQueued, "turn")} pending` : "Listening…"))
+    : null;
+
+  const renderCitations = (item: BriefItem): ReactNode => {
+    if (!item.turnRange) return null;
+    const cite = citationTurns(item.turnRange);
+    const turnTitle = (n: number): string => {
+      const t = displayTurns[n];
+      return t ? `Turn ${n + 1} · ${t.speaker}: ${t.text}` : `Turn ${n + 1}`;
+    };
+    return (
+      <span className="meet-cites" title={item.quote ? `“${item.quote}”` : undefined}>
+        {cite.kind === "turns" ? (
+          cite.turns.map((n) => (
+            <button
+              key={n}
+              type="button"
+              className="meet-cite"
+              title={turnTitle(n)}
+              aria-label={`Show turn ${n + 1} in the transcript`}
+              onClick={() => jumpToTurn(n)}
+            >
+              {n + 1}
+            </button>
+          ))
+        ) : (
+          <button
+            type="button"
+            className="meet-cite span"
+            title={turnTitle(cite.from)}
+            aria-label={`Show turns ${cite.from + 1} to ${cite.to + 1} in the transcript`}
+            onClick={() => jumpToTurn(cite.from)}
+          >
+            {cite.from + 1}–{cite.to + 1}
+          </button>
+        )}
+      </span>
+    );
+  };
+
+  const today = todayIso();
+  const renderItem = (item: BriefItem): ReactNode => {
+    const overdue =
+      item.kind === "action" &&
+      item.status === "open" &&
+      item.dueDate !== undefined &&
+      item.dueDate < today;
+    const hasMeta =
+      item.kind === "action" || item.dueDate !== undefined || (item.supersedes?.length ?? 0) > 0;
+    return (
+      <li key={item.nodeId} className={`meet-item ${item.status}`}>
+        <div className="meet-item-line">
+          <KindBadge kind={item.kind} status={item.status} showKind={false} />
+          <span className="meet-item-text">
+            <span
+              className={`meet-item-label ${item.kind === "decision" && item.status === "resolved" ? "decided" : ""}`}
+            >
+              {item.label}
+            </span>
+            {renderCitations(item)}
+          </span>
+          <button
+            type="button"
+            className="meet-link meet-item-show"
+            onClick={() => onCitation({ kind: "node", id: item.nodeId })}
+            aria-label={`Show “${item.label}” on the board`}
+          >
+            Show on board
+            <Ico.Arrow />
+          </button>
+        </div>
+        {hasMeta && (
+          <div className="meet-item-meta">
+            {item.assignee && (
+              <span className="meet-owner">
+                <Avatar name={item.assignee} size={18} />
+                {item.assignee}
+              </span>
+            )}
+            {item.kind === "action" && !item.assignee && (
+              <span className="meet-owner unowned">No owner yet</span>
+            )}
+            {item.dueDate && (
+              <span className={`mono meet-due ${overdue ? "overdue" : ""}`}>
+                {overdue ? "Overdue · " : "Due "}
+                {fmtDue(item.dueDate)}
+              </span>
+            )}
+            {item.supersedes?.map((id) => (
+              <ProvenanceChip
+                key={id}
+                icon={<span aria-hidden>↺</span>}
+                label={`Replaces · ${workspace.nodes[id]?.label ?? id}`}
+                title="Show the statement this one replaces on the board"
+                onClick={() => onCitation({ kind: "node", id })}
+              />
+            ))}
+          </div>
+        )}
+      </li>
+    );
+  };
+
+  const briefSummary = brief.sections
+    .map((s) => plural(s.items.length, KIND_LABEL[s.kind].one.toLowerCase()))
+    .join(" · ");
+
+  const renderBrief = (): ReactNode => {
+    if (phase === "none") return null;
+    let empty: ReactNode = null;
+    if (brief.total === 0) {
+      if (phase === "live") {
+        empty = extracts ? (
+          <EmptyState
+            compact
+            glyph={<span className="meet-listen" aria-hidden />}
+            title="Listening"
+            body="Decisions, actions and questions appear here as Lucent hears them — each one linked to the turns that produced it."
+          />
+        ) : (
+          <EmptyState
+            compact
+            title="Record mode keeps the transcript only"
+            body="Nothing is extracted while this capture runs. Choose Intelligence before your next recording to build the brief live, or extract this transcript once it is saved."
+          />
+        );
+      } else if (phase === "saved" && shown) {
+        empty = (
+          <EmptyState
+            compact
+            title="Nothing on this board cites this meeting yet"
+            body="Extract it and Lucent adds the decisions, actions, questions and risks it finds to the board — each one linked back to the turns that produced it."
+            action={
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={() => onExtract(shown)}
+                disabled={!boardId || shown.turns.length === 0}
+              >
+                Extract to board <Ico.Arrow />
+              </Button>
             }
-          }}
-          activePanel={activePanel}
-          turnsCount={displayTurns.length}
-        />
+          />
+        );
+      } else {
+        empty = (
+          <EmptyState
+            compact
+            title="This transcript isn't saved yet"
+            body={
+              boardId
+                ? "Save it to the board, then extract it — the brief lists what the meeting decided, assigned and left open."
+                : "Meetings save against a board in your workspace. Share this board, then save the transcript to extract a brief from it."
+            }
+          />
+        );
+      }
+    }
+    return (
+      <section className="meet-brief" id="meet-brief" aria-labelledby="meet-brief-title">
+        <div className="meet-brief-head">
+          <h2 className="meet-h2" id="meet-brief-title">
+            Brief
+          </h2>
+          {brief.total > 0 && (
+            <span className="mono-caps meet-brief-sum">
+              {briefSummary}
+              {brief.provisional ? " · provisional" : ""}
+            </span>
+          )}
+        </div>
+        {empty}
+        {brief.sections.map((section) => (
+          <div key={section.kind} className="meet-brief-section">
+            <h3 className="meet-h3">
+              <StatementGlyph kind={section.kind} size={13} />
+              {sectionHeading(section)}
+              <span className="section-count">{section.items.length}</span>
+            </h3>
+            <ul className="meet-items">{section.items.map(renderItem)}</ul>
+          </div>
+        ))}
+      </section>
+    );
+  };
+
+  const meetingsList = (compact: boolean): ReactNode =>
+    saved.map((m) => {
+      const statements = savedStatementCounts.get(m.id) ?? 0;
+      const viewing = selectedMeeting?.id === m.id;
+      return (
+        <button
+          key={m.id}
+          type="button"
+          className={`meet-past ${viewing ? "on" : ""} ${compact ? "compact" : ""}`}
+          aria-pressed={viewing}
+          onClick={() => openMeeting(viewing ? null : m)}
+        >
+          <span className="meet-past-title">
+            {fmtDay(m.startedAt)}, {fmtClock(m.startedAt)}
+          </span>
+          <span className="mono meet-past-meta">
+            {plural(m.turns.length, "turn")}
+            {m.endedAt ? ` · ${fmtDuration(m.endedAt - m.startedAt)}` : " · no end recorded"}
+            {statements > 0 ? ` · ${plural(statements, "statement")}` : ""}
+            {viewing ? " · viewing" : ""}
+          </span>
+        </button>
+      );
+    });
+
+  const modeControl = (
+    <div className="meet-mode">
+      {!recording ? (
+        <div className="meet-seg" role="radiogroup" aria-label="Meeting mode">
+          {MEETING_MODES.map((mode) => (
+            <button
+              key={mode}
+              type="button"
+              className={selectedMode === mode ? "on" : ""}
+              aria-pressed={selectedMode === mode}
+              title={MODE_NOTES[mode]}
+              onClick={() => setSettings({ meetingMode: mode })}
+            >
+              {MODE_LABELS[mode]}
+            </button>
+          ))}
+        </div>
+      ) : (
+        <span className="meet-chip">{MODE_LABELS[selectedMode]} mode</span>
+      )}
+    </div>
+  );
+
+  const voiceHints = (
+    <>
+      {!voiceSupported && (
+        <p className="meet-note">
+          This browser offers no speech-to-text Lucent can use, so recording is unavailable.{" "}
+          <button type="button" className="meet-link" onClick={() => onOpenSettings("ai")}>
+            See voice providers
+          </button>
+        </p>
+      )}
+      {voiceSupported && !livekitConfigured && !recording && (
+        <p className="meet-note">
+          Local speech-to-text labels every line “You”. Configure LiveKit for per-speaker identity.{" "}
+          <button type="button" className="meet-link" onClick={() => onOpenSettings("ai")}>
+            Open voice settings
+          </button>
+        </p>
+      )}
+    </>
+  );
+
+  // The call drawer stays open while a call is joining or live; an idle or
+  // failed room can be put away.
+  const roomActive = roomStatus === "live" || roomStatus === "joining";
+  const showCall = callOpen || roomActive;
+
+  return (
+    <Page
+      crumbs={[
+        { label: "Boards", view: "dashboard" },
+        { label: projectName || "Untitled board", view: "canvas" },
+        { label: "Meeting", current: true },
+      ]}
+      meta={recPill}
+      onOpenSettings={onOpenSettings}
+      width="wide"
+    >
+      <div className={`meet-layout ${panelOpen ? "" : "panel-closed"}`}>
+        <div className="meet-doc">
+          {phase !== "none" && (
+            <div className="meet-meta">
+              {shown?.endedAt && (
+                <span className="meet-chip">{fmtDuration(shown.endedAt - shown.startedAt)}</span>
+              )}
+              {speakers.length > 0 && (
+                <span className="meet-chip meet-people" title={speakers.join(", ")}>
+                  <span className="meet-avatars">
+                    {speakers.slice(0, 4).map((name) => (
+                      <Avatar key={name} name={name} size={20} />
+                    ))}
+                  </span>
+                  {speakers.length === 1 ? speakers[0] : plural(speakers.length, "speaker")}
+                </span>
+              )}
+              <span className="meet-chip">{plural(displayTurns.length, "turn")}</span>
+              {shown
+                ? shownMode && <span className="meet-chip">{MODE_LABELS[shownMode]} mode</span>
+                : null}
+            </div>
+          )}
+
+          <PageHeader
+            eyebrow={
+              phase === "live"
+                ? `Live meeting · ${projectName}`
+                : phase === "saved"
+                  ? `Saved meeting · ${projectName}`
+                  : `Meeting · ${projectName}`
+            }
+            title={title}
+            lede={
+              phase === "live"
+                ? extracts
+                  ? `Recording — what the room decides lands on ${projectName} as it is said.`
+                  : "Recording the transcript only."
+                : phase === "saved" && shown
+                  ? shown.endedAt
+                    ? `Ended at ${fmtClock(shown.endedAt)} after ${fmtDuration(shown.endedAt - shown.startedAt)}.`
+                    : "This capture never recorded an end — the transcript holds what was flushed."
+                  : phase === "unsaved"
+                    ? "Captured in this tab and not saved to the board yet."
+                    : `Record a conversation and Lucent types what it hears onto ${projectName} — decisions, actions, questions and risks, each linked to the words that produced it.`
+            }
+          />
+
+          {phase !== "none" && (
+            <div className="meet-controls">
+              <div className="meet-actions">
+                {!recording ? (
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    onClick={startRecording}
+                    disabled={!voiceSupported}
+                  >
+                    <Ico.Mic /> New recording
+                  </Button>
+                ) : (
+                  <Button variant="danger" size="sm" onClick={stopRecording}>
+                    <span className="meet-stop" aria-hidden /> Stop
+                  </Button>
+                )}
+                {recording && shown && (
+                  <Button variant="ghost" size="sm" onClick={() => openMeeting(null)}>
+                    Back to live capture
+                  </Button>
+                )}
+                {!shown && !recording && turns.length > 0 && (
+                  <Button variant="ghost" size="sm" onClick={() => void onSave()} disabled={saving}>
+                    {saving ? "Saving…" : "Save meeting"}
+                  </Button>
+                )}
+                {shown && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => onExtract(shown)}
+                    disabled={!boardId}
+                  >
+                    Extract to board <Ico.Arrow />
+                  </Button>
+                )}
+                {displayTurns.length > 0 && (
+                  <Button
+                    variant="quiet"
+                    size="sm"
+                    onClick={markTopicBreak}
+                    title="Insert a topic separator — re-extractions treat it as a new topic"
+                  >
+                    Topic break
+                  </Button>
+                )}
+                {(selectedMode === "assistant" || selectedMode === "participant") && (
+                  <Button
+                    variant="quiet"
+                    size="sm"
+                    title={
+                      voiceMuted ? "Unmute Lucent's spoken answers" : "Mute Lucent's spoken answers"
+                    }
+                    aria-pressed={!voiceMuted}
+                    onClick={() => {
+                      if (!voiceMuted) {
+                        playbackRef.current?.stop();
+                        playbackRef.current = null;
+                      }
+                      setVoiceMuted((m) => !m);
+                    }}
+                  >
+                    {voiceMuted ? "Unmute voice" : "Mute voice"}
+                  </Button>
+                )}
+                <Button
+                  variant="quiet"
+                  size="sm"
+                  aria-pressed={showCall}
+                  disabled={roomActive}
+                  onClick={() => setCallOpen((o) => !o)}
+                  title={
+                    roomActive
+                      ? "The video call is running — leave it from the call controls"
+                      : "Video call with the people on this board"
+                  }
+                >
+                  <Ico.Video /> {roomStatus === "live" ? "In call" : "Video call"}
+                </Button>
+                {!panelOpen && (
+                  <Button variant="quiet" size="sm" onClick={() => setPanelOpen(true)}>
+                    Show transcript
+                  </Button>
+                )}
+              </div>
+              {modeControl}
+            </div>
+          )}
+
+          {phase !== "none" && (
+            <>
+              {!recording && <p className="meet-note">{MODE_NOTES[selectedMode]}</p>}
+              {statusLine && (
+                <p className="meet-live" role="status">
+                  <span className="meet-rec-dot" aria-hidden />
+                  {statusLine}
+                </p>
+              )}
+              {voiceHints}
+            </>
+          )}
+
+          {/* Conversational Lease Follow-Up Indicator */}
+          {activeLease && leaseRemainingSec > 0 && (
+            <div className="meet-lease" role="status">
+              <span className="meet-lease-dot" aria-hidden />
+              <span className="meet-lease-text">
+                {activeLease.state === "waiting_for_user_response"
+                  ? `Awaiting clarification from ${activeLease.speakerName || activeLease.speakerId}`
+                  : `Continuing conversation with ${activeLease.speakerName || activeLease.speakerId}`}{" "}
+                <span className="mono">({leaseRemainingSec}s)</span>
+              </span>
+              <button
+                type="button"
+                className="meet-kbd"
+                onClick={() => leaseManagerRef.current.dismissLease()}
+                title="Dismiss conversational lease (Esc)"
+              >
+                Esc
+              </button>
+            </div>
+          )}
+
+          {showCall && (
+            <div className="meet-call">
+              <NativeRoom
+                boardId={boardId}
+                isRecording={recording}
+                onToggleRecording={() => {
+                  if (recording) stopRecording();
+                  else startRecording();
+                }}
+                panelOpen={panelOpen}
+                onTogglePanel={onRoomPanel}
+                activePanel={activePanel}
+                turnsCount={displayTurns.length}
+              />
+            </div>
+          )}
+
+          {phase === "none" && (
+            <>
+              <EmptyState
+                glyph={
+                  <span className="meet-empty-glyph">
+                    <Ico.Mic />
+                  </span>
+                }
+                title="No meeting captured on this board yet"
+                body={
+                  <>
+                    Start recording and the transcript fills in on the right. In Intelligence mode
+                    Lucent turns what it hears into typed statements on the board — each one cites
+                    the turns it came from, so anyone can check who said it and in which words.
+                    {!boardId &&
+                      " This board lives only in this browser: share it to keep transcripts with the board."}
+                  </>
+                }
+                action={
+                  <>
+                    <Button variant="primary" onClick={startRecording} disabled={!voiceSupported}>
+                      <Ico.Mic /> Start recording
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      aria-pressed={showCall}
+                      disabled={roomActive}
+                      onClick={() => setCallOpen((o) => !o)}
+                    >
+                      <Ico.Video /> Video call
+                    </Button>
+                  </>
+                }
+              />
+              <div className="meet-empty-mode">
+                <span className="mono-caps">Capture mode</span>
+                {modeControl}
+                <p className="meet-note">{MODE_NOTES[selectedMode]}</p>
+                {voiceHints}
+              </div>
+              {saved.length > 0 && (
+                <section className="meet-past-list" aria-label="Past meetings on this board">
+                  <h2 className="meet-h2">Past meetings</h2>
+                  {meetingsList(false)}
+                </section>
+              )}
+            </>
+          )}
+
+          {renderBrief()}
+
+          {!shown && openQuestions.total > 0 && (
+            <section className="meet-open" aria-label="Open questions on this board">
+              <h3 className="meet-h3">
+                <StatementGlyph kind="question" size={13} />
+                Still open on this board
+                <span className="section-count">{openQuestions.total}</span>
+              </h3>
+              <ul className="meet-open-list">
+                {openQuestions.items.map((q) => (
+                  <li key={q.id}>
+                    <button
+                      type="button"
+                      className="meet-link"
+                      onClick={() => onCitation({ kind: "node", id: q.id })}
+                    >
+                      {q.label}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+              {openQuestions.total > openQuestions.items.length && (
+                <p className="meet-note">
+                  +{openQuestions.total - openQuestions.items.length} more in Intelligence
+                </p>
+              )}
+            </section>
+          )}
+
+          {voiceAnswers.length > 0 && (
+            <section className="meet-answers" aria-label="Answers from Lucent">
+              <h2 className="meet-h2">Asked Lucent</h2>
+              {voiceAnswers.map((a) => (
+                <div key={a.id} className="meet-answer">
+                  <div className="meet-answer-q">{a.question}</div>
+                  <div className={`meet-answer-a ${a.error ? "error" : ""}`}>
+                    <span className="meet-answer-mark" aria-hidden>
+                      ✦
+                    </span>
+                    {a.error ? `Couldn't answer: ${a.error}` : a.answer}
+                  </div>
+                  {a.links && a.links.length > 0 ? (
+                    <div className="meet-answer-cites">
+                      {a.links.map((c) => (
+                        <ProvenanceChip
+                          key={`${c.kind}:${c.id}:${c.turnRange?.join("-") ?? ""}`}
+                          label={c.label}
+                          title={c.why ?? c.detail}
+                          onClick={() => followAskCitation(c)}
+                        />
+                      ))}
+                    </div>
+                  ) : (
+                    a.citations.length > 0 && (
+                      <div className="meet-answer-cites">
+                        {a.citations.map((label, idx) => (
+                          <ProvenanceChip key={`${label}-${idx}`} label={label} />
+                        ))}
+                      </div>
+                    )
+                  )}
+                </div>
+              ))}
+            </section>
+          )}
+
+          <form className="meet-ask" onSubmit={(e) => void onAsk(e)}>
+            <span className="meet-ask-mark" aria-hidden>
+              <Ico.Sparkle />
+            </span>
+            <input
+              value={askDraft}
+              onChange={(e) => setAskDraft(e.target.value)}
+              placeholder={
+                boardId
+                  ? "Ask Lucent about this board…"
+                  : "Ask Lucent about this board — saves it to your workspace first"
+              }
+              aria-label="Ask Lucent about this board"
+              disabled={askBusy}
+            />
+            <button
+              type="submit"
+              className="meet-ask-send"
+              disabled={askBusy || askDraft.trim() === ""}
+              aria-label="Ask"
+            >
+              {askBusy ? <span className="meet-ask-busy" aria-hidden /> : <Ico.Arrow />}
+            </button>
+          </form>
+        </div>
 
         {panelOpen && (
-          <div className="meeting-drawer">
-            <div className="meeting-drawer-tabs">
+          <aside className="meet-panel" aria-label="Meeting transcript">
+            <div className="meet-panel-head">
+              <div className="meet-tabs" role="tablist" aria-label="Transcript panel">
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={activePanel === "transcript"}
+                  className={activePanel === "transcript" ? "on" : ""}
+                  onClick={() => setActivePanel("transcript")}
+                >
+                  Transcript
+                  <span className="meet-tab-count">{displayTurns.length}</span>
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={activePanel === "saved"}
+                  className={activePanel === "saved" ? "on" : ""}
+                  onClick={() => setActivePanel("saved")}
+                >
+                  Meetings
+                  <span className="meet-tab-count">{saved.length}</span>
+                </button>
+              </div>
               <button
-                className={`meeting-drawer-tab ${activePanel === "transcript" ? "active" : ""}`}
-                onClick={() => setActivePanel("transcript")}
-              >
-                Minutes {displayTurns.length > 0 ? `(${displayTurns.length})` : ""}
-              </button>
-              <button
-                className={`meeting-drawer-tab ${activePanel === "extract" ? "active" : ""}`}
-                onClick={() => setActivePanel("extract")}
-              >
-                Extracted
-              </button>
-              <button
-                className={`meeting-drawer-tab ${activePanel === "saved" ? "active" : ""}`}
-                onClick={() => setActivePanel("saved")}
-              >
-                Saved ({saved.length})
-              </button>
-              <div style={{ flex: 1 }} />
-              <button
+                type="button"
+                className="meet-icon-btn"
                 onClick={() => setPanelOpen(false)}
-                title="Collapse sidebar"
-                style={{
-                  background: "transparent",
-                  border: "none",
-                  color: "var(--ink-3)",
-                  cursor: "pointer",
-                  fontSize: 14,
-                  padding: "0 6px",
-                }}
+                title="Collapse transcript"
+                aria-label="Collapse transcript"
               >
-                ✕
+                <Ico.X />
               </button>
             </div>
 
-            <div className="meeting-drawer-content">
-              {activePanel === "transcript" && (
-                <div>
-                  <div className="meeting-head">
-                    <div>
-                      <div
-                        className="mono small"
-                        style={{
-                          letterSpacing: "0.12em",
-                          color: recording ? "var(--sig-red)" : "var(--ink-3)",
-                        }}
-                      >
-                        {recording ? "RECORDING" : shown ? "SAVED MEETING" : "READY"}
-                      </div>
-                      <h3 style={{ margin: "4px 0 0", fontSize: 14, color: "var(--ink-0)" }}>
-                        {shown ? new Date(shown.startedAt).toLocaleString() : "Meeting Minutes"}
-                      </h3>
-                      {recording && (
-                        <div
-                          className="mono small"
-                          style={{ marginTop: 4, color: "var(--ink-3)", letterSpacing: "0.04em" }}
-                        >
-                          {lastExtractStatus ??
-                            (extractQueued > 0
-                              ? `${extractQueued} turn${extractQueued > 1 ? "s" : ""} pending`
-                              : "listening…")}
-                        </div>
-                      )}
-                    </div>
-                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                      {!recording ? (
-                        <button
-                          className="btn amber"
-                          style={{ height: 26, fontSize: 11 }}
-                          onClick={startRecording}
-                          disabled={!voiceSupported}
-                        >
-                          <Ico.Mic /> {turns.length > 0 || shown ? "New capture" : "Record"}
-                        </button>
-                      ) : (
-                        <button
-                          className="btn"
-                          style={{ height: 26, fontSize: 11 }}
-                          onClick={stopRecording}
-                        >
-                          Stop
-                        </button>
-                      )}
-                      {(selectedMode === "assistant" || selectedMode === "participant") && (
-                        <button
-                          className="btn"
-                          style={{ height: 26, fontSize: 11 }}
-                          title={
-                            voiceMuted
-                              ? "Unmute Lucent's spoken answers"
-                              : "Mute Lucent's spoken answers"
-                          }
-                          aria-pressed={!voiceMuted}
-                          onClick={() => {
-                            if (!voiceMuted) {
-                              playbackRef.current?.stop();
-                              playbackRef.current = null;
-                            }
-                            setVoiceMuted((m) => !m);
-                          }}
-                        >
-                          {voiceMuted ? "Unmute voice" : "Mute voice"}
-                        </button>
-                      )}
-                      {!shown && turns.length > 0 && (
-                        <button
-                          className="btn primary"
-                          style={{ height: 26, fontSize: 11 }}
-                          onClick={() => void onSave()}
-                          disabled={saving}
-                        >
-                          {saving ? "Saving…" : "Save"}
-                        </button>
-                      )}
-                      {shown && (
-                        <button
-                          className="btn primary"
-                          style={{ height: 26, fontSize: 11 }}
-                          onClick={() => onExtract(shown)}
-                          disabled={!boardId}
-                        >
-                          Extract <Ico.Arrow />
-                        </button>
-                      )}
-                      {displayTurns.length > 0 && (
-                        <button
-                          className="btn"
-                          style={{ height: 26, fontSize: 11 }}
-                          onClick={markTopicBreak}
-                          title="Insert a topic separator — re-extractions treat it as a new topic"
-                        >
-                          Topic break
-                        </button>
-                      )}
-                    </div>
+            {activePanel === "transcript" && (
+              <>
+                <div className="meet-search">
+                  <Ico.Search />
+                  <input
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    placeholder="Search transcript…"
+                    aria-label="Search transcript"
+                  />
+                  {query && (
+                    <button
+                      type="button"
+                      className="meet-icon-btn"
+                      onClick={() => setQuery("")}
+                      aria-label="Clear search"
+                    >
+                      <Ico.X />
+                    </button>
+                  )}
+                </div>
+                {kindCounts.size > 0 && (
+                  <div className="meet-kind-filter">
+                    <FilterChips<TurnFilter>
+                      label="Filter lines by classification"
+                      value={turnFilter}
+                      onChange={setTurnFilter}
+                      items={[
+                        { id: "all", label: "All", count: displayTurns.length },
+                        ...KIND_ORDER.filter((k) => kindCounts.has(k)).map((k) => ({
+                          id: k,
+                          label: k[0]!.toUpperCase() + k.slice(1),
+                          count: kindCounts.get(k),
+                        })),
+                      ]}
+                    />
                   </div>
+                )}
 
-                  {!livekitConfigured && !recording && (
-                    <p
-                      className="mono small"
-                      style={{ color: "var(--ink-3)", margin: "4px 0 8px" }}
-                    >
-                      Local STT labels lines "You". Configure LiveKit in Settings for per-speaker
-                      identity.
-                    </p>
+                <div className="meet-turns" ref={turnsListRef}>
+                  {displayTurns.length === 0 && (
+                    <EmptyState
+                      compact
+                      title={recording ? "Listening for the first line" : "No transcript yet"}
+                      body={
+                        recording
+                          ? "Each line lands here as it is transcribed, with who said it and when."
+                          : "Start recording to capture the meeting. Lines classify themselves as they land (problem / hypothesis / solution / decision / action / requirement) and save to this board."
+                      }
+                    />
                   )}
-
-                  {!recording && (
-                    <div style={{ margin: "8px 0 12px" }}>
-                      <div className="segmented" role="radiogroup" aria-label="Meeting mode">
-                        {MEETING_MODES.map((mode) => (
+                  {displayTurns.length > 0 && filtering && filteredTurns.length === 0 && (
+                    <p className="meet-note meet-none">No lines match.</p>
+                  )}
+                  {filteredTurns.map(({ t, i }) => {
+                    const produced = reverseByTurn?.get(i) ?? liveByTurn?.get(i);
+                    const provisional = !shown && (liveByTurn?.has(i) ?? false);
+                    const focused = turnFocus?.turn === i;
+                    return (
+                      <Fragment key={focused ? `${i}:${turnFocus.seq}` : i}>
+                        {!filtering && topicBreaks.includes(i) && (
                           <button
-                            key={mode}
-                            className={selectedMode === mode ? "active" : ""}
-                            aria-pressed={selectedMode === mode}
-                            title={MODE_NOTES[mode]}
-                            onClick={() => setSettings({ meetingMode: mode })}
+                            type="button"
+                            className="meet-break"
+                            title="Remove topic break"
+                            onClick={() => setTopicBreaks((prev) => prev.filter((b) => b !== i))}
                           >
-                            {MODE_LABELS[mode]}
+                            <span>Topic break</span>
                           </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Conversational Lease Follow-Up Indicator */}
-                  {activeLease && leaseRemainingSec > 0 && (
-                    <div
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "space-between",
-                        padding: "6px 12px",
-                        margin: "0 0 10px",
-                        borderRadius: 8,
-                        background: "rgba(99, 102, 241, 0.12)",
-                        border: "1px solid rgba(99, 102, 241, 0.25)",
-                        color: "#a5b4fc",
-                        fontSize: 12,
-                      }}
-                    >
-                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                        <span
-                          style={{
-                            width: 8,
-                            height: 8,
-                            borderRadius: "50%",
-                            background: "#818cf8",
-                            boxShadow: "0 0 8px #818cf8",
-                          }}
-                        />
-                        <span>
-                          {activeLease.state === "waiting_for_user_response"
-                            ? `Awaiting clarification from ${activeLease.speakerName || activeLease.speakerId}`
-                            : `Continuing conversation with ${activeLease.speakerName || activeLease.speakerId}`}{" "}
-                          ({leaseRemainingSec}s)
-                        </span>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => leaseManagerRef.current.dismissLease()}
-                        title="Dismiss conversational lease (Esc)"
-                        style={{
-                          background: "rgba(255, 255, 255, 0.08)",
-                          border: "1px solid rgba(255, 255, 255, 0.15)",
-                          borderRadius: 4,
-                          color: "#c7d2fe",
-                          cursor: "pointer",
-                          fontSize: 11,
-                          padding: "2px 6px",
-                        }}
-                      >
-                        Esc
-                      </button>
-                    </div>
-                  )}
-
-                  <div className="meeting-turns">
-                    {displayTurns.length === 0 && (
-                      <p className="muted" style={{ fontSize: 13, padding: "24px 4px" }}>
-                        Start recording to capture the meeting. Lines classify themselves as they
-                        land (problem / hypothesis / solution / decision / action / requirement) and
-                        save to this board.
-                      </p>
-                    )}
-                    {displayTurns.map((t, i) => {
-                      const produced = reverseByTurn?.get(i) ?? liveByTurn?.get(i);
-                      const provisional = !shown && (liveByTurn?.has(i) ?? false);
-                      return (
-                        <Fragment key={i}>
-                          {topicBreaks.includes(i) && (
-                            <button
-                              className="mono small"
-                              title="Remove topic break"
-                              onClick={() => setTopicBreaks((prev) => prev.filter((b) => b !== i))}
-                              style={{
-                                alignSelf: "stretch",
-                                textAlign: "center",
-                                margin: "6px 0",
-                                fontSize: 10,
-                                letterSpacing: "0.08em",
-                                color: "var(--ink-3)",
-                                background: "transparent",
-                                border: "none",
-                                borderTop: "1px dashed var(--stroke-2)",
-                                padding: "6px 0 0",
-                                cursor: "pointer",
-                              }}
-                            >
-                              ── topic break ──
-                            </button>
-                          )}
-                          <div data-turn={i}>
-                            <div className={`meeting-turn${i === turnFlash ? " highlight" : ""}`}>
-                              <span className="mono small meeting-turn-speaker">{t.speaker}</span>
-                              <span style={{ flex: 1, fontSize: 13, color: "var(--ink-1)" }}>
-                                {t.text}
+                        )}
+                        <div
+                          data-turn={i}
+                          className={`meet-turn ${focused ? "focused" : ""}`}
+                          aria-current={focused ? "true" : undefined}
+                        >
+                          <Avatar name={t.speaker} size={24} />
+                          <div className="meet-turn-body">
+                            <div className="meet-turn-head">
+                              <span className="meet-turn-speaker">{t.speaker}</span>
+                              <span className="mono meet-turn-time">
+                                {turnBase !== null
+                                  ? formatElapsed(t.at - turnBase)
+                                  : fmtClock(t.at)}
                               </span>
+                              <span className="mono meet-turn-num">#{i + 1}</span>
                               {t.kind && (
                                 <span
-                                  className="mono"
-                                  style={{
-                                    fontSize: 9.5,
-                                    letterSpacing: "0.08em",
-                                    textTransform: "uppercase",
-                                    color: extractColor[t.kind],
-                                    flexShrink: 0,
-                                  }}
+                                  className="meet-turn-kind"
+                                  style={{ ["--tint" as string]: TURN_TINT[t.kind] }}
                                 >
                                   {t.kind}
                                 </span>
                               )}
                             </div>
-                            <div
-                              style={{
-                                display: "flex",
-                                gap: 10,
-                                flexWrap: "wrap",
-                                alignItems: "baseline",
-                                margin: "0 0 6px 10px",
-                              }}
-                            >
-                              <button
-                                className="mono"
-                                title="Re-extract the board from this turn onward"
-                                onClick={() => onReextractFrom(i)}
-                                style={{
-                                  fontSize: 9.5,
-                                  letterSpacing: "0.05em",
-                                  textTransform: "uppercase",
-                                  color: "var(--ink-3)",
-                                  background: "transparent",
-                                  border: "none",
-                                  padding: 0,
-                                  cursor: "pointer",
-                                }}
-                              >
-                                Re-extract from here
-                              </button>
+                            <p className="meet-turn-text">{highlight(t.text, query)}</p>
+                            <div className="meet-turn-foot">
                               {produced && produced.length > 0 && (
                                 <span
-                                  className="mono"
-                                  style={{
-                                    fontSize: 9.5,
-                                    letterSpacing: "0.05em",
-                                    textTransform: "uppercase",
-                                    color: "var(--amber-2)",
-                                  }}
-                                  title={`View on board: ${produced.join(", ")}`}
+                                  className="mono meet-produced"
+                                  title={`On the board: ${produced
+                                    .map((id) => workspace.nodes[id]?.label ?? id)
+                                    .join(", ")}`}
                                 >
                                   ✦ {produced.length} on board{provisional ? " · provisional" : ""}
                                 </span>
                               )}
                               {produced?.map((id) => (
-                                <span
-                                  key={id}
-                                  style={{ display: "inline-flex", gap: 6, alignItems: "baseline" }}
-                                >
+                                <span key={id} className="meet-obj">
                                   <button
-                                    className="mono turn-objects-link"
-                                    title={`View on board: ${id}`}
+                                    type="button"
+                                    className="meet-obj-view"
+                                    title={`View on board: ${workspace.nodes[id]?.label ?? id}`}
                                     onClick={() => onCitation({ kind: "node", id })}
-                                    style={{
-                                      fontSize: 9.5,
-                                      letterSpacing: "0.05em",
-                                      textTransform: "uppercase",
-                                      color: "var(--amber-2)",
-                                      background: "transparent",
-                                      border: "none",
-                                      padding: 0,
-                                      cursor: "pointer",
-                                    }}
                                   >
-                                    view
+                                    {workspace.nodes[id]?.label ?? id}
                                   </button>
                                   <button
-                                    className="mono"
+                                    type="button"
+                                    className="meet-obj-unlink"
                                     title="Unlink this object from the turn"
                                     onClick={() => onUnlink(id)}
-                                    style={{
-                                      fontSize: 9.5,
-                                      letterSpacing: "0.05em",
-                                      textTransform: "uppercase",
-                                      color: "var(--ink-3)",
-                                      background: "transparent",
-                                      border: "none",
-                                      padding: 0,
-                                      cursor: "pointer",
-                                    }}
                                   >
                                     unlink
                                   </button>
                                 </span>
                               ))}
+                              <button
+                                type="button"
+                                className="meet-reextract"
+                                title="Re-extract the board from this turn onward"
+                                onClick={() => onReextractFrom(i)}
+                              >
+                                Re-extract from here
+                              </button>
                             </div>
                           </div>
-                        </Fragment>
-                      );
-                    })}
-                    {topicBreaks.includes(displayTurns.length) && displayTurns.length > 0 && (
+                        </div>
+                      </Fragment>
+                    );
+                  })}
+                  {!filtering &&
+                    topicBreaks.includes(displayTurns.length) &&
+                    displayTurns.length > 0 && (
                       <button
-                        className="mono small"
+                        type="button"
+                        className="meet-break"
                         title="Remove topic break"
                         onClick={() =>
                           setTopicBreaks((prev) => prev.filter((b) => b !== displayTurns.length))
                         }
-                        style={{
-                          alignSelf: "stretch",
-                          textAlign: "center",
-                          margin: "6px 0",
-                          fontSize: 10,
-                          letterSpacing: "0.08em",
-                          color: "var(--ink-3)",
-                          background: "transparent",
-                          border: "none",
-                          borderTop: "1px dashed var(--stroke-2)",
-                          padding: "6px 0 0",
-                          cursor: "pointer",
-                        }}
                       >
-                        ── topic break ──
+                        <span>Topic break</span>
                       </button>
                     )}
-                    {!shown &&
-                      voiceAnswers.map((a) => (
-                        <div key={a.id} className="meeting-turn meeting-answer">
-                          <span className="mono small meeting-turn-speaker">✦ Lucent</span>
-                          <span style={{ flex: 1, fontSize: 13, color: "var(--ink-1)" }}>
-                            {a.error ? `Couldn't answer: ${a.error}` : a.answer}
-                          </span>
-                          {a.citations.length > 0 && (
-                            <span className="mono" style={{ fontSize: 10, color: "var(--ink-3)" }}>
-                              {a.citations.join(" · ")}
-                            </span>
-                          )}
-                        </div>
-                      ))}
-                    {!shown && openQuestions.total > 0 && (
-                      <div className="meeting-turn meeting-questions">
-                        <span className="mono small meeting-turn-speaker">? Open</span>
-                        <span style={{ flex: 1, fontSize: 13, color: "var(--ink-1)" }}>
-                          {openQuestions.items.map((q) => q.label).join(" · ")}
-                          {openQuestions.total > openQuestions.items.length &&
-                            ` (+${openQuestions.total - openQuestions.items.length} more)`}
-                        </span>
-                      </div>
-                    )}
-                  </div>
                 </div>
-              )}
+              </>
+            )}
 
-              {activePanel === "extract" && (
-                <div>
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                      marginBottom: 12,
-                    }}
+            {activePanel === "saved" && (
+              <div className="meet-saved">
+                {recording && (
+                  <button
+                    type="button"
+                    className={`meet-past compact ${shown ? "" : "on"}`}
+                    aria-pressed={!shown}
+                    onClick={() => openMeeting(null)}
                   >
-                    <div className="mono small" style={{ color: "var(--ink-3)" }}>
-                      Real-time classified items
-                    </div>
-                    {shown && (
-                      <button
-                        className="btn primary"
-                        style={{ height: 26, fontSize: 11 }}
-                        onClick={() => onExtract(shown)}
-                        disabled={!boardId}
-                      >
-                        Extract to diagram <Ico.Arrow />
-                      </button>
-                    )}
-                  </div>
-                  <div className="meeting-extract">
-                    {KIND_ORDER.map((k) => {
-                      const hits = displayTurns.filter((t) => t.kind === k);
-                      return (
-                        <div key={k} className="meeting-extract-col">
-                          <div
-                            className="mono meeting-extract-title"
-                            style={{ color: extractColor[k] }}
-                          >
-                            {k} ({hits.length})
-                          </div>
-                          {hits.length === 0 && <div className="meeting-extract-empty">—</div>}
-                          {hits.map((t, i) => (
-                            <div key={i} className="meeting-extract-card">
-                              {t.text}
-                            </div>
-                          ))}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-
-              {activePanel === "saved" && (
-                <div className="meeting-saved-list">
-                  <div className="mono small" style={{ color: "var(--ink-3)", marginBottom: 10 }}>
-                    Saved on this board ({saved.length})
-                  </div>
-                  {saved.length === 0 && (
-                    <div
-                      className="mono small"
-                      style={{ color: "var(--ink-3)", padding: "12px 0" }}
-                    >
-                      No saved meetings yet. Record and save to archive minutes.
-                    </div>
-                  )}
-                  {saved.map((m) => (
-                    <button
-                      key={m.id}
-                      className="meeting-saved-row"
-                      style={{
-                        display: "flex",
-                        justifyContent: "space-between",
-                        alignItems: "center",
-                        padding: "10px 12px",
-                        borderRadius: 8,
-                        background:
-                          selectedMeeting?.id === m.id ? "var(--canvas-3)" : "var(--canvas-2)",
-                        border: "1px solid var(--stroke-1)",
-                        marginBottom: 6,
-                        cursor: "pointer",
-                        width: "100%",
-                      }}
-                      onClick={() => setSelectedMeeting(selectedMeeting?.id === m.id ? null : m)}
-                    >
-                      <span style={{ fontSize: 12.5, color: "var(--ink-0)" }}>
-                        {new Date(m.startedAt).toLocaleString()}
-                      </span>
-                      <span className="mono small" style={{ color: "var(--amber-2)" }}>
-                        {m.turns.length} turns {selectedMeeting?.id === m.id ? "· viewing" : ""}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
+                    <span className="meet-past-title">
+                      <span className="meet-rec-dot" aria-hidden /> Live capture
+                    </span>
+                    <span className="mono meet-past-meta">
+                      {plural(turns.length, "turn")} · {formatElapsed(now - (startedAt ?? now))}
+                    </span>
+                  </button>
+                )}
+                {saved.length === 0 ? (
+                  <EmptyState
+                    compact
+                    title="No saved meetings yet"
+                    body={
+                      boardId
+                        ? "Record a meeting and it is kept here, with its transcript and brief."
+                        : "Meetings save against a board in your workspace — share this board to keep them."
+                    }
+                  />
+                ) : (
+                  meetingsList(true)
+                )}
+              </div>
+            )}
+          </aside>
         )}
       </div>
-    </div>
+    </Page>
   );
 }

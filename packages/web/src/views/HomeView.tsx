@@ -1,782 +1,975 @@
-import { useEffect, useState, useMemo } from "react";
-import { executionRollup } from "@lucent/core";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useWorkspace, type View } from "../workspace.js";
-import { getSessionUser } from "../session.js";
-import { listProjects, type ProjectMeta } from "../persistence.js";
+import { getSessionUser, hasSession } from "../session.js";
+import { boardIdOfMirror, listProjects, loadProject } from "../persistence.js";
 import { listBoards, type BoardSummary } from "../boards.js";
 import { loadOrgs } from "../orgs.js";
 import { listMeetings, type MeetingTranscript } from "../meetings.js";
-import { intelligenceSections, inboxItems } from "../intelligence.js";
-import { Ico } from "../ui/icons.js";
 import {
-  AtelierAppShell,
-  StatCard,
+  busiestBoard,
+  dueLabel,
+  greetingFor,
+  isQuestionText,
+  pulseLede,
+  timeAgo,
+  workspacePulse,
+  type PulseBoardInput,
+  type PulseItem,
+  type PulseNotice,
+} from "../pulse.js";
+import { Ico } from "../ui/icons.js";
+import { useToast } from "../ui/Toast.js";
+import { StatementGlyph } from "../ui/StatementGlyph.js";
+import {
+  Avatar,
+  Button,
+  EmptyState,
+  KindBadge,
+  Page,
+  PageHeader,
   ProvenanceChip,
-  DecisionIcon,
-  ActionIcon,
-  RiskIcon,
-} from "../ui/atelierAtoms.js";
+  SectionLabel,
+  StatTile,
+} from "../ui/kit.js";
 
-interface UnifiedBoard {
-  id: string;
-  name: string;
-  updatedAt: number;
-  isLocal: boolean;
-  nodes?: number;
+/**
+ * Home — the workspace pulse. A returning user lands here (landing.ts) and it
+ * answers three things from real data: what needs me, what changed, where do
+ * I pick up. It is deliberately NOT a board list: the rows are statements
+ * (open questions, pending decisions, late or blocked work) across boards,
+ * each one click from the node itself.
+ *
+ * Scope, stated honestly: the server has no cross-board aggregation, so the
+ * pulse covers the boards this browser can read — the open board (live), the
+ * local projects in storage, and the cached copy of any shared board opened
+ * here. Server boards known only by name appear under "Pick up where you
+ * left off" and are named as uncounted, never guessed at.
+ */
+
+/** How many local boards Home reads (each is a storage read + parse). */
+const LOCAL_BOARD_CAP = 12;
+/** Rows before "Show all". */
+const NEEDS_PREVIEW = 6;
+const RECENT_LIMIT = 5;
+
+/** How a board key opens: a local project slot, a server board, or both. */
+interface Opener {
+  local?: string;
+  cloud?: string;
 }
 
+const MISSING_BOARD = "That board isn't available any more — it may have been deleted or unshared.";
+
 export function HomeView({ onOpenSettings }: { onOpenSettings: (section?: string) => void }) {
-  const { setView, send, openProject, openBoard, newProject, workspace, boardId } = useWorkspace();
-  const [askPrompt, setAskPrompt] = useState("");
-  const [projects, setProjects] = useState<ProjectMeta[]>([]);
-  const [cloudBoards, setCloudBoards] = useState<BoardSummary[]>([]);
-  const [meetings, setMeetings] = useState<MeetingTranscript[]>([]);
-  const user = getSessionUser();
-  const userName = user?.name ? user.name.split(" ")[0] : user?.email ? user.email.split("@")[0] : "there";
+  const {
+    setView,
+    workspace,
+    projectId,
+    projectName,
+    boardId,
+    busy,
+    openProject,
+    openBoard,
+    newProject,
+    startNewBoardFor,
+    ask,
+    setPillMode,
+    onCitation,
+  } = useWorkspace();
+  const { notify } = useToast();
 
+  // A clock for the eyebrow and the relative times; a minute is precise enough.
+  const [now, setNow] = useState(() => Date.now());
+  const [mountedAt] = useState(() => Date.now());
   useEffect(() => {
-    try {
-      setProjects(listProjects().slice(0, 5));
-    } catch {
-      /* ignore */
-    }
+    const t = window.setInterval(() => setNow(Date.now()), 30_000);
+    return () => window.clearInterval(t);
+  }, []);
 
+  const user = getSessionUser();
+  const firstName = user?.name?.trim().split(/\s+/)[0] ?? "";
+
+  /* ------------------------------ sources ------------------------------ */
+
+  // Local projects, newest first — read once per open board (the open board
+  // itself comes live from the workspace, never from its autosave).
+  const local = useMemo(() => {
+    try {
+      const metas = listProjects();
+      const current = metas.find((p) => p.id === projectId) ?? null;
+      const others = metas
+        .filter((p) => p.id !== projectId)
+        .slice(0, LOCAL_BOARD_CAP)
+        .flatMap((p) => {
+          const data = loadProject(p.id);
+          return data ? [{ ...p, workspace: data.workspace }] : [];
+        });
+      return { current, others };
+    } catch {
+      return { current: null, others: [] };
+    }
+  }, [projectId]);
+
+  // Server boards: names and edit times only (contents are not fetched here).
+  const [cloud, setCloud] = useState<{ loaded: boolean; boards: BoardSummary[] }>(() => ({
+    loaded: !hasSession(),
+    boards: [],
+  }));
+  useEffect(() => {
+    if (!hasSession()) return;
     let cancelled = false;
     void (async () => {
       try {
         const { current } = await loadOrgs();
-        if (current && !cancelled) {
-          const boards = await listBoards(current.id);
-          if (!cancelled) setCloudBoards(boards.slice(0, 5));
-        }
+        if (!current) return;
+        const [own, shared] = await Promise.all([
+          listBoards(current.id),
+          listBoards(current.id, "shared"),
+        ]);
+        const seen = new Set<string>();
+        const boards = [...own, ...shared].filter((b) =>
+          seen.has(b.id) ? false : (seen.add(b.id), true),
+        );
+        if (!cancelled) setCloud({ loaded: true, boards });
       } catch {
-        /* offline or guest */
-      }
-
-      if (boardId) {
-        try {
-          const mList = await listMeetings(boardId);
-          if (!cancelled && mList) {
-            setMeetings(mList);
-          }
-        } catch {
-          /* ignore */
-        }
+        /* offline or signed out: local boards still answer */
+      } finally {
+        if (!cancelled) setCloud((c) => (c.loaded ? c : { ...c, loaded: true }));
       }
     })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
+  // Meetings live on the server per board, so only the open shared board has
+  // any to show. Nothing is rendered unless real transcripts come back.
+  const [meetings, setMeetings] = useState<MeetingTranscript[]>([]);
+  useEffect(() => {
+    if (!boardId) {
+      setMeetings([]);
+      return;
+    }
+    let cancelled = false;
+    void listMeetings(boardId)
+      .then((rows) => {
+        if (!cancelled) setMeetings(rows ?? []);
+      })
+      .catch(() => {
+        /* the section simply stays hidden */
+      });
     return () => {
       cancelled = true;
     };
   }, [boardId]);
 
-  const formattedDate = useMemo(() => {
-    const now = new Date();
-    const day = now.toLocaleDateString("en-US", { weekday: "long" });
-    const month = now.toLocaleDateString("en-US", { month: "short" });
-    const date = now.getDate();
-    const time = now.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
-    return `${day} · ${month} ${date} · ${time}`;
-  }, []);
+  /* ------------------------------ the pulse ----------------------------- */
 
-  // Live workspace intelligence & canvas stats
-  const sections = useMemo(() => intelligenceSections(workspace), [workspace]);
-  const inbox = useMemo(() => inboxItems(workspace), [workspace]);
+  const currentKey = boardIdOfMirror(projectId) ?? projectId;
 
-  const decisionsCount =
-    (sections.find((s) => s.kind === "decision")?.rows.length ?? 0) +
-    (sections.find((s) => s.kind === "proposal")?.rows.length ?? 0);
-  const actionsCount = sections.find((s) => s.kind === "action")?.rows.length ?? 0;
-  const rollup = useMemo(() => executionRollup(workspace, Date.now()), [workspace]);
-  const blockedCount = rollup.blocked;
-  const pendingDecisions =
-    sections.find((s) => s.kind === "decision")?.rows.filter((r) => r.status === "open").length ?? 0;
-
-  const nodesCount = Object.keys(workspace.nodes).length;
-  const edgesCount = Object.keys(workspace.edges).length;
-  const totalBoards = projects.length + cloudBoards.length;
-
-  const subtitle = useMemo(() => {
-    if (totalBoards === 0 && nodesCount === 0) {
-      return "Welcome to your workspace. Start by creating a board or describing a diagram to draft.";
+  const { inputs, openers } = useMemo(() => {
+    const openers = new Map<string, Opener>();
+    const byKey = new Map<string, PulseBoardInput>();
+    byKey.set(currentKey, {
+      id: currentKey,
+      name: projectName || local.current?.name || "This board",
+      // A board never autosaved yet is as fresh as this visit.
+      updatedAt: local.current?.updatedAt ?? mountedAt,
+      workspace,
+      isCurrent: true,
+    });
+    openers.set(currentKey, { local: projectId, ...(boardId ? { cloud: boardId } : {}) });
+    for (const p of local.others) {
+      const serverId = boardIdOfMirror(p.id);
+      const key = serverId ?? p.id;
+      if (byKey.has(key)) continue;
+      byKey.set(key, {
+        id: key,
+        name: p.name,
+        updatedAt: p.updatedAt,
+        workspace: p.workspace,
+        isCurrent: false,
+      });
+      openers.set(key, { local: p.id, ...(serverId ? { cloud: serverId } : {}) });
     }
-    const parts: string[] = [];
-    if (totalBoards > 0) parts.push(`${totalBoards} board${totalBoards === 1 ? "" : "s"}`);
-    if (decisionsCount > 0) parts.push(`${decisionsCount} decision${decisionsCount === 1 ? "" : "s"}`);
-    if (actionsCount > 0) parts.push(`${actionsCount} open action${actionsCount === 1 ? "" : "s"}`);
-    if (inbox.length > 0) parts.push(`${inbox.length} item${inbox.length === 1 ? "" : "s"} awaiting review`);
-    return parts.length > 0 ? parts.join(" · ") : `${nodesCount} nodes on active canvas`;
-  }, [totalBoards, nodesCount, decisionsCount, actionsCount, inbox.length]);
-
-  const handleSubmit = (e?: React.FormEvent) => {
-    e?.preventDefault();
-    const q = askPrompt.trim();
-    if (!q) return;
-
-    // If it asks a question about existing work, go to intelligence ask
-    const isQuestion =
-      q.endsWith("?") ||
-      /^(who|what|where|why|when|how|is|are|does|can|which)\b/i.test(q);
-
-    if (isQuestion) {
-      try {
-        localStorage.setItem("lucent.v2.askInitial", q);
-      } catch {
-        /* ignore */
+    for (const b of cloud.boards) {
+      const known = byKey.get(b.id);
+      if (known) {
+        // The server's name and edit time are the truth for a shared board.
+        if (!known.isCurrent) known.name = b.name;
+        known.updatedAt = Math.max(known.updatedAt, b.updatedAt);
+        openers.set(b.id, { ...openers.get(b.id), cloud: b.id });
+        continue;
       }
-      setView("intelligence");
-    } else {
-      // Describe / generate a canvas diagram
-      setView("canvas");
-      void send(q);
+      byKey.set(b.id, {
+        id: b.id,
+        name: b.name,
+        updatedAt: b.updatedAt,
+        workspace: null,
+        isCurrent: false,
+      });
+      openers.set(b.id, { cloud: b.id });
     }
+    return { inputs: [...byKey.values()], openers };
+  }, [currentKey, projectId, projectName, boardId, workspace, local, cloud.boards, mountedAt]);
+
+  const pulse = useMemo(() => workspacePulse(inputs, now), [inputs, now]);
+  const lede = pulseLede(pulse);
+
+  const serverOnly = cloud.boards.filter((b) => {
+    const input = inputs.find((i) => i.id === b.id);
+    return input ? input.workspace === null : false;
+  });
+  const serverOnlyWithContent = serverOnly.filter((b) => b.nodes === undefined || b.nodes > 0);
+  const hasWork = pulse.boardsWithContent > 0 || serverOnlyWithContent.length > 0;
+  const firstRun = !hasWork && cloud.loaded;
+  const settling = !hasWork && !cloud.loaded;
+
+  /* ----------------------------- navigation ----------------------------- */
+
+  /** Open a board by key; resolves false (and says so) when it is gone. */
+  const openKey = useCallback(
+    async (key: string): Promise<boolean> => {
+      if (key === currentKey) return true;
+      const target = openers.get(key);
+      if (target?.cloud && (await openBoard(target.cloud))) return true;
+      if (target?.local) {
+        openProject(target.local);
+        return true;
+      }
+      notify(MISSING_BOARD, undefined, "error");
+      return false;
+    },
+    [currentKey, openers, openBoard, openProject, notify],
+  );
+
+  /** A board's view (Intelligence, Execution, canvas) — switching boards first when needed. */
+  const goTo = useCallback(
+    (key: string | null, view: View) => {
+      if (!key || key === currentKey) {
+        setView(view);
+        return;
+      }
+      const target = openers.get(key);
+      if (target?.local && !target.cloud) {
+        // Synchronous: one render lands on the right board AND the right view.
+        openProject(target.local);
+        setView(view);
+        return;
+      }
+      void openKey(key).then((ok) => {
+        if (ok) setView(view);
+      });
+    },
+    [currentKey, openers, openProject, openKey, setView],
+  );
+
+  /** The node itself: open its board, then select and centre it on the canvas. */
+  const reveal = useCallback(
+    (key: string, nodeId: string) => {
+      if (key === currentKey) {
+        onCitation({ kind: "node", id: nodeId });
+        return;
+      }
+      const target = openers.get(key);
+      if (target?.local && !target.cloud) {
+        // Batched with the board switch, so the canvas mounts on the new board
+        // with ?reveal= already set — the same path an Ask citation takes.
+        openProject(target.local);
+        onCitation({ kind: "node", id: nodeId });
+        return;
+      }
+      // A server board loads asynchronously: park the reveal first so the
+      // canvas consumes it when it mounts on the fetched board, not before.
+      const params = new URLSearchParams(window.location.search);
+      params.set("reveal", nodeId);
+      window.history.replaceState(null, "", `?${params.toString()}`);
+      void openKey(key).then((ok) => {
+        if (ok) return;
+        const clear = new URLSearchParams(window.location.search);
+        clear.delete("reveal");
+        window.history.replaceState(null, "", `?${clear.toString()}`);
+      });
+    },
+    [currentKey, openers, openProject, onCitation, openKey],
+  );
+
+  const openRecent = (key: string) => {
+    if (key === currentKey) setView("canvas");
+    else void openKey(key);
   };
 
-  const allBoards = useMemo<UnifiedBoard[]>(() => {
-    const local = projects.map((p) => ({
-      id: p.id,
-      name: p.name,
-      updatedAt: p.updatedAt,
-      isLocal: true,
-    }));
-    const cloud = cloudBoards.map((b) => ({
-      id: b.id,
-      name: b.name,
-      updatedAt: b.updatedAt ?? Date.now(),
-      isLocal: false,
-      nodes: b.nodes,
-    }));
-    return [...local, ...cloud];
-  }, [projects, cloudBoards]);
+  /* ------------------------------ composer ------------------------------ */
 
-  const noticeContent = useMemo(() => {
-    const risks = sections.find((s) => s.kind === "risk")?.rows ?? [];
-    const questions = sections.find((s) => s.kind === "question")?.rows ?? [];
-    if (risks.length > 0) {
-      return (
-        <>
-          <div
-            style={{
-              fontFamily: "var(--font-serif)",
-              fontSize: 15,
-              lineHeight: 1.55,
-              color: "var(--ink-0)",
-              marginBottom: 12,
-            }}
-          >
-            Identified <b>{risks.length} architectural risk{risks.length === 1 ? "" : "s"}</b> on the active board, including &ldquo;{risks[0]?.label}&rdquo;. Consider adding mitigations or linking resolving actions.
-          </div>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
-            <ProvenanceChip icon={<RiskIcon />} label={`Risk: ${risks[0]?.label}`} />
-          </div>
-          <div style={{ display: "flex", gap: 6, marginTop: 14 }}>
-            <button
-              type="button"
-              className="btn-atelier primary"
-              style={{ height: 30, fontSize: 12, padding: "0 14px" }}
-              onClick={() => setView("intelligence")}
-            >
-              Review risks
-            </button>
-          </div>
-        </>
-      );
-    }
-    if (questions.length > 0) {
-      return (
-        <>
-          <div
-            style={{
-              fontFamily: "var(--font-serif)",
-              fontSize: 15,
-              lineHeight: 1.55,
-              color: "var(--ink-0)",
-              marginBottom: 12,
-            }}
-          >
-            There {questions.length === 1 ? "is" : "are"} <b>{questions.length} open question{questions.length === 1 ? "" : "s"}</b> awaiting decision, starting with &ldquo;{questions[0]?.label}&rdquo;.
-          </div>
-          <div style={{ display: "flex", gap: 6, marginTop: 14 }}>
-            <button
-              type="button"
-              className="btn-atelier primary"
-              style={{ height: 30, fontSize: 12, padding: "0 14px" }}
-              onClick={() => setView("intelligence")}
-            >
-              Review questions
-            </button>
-          </div>
-        </>
-      );
-    }
-    if (nodesCount > 1 && edgesCount === 0) {
-      return (
-        <>
-          <div
-            style={{
-              fontFamily: "var(--font-serif)",
-              fontSize: 15,
-              lineHeight: 1.55,
-              color: "var(--ink-0)",
-              marginBottom: 12,
-            }}
-          >
-            Your canvas has <b>{nodesCount} disconnected nodes</b>. Use connectors to specify data flow, dependencies, or parent-child hierarchy.
-          </div>
-          <div style={{ display: "flex", gap: 6, marginTop: 14 }}>
-            <button
-              type="button"
-              className="btn-atelier primary"
-              style={{ height: 30, fontSize: 12, padding: "0 14px" }}
-              onClick={() => setView("canvas")}
-            >
-              Open canvas
-            </button>
-          </div>
-        </>
-      );
-    }
-    return (
-      <>
-        <div
-          style={{
-            fontFamily: "var(--font-serif)",
-            fontSize: 15,
-            lineHeight: 1.55,
-            color: "var(--ink-0)",
-            marginBottom: 12,
-          }}
-        >
-          Lucent is monitoring your workspace. As you create diagrams and run meetings, architectural contradictions, unmitigated risks, and duplicate topics will appear here in real time.
-        </div>
-        <div style={{ display: "flex", gap: 6, marginTop: 14 }}>
-          <button
-            type="button"
-            className="btn-atelier ghost"
-            style={{ height: 30, fontSize: 12 }}
-            onClick={() => setView("canvas")}
-          >
-            Explore canvas
-          </button>
-        </div>
-      </>
-    );
-  }, [sections, nodesCount, edgesCount, setView]);
+  const [draft, setDraft] = useState("");
+  const text = draft.trim();
+  const asQuestion = isQuestionText(text);
+  const boardLabel = projectName || "this board";
+
+  const runAsk = (question: string) => {
+    setDraft("");
+    // The canvas's Ask mode owns the answer — and the honest refusal on a
+    // local board, whose history is not on the server to be asked.
+    setPillMode("ask");
+    void ask(question);
+    setView("canvas");
+  };
+  const runBuild = (description: string) => {
+    setDraft("");
+    setPillMode("build");
+    startNewBoardFor(description);
+  };
+  const onSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!text || busy) return;
+    if (asQuestion) runAsk(text);
+    else runBuild(text);
+  };
+
+  const hint = busy
+    ? "Lucent is still working on your last request."
+    : !text
+      ? boardId
+        ? `Describe something new to start a board, or ask a question about “${boardLabel}”.`
+        : "Describe something new to start a board. Questions are answered from a shared board’s history."
+      : asQuestion
+        ? boardId
+          ? `Enter asks Lucent about “${boardLabel}”.`
+          : `Enter asks about “${boardLabel}” — it’s a local board, so Lucent will ask you to share it first.`
+        : "Enter starts a new board from this description.";
+
+  /* ------------------------------- tiles -------------------------------- */
+
+  const c = pulse.counts;
+  const boardsPhrase = (match: (i: PulseItem) => boolean): string => {
+    const boards = new Set(pulse.items.filter(match).map((i) => i.boardName));
+    if (boards.size === 1) return `on “${[...boards][0]}”`;
+    return `across ${boards.size} boards`;
+  };
+  const isQuestion = (i: PulseItem) => i.kind === "question";
+  const isPending = (i: PulseItem) => i.kind === "decision" || i.kind === "proposal";
+  const isAction = (i: PulseItem) => i.kind === "action";
+  const isOverdue = (i: PulseItem) => i.signal === "overdue";
+  // From the items, not the notices: a notice may skip an action whose
+  // blocking chain already tells its story, but the tile counts it.
+  const oldestDue = pulse.items
+    .filter(isOverdue)
+    .map((i) => i.dueDate ?? "")
+    .filter(Boolean)
+    .sort()[0];
+
+  /* ------------------------------- render ------------------------------- */
+
+  const [showAll, setShowAll] = useState(false);
+  const needs = showAll ? pulse.items : pulse.items.slice(0, NEEDS_PREVIEW);
+  const recent = pulse.boards.filter((b) => b.hasContent !== false).slice(0, RECENT_LIMIT);
+  const countedBoards = pulse.boards.filter((b) => b.hasContent !== null).length;
+
+  const today = new Date(now);
+  const eyebrow = [
+    today.toLocaleDateString(undefined, { weekday: "long" }),
+    today.toLocaleDateString(undefined, { month: "short", day: "numeric" }),
+    today.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }),
+  ].join(" · ");
+  // One board holding everything: naming it on every row is noise.
+  const showBoard = pulse.boardsWithItems > 1;
 
   return (
-    <AtelierAppShell
-      activeArea="home"
-      crumbs={[{ label: "Personal", view: "home" as View }, { label: "Home", current: true }]}
+    <Page
+      crumbs={[{ label: "Home", current: true }]}
+      onOpenSettings={onOpenSettings}
+      width="wide"
+      boardScoped={false}
     >
-      <div style={{ padding: "36px 40px 60px", maxWidth: 1220, margin: "0 auto" }}>
-        {/* Header greeting */}
-        <div style={{ marginBottom: 28 }}>
-          <div className="mono-caps" style={{ marginBottom: 8, color: "var(--ink-3)" }}>
-            {formattedDate}
-          </div>
-          <h1
-            style={{
-              fontFamily: "var(--font-serif)",
-              fontSize: 42,
-              letterSpacing: "-0.025em",
-              fontWeight: 400,
-              color: "var(--ink-0)",
-              lineHeight: 1.1,
-              margin: 0,
-            }}
-          >
-            Good morning, {userName}.
-          </h1>
-          <div
-            style={{
-              marginTop: 8,
-              fontFamily: "var(--font-serif)",
-              fontStyle: "italic",
-              fontSize: 17,
-              color: "var(--ink-2)",
-            }}
-          >
-            {subtitle}
-          </div>
-        </div>
+      <div className="home">
+        <PageHeader
+          eyebrow={eyebrow}
+          title={`${greetingFor(new Date(now))}${firstName ? `, ${firstName}` : ""}.`}
+          lede={
+            firstRun
+              ? "Describe an idea, hold a meeting, or start from a template — Lucent turns the conversation into a board you can edit."
+              : (lede ??
+                (serverOnlyWithContent.length > 0
+                  ? `${serverOnlyWithContent.length} shared ${serverOnlyWithContent.length === 1 ? "board is" : "boards are"} waiting on the server — open one to see what needs you there.`
+                  : undefined))
+          }
+        />
 
-        {/* Unified Ask & Prompt Bar */}
-        <form
-          onSubmit={handleSubmit}
-          style={{
-            padding: "12px 18px",
-            background: "var(--paper-0)",
-            border: "1px solid oklch(from var(--paper-4) l c h / 0.7)",
-            borderRadius: 14,
-            display: "flex",
-            gap: 12,
-            alignItems: "center",
-            marginBottom: 32,
-            boxShadow: "var(--shadow-1)",
-          }}
-        >
-          <div
-            style={{
-              width: 32,
-              height: 32,
-              borderRadius: 8,
-              background: "var(--bloom-wash)",
-              border: "1px solid var(--bloom-wash-2)",
-              display: "grid",
-              placeItems: "center",
-              color: "var(--bloom-2)",
-              flexShrink: 0,
-            }}
-          >
-            <Ico.Sparkle />
+        <form className="home-composer" onSubmit={onSubmit}>
+          <div className="home-composer-row">
+            <span className="home-composer-mark" aria-hidden>
+              <Ico.Sparkle />
+            </span>
+            <input
+              className="home-composer-input"
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              placeholder="Describe an idea — or ask about your work…"
+              aria-label="Describe an idea, or ask about your work"
+              aria-describedby="home-composer-hint"
+            />
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={!text || busy}
+              onClick={() => runAsk(text)}
+              title={`Ask Lucent about “${boardLabel}”`}
+            >
+              Ask
+            </Button>
+            <Button
+              variant="primary"
+              size="sm"
+              disabled={busy}
+              onClick={() => (text ? runBuild(text) : newProject())}
+              title={text ? "Start a new board from this description" : "Start a blank board"}
+            >
+              <Ico.Plus /> New board
+            </Button>
           </div>
-          <input
-            value={askPrompt}
-            onChange={(e) => setAskPrompt(e.target.value)}
-            placeholder="Ask Lucent anything — or describe a new diagram to draft…"
-            style={{
-              flex: 1,
-              fontSize: 15,
-              color: "var(--ink-0)",
-              fontFamily: "var(--font-serif)",
-              background: "none",
-              border: 0,
-              outline: "none",
-            }}
-          />
-          <span
-            className="mono"
-            style={{
-              fontSize: 10.5,
-              color: "var(--ink-3)",
-              padding: "4px 8px",
-              background: "var(--paper-2)",
-              borderRadius: 6,
-            }}
-          >
-            ↵
-          </span>
-          <button
-            type="submit"
-            className="btn-atelier ghost"
-            style={{ height: 32 }}
-            disabled={!askPrompt.trim()}
-          >
-            Ask
-          </button>
-          <button
-            type="button"
-            className="btn-atelier primary"
-            style={{ height: 32 }}
-            onClick={() => {
-              if (askPrompt.trim()) {
-                setView("canvas");
-                void send(askPrompt.trim());
-              } else {
-                newProject();
-                setView("canvas");
-              }
-            }}
-          >
-            <Ico.Plus /> New Board
-          </button>
+          <div className="home-composer-hint" id="home-composer-hint" aria-live="polite">
+            {text && !busy && <span className="home-kbd">↵</span>}
+            {hint}
+          </div>
         </form>
 
-        {/* Clickable Stat Cards */}
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-            gap: 14,
-            marginBottom: 32,
-          }}
-        >
-          <StatCard
-            label="Decisions"
-            value={decisionsCount.toString()}
-            delta={pendingDecisions > 0 ? `+${pendingDecisions}` : undefined}
-            sub={
-              pendingDecisions > 0
-                ? `${pendingDecisions} awaiting review`
-                : decisionsCount > 0
-                ? "Tracked in workspace"
-                : "No active decisions"
-            }
-            onClick={() => setView("intelligence")}
+        {settling ? null : firstRun ? (
+          <FirstRun
+            onDescribe={() => setView("canvas")}
+            onMeeting={() => setView("meeting")}
+            onTemplate={() => setView("dashboard")}
           />
-          <StatCard
-            label="Open actions"
-            value={actionsCount.toString()}
-            color="var(--bloom-2)"
-            sub={
-              blockedCount > 0
-                ? `${blockedCount} blocked`
-                : actionsCount > 0
-                ? "From board tasks"
-                : "No open actions"
-            }
-            onClick={() => setView("execution")}
-          />
-          <StatCard
-            label="Active Canvas"
-            value={nodesCount.toString()}
-            color="var(--moss)"
-            sub={`${edgesCount} connector${edgesCount === 1 ? "" : "s"}`}
-            onClick={() => setView("canvas")}
-          />
-          <StatCard
-            label="Total boards"
-            value={totalBoards.toString()}
-            sub={`${projects.length} local · ${cloudBoards.length} cloud`}
-            onClick={() => setView("dashboard")}
-          />
-        </div>
+        ) : (
+          <>
+            <div className="home-tiles">
+              <StatTile
+                label="Open questions"
+                value={c.openQuestions}
+                tone={c.openQuestions ? "question" : undefined}
+                sub={c.openQuestions ? boardsPhrase(isQuestion) : "None open"}
+                onClick={
+                  c.openQuestions
+                    ? () => goTo(busiestBoard(pulse.items, isQuestion), "intelligence")
+                    : undefined
+                }
+              />
+              <StatTile
+                label="Pending decisions"
+                value={c.pendingDecisions + c.openProposals}
+                tone={c.pendingDecisions + c.openProposals ? "decision" : undefined}
+                sub={
+                  c.pendingDecisions + c.openProposals
+                    ? [
+                        c.pendingDecisions
+                          ? `${c.pendingDecisions} decision${c.pendingDecisions === 1 ? "" : "s"}`
+                          : "",
+                        c.openProposals
+                          ? `${c.openProposals} proposal${c.openProposals === 1 ? "" : "s"}`
+                          : "",
+                      ]
+                        .filter(Boolean)
+                        .join(" · ")
+                    : "Nothing awaiting a call"
+                }
+                onClick={
+                  c.pendingDecisions + c.openProposals
+                    ? () => goTo(busiestBoard(pulse.items, isPending), "intelligence")
+                    : undefined
+                }
+              />
+              <StatTile
+                label="Open actions"
+                value={c.openActions}
+                tone={c.openActions ? "action" : undefined}
+                sub={
+                  c.openActions
+                    ? c.blocked
+                      ? `${c.blocked} blocked`
+                      : boardsPhrase(isAction)
+                    : "No tracked work open"
+                }
+                onClick={
+                  c.openActions
+                    ? () => goTo(busiestBoard(pulse.items, isAction), "execution")
+                    : undefined
+                }
+              />
+              <StatTile
+                label="Overdue"
+                value={c.overdue}
+                tone={c.overdue ? "alert" : undefined}
+                sub={
+                  c.overdue
+                    ? oldestDue
+                      ? `Oldest ${dueLabel(oldestDue, now).replace(/^was /, "")}`
+                      : "Past due"
+                    : "Nothing late"
+                }
+                onClick={
+                  c.overdue
+                    ? () => goTo(busiestBoard(pulse.items, isOverdue), "execution")
+                    : undefined
+                }
+              />
+            </div>
+            {serverOnly.length > 0 && (
+              <p className="home-scope">
+                Counts cover the {countedBoards === 1 ? "board" : `${countedBoards} boards`} open on
+                this device. {serverOnly.length} shared{" "}
+                {serverOnly.length === 1 ? "board joins" : "boards join"} the count once you open{" "}
+                {serverOnly.length === 1 ? "it" : "them"} here.
+              </p>
+            )}
 
-        {/* Main Two-Column Layout */}
-        <div style={{ display: "grid", gridTemplateColumns: "1.3fr 1fr", gap: 28 }}>
-          {/* Left Column: Upcoming Meetings + Needs You (Inbox) */}
-          <div>
-            <div className="mono-caps" style={{ marginBottom: 10 }}>
-              Meetings &amp; Transcripts
-            </div>
-            <div style={{ display: "grid", gap: 10, marginBottom: 32 }}>
-              {meetings.length > 0 ? (
-                meetings.slice(0, 3).map((m) => (
-                  <div
-                    key={m.id}
-                    onClick={() => setView("meeting")}
-                    style={{
-                      padding: "14px 16px",
-                      borderRadius: 12,
-                      background: "var(--paper-0)",
-                      border: "1px solid oklch(from var(--paper-4) l c h / 0.5)",
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 16,
-                      cursor: "pointer",
-                      transition: "all 0.15s var(--e-out)",
-                    }}
-                  >
-                    <div style={{ width: 56, textAlign: "right", fontFamily: "var(--font-mono)" }}>
-                      <div style={{ fontSize: 13, fontWeight: 600, color: "var(--ink-0)" }}>
-                        {new Date(m.startedAt).toLocaleTimeString("en-US", {
-                          hour: "numeric",
-                          minute: "2-digit",
-                        })}
-                      </div>
-                      <div style={{ fontSize: 10, color: "var(--ink-3)", marginTop: 2 }}>
-                        {m.turns.length} turns
-                      </div>
-                    </div>
-                    <div
-                      style={{
-                        width: 1,
-                        height: 32,
-                        background: "oklch(from var(--paper-4) l c h / 0.6)",
-                      }}
-                    />
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div
-                        style={{
-                          fontSize: 14,
-                          fontWeight: 600,
-                          color: "var(--ink-0)",
-                          marginBottom: 3,
-                        }}
+            <div className="home-cols">
+              <div className="home-col">
+                <SectionLabel count={pulse.items.length}>Needs you</SectionLabel>
+                {pulse.items.length === 0 ? (
+                  <EmptyState
+                    compact
+                    glyph={<Ico.Check />}
+                    title="Nothing needs you right now"
+                    body="Open questions, pending decisions and late or blocked work from your boards collect here as they appear."
+                  />
+                ) : (
+                  <>
+                    <ul className="home-needs">
+                      {needs.map((item) => (
+                        <NeedRow
+                          key={`${item.boardId}:${item.nodeId}`}
+                          item={item}
+                          now={now}
+                          showBoard={showBoard || !item.isCurrent}
+                          onReveal={() => reveal(item.boardId, item.nodeId)}
+                          onMeeting={
+                            item.fromMeeting && item.isCurrent && boardId
+                              ? () =>
+                                  onCitation({
+                                    kind: "meeting",
+                                    id: item.fromMeeting!,
+                                    ...(item.turnRange ? { turnRange: item.turnRange } : {}),
+                                  })
+                              : undefined
+                          }
+                        />
+                      ))}
+                    </ul>
+                    {pulse.items.length > NEEDS_PREVIEW && (
+                      <Button
+                        variant="quiet"
+                        size="sm"
+                        className="home-more"
+                        aria-expanded={showAll}
+                        onClick={() => setShowAll((v) => !v)}
                       >
-                        {m.mode ? `${m.mode} Meeting` : `Meeting Session · ${new Date(m.startedAt).toLocaleDateString()}`}
-                      </div>
-                      <div
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 6,
-                          fontSize: 11.5,
-                          color: "var(--ink-2)",
-                        }}
-                      >
-                        <Ico.Present style={{ width: 11, height: 11 }} />
-                        <span>{new Date(m.startedAt).toLocaleDateString()}</span>
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      className="btn-atelier ghost"
-                      style={{ height: 28, fontSize: 11 }}
-                    >
-                      View
-                    </button>
-                  </div>
-                ))
-              ) : (
-                <div
-                  style={{
-                    padding: "20px 22px",
-                    borderRadius: 12,
-                    background: "var(--paper-0)",
-                    border: "1px solid oklch(from var(--paper-4) l c h / 0.5)",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    gap: 16,
-                  }}
-                >
-                  <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-                    <div
-                      style={{
-                        width: 36,
-                        height: 36,
-                        borderRadius: 10,
-                        background: "var(--bloom-wash)",
-                        color: "var(--bloom-2)",
-                        display: "grid",
-                        placeItems: "center",
-                        flexShrink: 0,
-                      }}
-                    >
-                      <Ico.Present />
-                    </div>
-                    <div>
-                      <div
-                        style={{
-                          fontSize: 14,
-                          fontWeight: 500,
-                          color: "var(--ink-0)",
-                          marginBottom: 2,
-                        }}
-                      >
-                        No meetings recorded yet
-                      </div>
-                      <div style={{ fontSize: 12, color: "var(--ink-2)" }}>
-                        Capture speech in real time, extract architecture decisions, and sync action
-                        items to the board.
-                      </div>
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    className="btn-atelier primary"
-                    style={{ height: 32, flexShrink: 0 }}
-                    onClick={() => setView("meeting")}
-                  >
-                    <Ico.Present /> Start Meeting
-                  </button>
-                </div>
-              )}
-            </div>
+                        {showAll ? "Show fewer" : `Show all ${pulse.items.length}`}
+                      </Button>
+                    )}
+                  </>
+                )}
 
-            {/* Inbox */}
-            <div className="mono-caps" style={{ marginBottom: 10 }}>
-              Inbox · needs you
-            </div>
-            <div style={{ display: "grid", gap: 8, marginBottom: 28 }}>
-              {inbox.length > 0 ? (
-                inbox.slice(0, 4).map((item) => (
-                  <div
-                    key={item.id}
-                    onClick={() => setView("intelligence")}
-                    style={{
-                      padding: "12px 14px",
-                      borderRadius: 10,
-                      background: "var(--paper-0)",
-                      border: "1px solid oklch(from var(--paper-4) l c h / 0.5)",
-                      display: "flex",
-                      alignItems: "flex-start",
-                      gap: 12,
-                      cursor: "pointer",
-                    }}
-                  >
-                    <div
-                      style={{
-                        width: 26,
-                        height: 26,
-                        borderRadius: 7,
-                        background: "var(--bloom-wash)",
-                        color: "var(--bloom-2)",
-                        display: "grid",
-                        placeItems: "center",
-                        flexShrink: 0,
-                      }}
-                    >
-                      <Ico.Sparkle />
-                    </div>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div
-                        style={{
-                          fontSize: 13.5,
-                          fontWeight: 500,
-                          color: "var(--ink-0)",
-                          marginBottom: 2,
-                        }}
-                      >
-                        Merge &ldquo;{item.dup}&rdquo; into &ldquo;{item.existing}&rdquo;?
-                      </div>
-                      <div style={{ fontSize: 12, color: "var(--ink-2)" }}>
-                        {item.dupStatements + item.existingStatements} statements across topics
-                      </div>
-                    </div>
-                    <span className="mono" style={{ fontSize: 10.5, color: "var(--ink-3)" }}>
-                      Review →
-                    </span>
-                  </div>
-                ))
-              ) : (
-                <div
-                  style={{
-                    padding: "18px 20px",
-                    borderRadius: 10,
-                    background: "var(--paper-0)",
-                    border: "1px solid oklch(from var(--paper-4) l c h / 0.5)",
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 12,
-                  }}
-                >
-                  <div
-                    style={{
-                      width: 26,
-                      height: 26,
-                      borderRadius: 7,
-                      background: "oklch(from var(--moss) l c h / 0.12)",
-                      color: "var(--moss)",
-                      display: "grid",
-                      placeItems: "center",
-                      flexShrink: 0,
-                    }}
-                  >
-                    <Ico.Check />
-                  </div>
-                  <div>
-                    <div style={{ fontSize: 13.5, fontWeight: 500, color: "var(--ink-0)" }}>
-                      Inbox zero
-                    </div>
-                    <div style={{ fontSize: 12, color: "var(--ink-2)" }}>
-                      All decisions settled. No open proposals, conflicting statements, or
-                      blockers.
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
+                {meetings.length > 0 && (
+                  <>
+                    <SectionLabel count={meetings.length}>Recent meetings</SectionLabel>
+                    <ul className="home-meetings">
+                      {meetings.slice(0, 3).map((m) => (
+                        <MeetingRow
+                          key={m.id}
+                          meeting={m}
+                          boardName={boardLabel}
+                          onOpen={() => onCitation({ kind: "meeting", id: m.id })}
+                        />
+                      ))}
+                    </ul>
+                  </>
+                )}
+              </div>
 
-          {/* Right Column: Pinned Boards & What Lucent Noticed */}
-          <div>
-            <div className="mono-caps" style={{ marginBottom: 10 }}>
-              Pinned &amp; Recent Boards
-            </div>
-            <div style={{ display: "grid", gap: 8, marginBottom: 28 }}>
-              {allBoards.length > 0 ? (
-                allBoards.slice(0, 5).map((b) => (
-                  <button
-                    key={b.id}
-                    type="button"
-                    onClick={() => {
-                      if (b.isLocal) {
-                        openProject(b.id);
-                      } else {
-                        openBoard(b.id);
-                      }
-                    }}
-                    style={{
-                      padding: "12px 14px",
-                      borderRadius: 10,
-                      background: "var(--paper-0)",
-                      border: "1px solid oklch(from var(--paper-4) l c h / 0.5)",
-                      borderLeft: "4px solid var(--bloom-2)",
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 12,
-                      textAlign: "left",
-                      cursor: "pointer",
-                      width: "100%",
-                      transition: "all 0.15s var(--e-out)",
-                    }}
+              <div className="home-col">
+                <SectionLabel>Pick up where you left off</SectionLabel>
+                {recent.length === 0 ? (
+                  <EmptyState
+                    compact
+                    title="No boards yet"
+                    body="Boards you build or open appear here, most recent first."
+                  />
+                ) : (
+                  <ul className="home-boards">
+                    {recent.map((b) => (
+                      <li key={b.id}>
+                        <button
+                          type="button"
+                          className={`home-board ${b.isCurrent ? "current" : ""}`}
+                          onClick={() => openRecent(b.id)}
+                        >
+                          <span className="home-board-text">
+                            <span className="home-board-name">{b.name}</span>
+                            <span className="home-board-meta">
+                              {[
+                                b.isCurrent ? "open now" : `edited ${timeAgo(b.updatedAt, now)}`,
+                                b.openItems === null
+                                  ? "shared board"
+                                  : b.openItems
+                                    ? `${b.openItems} open`
+                                    : b.statements
+                                      ? "all settled"
+                                      : "",
+                                b.nodes ? `${b.nodes} node${b.nodes === 1 ? "" : "s"}` : "",
+                                b.actions && b.actions.total
+                                  ? `${b.actions.completed}/${b.actions.total} actions done`
+                                  : "",
+                              ]
+                                .filter(Boolean)
+                                .join(" · ")}
+                            </span>
+                          </span>
+                          <Ico.Arrow className="home-board-arrow" aria-hidden />
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {pulse.boards.filter((b) => b.hasContent !== false).length > RECENT_LIMIT && (
+                  <Button
+                    variant="quiet"
+                    size="sm"
+                    className="home-more"
+                    onClick={() => setView("dashboard")}
                   >
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div
-                        style={{
-                          fontSize: 13.5,
-                          fontWeight: 500,
-                          color: "var(--ink-0)",
-                          marginBottom: 2,
-                        }}
-                      >
-                        {b.name}
-                      </div>
-                      <div className="mono" style={{ fontSize: 10.5, color: "var(--ink-3)" }}>
-                        {b.isLocal
-                          ? `Local · Updated ${new Date(b.updatedAt).toLocaleDateString()}`
-                          : `Cloud · ${b.nodes ?? 0} nodes`}
-                      </div>
-                    </div>
-                    <Ico.Arrow style={{ color: "var(--ink-3)" }} />
-                  </button>
-                ))
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => {
-                    newProject();
-                    setView("canvas");
-                  }}
-                  style={{
-                    padding: "16px 18px",
-                    borderRadius: 10,
-                    background: "var(--paper-0)",
-                    border: "1px dashed oklch(from var(--bloom-2) l c h / 0.4)",
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 12,
-                    textAlign: "left",
-                    cursor: "pointer",
-                    width: "100%",
-                  }}
-                >
-                  <div
-                    style={{
-                      width: 32,
-                      height: 32,
-                      borderRadius: 8,
-                      background: "var(--bloom-wash)",
-                      color: "var(--bloom-2)",
-                      display: "grid",
-                      placeItems: "center",
-                      flexShrink: 0,
-                    }}
-                  >
-                    <Ico.Plus />
-                  </div>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: 13.5, fontWeight: 600, color: "var(--ink-0)" }}>
-                      Create your first board
-                    </div>
-                    <div style={{ fontSize: 12, color: "var(--ink-2)" }}>
-                      Start with a blank canvas or ask Lucent to generate a diagram.
-                    </div>
-                  </div>
-                </button>
-              )}
-            </div>
+                    All boards
+                  </Button>
+                )}
 
-            {/* What Lucent Noticed */}
-            <div className="mono-caps" style={{ marginBottom: 10, color: "var(--bloom-2)" }}>
-              <Ico.Sparkle style={{ display: "inline", verticalAlign: -2, marginRight: 4 }} />
-              What Lucent noticed
+                {pulse.noticed.length > 0 && (
+                  <>
+                    <SectionLabel glyph={<Ico.Sparkle className="home-noticed-glyph" />}>
+                      What Lucent noticed
+                    </SectionLabel>
+                    <div className="home-noticed">
+                      {pulse.noticed.map((n, i) => (
+                        <Notice
+                          key={i}
+                          notice={n}
+                          now={now}
+                          onReveal={reveal}
+                          onGoTo={goTo}
+                        />
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
             </div>
-            <div
-              style={{
-                padding: 18,
-                borderRadius: 14,
-                background: "oklch(from var(--bloom-1) l c h / 0.05)",
-                border: "1px solid var(--bloom-wash-2)",
-              }}
-            >
-              {noticeContent}
-            </div>
-          </div>
-        </div>
+          </>
+        )}
       </div>
-    </AtelierAppShell>
+    </Page>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+
+function NeedRow({
+  item,
+  now,
+  showBoard,
+  onReveal,
+  onMeeting,
+}: {
+  item: PulseItem;
+  now: number;
+  showBoard: boolean;
+  onReveal: () => void;
+  onMeeting?: () => void;
+}) {
+  return (
+    <li className={`home-need ${item.signal}`}>
+      <button
+        type="button"
+        className="home-need-main"
+        onClick={onReveal}
+        title={`Show on ${item.boardName}`}
+      >
+        <span className="home-need-top">
+          <KindBadge kind={item.kind} status={item.status} />
+          {item.signal === "overdue" && <span className="home-flag">Overdue</span>}
+          {item.blocked && <span className="home-flag">Blocked</span>}
+        </span>
+        <span className={`home-need-label ${item.kind === "decision" ? "serif" : ""}`}>
+          {item.label}
+        </span>
+        <span className="home-need-meta">
+          {showBoard && (
+            <span className="home-need-board">
+              <Ico.Layers aria-hidden />
+              {item.boardName}
+              {item.isCurrent && <span className="home-need-here"> · open now</span>}
+            </span>
+          )}
+          {item.assignee && (
+            <span className="home-need-owner">
+              <Avatar name={item.assignee} size={16} />
+              {item.assignee}
+            </span>
+          )}
+          {item.dueDate && (
+            <span className={item.signal === "overdue" ? "home-need-due late" : "home-need-due"}>
+              {dueLabel(item.dueDate, now)}
+            </span>
+          )}
+        </span>
+      </button>
+      {item.fromMeeting && (
+        <span className="home-need-side">
+          <ProvenanceChip
+            icon={<Ico.Present aria-hidden />}
+            label="From a meeting"
+            title={
+              onMeeting
+                ? "Open the transcript this came from"
+                : "Captured in a meeting — open this board to see the transcript"
+            }
+            onClick={onMeeting}
+          />
+        </span>
+      )}
+      {!item.fromMeeting && item.fromRequest && (
+        <span className="home-need-side">
+          <ProvenanceChip
+            icon={<Ico.Comment aria-hidden />}
+            label={item.fromRequest.by ? `From ${item.fromRequest.by}’s request` : "From a request"}
+            title={`Lucent made this from a request to the board, ${timeAgo(item.fromRequest.at, now)}`}
+          />
+        </span>
+      )}
+    </li>
+  );
+}
+
+function MeetingRow({
+  meeting,
+  boardName,
+  onOpen,
+}: {
+  meeting: MeetingTranscript;
+  boardName: string;
+  onOpen: () => void;
+}) {
+  const started = new Date(meeting.startedAt);
+  const minutes = meeting.endedAt
+    ? Math.max(1, Math.round((meeting.endedAt - meeting.startedAt) / 60_000))
+    : null;
+  const speakers = [...new Set(meeting.turns.map((t) => t.speaker).filter(Boolean))];
+  return (
+    <li>
+      <button type="button" className="home-meeting" onClick={onOpen}>
+        <span className="home-meeting-when">
+          <span className="home-meeting-time">
+            {started.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}
+          </span>
+          <span className="home-meeting-date">
+            {started.toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+          </span>
+        </span>
+        <span className="home-meeting-rule" aria-hidden />
+        <span className="home-meeting-body">
+          <span className="home-meeting-title">
+            {meeting.mode ? `${meeting.mode[0]!.toUpperCase()}${meeting.mode.slice(1)} meeting` : "Meeting"}{" "}
+            on {boardName}
+          </span>
+          <span className="home-meeting-meta">
+            {meeting.turns.length} turn{meeting.turns.length === 1 ? "" : "s"}
+            {minutes !== null ? ` · ${minutes} min` : " · still open"}
+          </span>
+        </span>
+        {speakers.length > 0 && (
+          <span className="home-meeting-people">
+            {speakers.slice(0, 4).map((s) => (
+              <Avatar key={s} name={s} size={22} />
+            ))}
+          </span>
+        )}
+      </button>
+    </li>
+  );
+}
+
+function Notice({
+  notice,
+  now,
+  onReveal,
+  onGoTo,
+}: {
+  notice: PulseNotice;
+  now: number;
+  onReveal: (boardKey: string, nodeId: string) => void;
+  onGoTo: (boardKey: string, view: View) => void;
+}) {
+  const board = (
+    <ProvenanceChip icon={<Ico.Layers aria-hidden />} label={notice.boardName} />
+  );
+  switch (notice.kind) {
+    case "blocked-chain": {
+      const target = notice.chain[notice.chain.length - 1]!;
+      const root = notice.chain[0]!;
+      return (
+        <div className="home-notice">
+          <p className="home-notice-text">
+            <b>{target.label}</b> can’t move: it waits on{" "}
+            {notice.chain.length > 2
+              ? `${notice.chain.length - 2} step${notice.chain.length - 2 === 1 ? "" : "s"} behind `
+              : ""}
+            <b>{root.label}</b>, which is blocked.
+          </p>
+          <div className="home-notice-chips">
+            {notice.chain.map((n, i) => (
+              <span key={n.id} className="home-chain-step">
+                {i > 0 && (
+                  <span className="home-chain-arrow" aria-hidden>
+                    →
+                  </span>
+                )}
+                <ProvenanceChip
+                  icon={<StatementGlyph kind="action" size={10} />}
+                  label={n.label}
+                  title="Show on the board"
+                  onClick={() => onReveal(notice.boardId, n.id)}
+                />
+              </span>
+            ))}
+          </div>
+          <div className="home-notice-actions">
+            {board}
+            <Button variant="bloom" size="sm" onClick={() => onGoTo(notice.boardId, "execution")}>
+              Open execution
+            </Button>
+          </div>
+        </div>
+      );
+    }
+    case "overdue":
+      return (
+        <div className="home-notice">
+          <p className="home-notice-text">
+            <b>{notice.label}</b> {dueLabel(notice.dueDate, now)}
+            {notice.assignee ? ` and is still with ${notice.assignee}` : " and has no owner"}
+            {notice.others > 0
+              ? ` — ${notice.others} more action${notice.others === 1 ? " is" : "s are"} late too.`
+              : "."}
+          </p>
+          <div className="home-notice-actions">
+            {board}
+            <Button variant="bloom" size="sm" onClick={() => onReveal(notice.boardId, notice.nodeId)}>
+              Show on board
+            </Button>
+          </div>
+        </div>
+      );
+    case "open-on-decided-topic":
+      return (
+        <div className="home-notice">
+          <p className="home-notice-text">
+            “{notice.question}” is still open under <i>{notice.topic}</i>, where{" "}
+            <b>{notice.decision}</b> is already decided. Worth answering, or recording what it
+            changes.
+          </p>
+          <div className="home-notice-chips">
+            <ProvenanceChip
+              icon={<StatementGlyph kind="question" size={10} />}
+              label={notice.question}
+              title="Show the question on the board"
+              onClick={() => onReveal(notice.boardId, notice.questionId)}
+            />
+            <ProvenanceChip
+              icon={<StatementGlyph kind="decision" size={10} />}
+              label={notice.decision}
+              title="Show the decision on the board"
+              onClick={() => onReveal(notice.boardId, notice.decisionId)}
+            />
+          </div>
+          <div className="home-notice-actions">
+            {board}
+            <Button variant="bloom" size="sm" onClick={() => onGoTo(notice.boardId, "intelligence")}>
+              Review statements
+            </Button>
+          </div>
+        </div>
+      );
+    case "duplicate-topic":
+      return (
+        <div className="home-notice">
+          <p className="home-notice-text">
+            <b>{notice.dup}</b> and <b>{notice.existing}</b> look like the same topic, split
+            across {notice.statements} statements. Merging keeps its decisions and questions
+            together.
+          </p>
+          <div className="home-notice-actions">
+            {board}
+            <Button variant="bloom" size="sm" onClick={() => onGoTo(notice.boardId, "intelligence")}>
+              Review merge
+            </Button>
+          </div>
+        </div>
+      );
+  }
+}
+
+function FirstRun({
+  onDescribe,
+  onMeeting,
+  onTemplate,
+}: {
+  onDescribe: () => void;
+  onMeeting: () => void;
+  onTemplate: () => void;
+}) {
+  const starts = [
+    {
+      id: "describe",
+      icon: <Ico.Sparkle aria-hidden />,
+      title: "Describe an idea",
+      body: "Type or speak what you’re thinking. Lucent builds an editable board — and keeps the decisions, questions and actions in it.",
+      cta: "Open the canvas",
+      onClick: onDescribe,
+    },
+    {
+      id: "meeting",
+      icon: <Ico.Present aria-hidden />,
+      title: "Start a meeting",
+      body: "Lucent listens and drafts what it heard as statements. You approve what lands on the board, with the words it came from.",
+      cta: "Open meeting",
+      onClick: onMeeting,
+    },
+    {
+      id: "template",
+      icon: <Ico.Book aria-hidden />,
+      title: "Start from a template",
+      body: "Flowcharts, journeys, mind maps and more — begin from a real structure and reshape it by talking.",
+      cta: "Browse templates",
+      onClick: onTemplate,
+    },
+  ];
+  return (
+    <section className="home-first" aria-labelledby="home-first-title">
+      <SectionLabel>
+        <span id="home-first-title">Three ways to begin</span>
+      </SectionLabel>
+      <div className="home-first-grid">
+        {starts.map((s) => (
+          <button key={s.id} type="button" className="home-start" onClick={s.onClick}>
+            <span className="home-start-icon">{s.icon}</span>
+            <span className="home-start-title">{s.title}</span>
+            <span className="home-start-body">{s.body}</span>
+            <span className="home-start-cta">
+              {s.cta} <Ico.Arrow aria-hidden />
+            </span>
+          </button>
+        ))}
+      </div>
+      <p className="home-first-note">
+        Once a board holds a question, a decision or an action, this page shows what needs you
+        across all of them.
+      </p>
+    </section>
   );
 }

@@ -1,0 +1,611 @@
+/* Atelier · home — owned by the home surface. Kit and statement
+   language live in lucent.css; this file holds only what is specific here. */
+
+.home {
+  max-width: 1180px;
+  margin: 0 auto;
+}
+
+/* The greeting sits a touch larger than a page title: Home is the one page
+   that speaks to the person rather than about a board. */
+.home .page-title {
+  font-size: 42px;
+  letter-spacing: -0.025em;
+}
+.home .page-lede {
+  font-size: 17px;
+}
+
+/* ---------------------------------------------------------------
+   Composer — describe (new board) or ask (the open board)
+   --------------------------------------------------------------- */
+
+.home-composer {
+  margin-bottom: 30px;
+  padding: 12px 14px 10px 16px;
+  background: var(--paper-0);
+  border: 1px solid oklch(from var(--paper-4) l c h / 0.7);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-1);
+  transition:
+    border-color 0.15s var(--e-out),
+    box-shadow 0.15s var(--e-out);
+}
+html[data-theme="dark"] .home-composer {
+  background: var(--paper-2);
+}
+.home-composer:focus-within {
+  border-color: var(--bloom-wash-2);
+  box-shadow:
+    var(--shadow-1),
+    0 0 0 3px var(--bloom-wash);
+}
+.home-composer-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.home-composer-mark {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  color: var(--bloom-2);
+  background: var(--bloom-wash);
+  border: 1px solid var(--bloom-wash-2);
+}
+.home-composer-input {
+  flex: 1;
+  min-width: 0;
+  height: 36px;
+  padding: 0 4px;
+  font-family: var(--font-serif);
+  font-size: 16px;
+  color: var(--ink-0);
+  background: none;
+  border: 0;
+  outline: none;
+}
+/* The composer's focus-within ring is the focus indicator; a second one
+   drawn inside it reads as a rendering glitch. */
+.home-composer-input:focus-visible {
+  outline: none;
+}
+.home-composer-input::placeholder {
+  color: var(--ink-3);
+  font-style: italic;
+}
+.home-composer-row .btn-atelier {
+  flex-shrink: 0;
+}
+.home-composer-hint {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 19px;
+  margin: 6px 0 0 42px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--ink-3);
+}
+.home-kbd {
+  padding: 0 6px;
+  border-radius: 5px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  line-height: 17px;
+  color: var(--ink-2);
+  background: var(--paper-2);
+  border: 1px solid oklch(from var(--paper-4) l c h / 0.6);
+}
+html[data-theme="dark"] .home-kbd {
+  background: var(--paper-3);
+}
+
+/* ---------------------------------------------------------------
+   Tiles, and what they count
+   --------------------------------------------------------------- */
+
+.home-tiles {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+}
+.home-scope {
+  margin: 10px 2px 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--ink-3);
+}
+
+.home-cols {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+  gap: 28px;
+  margin-top: 32px;
+}
+.home-col {
+  min-width: 0;
+}
+.home-more {
+  margin-top: 8px;
+}
+
+/* ---------------------------------------------------------------
+   Needs you — statement rows, one click from the node
+   --------------------------------------------------------------- */
+
+.home-needs,
+.home-boards,
+.home-meetings {
+  display: grid;
+  gap: 8px;
+  list-style: none;
+}
+
+.home-need {
+  display: flex;
+  align-items: stretch;
+  min-width: 0;
+  background: var(--paper-0);
+  border: 1px solid oklch(from var(--paper-4) l c h / 0.55);
+  border-radius: 12px;
+  transition:
+    background 0.12s var(--e-out),
+    border-color 0.12s var(--e-out);
+}
+html[data-theme="dark"] .home-need {
+  background: var(--paper-2);
+}
+.home-need:hover {
+  background: var(--paper-1);
+  border-color: oklch(from var(--paper-4) l c h / 0.9);
+}
+html[data-theme="dark"] .home-need:hover {
+  background: var(--paper-0);
+}
+/* Late work carries a madder edge — the only loud colour on the page. */
+.home-need.overdue,
+.home-need.blocked {
+  box-shadow: inset 3px 0 0 oklch(from var(--madder) l c h / 0.75);
+}
+.home-need-main {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+  padding: 12px 14px 12px 16px;
+  font: inherit;
+  text-align: left;
+  color: inherit;
+  background: none;
+  border: 0;
+  border-radius: 12px;
+  cursor: pointer;
+}
+.home-need-main:focus-visible {
+  outline: 2px solid var(--bloom-1);
+  outline-offset: -2px;
+}
+.home-need-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.home-flag {
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--madder);
+  background: oklch(from var(--madder) l c h / 0.1);
+}
+.home-need-label {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.4;
+  color: var(--ink-0);
+}
+.home-need-label.serif {
+  font-family: var(--font-serif);
+  font-size: 15px;
+  font-weight: 400;
+}
+.home-need-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 14px;
+  font-size: 11.5px;
+  color: var(--ink-2);
+}
+.home-need-board,
+.home-need-owner {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+.home-need-board svg {
+  width: 11px;
+  height: 11px;
+  flex-shrink: 0;
+  color: var(--ink-3);
+}
+.home-need-here {
+  color: var(--bloom-2);
+}
+.home-need-owner .avatar-chip {
+  border-width: 1px;
+}
+.home-need-due {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.02em;
+  color: var(--ink-3);
+}
+.home-need-due.late {
+  color: var(--madder);
+}
+.home-need-side {
+  display: flex;
+  align-items: center;
+  flex-shrink: 1;
+  min-width: 0;
+  max-width: 44%;
+  padding: 0 14px 0 4px;
+}
+
+/* ---------------------------------------------------------------
+   Recent meetings (the open shared board's own transcripts)
+   --------------------------------------------------------------- */
+
+.home-meeting {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 12px 16px;
+  font: inherit;
+  text-align: left;
+  color: inherit;
+  background: var(--paper-0);
+  border: 1px solid oklch(from var(--paper-4) l c h / 0.55);
+  border-radius: 12px;
+  box-shadow: var(--shadow-1);
+  cursor: pointer;
+  transition:
+    transform 0.15s var(--e-out),
+    box-shadow 0.15s var(--e-out);
+}
+html[data-theme="dark"] .home-meeting {
+  background: var(--paper-2);
+}
+.home-meeting:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-2);
+}
+.home-meeting-when {
+  display: grid;
+  gap: 2px;
+  width: 64px;
+  flex-shrink: 0;
+  text-align: right;
+  font-family: var(--font-mono);
+}
+.home-meeting-time {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--ink-0);
+}
+.home-meeting-date {
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--ink-3);
+}
+.home-meeting-rule {
+  width: 1px;
+  height: 32px;
+  flex-shrink: 0;
+  background: oklch(from var(--paper-4) l c h / 0.6);
+}
+.home-meeting-body {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+.home-meeting-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--ink-0);
+}
+.home-meeting-meta {
+  font-size: 11.5px;
+  color: var(--ink-2);
+}
+.home-meeting-people {
+  display: flex;
+  flex-shrink: 0;
+}
+.home-meeting-people .avatar-chip + .avatar-chip {
+  margin-left: -6px;
+}
+
+/* ---------------------------------------------------------------
+   Pick up where you left off
+   --------------------------------------------------------------- */
+
+.home-board {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 12px 14px;
+  font: inherit;
+  text-align: left;
+  color: inherit;
+  background: var(--paper-0);
+  border: 1px solid oklch(from var(--paper-4) l c h / 0.55);
+  border-left: 3px solid var(--paper-4);
+  border-radius: 10px;
+  cursor: pointer;
+  transition:
+    transform 0.12s var(--e-out),
+    border-color 0.12s var(--e-out);
+}
+html[data-theme="dark"] .home-board {
+  background: var(--paper-2);
+}
+.home-board:hover {
+  transform: translateX(2px);
+  border-color: oklch(from var(--paper-4) l c h / 0.9);
+  border-left-color: var(--ink-3);
+}
+.home-board.current,
+.home-board.current:hover {
+  border-left-color: var(--bloom-2);
+}
+.home-board-text {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+.home-board-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--ink-0);
+}
+.home-board-meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.02em;
+  color: var(--ink-3);
+}
+.home-board-arrow {
+  flex-shrink: 0;
+  color: var(--ink-3);
+}
+
+/* ---------------------------------------------------------------
+   What Lucent noticed — only ever a real, derived signal
+   --------------------------------------------------------------- */
+
+.home-noticed-glyph {
+  width: 12px;
+  height: 12px;
+  color: var(--bloom-2);
+}
+.home-noticed {
+  padding: 18px;
+  border-radius: var(--r-md);
+  background: oklch(from var(--bloom-1) l c h / 0.05);
+  border: 1px solid var(--bloom-wash-2);
+}
+.home-notice + .home-notice {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid oklch(from var(--bloom-1) l c h / 0.18);
+}
+.home-notice-text {
+  font-family: var(--font-serif);
+  font-size: 15px;
+  line-height: 1.55;
+  color: var(--ink-0);
+  text-wrap: pretty;
+}
+.home-notice-text b {
+  font-weight: 600;
+}
+.home-notice-text i {
+  font-family: var(--font-mono);
+  font-style: normal;
+  font-size: 12.5px;
+  color: var(--ink-1);
+}
+.home-notice-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+}
+.home-notice-chips .prov-chip {
+  max-width: 220px;
+}
+.home-chain-step {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+}
+.home-chain-arrow {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-3);
+}
+.home-notice-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 12px;
+}
+.home-notice-actions .prov-chip {
+  max-width: 60%;
+}
+
+/* ---------------------------------------------------------------
+   First run — three honest ways to begin
+   --------------------------------------------------------------- */
+
+.home-first-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+.home-start {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  min-height: 196px;
+  padding: 20px 20px 18px;
+  font: inherit;
+  text-align: left;
+  color: inherit;
+  background: var(--paper-0);
+  border: 1px solid oklch(from var(--paper-4) l c h / 0.6);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-1);
+  cursor: pointer;
+  transition:
+    transform 0.15s var(--e-out),
+    box-shadow 0.15s var(--e-out),
+    border-color 0.15s var(--e-out);
+}
+html[data-theme="dark"] .home-start {
+  background: var(--paper-2);
+}
+.home-start:hover {
+  transform: translateY(-2px);
+  border-color: var(--bloom-wash-2);
+  box-shadow: var(--shadow-2);
+}
+.home-start:focus-visible,
+.home-board:focus-visible,
+.home-meeting:focus-visible {
+  outline: 2px solid var(--bloom-1);
+  outline-offset: 2px;
+}
+.home-start-icon {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  margin-bottom: 4px;
+  border-radius: 9px;
+  color: var(--bloom-2);
+  background: var(--bloom-wash);
+  border: 1px solid var(--bloom-wash-2);
+}
+.home-start-title {
+  font-family: var(--font-serif);
+  font-size: 19px;
+  letter-spacing: -0.01em;
+  color: var(--ink-0);
+}
+.home-start-body {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--ink-2);
+  text-wrap: pretty;
+}
+.home-start-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: auto;
+  padding-top: 6px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--bloom-2);
+}
+.home-start-cta svg {
+  width: 13px;
+  height: 13px;
+}
+.home-first-note {
+  margin: 18px 2px 0;
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-size: 14px;
+  color: var(--ink-3);
+}
+
+/* ---------------------------------------------------------------
+   Narrow widths and reduced motion
+   --------------------------------------------------------------- */
+
+@media (max-width: 1100px) {
+  .home-cols {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@media (max-width: 900px) {
+  .home-tiles {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .home-first-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .home-start {
+    min-height: 0;
+  }
+  .home .page-title {
+    font-size: 34px;
+  }
+  .home-composer-hint {
+    margin-left: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .home-composer,
+  .home-need,
+  .home-meeting,
+  .home-board,
+  .home-start {
+    transition: none;
+  }
+  .home-meeting:hover,
+  .home-board:hover,
+  .home-start:hover {
+    transform: none;
+  }
+}

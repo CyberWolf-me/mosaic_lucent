@@ -153,6 +153,57 @@ export async function deleteOrg(id: string): Promise<OrgResult<null>> {
   return { ok: true, value: null };
 }
 
+/* --------------------------------- invites -------------------------------- */
+
+/** A pending invite as the owner-only list returns it (token hash never leaves). */
+export interface OrgInvite {
+  id: string;
+  email: string;
+  role: "editor" | "viewer";
+  createdAt: number;
+  expiresAt: number;
+}
+
+/**
+ * Invite someone to an org by email (owner only). The server answers 204 for
+ * any address — it must not reveal whether the invitee has an account — so
+ * success here means "sent if deliverable", and the pending list is the
+ * source of truth for what was created. 402 is the seat ceiling.
+ */
+export async function inviteToOrg(
+  orgId: string,
+  email: string,
+  role: "editor" | "viewer",
+): Promise<OrgResult<null>> {
+  const res = await authed(`/api/orgs/${encodeURIComponent(orgId)}/invites`, {
+    method: "POST",
+    body: JSON.stringify({ email, role }),
+  });
+  if (res?.status === 402) {
+    return { ok: false, error: "This workspace is out of seats. Upgrade the plan to invite more people." };
+  }
+  if (!res || !res.ok) return refusal(res, "Could not send that invite.");
+  return { ok: true, value: null };
+}
+
+/** Live invites for an org (owner only; empty for everyone else). */
+export async function listOrgInvites(orgId: string): Promise<OrgInvite[]> {
+  const res = await authed(`/api/orgs/${encodeURIComponent(orgId)}/invites`);
+  if (!res || !res.ok) return [];
+  const data = (await res.json()) as { invites?: OrgInvite[] };
+  return data.invites ?? [];
+}
+
+/** Revoke a pending invite (owner only). Idempotent on the server. */
+export async function revokeOrgInvite(orgId: string, inviteId: string): Promise<OrgResult<null>> {
+  const res = await authed(
+    `/api/orgs/${encodeURIComponent(orgId)}/invites/${encodeURIComponent(inviteId)}`,
+    { method: "DELETE" },
+  );
+  if (!res || !res.ok) return refusal(res, "Could not revoke that invite.");
+  return { ok: true, value: null };
+}
+
 /* ------------------------- active org selection --------------------------- */
 
 /**

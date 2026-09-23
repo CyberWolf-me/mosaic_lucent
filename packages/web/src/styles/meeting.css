@@ -1,0 +1,1008 @@
+/* Atelier · meeting — owned by the meeting surface. Kit and statement
+   language live in lucent.css; this file holds only what is specific here.
+
+   Layout: a document column (the meeting brief) and a sticky transcript
+   column. The page scroller (kit .page) scrolls the document; the transcript
+   column pins in place and scrolls its own list, so a citation in the brief
+   can land on a turn without moving the page. */
+
+/* The page's bottom padding is sized for long reading columns; this view
+   pins a full-height column, so it trims it (scoped to this view only). */
+.page-inner:has(> .meet-layout) {
+  padding-bottom: 20px;
+}
+
+.meet-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 380px;
+  gap: 32px;
+  align-items: start;
+}
+.meet-layout.panel-closed {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+/* ------------------------------------------------------------------ doc */
+
+.meet-doc {
+  min-width: 0;
+  width: 100%;
+  max-width: 760px;
+  justify-self: center;
+  display: flex;
+  flex-direction: column;
+}
+.meet-doc .page-header {
+  margin-bottom: 20px;
+}
+
+.meet-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 18px;
+}
+.meet-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ink-1);
+  background: oklch(from var(--paper-2) l c h / 0.7);
+  border: 1px solid oklch(from var(--paper-4) l c h / 0.5);
+  white-space: nowrap;
+}
+.meet-people {
+  padding-left: 4px;
+}
+.meet-avatars {
+  display: inline-flex;
+}
+.meet-avatars .avatar-chip + .avatar-chip {
+  margin-left: -6px;
+}
+
+.meet-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 16px;
+  padding: 10px 0 12px;
+  border-top: 1px solid oklch(from var(--paper-4) l c h / 0.55);
+}
+.meet-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.meet-actions .btn-atelier svg,
+.meet-empty-mode .btn-atelier svg {
+  width: 13px;
+  height: 13px;
+}
+.meet-actions .btn-atelier[aria-pressed="true"] {
+  color: var(--bloom-2);
+  background: var(--bloom-wash);
+}
+.meet-stop {
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  background: currentColor;
+}
+
+/* Mode: a segmented control (radiogroup of pressed buttons). */
+.meet-seg {
+  display: inline-flex;
+  padding: 3px;
+  gap: 2px;
+  border-radius: 999px;
+  background: oklch(from var(--paper-3) l c h / 0.7);
+  border: 1px solid oklch(from var(--paper-4) l c h / 0.5);
+}
+.meet-seg button {
+  height: 26px;
+  padding: 0 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ink-2);
+  transition:
+    background 0.12s var(--e-out),
+    color 0.12s var(--e-out);
+}
+.meet-seg button:hover {
+  color: var(--ink-0);
+}
+.meet-seg button.on {
+  color: var(--ink-0);
+  background: var(--paper-0);
+  box-shadow: var(--shadow-1);
+}
+html[data-theme="dark"] .meet-seg button.on {
+  background: var(--paper-4);
+}
+
+.meet-note {
+  margin: 0 0 8px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--ink-3);
+  text-wrap: pretty;
+}
+.meet-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: inherit;
+  font-weight: 500;
+  color: var(--bloom-2);
+  border-radius: 4px;
+}
+.meet-link:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.meet-link svg {
+  width: 11px;
+  height: 11px;
+}
+
+/* Live status + the REC pill share one pulsing dot. */
+.meet-live {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--ink-2);
+}
+.meet-rec-dot {
+  display: inline-block;
+  flex-shrink: 0;
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--madder);
+  animation: pulse-bloom 1.4s ease-in-out infinite;
+}
+.meet-rec,
+.meet-ended {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 28px;
+  padding: 0 12px 0 10px;
+  border-radius: 999px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+.meet-rec {
+  color: var(--madder);
+  background: oklch(from var(--madder) l c h / 0.1);
+  border: 1px solid oklch(from var(--madder) l c h / 0.3);
+}
+button.meet-rec:hover {
+  background: oklch(from var(--madder) l c h / 0.16);
+}
+.meet-ended {
+  color: var(--ink-2);
+  background: oklch(from var(--paper-2) l c h / 0.8);
+  border: 1px solid oklch(from var(--paper-4) l c h / 0.6);
+}
+
+/* Conversational lease (Assistant / Participant). */
+.meet-lease {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 4px 0 12px;
+  padding: 8px 10px 8px 12px;
+  border-radius: var(--r-sm);
+  font-size: 12.5px;
+  color: var(--bloom-2);
+  background: var(--bloom-wash);
+  border: 1px solid var(--bloom-wash-2);
+}
+.meet-lease-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--bloom-1);
+  box-shadow: 0 0 8px var(--bloom-glow);
+}
+.meet-lease-text {
+  flex: 1;
+  min-width: 0;
+}
+.meet-kbd {
+  padding: 2px 7px;
+  border-radius: 5px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--ink-1);
+  background: var(--paper-0);
+  border: 1px solid oklch(from var(--paper-4) l c h / 0.8);
+}
+
+/* The video room drawer. NativeRoom brings its own lobby/stage. */
+.meet-call {
+  margin: 8px 0 20px;
+}
+
+/* ---------------------------------------------------------- empty state */
+
+.meet-empty-glyph {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 999px;
+  color: var(--bloom-2);
+  background: var(--bloom-wash);
+}
+.meet-empty-glyph svg {
+  width: 18px;
+  height: 18px;
+}
+.meet-empty-mode {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 22px 0 0;
+}
+.meet-empty-mode .meet-note {
+  margin: 0;
+}
+
+.meet-past-list {
+  margin-top: 34px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.meet-past {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 12px 14px;
+  text-align: left;
+  border-radius: var(--r-sm);
+  background: oklch(from var(--paper-0) l c h / 0.6);
+  border: 1px solid oklch(from var(--paper-4) l c h / 0.55);
+  transition:
+    border-color 0.12s var(--e-out),
+    background 0.12s var(--e-out);
+}
+html[data-theme="dark"] .meet-past {
+  background: var(--paper-2);
+}
+.meet-past:hover {
+  border-color: var(--ink-4);
+}
+.meet-past.on {
+  border-color: var(--bloom-wash-2);
+  background: var(--bloom-wash);
+}
+.meet-past.compact {
+  flex-direction: column;
+  gap: 3px;
+  padding: 10px 12px;
+}
+.meet-past-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-serif);
+  font-size: 14.5px;
+  color: var(--ink-0);
+}
+.meet-past-meta {
+  font-size: 10.5px;
+  color: var(--ink-3);
+}
+
+/* ----------------------------------------------------------------- brief */
+
+.meet-h2 {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: 24px;
+  font-weight: 500;
+  letter-spacing: -0.015em;
+  color: var(--ink-0);
+}
+.meet-h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px;
+  font-family: var(--font-serif);
+  font-size: 19px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  color: var(--ink-0);
+}
+.meet-h3 .section-count {
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+.meet-brief {
+  margin-top: 20px;
+  padding-top: 22px;
+  border-top: 1px solid oklch(from var(--paper-4) l c h / 0.55);
+}
+.meet-brief-head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin-bottom: 18px;
+}
+.meet-brief-sum {
+  font-size: 10px;
+}
+.meet-brief-section {
+  margin-bottom: 26px;
+}
+
+.meet-items {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.meet-item {
+  padding: 10px 0 11px;
+  border-bottom: 1px solid oklch(from var(--paper-4) l c h / 0.4);
+}
+.meet-item:last-child {
+  border-bottom: 0;
+}
+.meet-item-line {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+.meet-item-line .kind-badge {
+  flex-shrink: 0;
+  transform: translateY(-1px);
+}
+.meet-item-text {
+  flex: 1;
+  min-width: 0;
+}
+.meet-item-text .meet-cites {
+  margin-left: 6px;
+  vertical-align: 1px;
+}
+.meet-item-label {
+  min-width: 0;
+  font-size: 14.5px;
+  line-height: 1.5;
+  color: var(--ink-0);
+  text-wrap: pretty;
+}
+/* A decided decision reads in the serif: it is the voice of the record. */
+.meet-item-label.decided {
+  font-family: var(--font-serif);
+  font-size: 15.5px;
+  letter-spacing: -0.01em;
+}
+.meet-item.superseded .meet-item-label,
+.meet-item.rejected .meet-item-label {
+  color: var(--ink-3);
+  text-decoration: line-through;
+  text-decoration-color: oklch(from var(--ink-3) l c h / 0.6);
+}
+.meet-item-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  margin-top: 6px;
+  /* Aligns under the label, past the status badge. */
+  padding-left: 22px;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+.meet-owner {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 500;
+  color: var(--ink-1);
+}
+.meet-owner.unowned {
+  font-weight: 400;
+  font-style: italic;
+  color: var(--ink-3);
+}
+.meet-due {
+  font-size: 11px;
+  color: var(--ink-2);
+}
+.meet-due.overdue {
+  color: var(--madder);
+}
+.meet-item-show {
+  flex-shrink: 0;
+  align-self: center;
+  font-size: 12px;
+  white-space: nowrap;
+  color: var(--ink-3);
+  transition: color 0.12s var(--e-out);
+}
+.meet-item:hover .meet-item-show,
+.meet-item:focus-within .meet-item-show {
+  color: var(--bloom-2);
+}
+
+/* Citation pills: one numbered chip per turn, a span for long ranges. */
+.meet-cites {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.meet-cite {
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 999px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--bloom-2);
+  background: var(--bloom-wash);
+  border: 1px solid var(--bloom-wash-2);
+  transition:
+    background 0.12s var(--e-out),
+    color 0.12s var(--e-out);
+}
+.meet-cite:hover {
+  color: var(--paper-0);
+  background: var(--bloom-2);
+}
+.meet-cite.span {
+  padding: 0 8px;
+}
+
+/* "Listening" glyph: three breathing bars. */
+.meet-listen {
+  display: inline-block;
+  width: 22px;
+  height: 14px;
+  background:
+    linear-gradient(var(--bloom-2), var(--bloom-2)) 2px 50% / 3px 6px no-repeat,
+    linear-gradient(var(--bloom-2), var(--bloom-2)) 9px 50% / 3px 14px no-repeat,
+    linear-gradient(var(--bloom-2), var(--bloom-2)) 16px 50% / 3px 9px no-repeat;
+  animation: pulse-bloom 1.4s ease-in-out infinite;
+}
+
+/* Participant mode: the board's open questions. */
+.meet-open {
+  margin: 4px 0 24px;
+  padding: 14px 16px;
+  border-radius: var(--r-md);
+  background: oklch(from var(--kind-question) l c h / 0.07);
+  border: 1px solid oklch(from var(--kind-question) l c h / 0.25);
+}
+.meet-open-list {
+  list-style: none;
+  margin: 0 0 4px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13.5px;
+}
+.meet-open-list .meet-link {
+  color: var(--ink-0);
+  text-align: left;
+}
+
+/* ---------------------------------------------------------------- answers */
+
+.meet-answers {
+  margin-top: 8px;
+  padding-top: 22px;
+  border-top: 1px solid oklch(from var(--paper-4) l c h / 0.55);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.meet-answer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.meet-answer-q {
+  align-self: flex-start;
+  max-width: 90%;
+  padding: 8px 12px;
+  border-radius: 12px;
+  font-size: 13.5px;
+  color: var(--ink-0);
+  background: oklch(from var(--paper-3) l c h / 0.7);
+}
+.meet-answer-a {
+  display: flex;
+  gap: 8px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  font-family: var(--font-serif);
+  font-size: 14.5px;
+  line-height: 1.6;
+  color: var(--ink-0);
+  background: oklch(from var(--bloom-1) l c h / 0.05);
+  border: 1px solid var(--bloom-wash-2);
+  white-space: pre-wrap;
+}
+.meet-answer-a.error {
+  font-family: var(--font-sans);
+  font-size: 13px;
+  color: var(--madder);
+  background: oklch(from var(--madder) l c h / 0.06);
+  border-color: oklch(from var(--madder) l c h / 0.3);
+}
+.meet-answer-mark {
+  color: var(--bloom-2);
+}
+.meet-answer-cites {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* The Ask bar: sticks to the bottom of the viewport while the doc scrolls. */
+.meet-ask {
+  position: sticky;
+  bottom: 16px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 28px;
+  padding: 7px 7px 7px 10px;
+  border-radius: 999px;
+  background: oklch(from var(--paper-0) l c h / 0.96);
+  border: 1px solid oklch(from var(--paper-4) l c h / 0.75);
+  box-shadow: var(--shadow-2);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  transition:
+    border-color 0.15s var(--e-out),
+    box-shadow 0.15s var(--e-out);
+}
+.meet-ask:focus-within {
+  border-color: var(--bloom-wash-2);
+  box-shadow:
+    var(--shadow-2),
+    0 0 0 3px var(--bloom-wash);
+}
+.meet-ask-mark {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  border-radius: 999px;
+  color: var(--bloom-2);
+  background: var(--bloom-wash);
+}
+.meet-ask-mark svg {
+  width: 14px;
+  height: 14px;
+}
+.meet-ask input {
+  flex: 1;
+  min-width: 0;
+  font-size: 14px;
+  color: var(--ink-0);
+}
+.meet-ask input::placeholder {
+  font-family: var(--font-serif);
+  font-style: italic;
+  color: var(--ink-3);
+}
+.meet-ask input:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+.meet-ask-send {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  border-radius: 999px;
+  color: var(--paper-0);
+  background: var(--bloom-2);
+  transition: background 0.12s var(--e-out);
+}
+.meet-ask-send:hover:not(:disabled) {
+  background: var(--bloom-1);
+}
+.meet-ask-send:disabled {
+  color: var(--ink-3);
+  background: var(--paper-3);
+  cursor: not-allowed;
+}
+.meet-ask-send svg {
+  width: 14px;
+  height: 14px;
+}
+.meet-ask-busy {
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  animation: meet-spin 0.8s linear infinite;
+}
+@keyframes meet-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ------------------------------------------------------ transcript panel */
+
+.meet-panel {
+  position: sticky;
+  top: 36px;
+  /* 56 top bar + 36 page padding + 20 bottom breathing room. */
+  height: calc(100vh - 112px);
+  min-height: 420px;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+  border-radius: var(--r-md);
+  background: oklch(from var(--paper-0) l c h / 0.7);
+  border: 1px solid oklch(from var(--paper-4) l c h / 0.6);
+  box-shadow: var(--shadow-1);
+}
+html[data-theme="dark"] .meet-panel {
+  background: var(--paper-2);
+}
+.meet-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 8px 0 10px;
+  border-bottom: 1px solid oklch(from var(--paper-4) l c h / 0.5);
+}
+.meet-tabs {
+  display: flex;
+  gap: 2px;
+}
+.meet-tabs button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: -1px;
+  padding: 8px 10px 10px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--ink-2);
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+}
+.meet-tabs button:hover {
+  color: var(--ink-0);
+}
+.meet-tabs button.on {
+  color: var(--ink-0);
+  border-bottom-color: var(--ink-0);
+}
+.meet-tab-count {
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink-3);
+  background: oklch(from var(--paper-3) l c h / 0.8);
+}
+.meet-icon-btn {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  border-radius: 7px;
+  color: var(--ink-3);
+}
+.meet-icon-btn:hover {
+  color: var(--ink-0);
+  background: oklch(from var(--paper-3) l c h / 0.7);
+}
+.meet-icon-btn svg {
+  width: 13px;
+  height: 13px;
+}
+
+.meet-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 12px 8px;
+  padding: 0 6px 0 10px;
+  height: 34px;
+  border-radius: var(--r-sm);
+  color: var(--ink-3);
+  background: oklch(from var(--paper-2) l c h / 0.8);
+  border: 1px solid oklch(from var(--paper-4) l c h / 0.55);
+}
+html[data-theme="dark"] .meet-search {
+  background: var(--paper-3);
+}
+.meet-search:focus-within {
+  border-color: var(--bloom-wash-2);
+  box-shadow: 0 0 0 3px var(--bloom-wash);
+}
+.meet-search > svg {
+  width: 13px;
+  height: 13px;
+  flex-shrink: 0;
+}
+.meet-search input {
+  flex: 1;
+  min-width: 0;
+  font-size: 12.5px;
+  color: var(--ink-0);
+}
+.meet-search input:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
+.meet-kind-filter {
+  padding: 0 12px 8px;
+}
+.meet-kind-filter .filter-chips {
+  gap: 4px;
+}
+.meet-kind-filter .filter-chip {
+  height: 24px;
+  padding: 0 9px;
+  gap: 5px;
+  font-size: 11.5px;
+}
+
+.meet-turns {
+  position: relative; /* the offsetParent the citation scroll measures against */
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 4px 6px 18px;
+  scrollbar-width: thin;
+}
+.meet-turns > .empty-state {
+  margin: 8px 6px;
+}
+.meet-none {
+  padding: 16px 10px;
+}
+
+.meet-turn {
+  display: flex;
+  gap: 10px;
+  padding: 10px 10px 8px;
+  border-radius: var(--r-sm);
+  transition: background 0.15s var(--e-out);
+}
+.meet-turn:hover {
+  background: oklch(from var(--paper-3) l c h / 0.45);
+}
+.meet-turn.focused {
+  background: var(--bloom-wash);
+  box-shadow: inset 2px 0 0 var(--bloom-2);
+  animation: meet-flash 1.4s var(--e-out);
+}
+@keyframes meet-flash {
+  0% {
+    background: var(--bloom-wash-2);
+  }
+  100% {
+    background: var(--bloom-wash);
+  }
+}
+.meet-turn > .avatar-chip {
+  margin-top: 1px;
+}
+.meet-turn-body {
+  flex: 1;
+  min-width: 0;
+}
+.meet-turn-head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  margin-bottom: 2px;
+}
+.meet-turn-speaker {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink-0);
+}
+.meet-turn-time,
+.meet-turn-num {
+  font-size: 10.5px;
+  color: var(--ink-3);
+}
+.meet-turn-num {
+  color: var(--ink-4);
+}
+.meet-turn-kind {
+  margin-left: auto;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  font-weight: 500;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--tint);
+  background: oklch(from var(--tint) l c h / 0.1);
+}
+.meet-turn-text {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--ink-1);
+  overflow-wrap: anywhere;
+}
+.meet-mark {
+  padding: 0 2px;
+  border-radius: 3px;
+  color: var(--ink-0);
+  background: oklch(from var(--saffron) l c h / 0.4);
+}
+
+/* Per-turn affordances: the provenance count always shows; the correction
+   actions surface on hover or keyboard focus to keep the transcript calm. */
+.meet-turn-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  margin-top: 4px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+}
+.meet-turn-foot:empty {
+  display: none;
+}
+.meet-produced {
+  color: var(--bloom-2);
+  text-transform: uppercase;
+}
+.meet-obj {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  max-width: 100%;
+}
+.meet-obj-view {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-sans);
+  font-size: 11.5px;
+  color: var(--bloom-2);
+  border-radius: 4px;
+}
+.meet-obj-view:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.meet-obj-unlink,
+.meet-reextract {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  border-radius: 4px;
+  opacity: 0;
+  transition:
+    opacity 0.12s var(--e-out),
+    color 0.12s var(--e-out);
+}
+.meet-turn:hover .meet-obj-unlink,
+.meet-turn:hover .meet-reextract,
+.meet-turn:focus-within .meet-obj-unlink,
+.meet-turn:focus-within .meet-reextract {
+  opacity: 1;
+}
+.meet-obj-unlink:hover,
+.meet-reextract:hover {
+  color: var(--ink-0);
+}
+@media (hover: none) {
+  .meet-obj-unlink,
+  .meet-reextract {
+    opacity: 1;
+  }
+}
+
+.meet-break {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  margin: 6px 0;
+  padding: 2px 10px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.meet-break::before,
+.meet-break::after {
+  content: "";
+  flex: 1;
+  border-top: 1px dashed oklch(from var(--paper-4) l c h / 0.9);
+}
+.meet-break:hover {
+  color: var(--madder);
+}
+
+.meet-saved {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px;
+}
+
+/* ------------------------------------------------------------ responsive */
+
+@media (max-width: 1180px) {
+  .meet-layout {
+    grid-template-columns: minmax(0, 1fr) 340px;
+    gap: 24px;
+  }
+}
+@media (max-width: 960px) {
+  .meet-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .meet-panel {
+    position: static;
+    height: 520px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .meet-rec-dot,
+  .meet-listen,
+  .meet-ask-busy,
+  .meet-turn.focused {
+    animation: none;
+  }
+}

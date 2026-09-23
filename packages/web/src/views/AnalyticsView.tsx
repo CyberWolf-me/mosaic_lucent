@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { fetchAnalyticsBilling, fetchAnalyticsTrend, type UsageTrendRow } from "../analytics.js";
 import { Ico } from "../ui/icons.js";
+import { requestSettings } from "../ui/Chrome.js";
+import { Button, Card, FilterChips, Page, PageHeader, SectionLabel } from "../ui/kit.js";
 import { fetchOrgs, preferredOrg } from "../billing.js";
 
 /**
@@ -8,20 +10,29 @@ import { fetchOrgs, preferredOrg } from "../billing.js";
  *
  * Owner-visible meters for the active org: same numbers the paywall reads
  * (the "limit / used / remaining" row from `GET /api/orgs/:id/billing`) plus
- * a 30-day trend per metered kind (AI generations, voice minutes, asset
- * bytes). The trend is read from `/api/analytics/:orgId/trend` which is
- * added alongside this view; older deployments simply render the meters.
+ * a daily trend per metered kind (AI generations, voice minutes, asset
+ * bytes, images). The trend is read from `/api/analytics/:orgId/trend`;
+ * deployments without a usage store answer with no rows, which renders as
+ * "no activity" rather than an error.
  *
  * Not a separate product surface — it lives behind Admin. Owner-only by
  * route, gate mirrored to the route that returns the trend.
  */
 
+/**
+ * Two vocabularies meet here (server `entitlements.ts` METERED_KEYS): the
+ * billing row is keyed by the LIMIT we sell (`ai.generationsPerMonth`), the
+ * trend by the USAGE kind we record (`ai.generation`). Asking the trend route
+ * for the limit key matched no rollup, so those two charts were always empty.
+ */
 const METERED_KINDS = [
-  { key: "ai.generationsPerMonth", label: "AI generations" },
-  { key: "voice.minutes", label: "Voice minutes" },
-  { key: "storage.bytes", label: "Storage" },
-  { key: "image.generation", label: "Images generated" },
+  { key: "ai.generationsPerMonth", usage: "ai.generation", label: "AI generations", unit: "count" },
+  { key: "voice.minutes", usage: "voice.minute", label: "Voice minutes", unit: "count" },
+  { key: "storage.bytes", usage: "storage.bytes", label: "Storage", unit: "bytes" },
+  { key: "image.generation", usage: "image.generation", label: "Images generated", unit: "count" },
 ] as const;
+
+type Unit = (typeof METERED_KINDS)[number]["unit"];
 
 interface LimitsRow {
   key: string;
@@ -32,102 +43,147 @@ interface LimitsRow {
   remaining: number | null;
 }
 
+type WindowId = "7" | "30" | "90";
+
 export function AnalyticsView({ onBack }: { onBack: () => void }) {
   const [orgId, setOrgId] = useState<string | null>(null);
+  const [orgName, setOrgName] = useState<string | null>(null);
+  const [isOwner, setIsOwner] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [limits, setLimits] = useState<LimitsRow[]>([]);
-  const [trends, setTrends] = useState<Record<string, UsageTrendRow[]>>({});
+  const [limits, setLimits] = useState<LimitsRow[] | null>(null);
+  const [trends, setTrends] = useState<Record<string, UsageTrendRow[]> | null>(null);
   const [windowDays, setWindowDays] = useState(30);
 
   useEffect(() => {
     let cancelled = false;
+    setTrends(null);
     void (async () => {
-      const orgs = await fetchOrgs();
-      if (cancelled) return;
-      if (orgs.kind !== "ok") {
-        setError(
-          orgs.kind === "signedOut"
-            ? "Sign in to view analytics."
-            : "Couldn't load your workspace.",
-        );
-        return;
-      }
-      const org = preferredOrg(orgs.orgs);
-      if (org === null) {
-        setError("You don't have a workspace yet.");
-        return;
-      }
-      setOrgId(org.id);
-      // Use /api/orgs/:id/billing because every owner-visible surface already
-      // exists there. The dedicated analytics trend endpoint is added below;
-      // older deployments silently get empty trends.
-      const billing = await fetchAnalyticsBilling(org.id);
-      if (billing !== null && !cancelled) {
-        const rows: LimitsRow[] = [];
-        for (const m of billing.limits) {
-          rows.push({
-            key: m.key,
-            label: m.key,
-            limit: m.limit,
-            used: m.used,
-            unlimited: m.unlimited,
-            remaining: m.limit === null || m.used === null ? null : Math.max(0, m.limit - m.used),
-          });
+      try {
+        const orgs = await fetchOrgs();
+        if (cancelled) return;
+        if (orgs.kind !== "ok") {
+          setError(
+            orgs.kind === "signedOut"
+              ? "Sign in to view analytics."
+              : "Couldn't load your workspace.",
+          );
+          return;
         }
-        setLimits(rows);
+        const org = preferredOrg(orgs.orgs);
+        if (org === null) {
+          setError("You don't have a workspace yet.");
+          return;
+        }
+        setOrgId(org.id);
+        setOrgName(org.name);
+        setIsOwner(org.role === "owner");
+        // Use /api/orgs/:id/billing because every owner-visible surface already
+        // exists there, so these meters can never disagree with the paywall.
+        const billing = await fetchAnalyticsBilling(org.id);
+        if (cancelled) return;
+        if (billing === null) {
+          setError("Couldn't load this workspace's usage meters.");
+          setLimits([]);
+        } else {
+          setError(null);
+          setLimits(
+            billing.limits.map((m) => ({
+              key: m.key,
+              label: m.key,
+              limit: m.limit,
+              used: m.used,
+              unlimited: m.unlimited,
+              remaining:
+                m.limit === null || m.used === null ? null : Math.max(0, m.limit - m.used),
+            })),
+          );
+        }
+        // Pull a trend per metered kind. Failures here render an empty chart
+        // rather than the whole dashboard erroring — the meters are the
+        // important part and trend data is a separate purchase.
+        const next: Record<string, UsageTrendRow[]> = {};
+        for (const k of METERED_KINDS) {
+          const t = await fetchAnalyticsTrend(org.id, k.usage, windowDays).catch(() => []);
+          if (cancelled) return;
+          next[k.key] = t;
+        }
+        if (!cancelled) setTrends(next);
+      } catch {
+        if (!cancelled) {
+          setError("Can't reach the Lucent server.");
+          setLimits((l) => l ?? []);
+          setTrends((t) => t ?? {});
+        }
       }
-      // Pull a trend per metered kind. Failures here render an empty chart
-      // rather than the whole dashboard erroring — the meters are the
-      // important part and trend data is a separate purchase.
-      const next: Record<string, UsageTrendRow[]> = {};
-      for (const k of METERED_KINDS) {
-        const t = await fetchAnalyticsTrend(org.id, k.key, windowDays);
-        if (!cancelled) next[k.key] = t;
-      }
-      if (!cancelled) setTrends(next);
     })();
     return () => {
       cancelled = true;
     };
   }, [windowDays]);
 
+  const loading = limits === null && error === null;
+
   return (
-    <div className="view-page analytics-view">
-      <header className="view-head">
-        <button className="icon-btn" onClick={onBack} aria-label="Back">
-          <Ico.Left />
-        </button>
-        <h2>Analytics</h2>
-        <div className="view-head-spacer" />
-        {orgId !== null && <span className="mono small">org {orgId.slice(0, 12)}…</span>}
-      </header>
-      {error !== null && <div className="view-error">{error}</div>}
-      <section className="analytics-meters">
-        <div className="meter-controls">
-          <span className="meter-controls-label">Window</span>
-          {([7, 30, 90] as const).map((d) => (
-            <button
-              key={d}
-              className={`tpl-chip ${windowDays === d ? "active" : ""}`}
-              onClick={() => setWindowDays(d)}
-            >
-              {d}d
-            </button>
-          ))}
+    <Page
+      crumbs={[{ label: "Analytics", current: true }]}
+      boardScoped={false}
+      onOpenSettings={requestSettings}
+      width="default"
+    >
+      <PageHeader
+        eyebrow={
+          <span title={orgId ?? undefined}>{orgName ? `Analytics · ${orgName}` : "Analytics"}</span>
+        }
+        title={
+          <>
+            What this workspace <em>used</em>
+          </>
+        }
+        lede="This billing period, from the same meters your plan limits read — with the daily record underneath."
+        actions={
+          <>
+            <Button variant="ghost" onClick={onBack}>
+              <Ico.Left /> Back to canvas
+            </Button>
+            <Button variant="ghost" onClick={() => requestSettings("billing")}>
+              <Ico.Book /> Plan &amp; usage
+            </Button>
+          </>
+        }
+      />
+      {error !== null && (
+        <div className="boards-admin-error" role="alert">
+          {error}
         </div>
-        <div className="meter-grid">
-          {METERED_KINDS.map((k) => (
-            <MeterCard
-              key={k.key}
-              kind={k.key}
-              label={k.label}
-              row={limits.find((l) => l.key === k.key)}
-              trend={trends[k.key] ?? []}
-            />
-          ))}
+      )}
+      <div className="boards-usage-toolbar">
+        <SectionLabel>Meters</SectionLabel>
+        <div className="boards-usage-window">
+          <span className="mono-caps">Daily window</span>
+          <FilterChips
+            items={(["7", "30", "90"] as const).map((d) => ({ id: d, label: `${d}d` }))}
+            value={String(windowDays) as WindowId}
+            onChange={(id) => setWindowDays(Number(id))}
+            label="Trend window"
+          />
         </div>
-      </section>
-    </div>
+      </div>
+      <div className="boards-usage-grid" aria-busy={loading}>
+        {METERED_KINDS.map((k) => (
+          <MeterCard
+            key={k.key}
+            kind={k.key}
+            label={k.label}
+            unit={k.unit}
+            loading={loading}
+            row={limits?.find((l) => l.key === k.key)}
+            trend={trends ? (trends[k.key] ?? []) : null}
+            windowDays={windowDays}
+            isOwner={isOwner}
+          />
+        ))}
+      </div>
+    </Page>
   );
 }
 
@@ -136,72 +192,126 @@ function MeterCard({
   row,
   trend,
   kind,
+  unit,
+  loading,
+  windowDays,
+  isOwner,
 }: {
   label: string;
   row: LimitsRow | undefined;
-  trend: UsageTrendRow[];
+  /** Null while the trend is loading. */
+  trend: UsageTrendRow[] | null;
   kind: string;
+  unit: Unit;
+  loading: boolean;
+  windowDays: number;
+  isOwner: boolean;
 }): React.ReactElement {
-  const used = row?.used ?? 0;
+  const fmt = (n: number | null) => (unit === "bytes" ? formatBytes(n) : formatNumber(n));
+  const series = trend ? dailySeries(trend, windowDays) : [];
+  const windowTotal = series.reduce((s, p) => s + p.count, 0);
   const limit = row?.limit ?? null;
   const remaining = row?.remaining ?? null;
-  // The trend chart is a 60×40 SVG sparkline — small enough to be a sidebar
-  // tile, large enough to show direction without dragging in a chart library.
-  const path = buildSparkPath(
-    trend.map((r) => ({ value: r.count, label: r.day })),
-    60,
-    24,
-  );
+  const share =
+    row && limit !== null && limit > 0 && row.used !== null && !row.unlimited
+      ? Math.min(1, row.used / limit)
+      : null;
+  const tone = remaining === 0 ? "spent" : share !== null && share >= 0.8 ? "warn" : "";
+
   return (
-    <div className="meter-card" aria-label={`${label} usage`}>
-      <div className="meter-card-head">
-        <span className="meter-card-label">{label}</span>
-        <span className="mono small">{kind}</span>
+    <Card className="boards-meter" role="group" aria-label={`${label} usage`}>
+      <div className="boards-meter-head mono-caps" title={`Meter: ${kind}`}>
+        {label}
       </div>
-      <div className="meter-card-value">
-        <strong>{formatNumber(used)}</strong>
-        {limit !== null && !row?.unlimited && (
-          <span className="meter-card-limit"> / {formatNumber(limit)}</span>
+      <div className="boards-meter-value">
+        {loading ? (
+          <span className="boards-meter-big">—</span>
+        ) : row ? (
+          <>
+            <span className="boards-meter-big">{fmt(row.used)}</span>
+            {row.unlimited ? (
+              <span className="boards-meter-limit">unlimited</span>
+            ) : limit !== null ? (
+              <span className="boards-meter-limit">/ {fmt(limit)}</span>
+            ) : null}
+          </>
+        ) : trend !== null && isOwner ? (
+          <>
+            <span className="boards-meter-big">{fmt(windowTotal)}</span>
+            <span className="boards-meter-limit">in {windowDays} days · no plan limit</span>
+          </>
+        ) : (
+          <span className="boards-meter-big">—</span>
         )}
-        {row?.unlimited === true && <span className="meter-card-limit"> unlimited</span>}
       </div>
-      {remaining !== null && (
-        <div className={`meter-card-remaining ${remaining === 0 ? "exhausted" : ""}`}>
-          {remaining === 0 ? "Limit reached" : `${formatNumber(remaining)} left`}
+      {share !== null && (
+        <div
+          className={`boards-meter-bar ${tone}`}
+          role="meter"
+          aria-label={`${label} used this period`}
+          aria-valuemin={0}
+          aria-valuemax={limit ?? 0}
+          aria-valuenow={row?.used ?? 0}
+        >
+          <span style={{ width: `${Math.round(share * 100)}%` }} />
         </div>
       )}
-      <svg
-        className="meter-spark"
-        viewBox="0 0 60 24"
-        preserveAspectRatio="none"
-        aria-hidden="true"
-      >
-        <path d={path} fill="none" stroke="currentColor" strokeWidth="1.5" />
-      </svg>
-    </div>
+      {remaining !== null && (
+        <div className={`boards-meter-remaining ${tone}`}>
+          {remaining === 0 ? "Limit reached" : `${fmt(remaining)} left this period`}
+        </div>
+      )}
+      <div className="boards-meter-trend">
+        {!isOwner ? (
+          <span className="boards-meter-note">Daily history is visible to workspace owners.</span>
+        ) : trend === null ? (
+          <span className="boards-meter-note">Loading the last {windowDays} days…</span>
+        ) : windowTotal === 0 ? (
+          <span className="boards-meter-note">No activity in the last {windowDays} days.</span>
+        ) : (
+          <>
+            <Sparkline series={series} />
+            <span className="boards-meter-note">
+              {fmt(windowTotal)} in the last {windowDays} days
+            </span>
+          </>
+        )}
+      </div>
+    </Card>
   );
 }
 
 /**
- * Render a sparkline path. The input is a value-bearing series; output is
- * an SVG path that fits the given width/height. Empty input → empty string,
- * which falls through to no path rendered (better than a lone dot).
+ * The window as one point per UTC day (the rollup table's day key), with the
+ * days that recorded nothing filled in as zero. Connecting only the days that
+ * had rows drew a line straight across quiet weeks, which read as activity.
  */
-function buildSparkPath(
-  series: Array<{ value: number; label: string }>,
-  w: number,
-  h: number,
-): string {
-  if (series.length === 0) return "";
-  const max = Math.max(1, ...series.map((p) => p.value));
+function dailySeries(rows: UsageTrendRow[], days: number): { day: string; count: number }[] {
+  const byDay = new Map<string, number>();
+  for (const r of rows) byDay.set(r.day, (byDay.get(r.day) ?? 0) + r.count);
+  const out: { day: string; count: number }[] = [];
+  const today = Date.now();
+  for (let i = days - 1; i >= 0; i -= 1) {
+    const day = new Date(today - i * 86_400_000).toISOString().slice(0, 10);
+    out.push({ day, count: byDay.get(day) ?? 0 });
+  }
+  return out;
+}
+
+function Sparkline({ series }: { series: { day: string; count: number }[] }) {
+  const w = 100;
+  const h = 28;
+  const max = Math.max(1, ...series.map((p) => p.count));
   const stepX = series.length > 1 ? w / (series.length - 1) : w;
-  let d = "";
-  series.forEach((p, i) => {
-    const x = i * stepX;
-    const y = h - (p.value / max) * h;
-    d += `${i === 0 ? "M" : "L"}${x.toFixed(2)},${y.toFixed(2)} `;
-  });
-  return d.trim();
+  const pts = series.map((p, i) => [i * stepX, h - (p.count / max) * (h - 2) - 1] as const);
+  const line = pts.map(([x, y], i) => `${i === 0 ? "M" : "L"}${x.toFixed(2)},${y.toFixed(2)}`).join(" ");
+  const area = `${line} L${w},${h} L0,${h} Z`;
+  return (
+    <svg className="boards-spark" viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" aria-hidden="true">
+      <path className="boards-spark-area" d={area} />
+      <path className="boards-spark-line" d={line} vectorEffect="non-scaling-stroke" />
+    </svg>
+  );
 }
 
 function formatNumber(n: number | null): string {
@@ -209,4 +319,17 @@ function formatNumber(n: number | null): string {
   if (n < 1000) return n.toString();
   if (n < 1_000_000) return `${(n / 1000).toFixed(1)}k`;
   return `${(n / 1_000_000).toFixed(2)}M`;
+}
+
+function formatBytes(n: number | null): string {
+  if (n === null) return "—";
+  if (n < 1024) return `${n} B`;
+  const units = ["KB", "MB", "GB", "TB"];
+  let v = n / 1024;
+  let u = 0;
+  while (v >= 1024 && u < units.length - 1) {
+    v /= 1024;
+    u += 1;
+  }
+  return `${v >= 100 ? Math.round(v) : v.toFixed(1).replace(/\.0$/, "")} ${units[u]}`;
 }

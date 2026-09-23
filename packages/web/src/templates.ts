@@ -18,10 +18,15 @@ export interface Template {
   build: () => Operation[];
 }
 
-const AMBER = "oklch(0.90 0.11 92)";
-const BLUE = "oklch(0.86 0.08 235)";
-const GREEN = "oklch(0.87 0.09 145)";
-const PINK = "oklch(0.86 0.10 10)";
+// Hex, not oklch: a shape fill is board DATA, and the schema's colour check
+// (core schemaPrimitives CSS_COLOR) accepts #hex/rgb()/hsl() only. The oklch
+// literals these used to be failed validation, so every sticky template was
+// refused on insert — from Boards and from the canvas picker alike. Same
+// colours: oklch(0.90 0.11 92), (0.86 0.08 235), (0.87 0.09 145), (0.86 0.10 10).
+const AMBER = "#f8dc86";
+const BLUE = "#9ddafe";
+const GREEN = "#afe4b0";
+const PINK = "#ffb6c2";
 
 /** Per-insert id prefix, short enough to stay readable in exports. */
 function runId(): string {
