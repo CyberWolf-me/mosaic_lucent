@@ -43,7 +43,12 @@ export const registerHistoryRoutes: RegisterRoutes = (router, s) => {
     // The proposal join: appliedSeq ↔ seq. One read of the board's proposals
     // (already bounded by PROPOSAL_LIST_LIMIT) covers the whole window.
     const boardProposals = proposals ? await proposals.forBoard(boardId) : [];
-    const items = historyItems(entries, names, boardProposals);
+    const items = historyItems(
+      entries,
+      names,
+      boardProposals,
+      (id) => guard.board.workspace.nodes[id]?.statement?.kind,
+    );
 
     send(res, 200, {
       items,

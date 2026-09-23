@@ -152,6 +152,14 @@ export interface GenerateRequest {
   images?: ImageAttachment[];
   /** Documents whose text should inform the answer. */
   documents?: DocumentAttachment[];
+  /**
+   * The requester's local calendar date, YYYY-MM-DD. The prompt tells the
+   * model to resolve "by Friday" to a dueDate "against the conversation's
+   * date" — without this it had no date to resolve against and guessed from
+   * its training data (a live board got "Friday" → a date a year in the
+   * past). Local, not server UTC: "Friday" is the speaker's Friday.
+   */
+  today?: string;
 }
 
 /**

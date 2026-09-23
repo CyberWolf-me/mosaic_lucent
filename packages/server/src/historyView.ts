@@ -1,4 +1,4 @@
-import type { Operation } from "@lucent/core";
+import type { Operation, StatementKind } from "@lucent/core";
 import type { BoardStore, LoggedOpEntry, OperationActor } from "./boards.js";
 import type { UserStore } from "./accounts.js";
 import type { StoredProposal } from "./proposals.js";
@@ -161,8 +161,26 @@ export function historyItems(
   entries: readonly LoggedOpEntry[],
   names: ReadonlyMap<string, string>,
   proposals: readonly StoredProposal[],
+  /** The node's statement kind on the stored board now — the fallback when
+   * the SET_STATEMENT that fixed it is older than the visible window. */
+  currentKindOf: (nodeId: string) => StatementKind | undefined = () => undefined,
 ): HistoryItem[] {
   const bySeq = proposalsByAppliedSeq(proposals);
+  // The kind in force for a node just before a given revision: the latest
+  // SET_STATEMENT for it earlier in the window, else the board's current
+  // kind (kind is identity — a kind change is a new SET_STATEMENT, ADR 0021).
+  const kindBefore = (nodeId: string, seq: number): StatementKind | undefined => {
+    let found: { seq: number; kind: StatementKind } | undefined;
+    for (const e of entries) {
+      if (e.seq >= seq) continue;
+      for (const op of e.ops) {
+        if (op.op === "SET_STATEMENT" && op.id === nodeId && op.statement) {
+          if (!found || e.seq > found.seq) found = { seq: e.seq, kind: op.statement.kind };
+        }
+      }
+    }
+    return found?.kind ?? currentKindOf(nodeId);
+  };
   return entries.map((entry) => {
     const actor = entry.actor;
     const actorId = actor?.actorId ?? entry.by;
@@ -189,7 +207,7 @@ export function historyItems(
           : {}),
       },
       touched: touchedIds(entry),
-      ...(statementEventOf(entry) ?? {}),
+      ...(statementEventOf(entry, (id) => kindBefore(id, entry.seq)) ?? {}),
       ...(proposal
         ? {
             proposal: {
@@ -218,6 +236,7 @@ export function historyItems(
  */
 export function statementEventOf(
   entry: LoggedOpEntry,
+  kindOf: (nodeId: string) => StatementKind | undefined = () => undefined,
 ): { statementEvent: NonNullable<HistoryItem["statementEvent"]> } | undefined {
   for (const op of entry.ops) {
     if (op.op === "SET_STATEMENT") {
@@ -235,10 +254,12 @@ export function statementEventOf(
     if (op.op === "UPDATE_STATEMENT") {
       return {
         statementEvent: {
-          // An update keeps the kind it had — kind is identity (ADR 0021).
-          // The timeline row shows the status change; the kind the reader
-          // knows from the node the row links to.
-          kind: "decision",
+          // An update keeps the kind it had — kind is identity (ADR 0021) —
+          // so the row names THAT kind: a resolved question reads "Question ·
+          // Answered", not "Decision · Decided" (the old hardcoded kind).
+          // "decision" remains only when neither the window nor the board
+          // knows the node any more (it was deleted after an older SET).
+          kind: kindOf(op.id) ?? "decision",
           status: op.status ?? "open",
           ...(op.supersedes?.length ? { supersedes: op.supersedes } : {}),
           nodeId: op.id,

@@ -498,10 +498,18 @@ export interface ProvenanceFields {
   /**
    * Stage D2: the source STATEMENT node ids this item was derived from —
    * the statement→action link plan generation stamps (ADR 0022's first
-   * evidence-family extension). At least one of meetingId/createdFrom is
-   * present on every provenance object.
+   * evidence-family extension). At least one of meetingId/createdFrom/
+   * conversation is present on every provenance object.
    */
   createdFrom?: string[];
+  /**
+   * Conversation evidence (ADR 0042): Lucent made this from a request typed
+   * or spoken to the board, outside a meeting. `by` is the display name of
+   * who asked, `at` when (epoch ms); the words themselves ride in `quote`.
+   * Without it every AI-drawn node on a chat-built board had no answer to
+   * "why is this here?" — and read as hand-made.
+   */
+  conversation?: { at: number; by?: string };
 }
 
 export interface Edge {

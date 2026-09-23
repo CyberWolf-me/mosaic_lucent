@@ -48,3 +48,4 @@ back to it.
 | [0039](0039-hybrid-engine-selection.md)                           | The hybrid engine selection: ELK for flat graph families, hand-written engines elsewhere — provisional on the human pass (Stage V) | Accepted |
 | [0040](0040-the-state-taxonomy.md)                                | The state taxonomy: canonical, derived, ephemeral — a cache never becomes truth (docs/20 P0)                                       | Accepted |
 | [0041](0041-one-mutation-path.md)                                 | One mutation path: every writer converges on the same validated, sequenced commit (docs/20 P0)                                     | Accepted |
+| [0042](0042-conversation-is-evidence.md)                          | A conversation request is evidence, too: the third provenance family (Atelier)                                                     | Accepted |

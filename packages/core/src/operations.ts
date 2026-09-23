@@ -95,10 +95,21 @@ export const provenanceFieldsSchema = z
     /** Stage D2: the statement node ids this item was derived from — the
      * plan send path stamps it (attachPlanProvenance), never the model. */
     createdFrom: z.array(z.string().min(1)).max(20).optional(),
+    /** ADR 0042: the board conversation request this came from — stamped by
+     * the client's send path (attachProvenance), never by the model. */
+    conversation: z
+      .object({
+        at: z.number().int().nonnegative(),
+        by: z.string().min(1).max(80).optional(),
+      })
+      .optional(),
   })
   .refine(
-    (p) => p.meetingId !== undefined || (p.createdFrom !== undefined && p.createdFrom.length > 0),
-    "provenance needs meeting evidence or source statements (createdFrom)",
+    (p) =>
+      p.meetingId !== undefined ||
+      (p.createdFrom !== undefined && p.createdFrom.length > 0) ||
+      p.conversation !== undefined,
+    "provenance needs meeting evidence, source statements (createdFrom), or a conversation request",
   );
 
 /**

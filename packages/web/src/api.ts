@@ -365,6 +365,16 @@ export async function notePlanRefusal(res: Response): Promise<void> {
   recordPlanRefusal(await describeFailure(res, "Board"));
 }
 
+/**
+ * The requester's local calendar date, YYYY-MM-DD. Sent with every
+ * generation so the model can resolve "by Friday" against a real date —
+ * local rather than UTC, because "Friday" is the speaker's Friday.
+ */
+export function localIsoDate(now: Date = new Date()): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+}
+
 export async function generate(
   message: string,
   workspace: Workspace,
@@ -384,6 +394,7 @@ export async function generate(
       body: JSON.stringify({
         message,
         summary: summarizeWorkspace(workspace, selection),
+        today: localIsoDate(),
         ...(turns.length ? { history: turns } : {}),
         ...(attachments?.images?.length ? { images: attachments.images } : {}),
         ...(attachments?.documents?.length ? { documents: attachments.documents } : {}),
@@ -465,6 +476,7 @@ export async function streamGenerate(
       body: JSON.stringify({
         message,
         summary: summarizeWorkspace(workspace, selection),
+        today: localIsoDate(),
         ...(turns.length ? { history: turns } : {}),
         ...(attachments?.images?.length ? { images: attachments.images } : {}),
         ...(attachments?.documents?.length ? { documents: attachments.documents } : {}),

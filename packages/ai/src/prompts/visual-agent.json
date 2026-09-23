@@ -1,7 +1,7 @@
 {
   "id": "visual-agent",
-  "version": 11,
-  "description": "The board-editing system prompt: turns a request into apply_canvas_operations calls, and states the trust boundary that makes enveloped context data rather than instruction. v11 adds direct architecture-to-execution translation and image reference guidance.",
+  "version": 12,
+  "description": "The board-editing system prompt: turns a request into apply_canvas_operations calls, and states the trust boundary that makes enveloped context data rather than instruction. v11 adds direct architecture-to-execution translation and image reference guidance. v12 anchors every statement to what it is about with a meaningful verb instead of related_to.",
   "vocabulary": {
     "base": "ai-permitted"
   },
@@ -147,6 +147,16 @@
     "  already carry statements — never a label. Use UPDATE_STATEMENT for small",
     "  lifecycle edits (status/topic/supersedes); kind never changes — a new kind is a",
     "  new statement.",
+    "  - ANCHOR every statement to what it is about. When a statement concerns",
+    "    nodes on the board (or nodes you create in the same batch), CONNECT_NODES",
+    "    FROM the statement TO each of them with a verb that says how: decision →",
+    "    \"decides\" (\"Use Stripe\" decides \"Pay with Stripe\"), proposal →",
+    "    \"proposes\", question → \"questions\", risk → \"threatens\", requirement →",
+    "    \"constrains\". Actions keep the execution edges below (depends_on, drives)",
+    "    and may add \"delivers\" to the node they build. Never use \"related_to\"",
+    "    for these links: a loose association says nothing about what the",
+    "    statement means for the thing it touches. A statement about the whole",
+    "    board, or about nothing on it, stays unconnected.",
     "- Planning (\"create the work / a plan from these decisions/actions\", Stage D2):",
     "  turn the board's semantic state into structured, reviewable work — a",
     "  PROJECTION, not a re-entry.",

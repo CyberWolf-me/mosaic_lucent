@@ -86,6 +86,9 @@ const nodeSchema = z.object({
           turnKinds: z.array(z.string().min(1)).max(8).optional(),
           quote: z.string().max(240).optional(),
           createdFrom: z.array(z.string().min(1)).max(20).optional(),
+          conversation: z
+            .object({ at: z.number(), by: z.string().max(80).optional() })
+            .optional(),
         })
         .optional(),
     })
@@ -97,6 +100,9 @@ const nodeSchema = z.object({
       turnKinds: z.array(z.string().min(1)).max(8).optional(),
       quote: z.string().max(240).optional(),
       createdFrom: z.array(z.string().min(1)).max(20).optional(),
+      // ADR 0042: conversation evidence — without it here, parseWorkspace
+      // would silently strip it from every persisted board on load.
+      conversation: z.object({ at: z.number(), by: z.string().max(80).optional() }).optional(),
     })
     .optional(),
   metadata: z.record(z.string(), z.unknown()).optional(),

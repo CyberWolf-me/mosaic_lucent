@@ -3212,7 +3212,7 @@ export function createApp(deps: AppDeps): App {
         if (typeof body.agentName === "string" && body.agentName.trim().length > 0) {
           agentName = body.agentName.trim().slice(0, 64);
         }
-      } catch (err) {
+      } catch {
         send(res, 400, { error: "Invalid JSON body" });
         return;
       }

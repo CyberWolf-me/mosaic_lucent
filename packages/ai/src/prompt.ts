@@ -351,6 +351,31 @@ export function stripInstructionLike(text: string): RedactionResult {
   return { text: out.join("\n"), count };
 }
 
+const WEEKDAY_NAMES = [
+  "Sunday",
+  "Monday",
+  "Tuesday",
+  "Wednesday",
+  "Thursday",
+  "Friday",
+  "Saturday",
+] as const;
+
+/**
+ * The line that anchors relative deadlines: "Today is Wednesday, 2026-09-23".
+ * Only a well-formed calendar date renders (the field is client-supplied);
+ * anything else yields nothing rather than a misleading anchor.
+ */
+export function todayLine(today: string | undefined): string | null {
+  if (!today || !/^\d{4}-\d{2}-\d{2}$/.test(today)) return null;
+  const [y, m, d] = today.split("-").map(Number) as [number, number, number];
+  const date = new Date(Date.UTC(y, m - 1, d));
+  if (date.getUTCFullYear() !== y || date.getUTCMonth() !== m - 1 || date.getUTCDate() !== d) {
+    return null;
+  }
+  return `Today is ${WEEKDAY_NAMES[date.getUTCDay()]}, ${today} (the requester's local date). Resolve relative deadlines — "by Friday", "next Monday", "end of week", "the 15th" — to a YYYY-MM-DD dueDate against this date, always forward from it.`;
+}
+
 /** Render the workspace + user message into a single user-turn string. */
 export function buildUserPrompt(request: GenerateRequest): string {
   const { message, summary, history, documents } = request;
@@ -578,6 +603,9 @@ export function buildUserPrompt(request: GenerateRequest): string {
   // text rather than in an attribute: this region has no envelope to carry one,
   // and a silently shortened request is the one truncation the user would notice
   // as the model answering half a question.
+  const dateLine = todayLine(request.today);
+  if (dateLine) sections.push(dateLine);
+
   const asked = clamp(message, PAYLOAD_LIMITS.message);
   sections.push(
     `User request: ${escapeHarnessTags(asked.text)}${

@@ -211,6 +211,12 @@ export const generateRequestSchema = z.object({
    * stored board (authoritative) instead of this request's summary.
    */
   boardId: z.string().min(1).max(REQUEST_LIMITS.idChars).optional(),
+  /** The requester's local date (YYYY-MM-DD), so "by Friday" resolves to
+   * a real dueDate (packages/ai GenerateRequest.today). */
+  today: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional(),
   /**
    * Attachments the model should look at. Images go to vision-capable providers;
    * documents are already-extracted text (the browser does the extraction, so no

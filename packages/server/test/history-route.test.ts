@@ -416,6 +416,35 @@ describe("statementEvent derivation (Stage C3)", () => {
     });
   });
 
+  it("a status change names the node's real kind, not a placeholder decision", async () => {
+    const h = (open = await harness());
+    const alice = await signup(h, "ev3@example.com");
+    const boardId = await makeBoard(h, alice.token, "Kinds");
+    const first = await h.boardStore.appendOp({
+      boardId,
+      ops: [
+        { op: "CREATE_NODE", id: "q1", nodeType: "question", label: "Cash on delivery?" },
+        { op: "SET_STATEMENT", id: "q1", statement: { kind: "question", status: "open" } },
+      ],
+      by: alice.id,
+      label: "ask",
+      at: Date.now(),
+    });
+    expect(first.ok).toBe(true);
+    const answered = await h.boardStore.appendOp({
+      boardId,
+      ops: [{ op: "UPDATE_STATEMENT", id: "q1", status: "resolved" }],
+      by: alice.id,
+      label: "answered",
+      at: Date.now(),
+    });
+    expect(answered.ok).toBe(true);
+    if (!answered.ok) return;
+    const res = await api(h, `/api/boards/${boardId}/history`, { token: alice.token });
+    const row = res.body.items.find((i: any) => i.seq === answered.seq);
+    expect(row.statementEvent).toMatchObject({ kind: "question", status: "resolved", nodeId: "q1" });
+  });
+
   it("a plain revision carries no statementEvent", async () => {
     const h = (open = await harness());
     const alice = await signup(h, "ev2@example.com");
