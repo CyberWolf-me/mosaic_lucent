@@ -1,6 +1,6 @@
 # 26 — The connected loop: from a canvas to the whole product
 
-- Status: **Proposed** — nothing here is built yet
+- Status: **Accepted 2026-09-24** — decisions locked in §12; execution follows §11's order
 - Date: 2026-09-24 · branch `lucent/atelier`
 - Inputs: the product definition (42 sections) and the user-flow specification
   (139 flows) written by the founder; a code audit of this branch
@@ -392,31 +392,46 @@ anything ships.
 | V4    | Representation registry   | §6.1 registry + state machine, timeline/roadmap, dependency, matrix, table, charts, C4, BPMN wired | "Turn this into a roadmap/state machine/C4" works from any board        |
 | V5    | Semantic zoom ladder      | §6.5, measured on 80/150/300-object boards                                             | A 300-object board is readable at every zoom                           |
 
-Recommended order: **Phase 0 → (A1 ‖ V1) → (A2 ‖ V2) → (A3 ‖ V3) → A4 → V4 →
-A5 → A6 → V5.** A1 comes first on Track A because every later surface reads
-the index; V1 comes first on Track V because icons and editor basics lift
-every board immediately and V2 depends on the asset client.
+**Locked order (2026-09-24, see §12):** the visual track leads the next
+milestone. Security defects F1–F2 and the colour contract F7 go first
+because they are defects, not features; the meeting/voice defects (F3–F6)
+move into the meeting/voice step.
 
-## 12. Decisions needed before building
+```text
+0. Security + colour fixes        F1, F2, F7
+1. Visual track                   V1 readability & icons → V2 Vector Studio (local)
+                                  → V3 Recraft + generation UX → V4 representation registry
+                                  → V5 semantic zoom at scale
+2. Meeting / voice productization A3 + F3–F6: native room, conversation flow,
+                                  follow-ups, barge-in, meeting UX, scheduling
+3. Intelligence refinement        A2 + A4: assumptions, constraints, trust/review, Ask
+4. Execution                      A1's projects + A5: planning, integrations
+5. Platform / enterprise          A6
+```
 
-1. **Order.** Is the recommended order right, or should the visual track lead?
-2. **Paid vector providers.** Which, if any: QuiverAI (credits), Recraft (API
-   or via OpenRouter), Vectorizer.AI (credits)? Without them V2 + the LLM
-   baseline still ship; V3 quality depends on this.
-3. **Projects as a first-class entity** (recommended) vs grouping boards only.
-4. **Meeting ↔ board**: a meeting as its own object linked to 0..n boards
-   (recommended) vs staying board-owned.
-5. **Review default**: meeting extraction lands as _suggested_ and needs
-   approval (recommended; more friction, more trust) vs today's auto-apply
-   with undo.
-6. **Scheduling**: Lucent's own scheduler + email/`.ics` first (recommended),
-   Google/Microsoft calendar sync later.
-7. **New statement kinds** the spec lists (assumption, constraint, fact, idea).
-   Recommended: add `assumption` (validated/invalidated) and `constraint`
-   (changed/lifted) — both have real lifecycles, as ADR 0021 requires; keep
-   fact and idea as ordinary notes.
-8. **Postgres as a requirement** for workspace features (index, search,
-   meetings list). In-memory stays for local development only.
+"Visual lead" means making the existing semantic and layout machinery produce
+a much better product — not rewriting the layout engine.
+
+## 12. Decisions (locked 2026-09-24)
+
+| #   | Decision                    | Locked answer                                                                                                                                           |
+| --- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | Order                       | The visual track leads the next milestone (§11)                                                                                                         |
+| 2   | Paid vector providers       | **Recraft first.** QuiverAI later, only if a benchmark (logo, icon, illustration, diagram-like, text→SVG, image→SVG) justifies it. Vectorizer.AI is not core |
+| 3   | Projects                    | Real first-class objects with identity, objective, members, status, timeline, intelligence, execution state and integrations — not folders              |
+| 4   | Meetings                    | First-class objects; relationships, not ownership: a meeting links to many boards and a project, a board to many meetings                              |
+| 5   | Meeting extraction          | Capture automatically (transcript, topics, candidate artifacts). Promotion of decisions, requirements, constraints, assumptions, risks and consequential actions into trusted state needs a human. External execution is always gated |
+| 6   | Scheduling                  | Lightweight native scheduling with email + ICS first; Google/Outlook sync next. Lucent owns meetings, not calendars — no calendar replacement            |
+| 7   | Semantic types              | Assumption (provisional → confirmed / invalidated) and constraint (active → relaxed / removed) become first-class kinds. Ideas stay notes. Facts become evidence-backed objects later (source, provenance, confidence) |
+| 8   | Storage                     | In-memory is development-only. A durable local store (SQLite) for a single-user local product later. PostgreSQL for shared, team and company use        |
+
+The resulting foundation is four first-class entities — **Project, Meeting,
+Board, Intelligence** — related, not nested, with Execution hanging off
+intelligence.
+
+The `VectorProvider` seam (§6.3) therefore ships as
+`Local` (importer, icons, tracing) · `FreeFallback` (the configured LLM authors
+structured paths) · `Recraft` · `QuiverAI` (later, after the benchmark).
 
 ## 13. Risks
 
