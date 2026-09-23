@@ -16,7 +16,7 @@ const VIEWPORT_SIZE: Record<Wireframe["viewport"], { w: number; label: string }>
  * produced by CREATE_WIREFRAME operations (docs/03, docs/05). Falls back to a
  * prompt when none exist yet. */
 export function WireframeView({ onOpenSettings }: { onOpenSettings: (section?: string) => void }) {
-  const { workspace, chat, send, setView } = useWorkspace();
+  const { workspace, chat, send, setView , projectName } = useWorkspace();
   const [message, setMessage] = useState("");
 
   const submit = () => {
@@ -45,8 +45,8 @@ export function WireframeView({ onOpenSettings }: { onOpenSettings: (section?: s
       </div>
       <TopBar
         crumbs={[
-          { label: "Personal" },
-          { label: "Workspace", view: "canvas" },
+          { label: "Boards", view: "dashboard" },
+          { label: projectName || "Untitled board", view: "canvas" },
           { label: wireframe?.title ?? "Wireframe", current: true },
         ]}
         onOpenSettings={onOpenSettings}

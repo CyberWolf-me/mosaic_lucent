@@ -3,7 +3,7 @@ import { resolveLocale, t } from "@lucent/i18n";
 import { applyLayout, applyRoutes, computeLayoutWithRoutes } from "@lucent/core";
 import { Ico } from "../ui/icons.js";
 import { AIPill } from "../ui/AIPill.js";
-import { TopBar, LeftRail, ZoomBadge, StatusBadge } from "../ui/Chrome.js";
+import { TopBar, LeftRail, ZoomBadge, StatusBadge, type Crumb } from "../ui/Chrome.js";
 import { CanvasViewport, emitHaptic, type ViewportControls } from "../ui/atoms.js";
 import { DiagramLayer } from "../ui/DiagramLayer.js";
 import {
@@ -19,7 +19,8 @@ import { EmptyState } from "./EmptyState.js";
 import { Tour } from "../ui/Tour.js";
 import { ProposalPanel } from "./ProposalPanel.js";
 import { AttentionPanel } from "./AttentionPanel.js";
-import { WhyThis } from "./WhyThis.js";
+import { NodeInspector } from "./NodeInspector.js";
+import type { HeroAttachments } from "./EmptyState.js";
 import { BoardView } from "./BoardView.js";
 import { DocumentView } from "./DocumentView.js";
 import { WireframeView } from "./WireframeView.js";
@@ -28,6 +29,7 @@ import { ErView } from "./ErView.js";
 import { Menu } from "../ui/primitives.js";
 import { buildAttention } from "../attention.js";
 import { VoiceOverlay } from "./VoiceOverlay.js";
+import { StatementGlyph } from "../ui/StatementGlyph.js";
 import { PresentMode } from "./PresentMode.js";
 import { PenLayer } from "./PenLayer.js";
 import { MarqueeLayer } from "./MarqueeLayer.js";
@@ -38,13 +40,6 @@ import { LinkInspector } from "./LinkInspector.js";
 import { Minimap } from "./Minimap.js";
 import { TemplatePicker } from "./TemplatePicker.js";
 import { TimerWidget } from "./TimerWidget.js";
-import {
-  STATEMENT_KINDS,
-  STATEMENT_STATUSES,
-  statementEditOps,
-  topicDuplicateHint,
-  topicSuggestions,
-} from "../statementUi.js";
 import { ContextMenu, type MenuItem } from "./ContextMenu.js";
 import { EngagementBadges, EngagementBar, VotePanel } from "./Engagement.js";
 import { CommentInbox, CommentPanel, CommentPins, NotificationBell } from "./Comments.js";
@@ -235,7 +230,6 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
     pillMode,
     setPillMode,
     onCitation,
-    selectDiagram,
     setRegionKind,
     layoutStatus,
     retryLayout,
@@ -317,8 +311,6 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
   const [toolsOpen, setToolsOpen] = useState(false);
   /** UX-3: attention drawer (proposal/skipped/blocked/at-risk/inbound/sync). */
   const [attentionOpen, setAttentionOpen] = useState(false);
-  /** UX-2: WhyThis popover for the focused node. */
-  const [whyNode, setWhyNode] = useState<string | null>(null);
 
   /**
    * The diagram region the current selection sits inside, if any: a region is a
@@ -725,6 +717,19 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
       }
     },
     [applyManual, notify, shapes, viewportBox, workspace, chat, projectName, settings.aiSound],
+  );
+
+  // The hero's attach path: a screenshot or document chosen before there is
+  // anything on the board to select. Same send, same validator; the files
+  // ride as the request's images/documents. Words are optional — a lone
+  // screenshot is a request too ("build this").
+  const submitWithAttachments = useCallback(
+    (attachments: HeroAttachments) => {
+      const text = message.trim() || "Build the board this attachment describes.";
+      setMessage("");
+      void send(text, [], attachments);
+    },
+    [message, send],
   );
 
   const submit = useCallback(() => {
@@ -1450,6 +1455,43 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
   );
 
   /** Node click: vote during a round, otherwise select (shift = add to selection). */
+  // Select a node and bring it into view — the inspector's links (a
+  // connection, the decision behind an action) move the camera with them.
+  const revealNode = useCallback(
+    (id: string) => {
+      selectNode(id, false);
+      const n = workspace.nodes[id];
+      if (n?.position) {
+        controls.current?.focusOn(
+          n.position.x + (n.size?.width ?? 160) / 2,
+          n.position.y + (n.size?.height ?? 64) / 2,
+        );
+      }
+    },
+    [selectNode, workspace.nodes],
+  );
+
+  // The ✦ trust loop: jump to the meeting that created a node. The meeting id
+  // rides in the URL (?meeting=<id>) — MeetingView reads it on mount and
+  // selects that transcript — and the turn range (Stage C3) lands the jump on
+  // the exact turns, the same contract an Ask meeting citation follows.
+  const openMeetingAt = useCallback(
+    (meetingId: string | null, turnRange?: [number, number]) => {
+      const url = new URL(window.location.href);
+      if (meetingId) {
+        url.searchParams.set("meeting", meetingId);
+        if (turnRange) url.searchParams.set("turn", String(turnRange[0]));
+        else url.searchParams.delete("turn");
+      } else {
+        url.searchParams.delete("meeting");
+        url.searchParams.delete("turn");
+      }
+      window.history.replaceState({}, "", url.toString());
+      setView("meeting");
+    },
+    [setView],
+  );
+
   const onNodeSelect = useCallback(
     (id: string, additive = false) => {
       if (voting) {
@@ -1714,14 +1756,29 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
   fitSelectionRef.current = fitToSelection;
   const objectCount = nodeCount + shapes.length;
   const prevCountRef = useRef(-1);
+  // A fit that is owed survives the effect being torn down before its timer
+  // fires. React's dev StrictMode mounts effects twice (mount → cleanup →
+  // mount): the first pass recorded the count and scheduled the fit, the
+  // cleanup cancelled it, and the second pass saw no change — so a reloaded
+  // board opened unframed, half under the toolbar.
+  const fitOwedRef = useRef(false);
   useEffect(() => {
     const had = prevCountRef.current;
     prevCountRef.current = objectCount;
-    // -1 is the mount pass: fit whatever was restored.
-    if ((had === -1 || had === 0) && objectCount > 0) {
-      const t = setTimeout(() => fitRef.current(), 260);
-      return () => clearTimeout(t);
-    }
+    // -1 is the mount pass: fit whatever was restored. 0 -> N is the first
+    // generation on an empty board. A jump of 3+ objects is an AI batch landing
+    // on a board that already had content — without a refit those nodes can lay
+    // outside the viewport and the user reads "nothing generated" though the ops
+    // applied. A single manual add is +1, so it never refits and steals the
+    // user's place.
+    const batchAdded = had > 0 && objectCount - had >= 3;
+    if (((had === -1 || had === 0) && objectCount > 0) || batchAdded) fitOwedRef.current = true;
+    if (!fitOwedRef.current) return;
+    const t = setTimeout(() => {
+      fitOwedRef.current = false;
+      fitRef.current();
+    }, 260);
+    return () => clearTimeout(t);
   }, [objectCount]);
 
   // Export the current board (nodes + shapes) as a downloadable SVG snapshot.
@@ -1933,40 +1990,75 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
   }
   const drawShapes = visibleShapes(shapes, shapeCull, shapeKeep);
 
-  const crumbs = [
-    { label: "Personal" },
+  const crumbs: Crumb[] = [
+    { label: "Boards", view: "dashboard" },
     // The board's real name — a previous fix pinned the fallback to a
     // placeholder ("E-commerce platform") for every named board, which is
     // the same bug class the identical-project-names fix (02afaa5) covered.
     {
-      label: projectName || (nodeCount ? "Untitled workspace" : "Untitled workspace"),
+      label: projectName || "Untitled board",
       current: true,
+      rename: true,
     },
   ];
 
-  // Title-block stamp: kind on the left, scale + node count on the right. The
-  // mono, all-caps treatment matches an engineering sheet's bottom corner.
+  // What the board KNOWS, in the top bar: its kind, then the live count of
+  // the statements that matter — decided, still open, at risk. It is the
+  // one-glance answer to "where does this board stand?", and a door into
+  // Intelligence. (It replaced an engineering-sheet stamp — "Sheet A-01 …
+  // Scale 44.2035%" — that described nothing real.)
+  const boardKnows = useMemo(() => {
+    let decided = 0;
+    let openQuestions = 0;
+    let openRisks = 0;
+    for (const n of Object.values(workspace.nodes)) {
+      const st = n.statement;
+      if (!st) continue;
+      if (st.kind === "decision" && st.status === "resolved") decided++;
+      else if (st.kind === "question" && st.status === "open") openQuestions++;
+      else if (st.kind === "risk" && st.status === "open") openRisks++;
+    }
+    return { decided, openQuestions, openRisks };
+  }, [workspace.nodes]);
   const meta = (
-    <div className="meta-stamp" aria-label="Board metadata">
-      <span>
-        Sheet <strong>A-01</strong>
-      </span>
-      <span style={{ color: "var(--stroke-2)" }}>|</span>
+    <button
+      className="meta-stamp board-knows"
+      onClick={() => setView("intelligence")}
+      title="What this board knows — open Intelligence"
+      aria-label={`${DIAGRAM_LABELS[workspace.diagramKind]}: ${boardKnows.decided} decided, ${boardKnows.openQuestions} open questions, ${boardKnows.openRisks} open risks. Open Intelligence.`}
+    >
       <span>{DIAGRAM_LABELS[workspace.diagramKind]}</span>
-      <span style={{ color: "var(--stroke-2)" }}>|</span>
-      <span>
-        Scale <strong>{zoom}%</strong>
-      </span>
-    </div>
+      {(boardKnows.decided > 0 || boardKnows.openQuestions > 0 || boardKnows.openRisks > 0) && (
+        <span className="board-knows-sep" aria-hidden />
+      )}
+      {boardKnows.decided > 0 && (
+        <span className="board-knows-item">
+          <StatementGlyph kind="decision" size={10} />
+          {boardKnows.decided} decided
+        </span>
+      )}
+      {boardKnows.openQuestions > 0 && (
+        <span className="board-knows-item">
+          <StatementGlyph kind="question" size={10} />
+          {boardKnows.openQuestions} open
+        </span>
+      )}
+      {boardKnows.openRisks > 0 && (
+        <span className="board-knows-item">
+          <StatementGlyph kind="risk" size={10} />
+          {boardKnows.openRisks} {boardKnows.openRisks === 1 ? "risk" : "risks"}
+        </span>
+      )}
+    </button>
   );
 
   // UX-2: named phases replace the char counter as the status model.
   // The workspace owns the phase; the char count rides along as detail.
   const PHASE_LABEL: Record<string, string> = {
-    understanding: "Parsing intent…",
-    constructing: "Designing architecture…",
-    validating: "Optimizing layout…",
-    applying: "Rendering nodes…",
+    understanding: "Reading your request…",
+    constructing: "Building the model…",
+    validating: "Checking every change…",
+    applying: "Placing it on the board…",
   };
   const status =
     canvasPhase === "generating"
@@ -2050,7 +2142,8 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
             <div className="canvas-grid" />
             <div className="canvas-vignette" />
           </div>
-          <TopBar crumbs={crumbs} meta={meta} onOpenSettings={onOpenSettings} />
+          {/* No "what the board knows" stamp yet: an empty board knows nothing. */}
+          <TopBar crumbs={crumbs} onOpenSettings={onOpenSettings} />
           <LeftRail onOpenSettings={onOpenSettings} />
           {/* The shape toolbar is NOT on the hero. It is `position: fixed`, so
               on the first-run page it floated over the prompt and the mode
@@ -2062,6 +2155,8 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
             value={message}
             onChange={setMessage}
             onSubmit={submit}
+            onSubmitWithAttachments={submitWithAttachments}
+            onStartMeeting={() => setView("meeting")}
             onSpeak={toggleVoice}
             onStartVoiceCall={toggleVoiceAgent}
             voiceAgentActive={
@@ -2234,60 +2329,6 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
                 onApply={applyManual}
               />
             )}
-            {selected && canvasPhase === "main" && canEdit && !drawingArmed && (
-              <SelectionHud
-                id={selected}
-                workspace={workspace}
-                onExplain={(label) => void send(`Explain the "${label}" node and its role.`)}
-                onExpand={(label) => void send(`Expand the "${label}" node into its sub-steps.`)}
-                onTransform={() => selectDiagram(nextDiagramKind(workspace.diagramKind))}
-                onComment={() => setCommentTarget(selected)}
-                onWhy={(id) => setWhyNode(id)}
-                onOpenMeeting={(meetingId, turnRange) => {
-                  // The ✦ trust loop: jump to the meeting that created this
-                  // node. The meeting id rides in the URL (?meeting=<id>) —
-                  // MeetingView reads it on mount and selects that transcript,
-                  // so the canvas needs no meeting state of its own. The turn
-                  // range (Stage C3) lands the jump on the exact turns that
-                  // produced the node — the same contract an Ask meeting
-                  // citation follows.
-                  const url = new URL(window.location.href);
-                  if (meetingId) {
-                    url.searchParams.set("meeting", meetingId);
-                    if (turnRange) url.searchParams.set("turn", String(turnRange[0]));
-                    else url.searchParams.delete("turn");
-                  } else {
-                    url.searchParams.delete("meeting");
-                    url.searchParams.delete("turn");
-                  }
-                  window.history.replaceState({}, "", url.toString());
-                  setView("meeting");
-                }}
-                // The statement editor commits through applyManual — the same
-                // validateOperations the AI path runs, so a bad manual edit
-                // is rejected exactly like a bad model op.
-                onApply={canEdit ? applyManual : undefined}
-              />
-            )}
-            {/* UX-2: one-tap provenance. The HUD answers "why is this here?"
-                with the meeting quote + source jump + undo, not a tooltip. */}
-            {(() => {
-              if (whyNode === null) return null;
-              const pos = workspace.nodes[whyNode]?.position;
-              if (!pos) return null;
-              return (
-                <div
-                  style={{
-                    position: "absolute",
-                    left: pos.x,
-                    top: (pos.y ?? 0) + 60,
-                    zIndex: 45,
-                  }}
-                >
-                  <WhyThis nodeId={whyNode} onClose={() => setWhyNode(null)} />
-                </div>
-              );
-            })()}
             {/* Live collaborators' cursors and selections track content space. */}
             {peers.length > 0 && <PresenceCursors peers={peers} />}
           </CanvasViewport>
@@ -2361,7 +2402,8 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
               aria-live="polite"
               style={{
                 position: "absolute",
-                top: 60,
+                // Below the top tool row (y 68–110).
+                top: 120,
                 left: "50%",
                 transform: "translateX(-50%)",
                 zIndex: 30,
@@ -2385,7 +2427,7 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
               role="status"
               style={{
                 position: "absolute",
-                top: 92,
+                top: 152,
                 left: "50%",
                 transform: "translateX(-50%)",
                 zIndex: 30,
@@ -2408,7 +2450,7 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
               onSelectTool={changeTool}
               onEmbed={addEmbed}
               onGenImage={generateImageShape}
-              orientation="left"
+              orientation="top"
             />
           )}
           <LeftRail onOpenSettings={onOpenSettings} />
@@ -2417,6 +2459,21 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
               right pileup (Polish/Templates/Timer/Vote). The comment bell
               stays separate — comments are attention, not tools. */}
           {/* Top-right consolidated Activity & Utilities Bar */}
+          <div className="canvas-top-right">
+          {canvasPhase === "main" && (
+            <ModeBar
+              mode={mode}
+              onEdit={() => setMode("edit")}
+              onPresent={enterPresent}
+              onFocus={() => {
+                if (!selected) {
+                  notify("Select a node, then Focus to spotlight it.");
+                  return;
+                }
+                setMode((m) => (m === "focus" ? "edit" : "focus"));
+              }}
+            />
+          )}
           {rightClusterVisible && (
             <div className="canvas-utility-bar">
               <div className="utility-bar-item">
@@ -2524,6 +2581,7 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
               </div>
             </div>
           )}
+          </div>
           {inboxOpen && canEdit && (
             <CommentInbox
               workspace={workspace}
@@ -2569,22 +2627,36 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
           {timerOpen && <TimerWidget onClose={() => setTimerOpen(false)} />}
           {templatesOpen && <TemplatePicker onClose={() => setTemplatesOpen(false)} />}
 
-          {canvasPhase === "main" && (
-            <ModeBar
-              mode={mode}
-              onEdit={() => setMode("edit")}
-              onPresent={enterPresent}
-              onFocus={() => {
-                if (!selected) {
-                  notify("Select a node, then Focus to spotlight it.");
-                  return;
-                }
-                setMode((m) => (m === "focus" ? "edit" : "focus"));
-              }}
-            />
-          )}
-
           {canvasPhase === "proposing" && <ProposalPanel />}
+
+          {/* The node inspector (Atelier): one selected node, what it IS —
+              kind, lifecycle, the words behind it, its connections as
+              sentences, the decisions it came from, the statement editor.
+              Replaces the floating HUD, whose "Why?" popover mislabelled
+              every AI-drawn node "Created by human" and whose Undo undid
+              the board's last edit rather than anything about the node. */}
+          {selected &&
+            selectedNodes.size <= 1 &&
+            selectedShapes.size === 0 &&
+            canvasPhase === "main" &&
+            mode !== "present" &&
+            !drawingArmed &&
+            !commentTarget &&
+            workspace.nodes[selected] && (
+              <NodeInspector
+                key={selected}
+                nodeId={selected}
+                workspace={workspace}
+                canEdit={canEdit}
+                onApply={applyManual}
+                onSelectNode={revealNode}
+                onOpenMeeting={openMeetingAt}
+                onExplain={(label) => void send(`Explain the "${label}" node and its role.`)}
+                onExpand={(label) => void send(`Expand the "${label}" node into its sub-steps.`)}
+                onComment={() => setCommentTarget(selected)}
+                onClose={() => setSelected(null)}
+              />
+            )}
 
           {canEdit && canvasPhase !== "proposing" && selectedShapes.size > 0 && (
             <ShapeInspector
@@ -2712,7 +2784,7 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
               {selected ? " · 1 selected" : settings.autosave ? " · Autosaved" : ""}
               {/* Semantic-zoom note (UX-4): edge labels hide below 70% (see
                   DiagramLayer), so say why the board looks quieter. */}
-              {zoom < 70 && nodeCount > 0 ? " · overview — zoom in for labels" : ""}
+              {zoom < 70 && nodeCount > 0 ? " · overview" : ""}
               {/* Doc 18 Phase 4: the async ELK refinement is in flight over
                   the committed phase-1 geometry — the board is valid, this
                   only explains the one beat where it settles. */}
@@ -2793,388 +2865,6 @@ function applyPreview(
   return applyRoutes(applyLayout(merged, layout), routes);
 }
 
-function SelectionHud({
-  id,
-  workspace,
-  onExplain,
-  onExpand,
-  onTransform,
-  onComment,
-  onWhy,
-  onOpenMeeting,
-  onApply,
-}: {
-  id: string;
-  workspace: import("@lucent/core").Workspace;
-  onExplain: (label: string) => void;
-  onExpand: (label: string) => void;
-  onTransform: () => void;
-  onComment: () => void;
-  /** UX-2: open the WhyThis provenance popover for this node. */
-  onWhy?: (id: string) => void;
-  /** Open the meeting a provenance stamp points at (null = the view itself). */
-  onOpenMeeting?: (meetingId: string | null, turnRange?: [number, number]) => void;
-  /** Commit manual ops through the same validator the AI path uses. */
-  onApply?: (ops: import("@lucent/core").Operation[], label: string) => boolean;
-}) {
-  const [statementOpen, setStatementOpen] = useState(false);
-  const node = workspace.nodes[id];
-  if (!node?.position) return null;
-  const w = node.size?.width ?? 160;
-  return (
-    <div
-      className="selection-hud"
-      style={{ left: node.position.x + w / 2, top: node.position.y - 42 }}
-    >
-      <button onClick={() => onExplain(node.label)}>Explain</button>
-      <button onClick={onTransform}>Transform</button>
-      <button onClick={() => onExpand(node.label)}>Expand</button>
-      <button onClick={onComment}>Comment</button>
-      <button
-        onClick={() => onWhy?.(id)}
-        title="Why is this here? Show the evidence behind this node."
-        aria-label={`Why is this here: ${node.label}`}
-      >
-        Why?
-      </button>
-      {/* Meeting provenance (M2/P0-3/Stage A → Stage C2): a node created from
-          a meeting extract can always answer "why is this here?" — the quoted
-          words that produced it plus the statement KINDS the turns carried,
-          and a click that JUMPS to the source meeting, closing the trust loop:
-          AI creates → user questions → evidence. Stage C2 reads the op-level
-          provenance FIRST (it is what converges to peers/server/history,
-          ADR 0022); the old metadata stamp stays as the pre-C2 fallback.
-          Stage D2: the ✦ MEETING jump requires meeting evidence — a
-          createdFrom-only node (plan evidence) has no transcript to open. */}
-      {Boolean(
-        (node.provenance?.meetingId ?? node.metadata?.meeting) ||
-          node.statement?.provenance?.meetingId,
-      ) && (
-        <ProvenanceButton
-          provenance={node.provenance}
-          legacy={node.metadata?.meeting as Record<string, unknown> | undefined}
-          onOpenMeeting={onOpenMeeting}
-        />
-      )}
-      {/* The statement editor (Stage C2): kind/status/topic/supersedes, all
-          committed through onApply → validateOperations — a manual edit is
-          rejected exactly like a bad model op (the review's guardrail: no
-          accidental cycles, no superseding a node with no statement). */}
-      {onApply && (
-        <StatementEditor
-          node={node}
-          workspace={workspace}
-          open={statementOpen}
-          setOpen={setStatementOpen}
-          onApply={onApply}
-        />
-      )}
-      <div className="sep" />
-      <button style={{ padding: "5px 8px" }}>
-        <Ico.Down />
-      </button>
-    </div>
-  );
-}
-
-/** The ✦ provenance jump, reading the op-level field with the legacy fallback. */
-function ProvenanceButton({
-  provenance,
-  legacy,
-  onOpenMeeting,
-}: {
-  provenance?: {
-    meetingId?: string;
-    turnRange?: [number, number];
-    turnKinds?: string[];
-    quote?: string;
-  };
-  legacy?: Record<string, unknown>;
-  /**
-   * Stage C3: the jump now carries the turn RANGE when the provenance has
-   * one — the board→evidence link lands on the exact turns instead of the
-   * transcript's top, closing the same contract the Ask citation path has
-   * had since C1 (citationTarget: meeting → ?meeting= + ?turn=).
-   */
-  onOpenMeeting?: (meetingId: string | null, turnRange?: [number, number]) => void;
-}) {
-  const source = provenance ?? {
-    meetingId: typeof legacy?.meetingId === "string" ? legacy.meetingId : undefined,
-    turnRange: legacy?.turnRange as [number, number] | undefined,
-    turnKinds: legacy?.turnKinds as string[] | undefined,
-    quote: typeof legacy?.quote === "string" ? legacy.quote : undefined,
-  };
-  const quote = source.quote ?? "";
-  const kinds = source.turnKinds ?? [];
-  const range = source.turnRange;
-  return (
-    <button
-      className="mono"
-      onClick={() => {
-        const meetingId = source.meetingId;
-        if (meetingId && meetingId !== "live-session") {
-          onOpenMeeting?.(meetingId, range);
-        } else {
-          // A live-session stamp (capture without a stored transcript)
-          // has no meeting to open — go to the view itself.
-          onOpenMeeting?.(null);
-        }
-      }}
-      title={`Created from meeting discussion: “${quote}”${
-        kinds.length ? `\nStatement kinds: ${kinds.join(", ")}` : ""
-      }${range ? `\nTurns: ${range[0]}–${range[1]}` : ""}\nClick to open the source meeting${range ? " at those turns" : ""}`}
-      style={{
-        color: "var(--amber-2)",
-        padding: "0 6px",
-        fontSize: 11,
-        background: "transparent",
-        border: "none",
-        cursor: "pointer",
-      }}
-    >
-      ✦{kinds.length > 0 ? ` ${kinds.join("·")}` : ""}
-    </button>
-  );
-}
-
-/**
- * The per-node statement editor: one popover, three constrained fields. The
- * supersedes list offers ONLY nodes that carry statements (the validator
- * would refuse anything else, and the picker should not propose a refusal),
- * and the commit is a validated op batch — statementEditOps builds the exact
- * op the model would emit, so manual and AI edits share one contract.
- */
-function StatementEditor({
-  node,
-  workspace,
-  open,
-  setOpen,
-  onApply,
-}: {
-  node: import("@lucent/core").Node;
-  workspace: import("@lucent/core").Workspace;
-  open: boolean;
-  setOpen: (v: boolean) => void;
-  onApply: (ops: import("@lucent/core").Operation[], label: string) => boolean;
-}) {
-  const prior = node.statement;
-  const [kind, setKind] = useState(prior?.kind ?? "decision");
-  const [status, setStatus] = useState(prior?.status ?? "open");
-  const [topic, setTopic] = useState(prior?.topic ?? "");
-  // Stage C5: the dismissed duplicate hint for the CURRENT typed value —
-  // "Keep" means keep, not nag again on the next render. Any edit to the
-  // field re-arms the hint (a new value is a new question).
-  const [dismissedHint, setDismissedHint] = useState<string | null>(null);
-  const activeHint =
-    dismissedHint !== null && dismissedHint === topic.trim()
-      ? undefined
-      : topicDuplicateHint(topic, workspace);
-  const [supersedes, setSupersedes] = useState<ReadonlySet<string>>(
-    new Set(prior?.supersedes ?? []),
-  );
-
-  // Candidates: statement-carrying nodes other than this one. The validator
-  // refuses everything else (no statement, self, cycles) — the picker offers
-  // only what can succeed.
-  const candidates = useMemo(
-    () => Object.values(workspace.nodes).filter((n) => n.statement && n.id !== node.id),
-    [workspace.nodes, node.id],
-  );
-
-  if (!open) {
-    return (
-      <button
-        className="mono"
-        title={prior ? "Edit statement" : "Make this node a statement"}
-        onClick={() => setOpen(true)}
-        style={{
-          color: prior ? "var(--amber-2)" : "var(--ink-3)",
-          padding: "0 6px",
-          fontSize: 11,
-          background: "transparent",
-          border: "none",
-          cursor: "pointer",
-        }}
-      >
-        ✎{prior ? ` ${prior.kind}` : ""}
-      </button>
-    );
-  }
-
-  const commit = () => {
-    // statementEditOps builds the op; applyManual runs the SAME validator
-    // the model's ops run through. A refused edit (cycle, bad topic) returns
-    // false here and the popover stays open — rejected visibly, not silently.
-    const ops = statementEditOps(node.id, prior, {
-      kind,
-      status,
-      topic: topic.trim().length > 0 ? topic.trim() : undefined,
-      supersedes: [...supersedes],
-    });
-    const label = prior ? `Update ${prior.kind} statement` : "Set statement";
-    if (!onApply(ops, label)) return;
-    setOpen(false);
-  };
-
-  return (
-    <div
-      className="statement-editor"
-      style={{
-        position: "absolute",
-        top: 40,
-        left: "50%",
-        transform: "translateX(-50%)",
-        width: 280,
-        padding: 14,
-        borderRadius: 12,
-        border: "1px solid var(--stroke-2)",
-        background: "var(--canvas-0)",
-        boxShadow: "var(--elev-3)",
-        display: "flex",
-        flexDirection: "column",
-        gap: 10,
-        zIndex: 40,
-      }}
-      onMouseDown={(e) => e.stopPropagation()}
-    >
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <span
-          className="mono"
-          style={{ fontSize: 10, color: "var(--ink-3)", textTransform: "uppercase" }}
-        >
-          Statement
-        </span>
-        <span style={{ flex: 1 }} />
-        <button
-          className="icon-btn"
-          style={{ height: 22, width: 22 }}
-          title="Close"
-          onClick={() => setOpen(false)}
-        >
-          <Ico.Down style={{ transform: "rotate(180deg)" }} />
-        </button>
-      </div>
-      <div style={{ display: "flex", gap: 8 }}>
-        <label style={{ flex: 1, fontSize: 11, color: "var(--ink-2)" }}>
-          Kind
-          <select
-            value={kind}
-            onChange={(e) => setKind(e.target.value as typeof kind)}
-            style={{ width: "100%", marginTop: 4 }}
-          >
-            {STATEMENT_KINDS.map((k) => (
-              <option key={k} value={k}>
-                {k}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label style={{ flex: 1, fontSize: 11, color: "var(--ink-2)" }}>
-          Status
-          <select
-            value={status}
-            onChange={(e) => setStatus(e.target.value as typeof status)}
-            style={{ width: "100%", marginTop: 4 }}
-          >
-            {STATEMENT_STATUSES.map((s) => (
-              <option key={s} value={s}>
-                {s}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
-      <label style={{ fontSize: 11, color: "var(--ink-2)" }}>
-        Topic (kebab-case)
-        <input
-          value={topic}
-          placeholder="e.g. pricing"
-          onChange={(e) => setTopic(e.target.value)}
-          list="statement-topic-suggestions"
-          style={{ width: "100%", marginTop: 4 }}
-        />
-        {/* Stage C5: the board's existing authored topics — offered, never
-            forced. Adopting one is one click; typing a new key stays free. */}
-        <datalist id="statement-topic-suggestions">
-          {topicSuggestions(workspace).map((t) => (
-            <option key={t} value={t} />
-          ))}
-        </datalist>
-      </label>
-      {/* Stage C5 (ADR 0025, rule 3): the challenge layer. When the typed
-          topic variant-matches exactly one existing authored key, surface
-          the possible duplicate WITH EVIDENCE — statement count — and let
-          the human decide. Accept sets the field (the commit then runs
-          through the same statementEditOps → applyManual → validator path
-          as any edit: an explicit user action, satisfying the invariant);
-          Keep commits exactly as typed. Nothing auto-applies, no LLM is
-          called, and the authored text is never rewritten by anything but
-          the user's own click. */}
-      {(() => {
-        const hint = activeHint;
-        if (!hint) return null;
-        return (
-          <div
-            className="mono"
-            style={{
-              fontSize: 10.5,
-              lineHeight: 1.5,
-              padding: "6px 8px",
-              borderRadius: 8,
-              border: "1px solid var(--amber-2)",
-              color: "var(--ink-1)",
-              background: "var(--canvas-1)",
-            }}
-          >
-            <div>
-              Possible duplicate — &quot;{topic.trim()}&quot; may refer to existing &quot;
-              {hint.existing}&quot; ({hint.statements}{" "}
-              {hint.statements === 1 ? "statement" : "statements"} carry it).
-            </div>
-            <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
-              <button
-                className="btn amber"
-                style={{ height: 22, fontSize: 10.5 }}
-                onClick={() => setTopic(hint.existing)}
-              >
-                Use &quot;{hint.existing}&quot;
-              </button>
-              <button
-                className="btn"
-                style={{ height: 22, fontSize: 10.5 }}
-                onClick={() => setDismissedHint(topic.trim())}
-              >
-                Keep &quot;{topic.trim()}&quot;
-              </button>
-            </div>
-          </div>
-        );
-      })()}
-      <label style={{ fontSize: 11, color: "var(--ink-2)" }}>
-        Supersedes
-        <select
-          multiple
-          value={[...supersedes]}
-          onChange={(e) =>
-            setSupersedes(new Set([...e.target.selectedOptions].map((o) => o.value)))
-          }
-          style={{ width: "100%", marginTop: 4, minHeight: candidates.length ? undefined : 28 }}
-          size={Math.min(4, Math.max(2, candidates.length))}
-        >
-          {candidates.map((n) => (
-            <option key={n.id} value={n.id}>
-              {n.label.slice(0, 32)} ({n.statement!.kind})
-            </option>
-          ))}
-        </select>
-      </label>
-      <button className="btn amber" style={{ height: 28, fontSize: 12 }} onClick={commit}>
-        {prior ? "Update statement" : "Set statement"}
-      </button>
-    </div>
-  );
-}
-
 /**
  * Positions the vote/react bar under whichever object is selected, whether that
  * is a semantic node or a manual shape.
@@ -3211,23 +2901,6 @@ function EngagementAnchor({
       <EngagementBar workspace={workspace} targetId={targetId} onApply={onApply} />
     </div>
   );
-}
-
-/** Cycle to the next representation for the Transform HUD action. */
-function nextDiagramKind(
-  current: import("@lucent/core").DiagramKind,
-): import("@lucent/core").DiagramKind {
-  const order: import("@lucent/core").DiagramKind[] = [
-    "flowchart",
-    "architecture",
-    "mindmap",
-    "journey",
-    "decisiontree",
-    "process",
-    "orgchart",
-  ];
-  const i = order.indexOf(current);
-  return order[(i + 1) % order.length]!;
 }
 
 /** The kinds a region may be set to, in the same order as the board picker. */

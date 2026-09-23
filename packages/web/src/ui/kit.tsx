@@ -18,12 +18,15 @@ export function Page({
   actions,
   onOpenSettings,
   width = "default",
+  boardScoped = true,
   children,
 }: {
   crumbs: Crumb[];
   meta?: ReactNode;
   actions?: ReactNode;
   onOpenSettings: (section?: string) => void;
+  /** false on pages that are not about the open board: hides Share/Meeting. */
+  boardScoped?: boolean;
   /** "wide" for two-pane pages; "narrow" for reading columns. */
   width?: "narrow" | "default" | "wide";
   children: ReactNode;
@@ -34,7 +37,13 @@ export function Page({
         <div className="paper-bg" />
         <div className="paper-grain" />
       </div>
-      <TopBar crumbs={crumbs} meta={meta} actions={actions} onOpenSettings={onOpenSettings} />
+      <TopBar
+        crumbs={crumbs}
+        meta={meta}
+        actions={actions}
+        onOpenSettings={onOpenSettings}
+        boardActions={boardScoped}
+      />
       <LeftRail onOpenSettings={onOpenSettings} />
       <div className="page" tabIndex={-1}>
         <div className={`page-inner page-${width}`}>{children}</div>

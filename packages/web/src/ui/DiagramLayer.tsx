@@ -539,10 +539,11 @@ export function DiagramLayer({
             // Stage C2: the statement chip — kind·status under the label,
             // tinted by kind (statementUi's map), dimmed when settled.
             // Far zoom (UX-4) drops it with the sub caption.
-            {...(n.statement && !hideNodeDetail ? { statement: n.statement } : {})}
-            {...(n.statement && !hideNodeDetail
-              ? { statementTint: KIND_TINT[n.statement.kind] }
-              : {})}
+            // The statement stays at every zoom: what a node IS (a decision,
+            // an open question, a risk) is the one thing an overview must still
+            // say. Far zoom drops only the footnotes (owner, due, source).
+            {...(n.statement ? { statement: n.statement } : {})}
+            {...(n.statement ? { statementTint: KIND_TINT[n.statement.kind] } : {})}
             {...(n.statement && !hideNodeDetail && n.issue?.assignee
               ? { statementOwner: n.issue.assignee }
               : {})}
@@ -550,7 +551,9 @@ export function DiagramLayer({
               ? { statementDue: n.issue.dueDate }
               : {})}
             fromMeeting={Boolean(
-              n.statement && (n.provenance?.meetingId ?? n.statement.provenance?.meetingId),
+              n.statement &&
+                !hideNodeDetail &&
+                (n.provenance?.meetingId ?? n.statement.provenance?.meetingId),
             )}
             // The BPMN lens (docs/19): shapes are a presentation choice of
             // the lens, computed per node from its region's kind. Undefined

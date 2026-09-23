@@ -1,0 +1,767 @@
+/* Atelier · canvas — owned by the canvas surface. Kit and statement
+   language live in lucent.css; this file holds only what is specific here. */
+
+/* Tools run along the top of the board (prototype screen 3) instead of
+   standing as a second vertical rail beside the navigation rail. Anchored
+   left, next to the rail, so the right side stays free for the mode switch
+   and the board utilities at any width. */
+.shape-toolbar.top {
+  top: 68px;
+  left: 84px;
+  transform: none;
+  flex-direction: row;
+  gap: 1px;
+  padding: 4px 5px;
+  max-width: calc(100vw - 700px);
+  overflow-x: auto;
+  scrollbar-width: none;
+  border-radius: 12px;
+  border-color: oklch(from var(--paper-4) l c h / 0.6);
+  background: oklch(from var(--paper-0) l c h / 0.92);
+  box-shadow: var(--shadow-2);
+  z-index: 35;
+}
+.shape-toolbar.top::-webkit-scrollbar {
+  display: none;
+}
+.shape-toolbar.top .tool {
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  border-radius: 8px;
+}
+.shape-toolbar.top .tool.active {
+  background: var(--ink-0);
+  color: var(--paper-0);
+}
+.shape-toolbar.top .divider {
+  width: 1px;
+  height: 18px;
+  margin: 0 4px;
+  flex-shrink: 0;
+  background: oklch(from var(--paper-4) l c h / 0.7);
+}
+.shape-toolbar.top .tool[data-tip]::after {
+  top: calc(100% + 10px);
+  bottom: auto;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+/* One row at top right: the Edit / Focus / Present switch (always there, so
+   Focus and Present can always be left) and the board utilities. */
+.canvas-top-right {
+  position: absolute;
+  top: 68px;
+  right: 16px;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.canvas-top-right .mode-bar,
+.canvas-top-right .canvas-utility-bar {
+  position: static;
+  transform: none;
+}
+.canvas-top-right .mode-bar {
+  height: 42px;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  border-radius: 12px;
+  background: oklch(from var(--paper-0) l c h / 0.92);
+  border: 1px solid oklch(from var(--paper-4) l c h / 0.6);
+  box-shadow: var(--shadow-2);
+}
+.canvas-top-right .mode-btn {
+  height: 32px;
+  padding: 0 11px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 8px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--ink-2);
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+}
+.canvas-top-right .mode-btn:hover {
+  color: var(--ink-0);
+  background: var(--paper-2);
+}
+.canvas-top-right .mode-btn.active {
+  color: var(--paper-0);
+  background: var(--ink-0);
+}
+.canvas-top-right .mode-btn svg {
+  width: 13px;
+  height: 13px;
+}
+.canvas-top-right .canvas-utility-bar {
+  height: 42px;
+  padding: 4px 6px;
+  border-radius: 12px;
+  background: oklch(from var(--paper-0) l c h / 0.92);
+  border: 1px solid oklch(from var(--paper-4) l c h / 0.6);
+  box-shadow: var(--shadow-2);
+}
+
+/* What the board knows — the top bar's stamp. */
+.meta-stamp.board-knows {
+  height: 30px;
+  gap: 8px;
+  padding: 0 12px;
+  border-radius: 999px;
+  cursor: pointer;
+  color: var(--ink-2);
+  background: oklch(from var(--paper-0) l c h / 0.6);
+  border: 1px solid oklch(from var(--paper-4) l c h / 0.6);
+  transition: all 0.12s var(--e-out);
+}
+.meta-stamp.board-knows:hover {
+  color: var(--ink-0);
+  border-color: var(--ink-4);
+  background: var(--paper-0);
+}
+.board-knows-sep {
+  width: 1px;
+  height: 12px;
+  background: oklch(from var(--paper-4) l c h / 0.9);
+}
+.board-knows-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--ink-1);
+}
+
+/* ---------------------------------------------------------------
+   The node inspector — right column, below the top-right row.
+   --------------------------------------------------------------- */
+.node-inspector {
+  position: absolute;
+  top: 122px;
+  right: 16px;
+  bottom: 96px;
+  width: 340px;
+  max-width: calc(100vw - 120px);
+  z-index: 32;
+  display: flex;
+  flex-direction: column;
+  background: oklch(from var(--paper-0) l c h / 0.97);
+  border: 1px solid oklch(from var(--paper-4) l c h / 0.6);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-3);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  animation: ni-in 0.2s var(--e-out);
+  overflow: hidden;
+}
+html[data-theme="dark"] .node-inspector {
+  background: oklch(from var(--paper-2) l c h / 0.97);
+}
+@keyframes ni-in {
+  from {
+    opacity: 0;
+    transform: translateX(8px);
+  }
+}
+/* One right column at a time: the overview map yields to the inspector. */
+body:has(.node-inspector) .minimap {
+  opacity: 0;
+  pointer-events: none;
+}
+.ni-head {
+  position: relative;
+  padding: 16px 44px 14px 18px;
+  border-bottom: 1px solid oklch(from var(--paper-4) l c h / 0.45);
+}
+.ni-eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.ni-region {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  letter-spacing: 0.04em;
+  text-transform: none;
+}
+.ni-title {
+  margin: 8px 0 0;
+  font-size: 17px;
+  font-weight: 500;
+  line-height: 1.3;
+  color: var(--ink-0);
+  text-wrap: balance;
+}
+.ni-title.serif {
+  font-size: 19px;
+  font-weight: 400;
+}
+.ni-close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 8px;
+  color: var(--ink-3);
+  background: transparent;
+  cursor: pointer;
+}
+.ni-close:hover {
+  color: var(--ink-0);
+  background: var(--paper-2);
+}
+.ni-close svg {
+  width: 13px;
+  height: 13px;
+}
+.ni-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 18px 12px;
+}
+.ni-section {
+  padding: 14px 0;
+  border-bottom: 1px dashed oklch(from var(--paper-4) l c h / 0.5);
+}
+.ni-section:last-child {
+  border-bottom: 0;
+}
+.ni-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.ni-count {
+  padding: 0 5px;
+  border-radius: 999px;
+  letter-spacing: 0.02em;
+  background: oklch(from var(--paper-3) l c h / 0.9);
+  color: var(--ink-2);
+}
+.ni-sub {
+  margin: 12px 0 4px;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--ink-2);
+}
+.ni-none {
+  margin: 0 0 8px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--ink-3);
+}
+.ni-origin {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 12.5px;
+  color: var(--ink-1);
+}
+.ni-origin-mark {
+  color: var(--bloom-2);
+}
+.ni-quote {
+  margin: 10px 0 0;
+  padding: 10px 12px;
+  border-left: 2px solid var(--bloom-2);
+  border-radius: 0 8px 8px 0;
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--ink-0);
+  background: oklch(from var(--bloom-1) l c h / 0.06);
+}
+.ni-turnkinds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 8px;
+}
+.ni-turnkinds span {
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+  background: oklch(from var(--paper-3) l c h / 0.8);
+}
+.ni-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+.ni-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.ni-link {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 8px;
+  margin: 0 -8px;
+  width: calc(100% + 16px);
+  border: 0;
+  border-radius: 8px;
+  font-size: 12.5px;
+  text-align: left;
+  color: var(--ink-1);
+  background: transparent;
+  cursor: pointer;
+}
+.ni-link:hover {
+  color: var(--ink-0);
+  background: var(--paper-2);
+}
+.ni-link > span:not(.ni-link-meta):not(.ni-verb) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ni-link .struck {
+  text-decoration: line-through;
+  color: var(--ink-3);
+}
+.ni-link-meta {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink-3);
+}
+.ni-edge .ni-verb {
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--ink-3);
+}
+.ni-edge .ni-edge-other {
+  font-weight: 500;
+}
+.ni-facts {
+  display: grid;
+  grid-template-columns: 76px 1fr;
+  gap: 7px 10px;
+  margin: 0;
+  font-size: 12.5px;
+}
+.ni-facts dt {
+  padding-top: 2px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.ni-facts dd {
+  margin: 0;
+  color: var(--ink-0);
+}
+.ni-owner {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.ni-facts dd.ni-overdue {
+  color: var(--madder);
+}
+.ni-topic {
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+.ni-topic .mono {
+  margin-left: 4px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  color: var(--ink-1);
+  background: oklch(from var(--paper-3) l c h / 0.8);
+}
+.ni-foot {
+  display: flex;
+  gap: 6px;
+  padding: 10px 14px;
+  border-top: 1px solid oklch(from var(--paper-4) l c h / 0.45);
+  background: oklch(from var(--paper-1) l c h / 0.6);
+}
+.ni-foot svg {
+  width: 13px;
+  height: 13px;
+}
+
+/* The statement editor, inline. */
+.ni-kinds {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 5px;
+  margin-bottom: 12px;
+}
+.ni-kind {
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  border-radius: 8px;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--ink-1);
+  background: oklch(from var(--paper-2) l c h / 0.7);
+  border: 1px solid oklch(from var(--paper-4) l c h / 0.5);
+  cursor: pointer;
+}
+.ni-kind:hover {
+  border-color: var(--kind);
+}
+.ni-kind.on {
+  color: #fff;
+  background: var(--kind);
+  border-color: var(--kind);
+}
+.ni-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 10px;
+  font-size: 11px;
+  color: var(--ink-2);
+}
+.ni-field span {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.ni-field input,
+.ni-field select {
+  width: 100%;
+  padding: 7px 9px;
+  border-radius: 8px;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--ink-0);
+  background: var(--paper-0);
+  border: 1px solid oklch(from var(--paper-4) l c h / 0.8);
+}
+.ni-field input:focus-visible,
+.ni-field select:focus-visible {
+  outline: none;
+  border-color: var(--bloom-2);
+  box-shadow: 0 0 0 3px var(--bloom-wash);
+}
+.ni-hint {
+  margin-bottom: 10px;
+  padding: 9px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--ink-1);
+  border: 1px solid oklch(from var(--kind-question) l c h / 0.45);
+  background: oklch(from var(--kind-question) l c h / 0.08);
+}
+.ni-refused {
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: var(--madder);
+}
+@media (prefers-reduced-motion: reduce) {
+  .node-inspector {
+    animation: none;
+  }
+}
+
+/* The conversation: each Lucent turn says what it changed. */
+.turn-effect {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  margin-top: 7px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--ink-3);
+}
+.turn-effect-kind {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.ai-msg-count-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.ai-msg-count-btn svg {
+  width: 12px;
+  height: 12px;
+}
+
+/* ---------------------------------------------------------------
+   The canvas hero — the first screen of a new board.
+   --------------------------------------------------------------- */
+.empty-hero {
+  gap: 18px;
+}
+.empty-hero .empty-badge {
+  color: var(--ink-2);
+  background: oklch(from var(--paper-0) l c h / 0.7);
+  border-color: oklch(from var(--paper-4) l c h / 0.6);
+}
+.empty-hero .hero-title {
+  font-family: var(--font-serif);
+  font-size: clamp(38px, 5vw, 56px);
+  font-weight: 400;
+  font-variation-settings: normal;
+  letter-spacing: -0.025em;
+  line-height: 1.04;
+  max-width: 760px;
+  color: var(--ink-0);
+  background: none;
+  -webkit-text-fill-color: currentColor;
+}
+.empty-hero .hero-title em {
+  font-style: italic;
+  color: var(--bloom-2);
+}
+.empty-hero .empty-sub {
+  max-width: 540px;
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-size: 16px;
+  line-height: 1.5;
+  color: var(--ink-2);
+}
+.empty-hero .empty-omnibar {
+  width: 680px;
+  gap: 12px;
+  padding: 16px 16px 12px 20px;
+  background: oklch(from var(--paper-0) l c h / 0.95);
+  border: 1px solid oklch(from var(--paper-4) l c h / 0.7);
+  border-radius: var(--r-xl);
+  box-shadow: var(--shadow-3);
+}
+.empty-hero .empty-input {
+  font-size: 15.5px;
+}
+.hero-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.hero-chip {
+  height: 30px;
+  padding: 0 11px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 999px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--ink-1);
+  background: oklch(from var(--paper-2) l c h / 0.8);
+  border: 1px solid oklch(from var(--paper-4) l c h / 0.55);
+  cursor: pointer;
+  transition: all 0.12s var(--e-out);
+}
+.hero-chip svg {
+  width: 13px;
+  height: 13px;
+}
+.hero-chip:hover:not(:disabled) {
+  color: var(--ink-0);
+  border-color: var(--ink-4);
+}
+.hero-chip:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.hero-chip.on {
+  color: var(--paper-0);
+  background: var(--bloom-2);
+  border-color: var(--bloom-2);
+}
+.hero-chip.on.danger {
+  background: var(--madder);
+  border-color: var(--madder);
+}
+.hero-hint {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--ink-3);
+}
+.hero-begin {
+  height: 34px;
+  padding: 0 16px;
+}
+.hero-begin svg {
+  width: 13px;
+  height: 13px;
+}
+.hero-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.hero-file {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 240px;
+  height: 28px;
+  padding: 0 4px 0 10px;
+  border-radius: 8px;
+  font-size: 12px;
+  color: var(--ink-1);
+  background: var(--bloom-wash);
+  border: 1px solid var(--bloom-wash-2);
+}
+.hero-file svg {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+}
+.hero-file-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hero-file button {
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 5px;
+  color: var(--ink-2);
+  background: transparent;
+  cursor: pointer;
+}
+.hero-file button:hover {
+  color: var(--ink-0);
+  background: oklch(from var(--paper-0) l c h / 0.8);
+}
+.hero-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  max-width: 760px;
+}
+.empty-hero .empty-chip {
+  color: var(--ink-2);
+  background: oklch(from var(--paper-0) l c h / 0.55);
+  border-color: oklch(from var(--paper-4) l c h / 0.6);
+}
+.empty-hero .empty-chip:hover {
+  color: var(--ink-0);
+  border-color: var(--ink-4);
+}
+.hero-alt {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 4px;
+}
+.hero-alt-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 34px;
+  padding: 0 14px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink-0);
+  background: oklch(from var(--paper-0) l c h / 0.8);
+  border: 1px solid oklch(from var(--paper-4) l c h / 0.7);
+  cursor: pointer;
+  transition: all 0.12s var(--e-out);
+}
+.hero-alt-btn:hover {
+  border-color: var(--ink-3);
+  box-shadow: var(--shadow-1);
+}
+.hero-alt-btn.quiet {
+  color: var(--ink-2);
+  background: transparent;
+  border-color: transparent;
+}
+.hero-alt-btn.quiet:hover {
+  color: var(--ink-0);
+  box-shadow: none;
+}
+.hero-alt-btn svg {
+  width: 13px;
+  height: 13px;
+}
+.hero-failure {
+  width: 680px;
+  max-width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: var(--r-md);
+  border: 1px solid oklch(from var(--madder) l c h / 0.45);
+  background: oklch(from var(--madder) l c h / 0.06);
+}
+.hero-failure-mark {
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  font-weight: 700;
+  color: #fff;
+  background: var(--madder);
+}
+.hero-failure-text {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  color: var(--ink-0);
+}
+.hero-failure-detail {
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--ink-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

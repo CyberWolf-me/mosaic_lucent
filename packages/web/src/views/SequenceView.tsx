@@ -11,7 +11,7 @@ import { toSequence } from "../board/sequence.js";
  * an empty state explains that rather than showing a demo flow that reads as
  * real board data; the sample is available behind an explicit toggle. */
 export function SequenceView({ onOpenSettings }: { onOpenSettings: (section?: string) => void }) {
-  const { workspace, chat, send, setView } = useWorkspace();
+  const { workspace, chat, send, setView , projectName } = useWorkspace();
   const [message, setMessage] = useState("");
   const [showSample, setShowSample] = useState(false);
   const submit = () => {
@@ -57,8 +57,8 @@ export function SequenceView({ onOpenSettings }: { onOpenSettings: (section?: st
       </div>
       <TopBar
         crumbs={[
-          { label: "Personal" },
-          { label: "Workspace", view: "canvas" },
+          { label: "Boards", view: "dashboard" },
+          { label: projectName || "Untitled board", view: "canvas" },
           { label: "Sequence", current: true },
         ]}
         onOpenSettings={onOpenSettings}

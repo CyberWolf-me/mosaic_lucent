@@ -9,7 +9,7 @@ import { boardToMarkdown } from "../board/serialize.js";
  * Markdown-style outline; the underlying text is the same boardToMarkdown used
  * for export, so the view and the file stay in sync. */
 export function DocumentView({ onOpenSettings }: { onOpenSettings: (section?: string) => void }) {
-  const { workspace, chat, send, setView } = useWorkspace();
+  const { workspace, chat, send, setView , projectName } = useWorkspace();
   const [message, setMessage] = useState("");
   const submit = () => {
     const text = message.trim();
@@ -32,8 +32,8 @@ export function DocumentView({ onOpenSettings }: { onOpenSettings: (section?: st
       </div>
       <TopBar
         crumbs={[
-          { label: "Personal" },
-          { label: "Workspace", view: "canvas" },
+          { label: "Boards", view: "dashboard" },
+          { label: projectName || "Untitled board", view: "canvas" },
           { label: "Document", current: true },
         ]}
         onOpenSettings={onOpenSettings}

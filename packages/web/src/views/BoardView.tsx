@@ -29,7 +29,7 @@ interface ActiveDrag {
  * over the same semantic model — no separate task store.
  */
 export function BoardView({ onOpenSettings }: { onOpenSettings: (section?: string) => void }) {
-  const { workspace, chat, send, setView, applyManual, boardId } = useWorkspace();
+  const { workspace, chat, send, setView, applyManual, boardId , projectName } = useWorkspace();
   const [message, setMessage] = useState("");
   const [activeDrag, setActiveDrag] = useState<ActiveDrag | null>(null);
   const [overCol, setOverCol] = useState<IssueStatusCategory | null>(null);
@@ -143,9 +143,9 @@ export function BoardView({ onOpenSettings }: { onOpenSettings: (section?: strin
       </div>
       <TopBar
         crumbs={[
-          { label: "Personal" },
-          { label: "Workspace", view: "canvas" },
-          { label: "Board", current: true },
+          { label: "Boards", view: "dashboard" },
+          { label: projectName || "Untitled board", view: "canvas" },
+          { label: "Kanban", current: true },
         ]}
         onOpenSettings={onOpenSettings}
       />

@@ -70,7 +70,7 @@ export function ShapeToolbar({
   onSelectTool?: (t: Tool) => void;
   onEmbed?: () => void;
   onGenImage?: () => void;
-  orientation?: "left" | "bottom";
+  orientation?: "left" | "bottom" | "top";
 }) {
   const [tool, setTool] = useState<Tool>(activeTool);
 
@@ -228,9 +228,6 @@ export function ShapeElement({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editRequested]);
 
-  // Hidden shapes are not rendered on the canvas (still in the model).
-  if (shape.hidden) return null;
-
   const defaultText =
     text ??
     (kind === "sticky"
@@ -251,6 +248,12 @@ export function ShapeElement({
   const resizeRef = useRef<{ startX: number; startY: number; baseW: number; baseH: number } | null>(
     null,
   );
+
+  // Hidden shapes are not rendered on the canvas (still in the model). This
+  // must come after every hook: returning before `dragging`/`resizeRef`
+  // meant hiding or showing a shape changed the hook count and React threw
+  // ("Rendered fewer hooks than expected").
+  if (shape.hidden) return null;
 
   const startResize = (e: React.PointerEvent) => {
     e.stopPropagation();

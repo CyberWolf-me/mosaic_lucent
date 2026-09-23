@@ -129,6 +129,13 @@ export interface ChatEntry {
   role: "user" | "ai" | "error";
   text: string;
   /**
+   * On an AI reply that changed the board: what it changed (turnEffect.ts),
+   * computed from the ops actually applied. The conversation then reads as
+   * a log of what the team's board learned, not just of messages. Optional
+   * so older saved conversations keep parsing.
+   */
+  effect?: import("./turnEffect.js").TurnEffect;
+  /**
    * True when the AI judged this request to be about a different system than
    * the board shows (the prompt's parallel-diagram rule) and described what it
    * would build instead. The chat entry then carries a one-click "create that

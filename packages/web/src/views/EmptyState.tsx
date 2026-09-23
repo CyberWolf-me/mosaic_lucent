@@ -1,13 +1,41 @@
-import { Ico } from "../ui/icons.js";
+import { useRef, useState } from "react";
+import { Ico, ToolIco } from "../ui/icons.js";
 import { useToast } from "../ui/Toast.js";
+import { downscaleImage } from "../board/images.js";
 
-/** The "magic moment" hero, ported from reference/screen_empty.jsx. */
+/** What the hero hands the model alongside the words. */
+export interface HeroAttachments {
+  images?: Array<{ data: string; mediaType: string }>;
+  documents?: Array<{ name: string; text: string }>;
+}
+
+interface Picked {
+  id: string;
+  name: string;
+  kind: "image" | "document";
+  image?: { data: string; mediaType: string };
+  document?: { name: string; text: string };
+}
+
+const TEXT_TYPES = /\.(txt|md|markdown|csv|json|ya?ml|log)$/i;
+const MAX_FILES = 4;
+const MAX_DOC_CHARS = 20_000;
+
+/**
+ * The first screen of a new board — the "magic moment" (docs/01). It offers
+ * the two ways into Lucent as equals: describe it (typed, dictated, or with a
+ * screenshot / document attached), or start a meeting and let Lucent listen.
+ * Everything here does something real; the old Attach button only said
+ * "coming soon".
+ */
 export function EmptyState({
   value,
   onChange,
   onSubmit,
+  onSubmitWithAttachments,
   onSpeak,
   onBlankBoard,
+  onStartMeeting,
   failedAttempt,
   onStartVoiceCall,
   voiceAgentActive,
@@ -17,8 +45,11 @@ export function EmptyState({
   value: string;
   onChange: (v: string) => void;
   onSubmit: () => void;
+  /** Send the words with attached files (images → vision, text → documents). */
+  onSubmitWithAttachments?: (attachments: HeroAttachments) => void;
   onSpeak: () => void;
   onBlankBoard?: () => void;
+  onStartMeeting?: () => void;
   onStartVoiceCall?: () => void;
   voiceAgentActive?: boolean;
   listening?: boolean;
@@ -26,12 +57,61 @@ export function EmptyState({
   failedAttempt?: { text: string; retryPrompt?: string } | null;
 }) {
   const { notify } = useToast();
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [picked, setPicked] = useState<Picked[]>([]);
+  const [reading, setReading] = useState(false);
+
+  // Suggestions that show what Lucent is for: not just a diagram topic, but
+  // the decisions, questions and owners a conversation carries.
   const suggestions = [
+    "Checkout redesign — we chose guest checkout; open question: Apple Pay at launch?",
     "An e-commerce platform with Stripe payments",
-    "The architecture for a real-time chat app",
-    "A user journey for SaaS onboarding",
-    "Mind map for a new product launch",
+    "Onboarding journey for a B2B SaaS — where do users drop off?",
+    "Architecture for a real-time chat app; risk: message ordering at scale",
   ];
+
+  const addFiles = async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    setReading(true);
+    const next: Picked[] = [];
+    for (const file of [...files].slice(0, MAX_FILES - picked.length)) {
+      const id = `${file.name}-${file.size}-${file.lastModified}`;
+      if (file.type.startsWith("image/")) {
+        // Same downscale as pasting onto the board: a 12 MP screenshot must
+        // not become a multi-megabyte request.
+        const scaled = await downscaleImage(file);
+        const match = scaled && /^data:([^;,]+);base64,(.+)$/s.exec(scaled.dataUrl);
+        if (!match) {
+          notify(`Couldn't read ${file.name} as an image.`);
+          continue;
+        }
+        next.push({ id, name: file.name, kind: "image", image: { mediaType: match[1]!, data: match[2]! } });
+      } else if (file.type.startsWith("text/") || TEXT_TYPES.test(file.name)) {
+        const text = (await file.text()).slice(0, MAX_DOC_CHARS);
+        if (!text.trim()) continue;
+        next.push({ id, name: file.name, kind: "document", document: { name: file.name, text } });
+      } else {
+        notify(`${file.name}: attach an image or a text file (.txt, .md, .csv, .json). For a PDF, paste its text.`);
+      }
+    }
+    setReading(false);
+    setPicked((p) => [...p, ...next.filter((n) => !p.some((x) => x.id === n.id))].slice(0, MAX_FILES));
+    if (fileRef.current) fileRef.current.value = "";
+  };
+
+  const begin = () => {
+    if (picked.length > 0 && onSubmitWithAttachments) {
+      const images = picked.flatMap((p) => (p.image ? [p.image] : []));
+      const documents = picked.flatMap((p) => (p.document ? [p.document] : []));
+      onSubmitWithAttachments({
+        ...(images.length ? { images } : {}),
+        ...(documents.length ? { documents } : {}),
+      });
+      setPicked([]);
+      return;
+    }
+    onSubmit();
+  };
 
   return (
     <div className="empty-hero">
@@ -39,57 +119,30 @@ export function EmptyState({
 
       <div className="empty-badge">
         <span className="empty-badge-dot" />
-        Lucent · Studio ready
+        Think out loud · Build visually
       </div>
 
-      <h1 className="empty-title">
-        What are you thinking about?
+      <h1 className="empty-title hero-title">
+        What are you <em>thinking</em> about?
       </h1>
 
       <p className="empty-sub">
-        Describe an idea, a system, a flow. Lucent turns your words into an editable visual workspace
-        you can shape as you talk.
+        Describe an idea, a system, a decision in the making — or start a meeting and let Lucent
+        listen. Every object it draws remembers the words that made it.
       </p>
 
       {failedAttempt && (
-        <div
-          role="alert"
-          style={{
-            width: 640,
-            maxWidth: "100%",
-            display: "flex",
-            alignItems: "center",
-            gap: 12,
-            padding: "12px 16px",
-            border: "1px solid var(--sig-red)",
-            borderRadius: "var(--r-lg)",
-            background: "oklch(from var(--canvas-2) l c h / 0.85)",
-            backdropFilter: "blur(16px)",
-          }}
-        >
-          <span style={{ color: "var(--sig-red)", fontSize: 15 }}>⚠</span>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 12.5, color: "var(--ink-0)", lineHeight: 1.45 }}>
-              That didn't work — the board is still empty, your request wasn't lost.
-            </div>
-            <div
-              className="mono"
-              style={{
-                fontSize: 11,
-                color: "var(--ink-3)",
-                marginTop: 3,
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-                whiteSpace: "pre-wrap",
-              }}
-            >
-              {failedAttempt.text}
-            </div>
+        <div className="hero-failure" role="alert">
+          <span className="hero-failure-mark" aria-hidden>
+            !
+          </span>
+          <div className="hero-failure-text">
+            <div>That didn't work — the board is still empty, and your request wasn't lost.</div>
+            <div className="mono hero-failure-detail">{failedAttempt.text}</div>
           </div>
           {failedAttempt.retryPrompt && (
             <button
-              className="btn amber"
-              style={{ flex: "none", height: 30, padding: "0 14px", fontSize: 12 }}
+              className="btn-atelier ghost sm"
               onClick={() => {
                 if (failedAttempt.retryPrompt) onChange(failedAttempt.retryPrompt);
               }}
@@ -111,112 +164,103 @@ export function EmptyState({
           value={value}
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Enter") onSubmit();
+            if (e.key === "Enter") begin();
           }}
-          placeholder="e.g. I'm building an e-commerce platform. Customers browse, add to cart, checkout, pay with Stripe…"
+          placeholder="e.g. Customers browse restaurants, pay with Stripe, and track the driver. We decided on…"
         />
-        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-          {onStartVoiceCall && (
-            <button
-              className={`icon-btn voice-call-btn ${voiceAgentActive ? "active" : ""}`}
-              style={{
-                background: voiceAgentActive
-                  ? "linear-gradient(135deg, var(--sig-violet), oklch(0.55 0.18 280))"
-                  : "oklch(from var(--sig-violet) l c h / 0.12)",
-                color: voiceAgentActive ? "var(--canvas-0)" : "var(--sig-violet)",
-                border: "1px solid oklch(from var(--sig-violet) l c h / 0.35)",
-                fontWeight: 600,
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 6,
-                boxShadow: voiceAgentActive ? "0 0 16px oklch(from var(--sig-violet) l c h / 0.4)" : undefined,
-              }}
-              onClick={onStartVoiceCall}
-              title="Live Duplex Voice Call (Talk conversationally with Lucent AI co-pilot)"
-            >
-              <Ico.Phone style={{ width: 14, height: 14 }} />
-              {voiceAgentActive ? "In Call…" : "Live Call"}
-            </button>
-          )}
+        {picked.length > 0 && (
+          <div className="hero-files" aria-label="Attached files">
+            {picked.map((p) => (
+              <span key={p.id} className="hero-file">
+                {p.kind === "image" ? <ToolIco.Media /> : <Ico.Book />}
+                <span className="hero-file-name">{p.name}</span>
+                <button
+                  onClick={() => setPicked((all) => all.filter((x) => x.id !== p.id))}
+                  aria-label={`Remove ${p.name}`}
+                  title="Remove"
+                >
+                  <Ico.X />
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
+        <div className="hero-actions">
           <button
-            className={`icon-btn ${listening ? "active" : ""}`}
-            style={{
-              background: listening ? "oklch(from var(--sig-red) l c h / 0.18)" : "var(--canvas-3)",
-              color: listening ? "var(--sig-red)" : "inherit",
-              border: listening ? "1px solid var(--sig-red)" : undefined,
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 6,
-            }}
+            className={`hero-chip ${listening ? "on danger" : ""}`}
             onClick={onSpeak}
-            title={listening ? "Listening… click to submit" : "Voice Dictation (transcribe speech into prompt)"}
+            title={listening ? "Listening… click to stop" : "Dictate your description"}
           >
             <Ico.Mic2 /> {listening ? "Listening…" : "Speak"}
           </button>
-          {onGenImage && (
+          {onStartVoiceCall && (
             <button
-              className="icon-btn"
-              style={{ background: "var(--canvas-3)", display: "inline-flex", alignItems: "center", gap: 6 }}
-              onClick={onGenImage}
-              title="Generate reference image or logo with AI"
+              className={`hero-chip ${voiceAgentActive ? "on" : ""}`}
+              onClick={onStartVoiceCall}
+              title="Talk it through with Lucent in a live voice call"
             >
-              <Ico.Sparkle /> Image / Logo
+              <Ico.Phone /> {voiceAgentActive ? "In call…" : "Live call"}
             </button>
           )}
-          <button
-            className="icon-btn"
-            onClick={() =>
-              notify(
-                "File attachments are coming soon — describe it in words for now.",
-                <Ico.Attach />,
-              )
-            }
-          >
-            <Ico.Attach /> Attach
-          </button>
+          {onSubmitWithAttachments && (
+            <>
+              <button
+                className="hero-chip"
+                onClick={() => fileRef.current?.click()}
+                disabled={reading || picked.length >= MAX_FILES}
+                title="Attach a screenshot, whiteboard photo, or a text document for Lucent to read"
+              >
+                <Ico.Attach /> {reading ? "Reading…" : "Attach"}
+              </button>
+              <input
+                ref={fileRef}
+                type="file"
+                multiple
+                accept="image/*,.txt,.md,.markdown,.csv,.json,.yaml,.yml"
+                className="sr-only"
+                tabIndex={-1}
+                aria-hidden
+                onChange={(e) => void addFiles(e.target.files)}
+              />
+            </>
+          )}
+          {onGenImage && (
+            <button className="hero-chip" onClick={onGenImage} title="Generate a reference image or logo">
+              <Ico.Sparkle /> Image
+            </button>
+          )}
           <div style={{ flex: 1 }} />
-          <span style={{ fontSize: 11, color: "var(--ink-3)", fontFamily: "var(--font-mono)" }}>
-            Enter to send
-          </span>
+          <span className="hero-hint">Enter to send</span>
           <button
-            className="btn amber"
-            style={{ flex: "none", padding: "0 18px", height: 34 }}
-            onClick={onSubmit}
+            className="btn-atelier primary hero-begin"
+            onClick={begin}
+            disabled={!value.trim() && picked.length === 0}
           >
             Begin <Ico.Arrow />
           </button>
         </div>
       </div>
 
-      <div
-        style={{
-          display: "flex",
-          gap: 8,
-          flexWrap: "wrap",
-          justifyContent: "center",
-          maxWidth: 720,
-          marginTop: 4,
-        }}
-      >
+      <div className="hero-suggestions">
         {suggestions.map((s, i) => (
-          <button
-            key={i}
-            className="empty-chip"
-            onClick={() => onChange(s)}
-          >
+          <button key={i} className="empty-chip" onClick={() => onChange(s)}>
             {s}
           </button>
         ))}
       </div>
 
-      {onBlankBoard && (
-        <button
-          className="empty-blank-btn"
-          onClick={onBlankBoard}
-        >
-          or start with a blank board <Ico.Arrow />
-        </button>
-      )}
+      <div className="hero-alt">
+        {onStartMeeting && (
+          <button className="hero-alt-btn" onClick={onStartMeeting}>
+            <Ico.Present /> Start a meeting instead
+          </button>
+        )}
+        {onBlankBoard && (
+          <button className="hero-alt-btn quiet" onClick={onBlankBoard}>
+            or start with a blank board <Ico.Arrow />
+          </button>
+        )}
+      </div>
     </div>
   );
 }

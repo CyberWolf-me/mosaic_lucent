@@ -26,6 +26,12 @@ export interface Crumb {
   label: string;
   current?: boolean;
   view?: View;
+  /**
+   * The crumb IS the board's name and clicking it renames the board. Opt-in:
+   * it used to be implied by `current`, so a page title crumb ("Home",
+   * "Intelligence") opened a rename-the-board box.
+   */
+  rename?: boolean;
 }
 
 export function TopBar({
@@ -33,14 +39,21 @@ export function TopBar({
   actions,
   meta,
   onOpenSettings,
+  boardActions = true,
 }: {
   crumbs: Crumb[];
   actions?: React.ReactNode;
   /** Optional right-side stamp: a small mono label, like the corner of a sheet. */
   meta?: React.ReactNode;
   onOpenSettings: (section?: string) => void;
+  /**
+   * Share and Meeting act on the open board. On pages that are not about one
+   * board (Home, Boards, Notifications, Admin) they read as "share what?", so
+   * those pages turn them off.
+   */
+  boardActions?: boolean;
 }) {
-  const { setView, readOnly, projectName, setProjectName } = useWorkspace();
+  const { view, setView, readOnly, projectName, setProjectName } = useWorkspace();
   const [share, setShare] = useState(false);
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState(projectName);
@@ -70,7 +83,7 @@ export function TopBar({
             >
               {c.label}
             </button>
-          ) : c.current && !readOnly ? (
+          ) : c.current && c.rename && !readOnly ? (
             editingTitle ? (
               <input
                 autoFocus
@@ -129,17 +142,21 @@ export function TopBar({
               <Ico.Eye /> View only
             </span>
           )}
-          <button className="icon-btn" onClick={() => setShare(true)} aria-label="Share board">
-            <Ico.Share /> Share
-          </button>
-          <button
-            className="icon-btn"
-            onClick={() => setView("meeting")}
-            title="Start or join a meeting on this board"
-            aria-label="Meeting"
-          >
-            <Ico.Present /> Meeting
-          </button>
+          {boardActions && (
+            <button className="icon-btn" onClick={() => setShare(true)} aria-label="Share board">
+              <Ico.Share /> Share
+            </button>
+          )}
+          {boardActions && view !== "meeting" && (
+            <button
+              className="icon-btn"
+              onClick={() => setView("meeting")}
+              title="Start or join a meeting on this board"
+              aria-label="Meeting"
+            >
+              <Ico.Present /> Meeting
+            </button>
+          )}
           <ProfileMenu onOpenSettings={onOpenSettings} onNavigate={setView} />
         </>
       </div>
@@ -853,7 +870,8 @@ export function ZoomBadge({
       style={{
         position: "absolute",
         bottom: 20,
-        left: 20,
+        // Clear of the rail (x 12–68).
+        left: 84,
         zIndex: 25,
         display: "flex",
         alignItems: "center",

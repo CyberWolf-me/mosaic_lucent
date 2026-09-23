@@ -4,6 +4,10 @@ import { AllowanceNote } from "./Paywall.js";
 import type { ChatEntry } from "../persistence.js";
 import type { AskCitation } from "../boards.js";
 import { useWorkspace } from "../workspace.js";
+import { StatementGlyph } from "./StatementGlyph.js";
+import { KIND_LABEL } from "../statementUi.js";
+import { isEmptyEffect, type TurnEffect } from "../turnEffect.js";
+import type { StatementKind } from "@lucent/core";
 
 /**
  * Floating conversational pill ported from reference/components/ai_pill.jsx.
@@ -19,11 +23,13 @@ export type PillMode = "build" | "ask";
 /** UX-2 generation phase: the machine-readable half of the pill status. */
 export type AIPhase = "understanding" | "constructing" | "validating" | "applying";
 
+// What is actually happening, in the user's terms — the old labels
+// ("Designing architecture…") named a diagram kind the request may not be.
 const PHASE_LABEL: Record<AIPhase, string> = {
-  understanding: "Parsing intent…",
-  constructing: "Designing architecture…",
-  validating: "Optimizing layout…",
-  applying: "Rendering nodes…",
+  understanding: "Reading your request…",
+  constructing: "Building the model…",
+  validating: "Checking every change…",
+  applying: "Placing it on the board…",
 };
 
 export function AIPill({
@@ -335,7 +341,7 @@ export function AIPill({
           }}
           className="ai-msg-count-btn"
         >
-          {history.length} messages ↑
+          <Ico.Comment /> Conversation · {history.filter((m) => m.role === "user").length}
         </button>
       )}
     </div>
@@ -391,6 +397,9 @@ function ConvoTurn({
         >
           {entry.text}
         </div>
+        {!isUser && entry.effect && !isEmptyEffect(entry.effect) && (
+          <EffectLine effect={entry.effect} />
+        )}
         {!isUser && entry.suggestNewBoard && entry.originPrompt && (
           <NewBoardAction prompt={entry.originPrompt} />
         )}
@@ -412,6 +421,44 @@ function ConvoTurn({
           <CitationList citations={entry.citations} onCitation={onCitation} />
         )}
       </div>
+    </div>
+  );
+}
+
+const EFFECT_ORDER: StatementKind[] = [
+  "decision",
+  "proposal",
+  "question",
+  "action",
+  "requirement",
+  "risk",
+];
+
+/**
+ * What the turn did to the board, under the reply: counts from the ops that
+ * were applied, and the statements it introduced by kind — so the
+ * conversation reads as a log of what the board learned.
+ */
+function EffectLine({ effect }: { effect: TurnEffect }) {
+  const parts: string[] = [];
+  if (effect.created) parts.push(`added ${effect.created}`);
+  if (effect.connected) parts.push(`connected ${effect.connected}`);
+  if (effect.changed) parts.push(`changed ${effect.changed}`);
+  if (effect.resolved) parts.push(`moved ${effect.resolved} forward`);
+  if (effect.removed) parts.push(`removed ${effect.removed}`);
+  const kinds = EFFECT_ORDER.filter((k) => (effect.statements[k] ?? 0) > 0);
+  return (
+    <div className="turn-effect" aria-label="What this changed">
+      {parts.length > 0 && <span className="turn-effect-counts">{parts.join(" · ")}</span>}
+      {kinds.map((k) => {
+        const n = effect.statements[k] ?? 0;
+        return (
+          <span key={k} className="turn-effect-kind" style={{ color: `var(--kind-${k})` }}>
+            <StatementGlyph kind={k} size={10} />
+            {n} {(n === 1 ? KIND_LABEL[k].one : KIND_LABEL[k].many).toLowerCase()}
+          </span>
+        );
+      })}
     </div>
   );
 }

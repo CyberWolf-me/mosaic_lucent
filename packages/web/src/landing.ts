@@ -44,7 +44,8 @@ export function landingView(): View {
       .slice(0, 8)
       .some((p) => {
         const ws = loadProject(p.id)?.workspace;
-        return !!ws && Object.keys(ws.nodes).length + Object.keys(ws.shapes).length > 0;
+        if (!ws) return false;
+        return Object.keys(ws.nodes).length + Object.keys(ws.shapes).length > 0;
       });
     return hasWork ? "home" : "canvas";
   } catch {

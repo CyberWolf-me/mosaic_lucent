@@ -1,3 +1,11 @@
+@import "./styles/home.css";
+@import "./styles/boards.css";
+@import "./styles/canvas.css";
+@import "./styles/meeting.css";
+@import "./styles/intelligence.css";
+@import "./styles/execution.css";
+@import "./styles/history.css";
+
 /* ============================================================
    LUCENT — product layer (Atelier)
 
@@ -17,6 +25,14 @@
 /* ---------------------------------------------------------------
    1 · Shell
    --------------------------------------------------------------- */
+
+/* The app scrolls inside its panes (.page, the canvas), never the document.
+   Hidden hover labels hanging past the right edge made the root 6px wider
+   than the viewport; clip (unlike hidden) also refuses programmatic scroll,
+   so a focus or scrollIntoView can't nudge the whole shell sideways. */
+html {
+  overflow: clip;
+}
 
 .top-bar {
   height: 56px;
@@ -713,11 +729,13 @@ button.stat-tile:hover {
   padding: 20px 18px;
   gap: 4px;
 }
-.empty-glyph {
+/* Scoped under .empty-state: the canvas hero already owns a bare
+   .empty-title, and an unscoped kit rule shrank its headline. */
+.empty-state .empty-glyph {
   margin-bottom: 6px;
   color: var(--ink-3);
 }
-.empty-title {
+.empty-state .empty-title {
   font-family: var(--font-serif);
   font-size: 17px;
   color: var(--ink-0);
@@ -725,14 +743,14 @@ button.stat-tile:hover {
 .empty-state.compact .empty-title {
   font-size: 14.5px;
 }
-.empty-body {
+.empty-state .empty-body {
   max-width: 440px;
   font-size: 13px;
   line-height: 1.5;
   color: var(--ink-2);
   text-wrap: pretty;
 }
-.empty-action {
+.empty-state .empty-action {
   margin-top: 10px;
   display: flex;
   gap: 8px;
@@ -816,4 +834,82 @@ button.prov-chip:hover {
 .btn-atelier.quiet:hover:not(:disabled) {
   color: var(--ink-0);
   background: oklch(from var(--paper-3) l c h / 0.6);
+}
+
+/* Settings → Team: real members and invites. */
+.team-member {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 0;
+}
+.team-member + .team-member {
+  border-top: 1px dashed oklch(from var(--paper-4) l c h / 0.5);
+}
+.team-member .avatar {
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--paper-0);
+  background: var(--ink-2);
+}
+.team-member-who {
+  flex: 1;
+  min-width: 0;
+}
+.team-member-name {
+  font-size: 13px;
+  color: var(--ink-0);
+}
+.team-member-email {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--ink-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.team-member-role {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+}
+.team-invite {
+  display: flex;
+  gap: 8px;
+}
+.team-invite input,
+.team-invite select {
+  padding: 9px 12px;
+  border-radius: 8px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--ink-0);
+  background: var(--paper-1);
+  border: 1px solid oklch(from var(--paper-4) l c h / 0.7);
+}
+.team-invite input {
+  flex: 1;
+  min-width: 0;
+}
+.team-note {
+  margin-top: 8px;
+  font-size: 12.5px;
+}
+.team-note.ok {
+  color: var(--moss);
+}
+.team-note.error {
+  color: var(--madder);
+}
+.team-pending {
+  margin-top: 16px;
 }

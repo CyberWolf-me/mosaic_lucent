@@ -73,6 +73,7 @@ import {
 } from "./persistence.js";
 import { settingsStore } from "./settings.js";
 import { initialLocation } from "./landing.js";
+import { turnEffect } from "./turnEffect.js";
 
 /**
  * Central workspace state: the real @lucent/core Workspace + History, the
@@ -1386,7 +1387,20 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
                   : {}),
               quote: provenance.turns.join(" ").slice(0, 240),
             })
-          : result.operations;
+          : attachments?.plan
+            ? // A plan's evidence is its source statements (createdFrom,
+              // stamped below); its "message" is machine-written.
+              result.operations
+            : // ADR 0042: a request typed or spoken to the board is evidence
+              // too — who asked, when, and the words — so a chat-built node
+              // can answer "why is this here?" like a meeting-built one.
+              attachProvenance(result.operations, {
+                conversation: {
+                  at: Date.now(),
+                  ...(getSessionUser()?.name ? { by: getSessionUser()!.name.slice(0, 80) } : {}),
+                },
+                quote: text.slice(0, 240),
+              });
         // The plan gate (Stage D2, ADR 0028): a PLAN request's ops are
         // filtered against PLAN_SAFE_OOPS before they touch anything —
         // lifecycle conversion (UPDATE_STATEMENT) is mechanically absent, so
@@ -1528,7 +1542,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           const next = applyStamped();
           const conversation: ChatEntry[] = [
             ...withUser,
-            { role: "ai", text: explanation, ...skippedNote },
+            { role: "ai", text: explanation, ...skippedNote, effect: turnEffect(foldedOps) },
           ];
           setChat(conversation);
           // The folded ops, not the raw model batch — the stamp and the
@@ -1811,6 +1825,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       {
         role: "ai",
         text: `Applied ${appliedOps.length} changes as one commit.${skippedNote}`,
+        effect: turnEffect(appliedOps),
       },
     ];
     setChat(conversation);

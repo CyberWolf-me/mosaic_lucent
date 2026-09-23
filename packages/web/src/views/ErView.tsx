@@ -8,7 +8,7 @@ import { toEr } from "../board/er.js";
 /** Entity-relationship view — derived from the semantic graph (docs/15 Phase D).
  * Each node becomes an entity table; edges become labelled relationships. */
 export function ErView({ onOpenSettings }: { onOpenSettings: (section?: string) => void }) {
-  const { workspace, chat, send, setView } = useWorkspace();
+  const { workspace, chat, send, setView , projectName } = useWorkspace();
   const [message, setMessage] = useState("");
   const submit = () => {
     const text = message.trim();
@@ -28,8 +28,8 @@ export function ErView({ onOpenSettings }: { onOpenSettings: (section?: string) 
       </div>
       <TopBar
         crumbs={[
-          { label: "Personal" },
-          { label: "Workspace", view: "canvas" },
+          { label: "Boards", view: "dashboard" },
+          { label: projectName || "Untitled board", view: "canvas" },
           { label: "ER diagram", current: true },
         ]}
         onOpenSettings={onOpenSettings}
