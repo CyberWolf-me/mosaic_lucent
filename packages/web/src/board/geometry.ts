@@ -1,4 +1,4 @@
-import type { Shape, Workspace } from "@lucent/core";
+import type { Shape, ShapeLink, Workspace } from "@lucent/core";
 import { routeStyleFor, routedVertices } from "@lucent/core";
 import { DIAGRAM_LABELS } from "../scene.js";
 import { glyphSvg, nodeGlyphNow } from "../icons/exportSvg.js";
@@ -182,6 +182,8 @@ export function contentBounds(workspace: Workspace): Box | null {
     });
   }
   for (const s of Object.values(workspace.shapes)) {
+    // A hidden shape isn't drawn, so it mustn't stretch a fit or an export.
+    if (s.hidden) continue;
     boxes.push({ x: s.position.x, y: s.position.y, width: s.size.width, height: s.size.height });
   }
   if (boxes.length === 0) return null;
@@ -267,6 +269,69 @@ const escapeXml = (t: string) =>
  * export-PDF renderer builds, so we share one helper.
  */
 export const escapeAttr = (t: string): string => escapeXml(t);
+
+/**
+ * Where a manual connector meets a shape: the midpoint of the side facing the
+ * other end. Shared by the live ShapeLinkLayer and the export, so a link is
+ * drawn the same in both.
+ */
+export function shapeLinkAnchor(box: Box, toward: { x: number; y: number }): { x: number; y: number } {
+  const cx = box.x + box.width / 2;
+  const cy = box.y + box.height / 2;
+  const dx = toward.x - cx;
+  const dy = toward.y - cy;
+  if (Math.abs(dx) * box.height > Math.abs(dy) * box.width) {
+    return { x: dx > 0 ? box.x + box.width : box.x, y: cy };
+  }
+  return { x: cx, y: dy > 0 ? box.y + box.height : box.y };
+}
+
+/** The connector's path between two anchors, per its variant (curved by default). */
+export function shapeLinkPath(
+  a: { x: number; y: number },
+  b: { x: number; y: number },
+  variant: ShapeLink["variant"],
+): string {
+  if (variant === "straight") return `M ${a.x} ${a.y} L ${b.x} ${b.y}`;
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  if (variant === "elbow") {
+    const mx = (a.x + b.x) / 2;
+    const my = (a.y + b.y) / 2;
+    return Math.abs(dx) >= Math.abs(dy)
+      ? `M ${a.x} ${a.y} L ${mx} ${a.y} L ${mx} ${b.y} L ${b.x} ${b.y}`
+      : `M ${a.x} ${a.y} L ${a.x} ${my} L ${b.x} ${my} L ${b.x} ${b.y}`;
+  }
+  if (Math.abs(dx) >= Math.abs(dy)) {
+    const mx = (a.x + b.x) / 2;
+    return `M ${a.x} ${a.y} C ${mx} ${a.y}, ${mx} ${b.y}, ${b.x} ${b.y}`;
+  }
+  const my = (a.y + b.y) / 2;
+  return `M ${a.x} ${a.y} C ${a.x} ${my}, ${b.x} ${my}, ${b.x} ${b.y}`;
+}
+
+/**
+ * A connector's two anchors, or null when an end is gone or hidden — a link
+ * to something you can't see is drawn neither live nor in an export.
+ * `override` moves one shape (the live drag) without touching the board.
+ */
+export function shapeLinkEnds(
+  workspace: Workspace,
+  link: ShapeLink,
+  override?: { id: string; x: number; y: number } | null,
+): { a: { x: number; y: number }; b: { x: number; y: number } } | null {
+  const boxOf = (id: string): Box | null => {
+    const s = workspace.shapes[id];
+    if (!s || s.hidden) return null;
+    const pos = override?.id === id ? { x: override.x, y: override.y } : s.position;
+    return { x: pos.x, y: pos.y, width: s.size.width, height: s.size.height };
+  };
+  const sa = boxOf(link.source);
+  const sb = boxOf(link.target);
+  if (!sa || !sb) return null;
+  const center = (b: Box) => ({ x: b.x + b.width / 2, y: b.y + b.height / 2 });
+  return { a: shapeLinkAnchor(sa, center(sb)), b: shapeLinkAnchor(sb, center(sa)) };
+}
 
 /** Serialize the board (nodes + manual shapes) to a standalone SVG string. */
 export function buildBoardSvg(workspace: Workspace, pad = 40): string {
@@ -363,7 +428,14 @@ export function buildBoardSvg(workspace: Workspace, pad = 40): string {
         `<text x="${x + width / 2}" y="${y + height / 2}" fill="#eee" font-family="sans-serif" font-size="13" text-anchor="middle" dominant-baseline="middle">${escapeXml(n.label)}</text>`,
     );
   }
-  for (const s of Object.values(workspace.shapes)) {
+  // Shapes in the canvas's stacking order, without the hidden ones, each
+  // turned by its rotation about its centre like the live CSS transform
+  // (docs/26 F10: exports used to include hidden shapes and drop rotation).
+  const shapes = Object.values(workspace.shapes)
+    .filter((s) => !s.hidden)
+    .sort((a, b) => (a.z ?? 0) - (b.z ?? 0));
+  for (const s of shapes) {
+    const before = parts.length;
     if (s.kind === "draw" && s.path) {
       // `path` is SVG path data validated by the schema; still escapeAttr so a
       // future model that smuggles a `"` can't break out of the attribute (M0.5).
@@ -438,6 +510,24 @@ export function buildBoardSvg(workspace: Workspace, pad = 40): string {
             : ""),
       );
     }
+    if (s.rotation && parts.length > before) {
+      const cx = s.position.x + s.size.width / 2;
+      const cy = s.position.y + s.size.height / 2;
+      parts[parts.length - 1] = `<g transform="rotate(${s.rotation} ${cx} ${cy})">${parts[parts.length - 1]}</g>`;
+    }
+  }
+
+  // Manual connectors between shapes, over the shapes (the live layer's
+  // z-index puts them above too). Exports used to leave them out entirely.
+  for (const link of Object.values(workspace.shapeLinks)) {
+    const ends = shapeLinkEnds(workspace, link);
+    if (!ends) continue;
+    parts.push(
+      `<path d="${shapeLinkPath(ends.a, ends.b, link.variant)}" fill="none" stroke="#8a8a90" stroke-width="1.5" marker-end="url(#export-arrow)"${link.doubleArrow ? ` marker-start="url(#export-arrow)"` : ""}/>` +
+        (link.label
+          ? `<text x="${(ends.a.x + ends.b.x) / 2}" y="${(ends.a.y + ends.b.y) / 2 - 6}" fill="#aaa" font-family="monospace" font-size="11" text-anchor="middle">${escapeXml(link.label)}</text>`
+          : ""),
+    );
   }
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="${minX} ${minY} ${w} ${h}"><defs><marker id="export-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#8a8a90"/></marker></defs><rect x="${minX}" y="${minY}" width="${w}" height="${h}" fill="#141416"/>${parts.join("")}</svg>`;
 }

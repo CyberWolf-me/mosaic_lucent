@@ -14,6 +14,7 @@ import {
   softClampZoom,
 } from "../src/board/geometry.js";
 import type { Shape } from "@lucent/core";
+import { cloneShapeOp } from "../src/shapes.js";
 
 const shape = (over: Partial<Shape> = {}): Shape => ({
   id: over.id ?? "s",
@@ -253,5 +254,107 @@ describe("board geometry", () => {
       size: { width: 50, height: 50 },
     });
     expect(shapesInFrame(frame, [frame, inside, outside])).toEqual(["in"]);
+  });
+});
+
+/**
+ * docs/26 F10: the export is the board on paper. It used to include shapes the
+ * canvas hides, drop rotation, stack shapes in insertion order, and leave out
+ * every manual connector; and duplicating an image dropped its picture.
+ */
+describe("export fidelity (F10)", () => {
+  const base = (extra: import("@lucent/core").Operation[] = []) =>
+    applyOperations(createWorkspace(), [
+      {
+        op: "CREATE_SHAPE",
+        id: "a",
+        kind: "rect",
+        position: { x: 0, y: 0 },
+        size: { width: 100, height: 60 },
+        text: "Alpha",
+        z: 2,
+      },
+      {
+        op: "CREATE_SHAPE",
+        id: "b",
+        kind: "rect",
+        position: { x: 300, y: 0 },
+        size: { width: 100, height: 60 },
+        text: "Beta",
+        z: 1,
+      },
+      ...extra,
+    ]);
+
+  it("leaves hidden shapes out of the drawing and the bounds", () => {
+    const ws = base([
+      {
+        op: "CREATE_SHAPE",
+        id: "h",
+        kind: "rect",
+        position: { x: 2000, y: 2000 },
+        size: { width: 50, height: 50 },
+        text: "Secret",
+        hidden: true,
+      },
+    ]);
+    const svg = buildBoardSvg(ws);
+    expect(svg).not.toContain("Secret");
+    expect(contentBounds(ws)).toEqual({ x: 0, y: 0, width: 400, height: 60 });
+  });
+
+  it("stacks shapes by z, like the canvas", () => {
+    const svg = buildBoardSvg(base());
+    expect(svg.indexOf("Beta")).toBeLessThan(svg.indexOf("Alpha"));
+  });
+
+  it("turns a rotated shape about its centre", () => {
+    const svg = buildBoardSvg(base([{ op: "UPDATE_SHAPE", id: "a", rotation: 12 }]));
+    expect(svg).toContain('<g transform="rotate(12 50 30)">');
+  });
+
+  it("draws manual connectors, their label and a double arrow — but not to a hidden shape", () => {
+    const ws = base([
+      {
+        op: "CONNECT_SHAPES",
+        id: "l1",
+        source: "a",
+        target: "b",
+        label: "feeds",
+        variant: "straight",
+        doubleArrow: true,
+      },
+    ]);
+    const svg = buildBoardSvg(ws);
+    expect(svg).toContain('<path d="M 100 30 L 300 30"');
+    expect(svg).toContain('marker-start="url(#export-arrow)"');
+    expect(svg).toContain(">feeds</text>");
+    const hidden = applyOperations(ws, [{ op: "UPDATE_SHAPE", id: "b", hidden: true }]);
+    expect(buildBoardSvg(hidden)).not.toContain("feeds");
+  });
+
+  it("a duplicate carries the image, text and style, but not lock or visibility", () => {
+    const img: Shape = shape({
+      id: "img",
+      kind: "image",
+      src: "https://example.com/logo.png",
+      text: "Logo",
+      style: { stroke: "#123456" },
+      locked: true,
+      rotation: 5,
+    });
+    const op = cloneShapeOp(img, "copy", 24, 3);
+    expect(op).toMatchObject({
+      id: "copy",
+      kind: "image",
+      src: "https://example.com/logo.png",
+      text: "Logo",
+      style: { stroke: "#123456" },
+      rotation: 5,
+      position: { x: img.position.x + 24, y: img.position.y + 24 },
+      z: 3,
+    });
+    expect(op).not.toHaveProperty("locked");
+    expect(op).not.toHaveProperty("hidden");
   });
 });

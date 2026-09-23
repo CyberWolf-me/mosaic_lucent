@@ -1,5 +1,5 @@
 import type { Operation, Shape } from "@lucent/core";
-import { shapeId } from "../shapes.js";
+import { cloneShapeOp, shapeId } from "../shapes.js";
 import { alignPositions, distributePositions, type AlignMode } from "../board/geometry.js";
 
 /**
@@ -79,18 +79,7 @@ export function ShapeInspector({
       const s = shapes[id]!;
       const nid = shapeId();
       newIds.add(nid);
-      ops.push({
-        op: "CREATE_SHAPE",
-        id: nid,
-        kind: s.kind,
-        position: { x: s.position.x + 24, y: s.position.y + 24 },
-        size: s.size,
-        ...(s.rotation !== undefined ? { rotation: s.rotation } : {}),
-        ...(s.text !== undefined ? { text: s.text } : {}),
-        ...(s.path !== undefined ? { path: s.path } : {}),
-        ...(s.style ? { style: s.style } : {}),
-        z: (s.z ?? 0) + 1,
-      });
+      ops.push(cloneShapeOp(s, nid, 24, (s.z ?? 0) + 1));
     }
     onApply(ops, `Duplicate ${ids.length} shape${ids.length > 1 ? "s" : ""}`);
     onSelect(newIds);

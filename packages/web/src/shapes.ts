@@ -1,4 +1,4 @@
-import type { Operation } from "@lucent/core";
+import type { Operation, Shape } from "@lucent/core";
 
 /**
  * Default geometry/text for a freshly dropped shape kind. Centralizes the shape
@@ -75,6 +75,35 @@ export function normalizeZ(z: number | undefined): number {
 export function nextZ(shapes: { z?: number }[]): number {
   const top = shapes.reduce((m, s) => Math.max(m, normalizeZ(s.z)), 0);
   return Math.min(top + 1, Z_MAX);
+}
+
+/**
+ * The CREATE_SHAPE that copies `s` as a new shape `id`, offset by `offset`
+ * px — the one definition every duplicate and paste uses. Content travels
+ * whole (text, path, image src, style, rotation); state doesn't: a copy is
+ * unlocked, visible and ungrouped, because it's something you just made and
+ * are about to move. The inspector's duplicate used to hand-copy fields and
+ * forgot `src`, so a duplicated image came out blank (docs/26 F10).
+ */
+export function cloneShapeOp(
+  s: Shape,
+  id: string,
+  offset: number,
+  z: number,
+): Extract<Operation, { op: "CREATE_SHAPE" }> {
+  return {
+    op: "CREATE_SHAPE",
+    id,
+    kind: s.kind,
+    position: { x: s.position.x + offset, y: s.position.y + offset },
+    size: { ...s.size },
+    ...(s.rotation !== undefined ? { rotation: s.rotation } : {}),
+    ...(s.text !== undefined ? { text: s.text } : {}),
+    ...(s.path !== undefined ? { path: s.path } : {}),
+    ...(s.src !== undefined ? { src: s.src } : {}),
+    ...(s.style ? { style: { ...s.style } } : {}),
+    z: normalizeZ(z),
+  };
 }
 
 export function createShapeOp(

@@ -61,7 +61,7 @@ import {
   type VoiceAgentController,
   type VoiceAgentState,
 } from "../stt/voiceAgentSession.js";
-import { nextZ, normalizeZ, shapeId } from "../shapes.js";
+import { cloneShapeOp, nextZ, normalizeZ, shapeId } from "../shapes.js";
 import { resolveEmbed } from "../embed.js";
 import { boardToMarkdown, boardToCsv, csvToStickyOps } from "../board/serialize.js";
 import { boardToMermaid, mermaidToOps } from "../board/mermaid.js";
@@ -1023,19 +1023,7 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
       src.forEach((s, i) => {
         const nid = shapeId();
         newIds.add(nid);
-        ops.push({
-          op: "CREATE_SHAPE",
-          id: nid,
-          kind: s.kind,
-          position: { x: s.position.x + offset, y: s.position.y + offset },
-          size: s.size,
-          ...(s.rotation !== undefined ? { rotation: s.rotation } : {}),
-          ...(s.text !== undefined ? { text: s.text } : {}),
-          ...(s.path !== undefined ? { path: s.path } : {}),
-          ...(s.src !== undefined ? { src: s.src } : {}),
-          ...(s.style ? { style: s.style } : {}),
-          z: normalizeZ(baseZ + i),
-        });
+        ops.push(cloneShapeOp(s, nid, offset, baseZ + i));
       });
       const ok = applyManual(ops, `Paste ${src.length} shape${src.length > 1 ? "s" : ""}`);
       if (!ok) return new Set();

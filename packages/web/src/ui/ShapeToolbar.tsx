@@ -3,7 +3,7 @@ import { ToolIco } from "./icons.js";
 import { isImageDataUrl } from "@lucent/core";
 import type { Shape } from "@lucent/core";
 import { normalizeZ, type DropKind } from "../shapes.js";
-import { DRAG_HYSTERESIS_PX } from "../board/geometry.js";
+import { DRAG_HYSTERESIS_PX, shapeLinkEnds, shapeLinkPath } from "../board/geometry.js";
 import { embedModeOf } from "../embed.js";
 
 export type { DropKind };
@@ -764,54 +764,8 @@ export function ShapeLinkLayer({
 }) {
   const links = Object.values(workspace.shapeLinks);
   if (links.length === 0) return null;
-  const centerOf = (id: string) => {
-    const s = workspace.shapes[id];
-    if (!s) return null;
-    const pos = dragOverride?.id === id ? { x: dragOverride.x, y: dragOverride.y } : s.position;
-    return { x: pos.x + s.size.width / 2, y: pos.y + s.size.height / 2 };
-  };
-
-  const anchorOf = (sId: string, otherCenter: { x: number; y: number }) => {
-    const s = workspace.shapes[sId];
-    if (!s) return null;
-    const pos = dragOverride?.id === sId ? { x: dragOverride.x, y: dragOverride.y } : s.position;
-    const cx = pos.x + s.size.width / 2;
-    const cy = pos.y + s.size.height / 2;
-    const dx = otherCenter.x - cx;
-    const dy = otherCenter.y - cy;
-    if (Math.abs(dx) * s.size.height > Math.abs(dy) * s.size.width) {
-      return { x: dx > 0 ? pos.x + s.size.width : pos.x, y: cy };
-    } else {
-      return { x: cx, y: dy > 0 ? pos.y + s.size.height : pos.y };
-    }
-  };
-
-  const pathFor = (
-    a: { x: number; y: number },
-    b: { x: number; y: number },
-    variant: string | undefined,
-  ) => {
-    if (variant === "straight") return `M ${a.x} ${a.y} L ${b.x} ${b.y}`;
-    const dx = b.x - a.x;
-    const dy = b.y - a.y;
-    if (variant === "elbow") {
-      const mx = (a.x + b.x) / 2;
-      const my = (a.y + b.y) / 2;
-      if (Math.abs(dx) >= Math.abs(dy)) {
-        return `M ${a.x} ${a.y} L ${mx} ${a.y} L ${mx} ${b.y} L ${b.x} ${b.y}`;
-      } else {
-        return `M ${a.x} ${a.y} L ${a.x} ${my} L ${b.x} ${my} L ${b.x} ${b.y}`;
-      }
-    }
-    // curved (default) - smooth bezier
-    if (Math.abs(dx) >= Math.abs(dy)) {
-      const mx = (a.x + b.x) / 2;
-      return `M ${a.x} ${a.y} C ${mx} ${a.y}, ${mx} ${b.y}, ${b.x} ${b.y}`;
-    } else {
-      const my = (a.y + b.y) / 2;
-      return `M ${a.x} ${a.y} C ${a.x} ${my}, ${b.x} ${my}, ${b.x} ${b.y}`;
-    }
-  };
+  // Anchors and paths come from board/geometry, shared with the export, so a
+  // connector is drawn the same live and on paper.
   return (
     <svg
       style={{
@@ -849,17 +803,15 @@ export function ShapeLinkLayer({
         </marker>
       </defs>
       {links.map((l) => {
-        const ca = centerOf(l.source);
-        const cb = centerOf(l.target);
-        if (!ca || !cb) return null;
-        const a = anchorOf(l.source, cb) ?? ca;
-        const b = anchorOf(l.target, ca) ?? cb;
+        const ends = shapeLinkEnds(workspace, l, dragOverride);
+        if (!ends) return null;
+        const { a, b } = ends;
         const mx = (a.x + b.x) / 2;
         const sel = selectedLink === l.id;
         return (
           <g key={l.id}>
             <path
-              d={pathFor(a, b, l.variant)}
+              d={shapeLinkPath(a, b, l.variant)}
               fill="none"
               stroke={sel ? "var(--amber-2)" : "var(--stroke-3)"}
               strokeWidth={sel ? 2.25 : 1.5}
@@ -868,7 +820,7 @@ export function ShapeLinkLayer({
             />
             {/* Wide invisible hit target for selecting the connector. */}
             <path
-              d={pathFor(a, b, l.variant)}
+              d={shapeLinkPath(a, b, l.variant)}
               fill="none"
               stroke="transparent"
               strokeWidth={14}
