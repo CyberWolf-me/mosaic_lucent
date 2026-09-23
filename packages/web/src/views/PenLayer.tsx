@@ -2,8 +2,16 @@ import { useEffect, useRef, useState } from "react";
 import type { Operation } from "@lucent/core";
 import { shapeId, Z_OVERLAY_PEN } from "../shapes.js";
 
+/**
+ * The theme's ink. A stroke in this colour is stored with NO stroke value, so
+ * the renderer's theme default draws it (light ink on the dark canvas, dark on
+ * paper). Board data never carries a var(): the schema refuses it, and it
+ * would not resolve in an export.
+ */
+const INK = "var(--ink-0)";
+
 const PEN_COLORS = [
-  { label: "Ink", value: "var(--ink-0, #111)" },
+  { label: "Ink", value: INK },
   { label: "Blue", value: "oklch(0.62 0.18 250)" },
   { label: "Red", value: "oklch(0.62 0.22 25)" },
   { label: "Green", value: "oklch(0.65 0.18 145)" },
@@ -26,7 +34,7 @@ const PEN_WIDTHS = [
  */
 export function PenLayer({
   scale,
-  stroke = "var(--ink-0)",
+  stroke = INK,
   onCommit,
   onDone,
 }: {
@@ -126,7 +134,7 @@ export function PenLayer({
       position: { x: minX, y: minY },
       size: { width: Math.max(3, maxX - minX), height: Math.max(3, maxY - minY) },
       path: d,
-      style: { stroke: penColor, strokeWidth: penWidth },
+      style: penColor === INK ? { strokeWidth: penWidth } : { stroke: penColor, strokeWidth: penWidth },
       z: 1,
     };
     onCommit(op);

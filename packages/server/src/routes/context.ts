@@ -197,6 +197,17 @@ export interface RouteServices {
     res: ServerResponse,
   ): Promise<{ ok: true; userId?: string } | { ok: false }>;
   requireUser(req: IncomingMessage, res: ServerResponse): Promise<StoredUser | undefined>;
+  /**
+   * The caller of a board-scoped agent route: a signed-in user, or a
+   * board-scoped voice-agent grant (`Authorization: Agent <grant>`,
+   * agentGrant.ts) for exactly this board. `viaAgent` marks the latter so the
+   * route records the change as AI initiated by the user.
+   */
+  requireBoardCaller(
+    req: IncomingMessage,
+    res: ServerResponse,
+    boardId: string,
+  ): Promise<{ user: StoredUser; viaAgent: boolean } | undefined>;
   orgRoleFor(userId: string, orgId: string): Promise<Role | undefined>;
   requireOrgRole(
     req: IncomingMessage,

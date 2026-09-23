@@ -128,6 +128,12 @@ import { registerIntegrationRoutes } from "./routes/integrations.js";
 import { registerSttRoutes } from "./routes/stt.js";
 import { registerTtsRoutes } from "./routes/tts.js";
 import { mintLiveKitToken } from "./livekit.js";
+import {
+  agentGrantFromHeader,
+  issueAgentGrant,
+  resolveRoomAccess,
+  verifyAgentGrant,
+} from "./agentGrant.js";
 import { registerAssetRoutes } from "./routes/assets.js";
 import { registerScimRoutes } from "./routes/scim.js";
 import { PUBLIC_TEMPLATES } from "./publicTemplates.js";
@@ -935,6 +941,32 @@ export function createApp(deps: AppDeps): App {
       return undefined;
     }
     return user;
+  }
+
+  /**
+   * A board route the voice agent may call: a signed-in user, or an
+   * `Authorization: Agent <grant>` for exactly this board (agentGrant.ts).
+   * The grant only identifies the user; the route still checks their current
+   * board role, so revoked access revokes the agent's.
+   */
+  async function requireBoardCaller(
+    req: IncomingMessage,
+    res: ServerResponse,
+    boardId: string,
+  ): Promise<{ user: StoredUser; viaAgent: boolean } | undefined> {
+    const grantToken = agentGrantFromHeader(req.headers.authorization);
+    if (grantToken) {
+      const grant = verifyAgentGrant(grantToken, secret);
+      const user =
+        grant && grant.boardId === boardId ? await userStore.findById(grant.userId) : undefined;
+      if (!user) {
+        send(res, 401, { error: "authentication required" });
+        return undefined;
+      }
+      return { user, viaAgent: true };
+    }
+    const user = await requireUser(req, res);
+    return user ? { user, viaAgent: false } : undefined;
   }
 
   /**
@@ -1898,6 +1930,7 @@ export function createApp(deps: AppDeps): App {
     trace: traceOf,
     requireUserIfNeeded,
     requireUser,
+    requireBoardCaller,
     orgRoleFor,
     requireOrgRole,
     requireBoardRole,
@@ -3149,22 +3182,40 @@ export function createApp(deps: AppDeps): App {
         send(res, 503, { error: "LiveKit is not configured" });
         return;
       }
-      let room = "lucent-voice";
+      let requested: { room?: string; boardId?: string } = {};
       try {
         const raw = await readBody(req);
         const body = raw ? (JSON.parse(raw) as { room?: unknown; boardId?: unknown }) : {};
-        // Room names are scoped per board so presence (and the transcript's
-        // speaker set) never crosses boards; the client may omit the room and
-        // get the default.
-        if (typeof body.room === "string" && body.room.trim().length > 0) {
-          room = body.room.trim().slice(0, 128);
-        } else if (typeof body.boardId === "string" && body.boardId.trim().length > 0) {
-          room = `board-${body.boardId.trim().slice(0, 120)}`;
-        }
+        requested = {
+          ...(typeof body.room === "string" ? { room: body.room.slice(0, 128) } : {}),
+          ...(typeof body.boardId === "string" ? { boardId: body.boardId.slice(0, 120) } : {}),
+        };
       } catch {
-        // An unreadable body keeps the default room — the client contract
-        // sends JSON, but a missing body is not worth failing a mic click on.
+        // An unreadable body gets the caller's private room — the client
+        // contract sends JSON, but a missing body is not worth failing a mic click on.
       }
+      // F1 (docs/26): this route used to mint for ANY room name, so any
+      // signed-in user could join `board-<anyone's id>` — another team's call —
+      // and everyone without a board shared one "lucent-voice" room. Board
+      // rooms now need a role on the board; everything else is the caller's
+      // own private room; any other name is refused.
+      const access = resolveRoomAccess(requested, user.id);
+      if (access.kind === "refused") {
+        send(res, 403, { error: "room not permitted" });
+        return;
+      }
+      if (access.kind === "board") {
+        const guard = await requireBoardRole(
+          req,
+          res,
+          access.boardId,
+          access.minRole,
+          "/api/livekit/token",
+          user,
+        );
+        if (!guard.ok) return;
+      }
+      const room = access.room;
       const minted = mintLiveKitToken({
         config: { apiKey, apiSecret, url },
         room,
@@ -3175,6 +3226,7 @@ export function createApp(deps: AppDeps): App {
         token: minted.token,
         url: minted.url,
         expiresAt: minted.expiresAt,
+        room,
       });
       return;
     }
@@ -3222,9 +3274,32 @@ export function createApp(deps: AppDeps): App {
         return;
       }
 
-      if (boardId) {
-        const guard = await requireBoardRole(req, res, boardId, "editor", "/api/livekit/dispatch", user);
-        if (!guard.ok) return;
+      // F2 (docs/26): the agent edits a board, so it is dispatched FOR a
+      // board, into that board's agent room — never into an arbitrary room
+      // with no board check.
+      if (!boardId) {
+        const fromRoom = /^voice_(.{1,120})$/.exec(room);
+        if (fromRoom) boardId = fromRoom[1]!;
+      }
+      if (!boardId || room !== `voice_${boardId}`) {
+        send(res, 400, { error: "the voice agent is dispatched for a board: send boardId" });
+        return;
+      }
+      const guard = await requireBoardRole(req, res, boardId, "editor", "/api/livekit/dispatch", user);
+      if (!guard.ok) return;
+      // The agent reads the board into a model and writes back, so the agent
+      // boundary (agentDisabled, classification) and the AI boundary are both
+      // checked BEFORE anything is dispatched, not only at write time.
+      for (const boundary of ["agent", "ai"] as const) {
+        const refusal = await outboundRefusal(guard.board, boundary);
+        if (refusal) {
+          send(res, 403, {
+            error: refusal.error,
+            classification: refusal.classification,
+            boundary: refusal.boundary,
+          });
+          return;
+        }
       }
 
       try {
@@ -3232,11 +3307,12 @@ export function createApp(deps: AppDeps): App {
         const httpUrl = url.replace(/^wss:\/\//i, "https://").replace(/^ws:\/\//i, "http://");
         const dispatchClient = new AgentDispatchClient(httpUrl, apiKey, apiSecret);
 
-        const userToken = req.headers["authorization"]?.replace(/^Bearer\s+/i, "") || "";
+        // A board-scoped, two-hour grant — never the user's session token,
+        // which used to ride this metadata through LiveKit (agentGrant.ts).
         const metadata = JSON.stringify({
           boardId,
           userId: user.id,
-          token: userToken,
+          grant: issueAgentGrant({ userId: user.id, boardId }, secret),
         });
 
         const dispatch = await dispatchClient.createDispatch(room, agentName, {
@@ -3838,9 +3914,10 @@ export function createApp(deps: AppDeps): App {
     }
 
     if (req.method === "GET" && req.url?.startsWith("/api/boards/")) {
-      const user = await requireUser(req, res);
-      if (!user) return;
       const id = req.url.slice("/api/boards/".length);
+      const caller = await requireBoardCaller(req, res, id);
+      if (!caller) return;
+      const { user } = caller;
       // Any member may read the board, and learns their own effective role in
       // the same response so the client needn't guess what it may do. A
       // non-member gets 404, not 403, so board ids stay unguessable.
@@ -3855,7 +3932,7 @@ export function createApp(deps: AppDeps): App {
       // boundary by definition. The role guard above ran first, so a stranger
       // still gets 404: the refusal only reaches callers who could see the
       // board anyway.
-      if (req.headers["x-lucent-client"] === "mcp") {
+      if (req.headers["x-lucent-client"] === "mcp" || caller.viaAgent) {
         const refusal = await outboundRefusal(guard.board, "agent");
         if (refusal) {
           send(res, 403, {

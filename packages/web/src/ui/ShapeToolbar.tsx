@@ -4,6 +4,7 @@ import { isImageDataUrl } from "@lucent/core";
 import type { Shape } from "@lucent/core";
 import { normalizeZ, type DropKind } from "../shapes.js";
 import { DRAG_HYSTERESIS_PX } from "../board/geometry.js";
+import { embedModeOf } from "../embed.js";
 
 export type { DropKind };
 
@@ -540,7 +541,7 @@ export function ShapeElement({
   if (kind === "embed") {
     const ew = liveSize?.width ?? size.width;
     const eh = liveSize?.height ?? size.height;
-    const isIframe = (sty?.fill ?? "") === "iframe"; // fill flag marks iframe vs image
+    const isIframe = embedModeOf(src) === "iframe";
     const safeSrc = isHttpUrl(src) ? src : "about:blank";
     return (
       <div

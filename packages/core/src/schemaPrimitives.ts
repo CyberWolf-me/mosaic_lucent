@@ -10,9 +10,11 @@ import * as z from "zod/v4";
  *  - svgPathData: the SVG path grammar (M/L/C/Q/A/Z/H/V/S/T + commas, spaces
  *    and decimals), with a length cap so an attacker can't craft a path that
  *    blows up the layout pass.
- *  - cssColor: a colour literal as the browser accepts it — hex, rgb(), hsl(),
- *    or a named colour. Plain strings are refused because they are an obvious
- *    sink for hostile markup.
+ *  - cssColor: a colour literal — hex, rgb(), hsl(), oklch() or oklab(), with
+ *    numeric channels only. Named colours, var() and relative colour syntax are
+ *    refused: plain words are an obvious sink for hostile markup, and a var()
+ *    resolves only inside the app's stylesheet, so it breaks in an export and
+ *    renders differently under every theme.
  *  - httpUrl: an absolute http(s) URL. The paste path in embed.ts already
  *    enforced this; the op path bypassed it, which is what M0.5 closes.
  *
@@ -26,8 +28,17 @@ const SVG_PATH_GRAMMAR = /^[MmLlHhVvCcSsQqTtAaZz][MmLlHhVvCcSsQqTtAaZz0-9.,\-\s]
 /** 4 KB is enough for any reasonable freeform shape; longer values are noise. */
 export const SVG_PATH_MAX_LENGTH = 4_000;
 
-/** CSS color literals: #rgb / #rrggbb / rgb(...) / rgba(...) / hsl(...) / hsla(...). */
-const CSS_COLOR = /^(#[0-9a-fA-F]{3,8}|rgba?\([0-9.,\s%/]+\)|hsla?\([0-9.,\s%/]+\))$/;
+/**
+ * CSS color literals: #rgb / #rrggbb / rgb[a]() / hsl[a]() / oklch() / oklab().
+ *
+ * The function bodies admit digits, separators, `%`, a sign and the `deg` unit —
+ * nothing that can name something else. oklch/oklab are here because the
+ * product's own palette is written in them: the sticky and inspector colours
+ * were oklch literals, so the schema refused every sticky the canvas created,
+ * and a saved board holding one failed to load (docs/26 F7).
+ */
+const CSS_COLOR =
+  /^(#[0-9a-fA-F]{3,8}|(?:rgba?|hsla?|oklch|oklab)\((?:[0-9.,\s%/+-]|deg)+\))$/;
 
 /** http(s) absolute URL — the only URLs we ever render. */
 const HTTP_URL = /^https?:\/\/[^\s<>"']+$/i;

@@ -8,12 +8,33 @@ import { alignPositions, distributePositions, type AlignMode } from "../board/ge
  * each as an UPDATE_SHAPE / CREATE_SHAPE operation so it persists and undoes.
  */
 
+// Literal colours only: a fill is board DATA, so it must pass the schema's
+// colour grammar and render the same in an export and for every collaborator.
+// These used to include var(--canvas-2), var(--ink-0) and the --sig-* tokens,
+// which the schema refuses, so those swatches silently did nothing
+// (docs/26 F7). The literals are the tokens' light-theme values.
 const FILLS = [
   "oklch(0.90 0.11 92)",
   "oklch(0.86 0.08 235)",
   "oklch(0.86 0.10 10)",
   "oklch(0.87 0.09 145)",
-  "var(--canvas-2)",
+  "oklch(0.945 0.024 84)", // paper
+];
+
+const STROKES = [
+  "oklch(0.20 0.030 45)", // ink
+  "oklch(0.48 0.22 260)", // bloom
+  "oklch(0.72 0.11 235)",
+  "oklch(0.78 0.11 155)",
+  "oklch(0.72 0.15 25)",
+];
+
+const TEXT_COLORS = [
+  "#1a1a1a",
+  "#ffffff",
+  "oklch(0.72 0.11 235)",
+  "oklch(0.72 0.15 25)",
+  "oklch(0.78 0.11 155)",
 ];
 
 export function ShapeInspector({
@@ -176,13 +197,7 @@ export function ShapeInspector({
       <div className="insp-group">
         <span className="insp-cap">Stroke</span>
         <div className="insp-swatches">
-          {[
-            "var(--ink-0)",
-            "var(--amber-2)",
-            "var(--sig-blue)",
-            "var(--sig-green)",
-            "var(--sig-red)",
-          ].map((c) => (
+          {STROKES.map((c) => (
             <button
               key={c}
               className="insp-swatch"
@@ -222,18 +237,16 @@ export function ShapeInspector({
           </button>
         </div>
         <div className="insp-swatches" style={{ marginTop: 6 }}>
-          {["#1a1a1a", "#ffffff", "var(--sig-blue)", "var(--sig-red)", "var(--sig-green)"].map(
-            (c) => (
-              <button
-                key={c}
-                className="insp-swatch"
-                style={{ background: c }}
-                onClick={() => setColor(c)}
-                title="Text colour"
-                aria-label={`Text colour ${c}`}
-              />
-            ),
-          )}
+          {TEXT_COLORS.map((c) => (
+            <button
+              key={c}
+              className="insp-swatch"
+              style={{ background: c }}
+              onClick={() => setColor(c)}
+              title="Text colour"
+              aria-label={`Text colour ${c}`}
+            />
+          ))}
         </div>
       </div>
       <div className="insp-group">

@@ -180,7 +180,7 @@ describe("POST /api/livekit/token (route)", () => {
     expect(res.status).toBe(401);
   });
 
-  it("mints a per-room, per-user token for an authenticated caller", async () => {
+  it("mints a per-user token for an authenticated caller (their private room)", async () => {
     await boot({
       LUCENT_LIVEKIT_API_KEY: API_KEY,
       LUCENT_LIVEKIT_API_SECRET: API_SECRET,
@@ -190,7 +190,7 @@ describe("POST /api/livekit/token (route)", () => {
     const res = await fetch(`${base}/api/livekit/token`, {
       method: "POST",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-      body: JSON.stringify({ room: "brd_meeting" }),
+      body: JSON.stringify({}),
     });
     expect(res.status).toBe(200);
     const body = (await res.json()) as { token: string; url: string; expiresAt: number };
@@ -202,11 +202,13 @@ describe("POST /api/livekit/token (route)", () => {
     if (verified.ok) {
       expect(verified.payload.iss).toBe(API_KEY);
       expect(typeof verified.payload.sub).toBe("string");
-      expect((verified.payload.video as { room: string }).room).toBe("brd_meeting");
+      // docs/26 F1: an arbitrary room name ("brd_meeting") is refused now;
+      // board rooms and the refusal are pinned in voice-security.test.ts.
+      expect((verified.payload.video as { room: string }).room).toMatch(/^user-/);
     }
   });
 
-  it("uses the default room when the body omits one", async () => {
+  it("uses the caller's private room — not a shared one — when the body omits one", async () => {
     await boot({
       LUCENT_LIVEKIT_API_KEY: API_KEY,
       LUCENT_LIVEKIT_API_SECRET: API_SECRET,
@@ -221,7 +223,7 @@ describe("POST /api/livekit/token (route)", () => {
     const body = (await res.json()) as { token: string };
     const verified = verifyLiveKitToken(body.token, API_SECRET);
     if (verified.ok) {
-      expect((verified.payload.video as { room: string }).room).toBe("lucent-voice");
+      expect((verified.payload.video as { room: string }).room).toMatch(/^user-usr_/);
     } else {
       expect.fail("token failed verification");
     }

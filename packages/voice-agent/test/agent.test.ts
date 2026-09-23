@@ -4,17 +4,18 @@ import {
   createApplyOpsTool,
   createGetBoardSummaryTool,
   extractConfigFromJob,
+  resolveLlmConfig,
 } from "../src/agent.js";
 import type { JobContext } from "@livekit/agents";
 
 describe("Voice Agent Context and Tools", () => {
   describe("extractConfigFromJob", () => {
-    it("extracts boardId and token from job metadata", () => {
+    it("extracts boardId and the board grant from job metadata", () => {
       const mockCtx = {
         job: {
           metadata: JSON.stringify({
             boardId: "brd_test123",
-            token: "tok_secret",
+            grant: "ag1.body.sig",
           }),
         },
         room: { name: "voice_room" },
@@ -22,7 +23,7 @@ describe("Voice Agent Context and Tools", () => {
 
       const config = extractConfigFromJob(mockCtx);
       expect(config.boardId).toBe("brd_test123");
-      expect(config.token).toBe("tok_secret");
+      expect(config.grant).toBe("ag1.body.sig");
     });
 
     it("falls back to extracting boardId from room name if metadata is missing", () => {
@@ -50,7 +51,7 @@ describe("Voice Agent Context and Tools", () => {
     it("rejects tool call when boardId is missing", async () => {
       const config: AgentContextConfig = {
         boardId: "",
-        token: "",
+        grant: "",
         serverUrl: "http://127.0.0.1:4387",
       };
       const tool = createApplyOpsTool(config);
@@ -68,7 +69,7 @@ describe("Voice Agent Context and Tools", () => {
     it("filters human-only operations and dispatches repaired ops to server", async () => {
       const config: AgentContextConfig = {
         boardId: "brd_sample",
-        token: "test_token",
+        grant: "test_grant",
         serverUrl: "http://127.0.0.1:4387",
       };
 
@@ -98,7 +99,7 @@ describe("Voice Agent Context and Tools", () => {
       expect(url).toBe("http://127.0.0.1:4387/api/boards/brd_sample/ops");
       expect(init.headers).toEqual(
         expect.objectContaining({
-          authorization: "Bearer test_token",
+          authorization: "Agent test_grant",
           "content-type": "application/json",
         }),
       );
@@ -115,11 +116,52 @@ describe("Voice Agent Context and Tools", () => {
     });
   });
 
+  describe("the board grant", () => {
+    it("refuses to write without a grant — no shared service-token fallback", async () => {
+      const fetchSpy = vi.fn();
+      vi.stubGlobal("fetch", fetchSpy);
+      const tool = createApplyOpsTool({
+        boardId: "brd_sample",
+        grant: "",
+        serverUrl: "http://127.0.0.1:4387",
+      });
+      const res = (await tool.execute(
+        { operations: [{ op: "CREATE_NODE", id: "n1", label: "X" }] },
+        {} as never,
+      )) as { success: boolean; error?: string };
+      expect(res.success).toBe(false);
+      expect(res.error).toMatch(/grant/i);
+      expect(fetchSpy).not.toHaveBeenCalled();
+      vi.unstubAllGlobals();
+    });
+  });
+
+  describe("resolveLlmConfig", () => {
+    it("uses the deployment's own provider variables", () => {
+      expect(
+        resolveLlmConfig({
+          LUCENT_AI_KEY: "k",
+          LUCENT_AI_BASE_URL: "https://gw.example/v1/chat/completions",
+          LUCENT_AI_MODEL: "m",
+        }),
+      ).toEqual({ apiKey: "k", baseURL: "https://gw.example/v1", model: "m" });
+    });
+
+    it("never falls back to a third-party endpoint", () => {
+      expect(() => resolveLlmConfig({})).toThrow(/no AI key/);
+      expect(() => resolveLlmConfig({ LUCENT_AI_KEY: "k", LUCENT_AI_BASE_URL: "https://gw.example" })).toThrow(
+        /LUCENT_AI_MODEL/,
+      );
+      // An OpenAI key alone means OpenAI itself: no baseURL override.
+      expect(resolveLlmConfig({ OPENAI_API_KEY: "sk" })).toEqual({ apiKey: "sk", model: "gpt-4o-mini" });
+    });
+  });
+
   describe("createGetBoardSummaryTool", () => {
     it("returns formatted components summary from server workspace", async () => {
       const config: AgentContextConfig = {
         boardId: "brd_sample",
-        token: "test_token",
+        grant: "test_grant",
         serverUrl: "http://127.0.0.1:4387",
       };
 

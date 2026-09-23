@@ -18,11 +18,11 @@ export interface Template {
   build: () => Operation[];
 }
 
-// Hex, not oklch: a shape fill is board DATA, and the schema's colour check
-// (core schemaPrimitives CSS_COLOR) accepts #hex/rgb()/hsl() only. The oklch
-// literals these used to be failed validation, so every sticky template was
-// refused on insert — from Boards and from the canvas picker alike. Same
-// colours: oklch(0.90 0.11 92), (0.86 0.08 235), (0.87 0.09 145), (0.86 0.10 10).
+// A shape fill is board DATA, checked by the schema's colour grammar (core
+// schemaPrimitives CSS_COLOR). These were switched to hex when that grammar
+// refused oklch; it accepts oklch now (docs/26 F7), and hex stays because it
+// is the most portable form for exports. Same colours: oklch(0.90 0.11 92),
+// (0.86 0.08 235), (0.87 0.09 145), (0.86 0.10 10).
 const AMBER = "#f8dc86";
 const BLUE = "#9ddafe";
 const GREEN = "#afe4b0";

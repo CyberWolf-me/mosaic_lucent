@@ -34,3 +34,12 @@ export function resolveEmbed(raw: string): EmbedInfo | null {
   // Generic page embed.
   return { mode: "iframe", src: url };
 }
+
+/**
+ * How a stored embed renders, derived from its (already resolved) src. The
+ * mode used to ride in `style.fill` as "iframe"/"image", which the schema's
+ * colour check refuses, so every embed insert was silently rejected.
+ */
+export function embedModeOf(src: string | undefined): EmbedInfo["mode"] {
+  return (src && resolveEmbed(src)?.mode) || "iframe";
+}

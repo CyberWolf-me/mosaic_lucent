@@ -42,7 +42,7 @@ export const registerBoardOpsRoutes: RegisterRoutes = (router, s) => {
   const {
     boardStore,
     readBody,
-    requireUser,
+    requireBoardCaller,
     requireBoardRole,
     send,
     requestOrigin,
@@ -56,10 +56,16 @@ export const registerBoardOpsRoutes: RegisterRoutes = (router, s) => {
     // No requireCsrf on this route: the guard only fires for cookie
     // sessions, and adding it would silently break bearer clients that the
     // comment in createApp's `requireCsrf` explicitly anticipates.
-    const user = await requireUser(req, res);
-    if (!user) return;
-    if (!meter(req, res, "/api/boards/:id/ops")) return;
     const boardId = ctx.param("id");
+    const caller = await requireBoardCaller(req, res, boardId);
+    if (!caller) return;
+    const { user, viaAgent } = caller;
+    if (!meter(req, res, "/api/boards/:id/ops")) return;
+    // A voice-agent grant writes AS AI on the user's behalf (ADR 0017): the
+    // history shows Lucent made it and who started the agent, not a human edit.
+    const actor = viaAgent
+      ? ({ actorType: "ai", actorId: "voice-agent", initiatedBy: user.id } as const)
+      : ({ actorType: "user", actorId: user.id, initiatedBy: user.id } as const);
     const guard = await requireBoardRole(req, res, boardId, "editor", "/api/boards/:id/ops", user);
     if (!guard.ok) return;
     // docs/23 S1/S2: the agent boundary. This route is the agent surface —
@@ -205,7 +211,7 @@ export const registerBoardOpsRoutes: RegisterRoutes = (router, s) => {
       // fresher than anything the HTTP caller's earlier read can name. The
       // caller's expectedSeq rides the store fallback below.
       ...(requestId !== undefined ? { requestId } : {}),
-      actor: { actorType: "user", actorId: user.id, initiatedBy: user.id },
+      actor,
     });
     if (roomResult?.ok && roomResult.entry) {
       // The broadcast + persistence the room's ordinary caller (realtime.ts)
@@ -242,7 +248,7 @@ export const registerBoardOpsRoutes: RegisterRoutes = (router, s) => {
       at: Date.now(),
       ...(typeof body.expectedSeq === "number" ? { expectedSeq: body.expectedSeq } : {}),
       ...(requestId !== undefined ? { requestId } : {}),
-      actor: { actorType: "user", actorId: user.id, initiatedBy: user.id },
+      actor,
     });
     if (!append.ok) {
       // Stale or raced: the caller re-reads and re-validates. `head` is

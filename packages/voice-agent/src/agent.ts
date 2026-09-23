@@ -47,13 +47,31 @@ You are interacting with the user over a real-time duplex voice call while they 
 
 export interface AgentContextConfig {
   boardId: string;
-  token: string;
+  /**
+   * The board-scoped grant the server minted at dispatch (server
+   * agentGrant.ts), sent as `Authorization: Agent <grant>`. There is
+   * deliberately no fallback: the agent used to fall back to a static service
+   * token from its environment, so every agent edit ran as one shared account
+   * regardless of who started it. No grant → the tools refuse to write.
+   */
+  grant: string;
   serverUrl: string;
 }
 
+/** The request headers the agent's server calls carry. */
+function authHeaders(config: AgentContextConfig): Record<string, string> {
+  return config.grant ? { authorization: `Agent ${config.grant}` } : {};
+}
+
+const NO_GRANT = {
+  success: false,
+  error:
+    "This voice agent was not dispatched with a board grant, so it cannot read or change the board. Start it from the board in Lucent.",
+} as const;
+
 export function extractConfigFromJob(ctx: JobContext): AgentContextConfig {
   let boardId = "";
-  let token = process.env.LUCENT_MCP_TOKEN || process.env.LUCENT_VOICE_AGENT_TOKEN || "";
+  let grant = "";
   const serverUrl = (
     process.env.LUCENT_SERVER_URL ||
     process.env.LUCENT_MCP_URL ||
@@ -64,10 +82,10 @@ export function extractConfigFromJob(ctx: JobContext): AgentContextConfig {
     try {
       const parsed = JSON.parse(ctx.job.metadata) as {
         boardId?: string;
-        token?: string;
+        grant?: string;
       };
       if (parsed.boardId) boardId = parsed.boardId;
-      if (parsed.token) token = parsed.token;
+      if (parsed.grant) grant = parsed.grant;
     } catch {
       // Ignored if metadata is not JSON
     }
@@ -80,7 +98,34 @@ export function extractConfigFromJob(ctx: JobContext): AgentContextConfig {
     }
   }
 
-  return { boardId, token, serverUrl };
+  return { boardId, grant, serverUrl };
+}
+
+/**
+ * The model the agent talks to: the deployment's own configured provider
+ * (LUCENT_AI_KEY / LUCENT_AI_BASE_URL / LUCENT_AI_MODEL, the server's
+ * variables), or OpenAI when only an OpenAI key is set. Anything missing is
+ * an error the operator sees at start — never a silent fallback to someone
+ * else's endpoint.
+ */
+export function resolveLlmConfig(env: Record<string, string | undefined>): {
+  apiKey: string;
+  baseURL?: string;
+  model: string;
+} {
+  const apiKey = env.LUCENT_AI_KEY || env.OPENAI_API_KEY || "";
+  const rawBase = env.LUCENT_AI_BASE_URL?.trim() || "";
+  const baseURL = rawBase ? rawBase.replace(/\/chat\/completions\/?$/i, "").replace(/\/+$/, "") : undefined;
+  const model = env.LUCENT_AI_MODEL?.trim() || (baseURL ? "" : "gpt-4o-mini");
+  if (!apiKey) {
+    throw new Error(
+      "Voice agent: no AI key. Set LUCENT_AI_KEY (and LUCENT_AI_BASE_URL/LUCENT_AI_MODEL for a non-OpenAI provider), the same values the Lucent server uses.",
+    );
+  }
+  if (!model) {
+    throw new Error("Voice agent: LUCENT_AI_BASE_URL is set but LUCENT_AI_MODEL is not.");
+  }
+  return { apiKey, ...(baseURL ? { baseURL } : {}), model };
 }
 
 export function createApplyOpsTool(config: AgentContextConfig) {
@@ -102,6 +147,7 @@ export function createApplyOpsTool(config: AgentContextConfig) {
       if (!config.boardId) {
         return { success: false, error: "No boardId available in context" };
       }
+      if (!config.grant) return NO_GRANT;
 
       // Filter out human-only operations and repair candidate operations
       const candidate = operations.filter(
@@ -122,10 +168,8 @@ export function createApplyOpsTool(config: AgentContextConfig) {
       try {
         const headers: Record<string, string> = {
           "content-type": "application/json",
+          ...authHeaders(config),
         };
-        if (config.token) {
-          headers["authorization"] = `Bearer ${config.token}`;
-        }
 
         const res = await fetch(`${config.serverUrl}/api/boards/${config.boardId}/ops`, {
           method: "POST",
@@ -170,12 +214,10 @@ export function createGetBoardSummaryTool(config: AgentContextConfig) {
       if (!config.boardId) {
         return { success: false, error: "No boardId available in context" };
       }
+      if (!config.grant) return NO_GRANT;
 
       try {
-        const headers: Record<string, string> = {};
-        if (config.token) {
-          headers["authorization"] = `Bearer ${config.token}`;
-        }
+        const headers = authHeaders(config);
 
         const res = await fetch(`${config.serverUrl}/api/boards/${config.boardId}`, {
           headers,
@@ -250,17 +292,10 @@ export default defineAgent({
       process.env.LUCENT_STT_KEY ||
       process.env.LUCENT_TTS_KEY;
 
-    const llmKey =
-      process.env.LUCENT_AI_KEY ||
-      process.env.OPENAI_API_KEY ||
-      "";
-    let llmBaseUrl =
-      process.env.LUCENT_AI_BASE_URL ||
-      "https://kiosapi.com/v1";
-    llmBaseUrl = llmBaseUrl.replace(/\/chat\/completions\/?$/i, "").replace(/\/+$/, "");
-    const llmModel =
-      process.env.LUCENT_AI_MODEL ||
-      "agnes-2.5-flash";
+    // The same provider the Lucent server is configured with — never a
+    // hardcoded third party (it used to default to an external gateway, so
+    // board content left the deployment for a model nobody chose).
+    const llmConfig = resolveLlmConfig(process.env);
 
     const stt = new deepgram.STT({
       apiKey: deepgramKey,
@@ -276,9 +311,9 @@ export default defineAgent({
     const vad = await silero.VAD.load();
 
     const llmInstance = new openai.LLM({
-      apiKey: llmKey,
-      baseURL: llmBaseUrl,
-      model: llmModel,
+      apiKey: llmConfig.apiKey,
+      ...(llmConfig.baseURL ? { baseURL: llmConfig.baseURL } : {}),
+      model: llmConfig.model,
     });
 
     // 4. Create Voice Agent Tools

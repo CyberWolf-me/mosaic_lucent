@@ -50,6 +50,42 @@ describe("operation schema refuses sink-hostile strings", () => {
     }
   });
 
+  it("accepts the product palette's oklch/oklab literals (docs/26 F7)", () => {
+    // The sticky and inspector colours are written in oklch; before F7 the
+    // schema refused them, so every sticky the canvas made was rejected.
+    for (const fill of [
+      "oklch(0.90 0.11 92)",
+      "oklch(0.62 0.20 258 / 0.14)",
+      "oklch(62% 0.2 258deg)",
+      "oklab(0.5 -0.1 0.1)",
+      "hsl(210deg 50% 50%)",
+    ]) {
+      const result = safeParseOperations([{ ...baseShape, style: { fill } }]);
+      expect(result.success, `expected ${fill} to parse`).toBe(true);
+    }
+  });
+
+  it("refuses var() and relative colour syntax: they resolve only in the app's stylesheet", () => {
+    for (const fill of [
+      "var(--ink-0)",
+      "oklch(from var(--x) l c h)",
+      "oklch(0.9 0.1 92) url(x)",
+      "oklch(calc(1) 0 0)",
+    ]) {
+      const result = safeParseOperations([{ ...baseShape, style: { fill } }]);
+      expect(result.success, `expected ${fill} to be refused`).toBe(false);
+    }
+  });
+
+  it("a saved board holding an oklch sticky loads intact", () => {
+    const ws = applyOperations(createWorkspace(), [
+      { ...baseShape, style: { fill: "oklch(0.90 0.11 92)" } } as Operation,
+    ]);
+    const parsed = parseWorkspace(JSON.parse(JSON.stringify(ws)));
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) expect(parsed.workspace.shapes[baseShape.id]?.style?.fill).toBe("oklch(0.90 0.11 92)");
+  });
+
   it("refuses a colour that is really markup", () => {
     const result = safeParseOperations([
       { ...baseShape, style: { fill: 'red" onmouseover="alert(1)' } },

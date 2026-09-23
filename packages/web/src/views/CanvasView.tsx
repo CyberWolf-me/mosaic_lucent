@@ -1003,8 +1003,6 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
           position: { x: 300, y: 220 },
           size: isIframe ? { width: 400, height: 260 } : { width: 260, height: 200 },
           src: info.src,
-          // Reuse the style.fill flag to record iframe vs image at render time.
-          style: { fill: info.mode },
           z: nextZ(shapes),
         },
       ],
