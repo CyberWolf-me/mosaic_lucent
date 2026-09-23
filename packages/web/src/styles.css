@@ -1,3 +1,5 @@
+@import "./atelier.css";
+
 /* ============================================================
    LUCENT — Design tokens
 
@@ -18,46 +20,33 @@
    ============================================================ */
 
 :root {
-  /* Canvas (cool indigo-ink, depth-ranked). */
-  --canvas-0: oklch(0.12 0.012 252); /* deepest — the page itself */
-  --canvas-1: oklch(0.15 0.013 252); /* base, sits on top of the page */
-  --canvas-2: oklch(0.19 0.014 252); /* node fill, card body */
-  --canvas-3: oklch(0.24 0.014 252); /* elevated, hover */
-  --canvas-4: oklch(0.3 0.014 252); /* active */
-  --grid-dot: oklch(0.3 0.02 252 / 0.55);
+  /* Canvas mappings to Atelier paper (warm cream light-mode default) */
+  --canvas-0: var(--paper-1);
+  --canvas-1: var(--paper-0);
+  --canvas-2: var(--paper-2);
+  --canvas-3: var(--paper-3);
+  --canvas-4: var(--paper-4);
+  --grid-dot: oklch(from var(--ink-3) l c h / 0.35);
 
-  /* Ink on canvas. Hue aligned with the ground so the warm amber accent is
-     the only hue the eye reads. Lightnesses match the previous audit
-     (1.4.3 passes for body text). */
-  --ink-0: oklch(0.98 0.005 252); /* primary — chalk */
-  --ink-1: oklch(0.84 0.008 252); /* secondary */
-  --ink-2: oklch(0.72 0.01 252); /* tertiary — body-legible on canvas-2/3 */
-  --ink-3: oklch(0.68 0.012 252); /* muted / meta (WCAG 1.4.3 accessible) */
-  --ink-4: oklch(0.48 0.014 252); /* faint labels; still ≥3:1 for large text */
+  /* Strokes on canvas map to paper boundaries */
+  --stroke-1: oklch(from var(--paper-4) l c h / 0.6);
+  --stroke-2: oklch(from var(--paper-4) l c h / 0.8);
+  --stroke-3: var(--paper-edge);
 
-  /* Strokes on canvas. Use these for hairline rules; the contrast against
-     the canvas is deliberately small so dividers recede. */
-  --stroke-1: oklch(0.28 0.014 252);
-  --stroke-2: oklch(0.36 0.016 252);
-  --stroke-3: oklch(0.5 0.018 252);
+  /* Legacy ink tokens map directly to Atelier ink */
+  --paper-ink-0: var(--ink-0);
+  --paper-ink-1: var(--ink-1);
+  --paper-ink-2: var(--ink-2);
 
-  /* Chrome (light, cool vellum). Mirror the dark tokens' hue so the
-     light theme is the same page, sun-side up. */
-  --paper-0: oklch(0.985 0.004 252); /* page */
-  --paper-1: oklch(0.965 0.005 252); /* card */
-  --paper-2: oklch(0.92 0.008 252); /* border */
-  --paper-3: oklch(0.86 0.01 252); /* strong border */
-  --paper-ink-0: oklch(0.18 0.014 252);
-  --paper-ink-1: oklch(0.38 0.014 252);
-  --paper-ink-2: oklch(0.56 0.012 252);
-
-  /* Accent — luminous amber beam. The only chroma on the page. Use for
-     AI illumination, focus, "this is what the model touched." */
-  --amber-1: oklch(0.86 0.14 78); /* bright */
-  --amber-2: oklch(0.78 0.15 72); /* mid */
-  --amber-3: oklch(0.62 0.13 65); /* deep */
-  --amber-glow: oklch(0.82 0.15 75 / 0.28);
-  --amber-glow-soft: oklch(0.82 0.15 75 / 0.12);
+  /* Accent — the signature cobalt "bloom" beam (for AI highlights in canvas).
+     The old design used amber here; the Atelier redesign replaced it with the
+     cobalt bloom from atelier.css. These aliases keep every legacy `--amber-*`
+     reference on-brand without touching each call site. */
+  --amber-1: var(--bloom-1); /* bright ink */
+  --amber-2: var(--bloom-2); /* mid */
+  --amber-3: var(--bloom-3); /* deep */
+  --amber-glow: var(--bloom-glow);
+  --amber-glow-soft: var(--bloom-wash);
 
   /* A cooler counter-accent for human-authored marks — sticky notes, pen
      strokes, the user's own annotations. Keeps authorship legible against
@@ -70,21 +59,16 @@
   --sig-red: oklch(0.72 0.15 25);
   --sig-violet: oklch(0.72 0.13 300);
 
-  /* Type. Display face carries the drafting-instrument personality for
-     headings and brand moments; body and mono stay for UI. */
-  --font-sans: "Geist", "Inter", system-ui, sans-serif;
-  --font-display: "Space Grotesk", "Geist", "Inter", system-ui, sans-serif;
-  --font-mono: "Geist Mono", "JetBrains Mono", ui-monospace, monospace;
+  /* Type. Atelier IBM Plex trio: Sans for body, Serif for display, Mono for code. */
+  --font-sans: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-display: "IBM Plex Serif", Georgia, serif;
+  --font-serif: "IBM Plex Serif", Georgia, serif;
+  --font-mono: "IBM Plex Mono", Menlo, Consolas, monospace;
 
-  /* Radii — tighter than the prior scale, so corners read as drafted
-     instead of pillowy. Pills are still reserved for true pill shapes
-     (the AI composer and status chips). */
-  --r-xs: 3px;
-  --r-sm: 5px;
-  --r-md: 7px;
-  --r-lg: 10px;
-  --r-xl: 14px;
-  --r-2xl: 20px;
+  /* Radii — inherit the Atelier redesign's softer scale from atelier.css.
+     The old design shipped tighter corners (3/5/7/10/14/20); the redesign
+     reads as drafted-but-warm, so we defer to atelier.css's 6/10/14/18/24/32.
+     Only the pill token, which atelier.css does not define, stays here. */
   --r-pill: 999px;
 
   /* Spacing scale (4px base). Use these instead of raw px for gap/padding/margin. */
@@ -102,15 +86,28 @@
   --elev-1: 0 1px 0 oklch(1 0 0 / 0.04) inset, 0 1px 2px oklch(0 0 0 / 0.45);
   --elev-2: 0 1px 0 oklch(1 0 0 / 0.05) inset, 0 8px 24px -8px oklch(0 0 0 / 0.55);
   --elev-3: 0 1px 0 oklch(1 0 0 / 0.06) inset, 0 24px 60px -20px oklch(0 0 0 / 0.65);
-  --glow-amber: 0 0 0 1px oklch(0.82 0.15 75 / 0.35), 0 0 32px -4px var(--amber-glow);
-  --glow-amber-soft: 0 0 0 1px oklch(0.82 0.15 75 / 0.18), 0 0 24px -6px var(--amber-glow-soft);
+  --glow-amber: var(--shadow-bloom);
+  --glow-amber-soft: 0 0 0 1px var(--bloom-wash-2), 0 0 24px -6px var(--bloom-wash);
 
   /* Motion */
   --e-out: cubic-bezier(0.2, 0.8, 0.2, 1);
   --e-in-out: cubic-bezier(0.6, 0, 0.2, 1);
 
   /* Keyboard focus ring — one token so every interactive element matches. */
-  --focus-ring: 0 0 0 2px var(--canvas-0), 0 0 0 4px var(--amber-1);
+  --focus-ring: 0 0 0 2px var(--canvas-0), 0 0 0 4px var(--bloom-2);
+}
+
+html[data-theme="dark"] {
+  --canvas-0: var(--paper-1);
+  --canvas-1: var(--paper-0);
+  --canvas-2: var(--paper-2);
+  --canvas-3: var(--paper-3);
+  --canvas-4: var(--paper-4);
+  --grid-dot: oklch(from var(--ink-3) l c h / 0.35);
+
+  --stroke-1: oklch(from var(--paper-4) l c h / 0.6);
+  --stroke-2: oklch(from var(--paper-4) l c h / 0.8);
+  --stroke-3: var(--paper-edge);
 }
 
 * {
@@ -127,14 +124,14 @@ body {
   font-feature-settings: "ss01", "cv11";
   /* Optical sizing so the system face reshapes with size (skill §15). */
   font-optical-sizing: auto;
-  background: var(--canvas-0);
+  background: var(--paper-1);
   color: var(--ink-0);
   overflow: hidden;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   /* Body tracking stays near zero; display sizes tighten per-rule below —
      one global letter-spacing is wrong somewhere (skill §15). */
-  letter-spacing: -0.005em;
+  letter-spacing: -0.003em;
 }
 
 button {
@@ -247,7 +244,7 @@ textarea:focus-visible {
   align-items: center;
   gap: 4px;
   padding: 5px 6px;
-  background: oklch(0.14 0.006 252 / 0.9);
+  background: oklch(from var(--paper-0) l c h / 0.9);
   backdrop-filter: blur(20px) saturate(1.4);
   -webkit-backdrop-filter: blur(20px) saturate(1.4);
   border: 1px solid var(--stroke-1);
@@ -340,50 +337,7 @@ textarea:focus-visible {
   color: var(--paper-ink-1);
 }
 
-/* ================= Canvas grid background =================
-   The drafting field. Dots by default; "lines" turns the canvas into a
-   measured sheet with a fine 8px minor grid and a heavier 40px major grid
-   that anchors the eye at every fifth unit. "Off" removes it. */
-.canvas-grid {
-  position: absolute;
-  inset: 0;
-  background-image: radial-gradient(var(--grid-dot) 1px, transparent 1px);
-  background-size: 28px 28px;
-  background-position: 0 0;
-  pointer-events: none;
-}
-html[data-grid="lines"] .canvas-grid {
-  background-image:
-    /* minor verticals at 8px, hairlines */
-    linear-gradient(to right, var(--grid-dot) 1px, transparent 1px),
-    /* minor horizontals at 8px, hairlines */
-      linear-gradient(to bottom, var(--grid-dot) 1px, transparent 1px),
-    /* major verticals every 5th line: 40px, slightly stronger */
-      linear-gradient(to right, oklch(0.4 0.02 252 / 0.35) 1px, transparent 1px),
-    /* major horizontals every 5th line */
-      linear-gradient(to bottom, oklch(0.4 0.02 252 / 0.35) 1px, transparent 1px);
-  background-size:
-    8px 8px,
-    8px 8px,
-    40px 40px,
-    40px 40px;
-}
-html[data-grid="none"] .canvas-grid {
-  background-image: none;
-}
-.canvas-vignette {
-  position: absolute;
-  inset: 0;
-  background: radial-gradient(
-    ellipse at center,
-    transparent 0%,
-    transparent 50%,
-    oklch(0.1 0.018 252 / 0.55) 100%
-  );
-  pointer-events: none;
-}
-
-/* ================= Top chrome (in-canvas dark) ================= */
+/* ================= Top chrome (Atelier warm paper) ================= */
 .top-bar {
   position: absolute;
   top: 0;
@@ -392,16 +346,15 @@ html[data-grid="none"] .canvas-grid {
   height: 52px;
   display: flex;
   align-items: center;
-  padding: 0 18px;
+  gap: 12px;
+  padding: 0 20px;
   z-index: 100;
-  gap: 14px;
   white-space: nowrap;
-  /* Translucent floating material with light catch (skill §12) */
-  background: oklch(0.12 0.012 252 / 0.82);
-  backdrop-filter: blur(20px) saturate(1.6);
-  -webkit-backdrop-filter: blur(20px) saturate(1.6);
-  border-bottom: 1px solid oklch(1 0 0 / 0.08);
-  box-shadow: 0 1px 0 0 oklch(0 0 0 / 0.2);
+  background: oklch(from var(--paper-0) l c h / 0.85);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-bottom: 1px solid oklch(from var(--paper-4) l c h / 0.6);
+  color: var(--ink-0);
 }
 .top-bar .crumb,
 .top-bar .crumb-sep {
@@ -576,7 +529,7 @@ html[data-grid="none"] .canvas-grid {
   font-variation-settings: "wght" 500;
 }
 .icon-btn.primary:hover {
-  background: oklch(0.94 0.005 252);
+  background: var(--paper-2);
 }
 .avatar {
   width: 26px;
@@ -595,26 +548,27 @@ html[data-grid="none"] .canvas-grid {
 /* ================= Left rail ================= */
 .left-rail {
   position: absolute;
-  top: 60px;
-  bottom: 90px;
+  top: 68px;
+  bottom: 56px;
   left: 12px;
-  width: 46px;
+  width: 52px;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 3px;
-  padding: 6px 3px;
-  background: oklch(0.13 0.01 252 / 0.82);
-  backdrop-filter: blur(20px) saturate(1.6);
-  border: 1px solid oklch(1 0 0 / 0.08);
-  border-radius: var(--r-xl);
-  box-shadow:
-    inset 0 1px 0 0 oklch(1 0 0 / 0.08),
-    var(--elev-2);
+  gap: 4px;
+  padding: 10px 0;
+  background: oklch(from var(--paper-0) l c h / 0.85);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid oklch(from var(--paper-4) l c h / 0.5);
+  border-radius: 18px;
+  box-shadow: var(--shadow-2);
   z-index: 50;
-  transition:
-    transform 0.2s var(--e-out),
-    border-color 0.2s var(--e-out);
+}
+.left-rail.on-right {
+  left: auto;
+  right: 12px;
+  width: 44px;
 }
 .rail-btn {
   width: 40px;
@@ -624,9 +578,8 @@ html[data-grid="none"] .canvas-grid {
   border-radius: var(--r-md);
   color: var(--ink-2);
   transition:
-    background 0.15s var(--e-out),
-    color 0.15s var(--e-out),
-    transform 0.1s var(--e-out);
+    background 0.12s var(--e-out),
+    color 0.12s var(--e-out);
   position: relative;
 }
 .rail-btn svg {
@@ -635,32 +588,25 @@ html[data-grid="none"] .canvas-grid {
   transition: transform 0.12s var(--e-out);
 }
 .rail-btn:hover {
-  background: var(--canvas-3);
+  background: var(--paper-2);
   color: var(--ink-0);
 }
-.rail-btn:hover svg {
-  transform: scale(1.06);
-}
 .rail-btn.active {
-  background: oklch(from var(--amber-1) l c h / 0.12);
-  color: var(--amber-1);
+  background: var(--ink-0);
+  color: var(--paper-0);
 }
 .rail-btn.active svg {
-  color: var(--amber-1);
+  color: var(--paper-0);
 }
-.rail-btn:active {
-  transform: scale(0.94);
-}
-.rail-btn.active::before {
+.rail-btn.active::after {
   content: "";
   position: absolute;
-  left: 2px;
-  top: 10px;
-  bottom: 10px;
-  width: 3px;
-  background: var(--amber-1);
+  right: -8px;
+  width: 4px;
+  height: 4px;
+  background: var(--bloom-1);
   border-radius: 999px;
-  box-shadow: 0 0 8px var(--amber-glow);
+  box-shadow: 0 0 8px var(--bloom-glow);
 }
 .rail-btn[data-tip]::after {
   content: attr(data-tip);
@@ -669,7 +615,7 @@ html[data-grid="none"] .canvas-grid {
   top: 50%;
   transform: translateY(-50%);
   padding: 4px 8px;
-  background: oklch(0.12 0.01 252 / 0.95);
+  background: oklch(from var(--paper-0) l c h / 0.95);
   backdrop-filter: blur(12px);
   color: var(--ink-0);
   font-family: var(--font-sans);
@@ -753,7 +699,7 @@ html[data-theme="light"] .rail-btn[data-tip]::after {
   align-items: center;
   gap: 10px;
   padding: 10px 10px 10px 20px;
-  background: oklch(0.17 0.007 252 / 0.85);
+  background: oklch(from var(--paper-0) l c h / 0.85);
   backdrop-filter: blur(24px) saturate(1.5);
   -webkit-backdrop-filter: blur(24px) saturate(1.5);
   border: 1px solid var(--stroke-2);
@@ -818,7 +764,7 @@ html[data-theme="light"] .rail-btn[data-tip]::after {
   padding: 3px 6px;
   border: 1px solid var(--stroke-1);
   border-radius: 4px;
-  background: oklch(0.14 0.006 252 / 0.5);
+  background: oklch(from var(--paper-3) l c h / 0.5);
 }
 .mic-btn {
   width: 38px;
@@ -864,7 +810,7 @@ html[data-theme="light"] .rail-btn[data-tip]::after {
   height: 18px;
 }
 .send-btn:hover {
-  background: oklch(0.94 0.005 252);
+  background: var(--paper-2);
 }
 .send-btn:active {
   transform: scale(0.94);
@@ -874,7 +820,7 @@ html[data-theme="light"] .rail-btn[data-tip]::after {
   cursor: default;
 }
 .ai-history-bubble {
-  background: oklch(0.14 0.008 252 / 0.92);
+  background: oklch(from var(--paper-0) l c h / 0.92);
   border: 1px solid var(--stroke-2);
   box-shadow:
     inset 0 1px 0 0 oklch(1 0 0 / 0.08),
@@ -895,7 +841,7 @@ html[data-theme="light"] .ai-pill {
   align-items: center;
   gap: 8px;
   padding: 6px 12px 6px 8px;
-  background: oklch(0.17 0.007 252 / 0.85);
+  background: oklch(from var(--paper-0) l c h / 0.85);
   backdrop-filter: blur(20px);
   border: 1px solid var(--stroke-2);
   border-radius: 999px;
@@ -930,20 +876,17 @@ html[data-theme="light"] .ai-pill {
   z-index: 2;
   pointer-events: auto;
   min-width: 130px;
-  background: var(--canvas-2);
-  border: 1px solid var(--stroke-1);
+  background: var(--paper-0);
+  border: 1.5px solid oklch(from var(--paper-edge) l c h / 0.7);
   border-radius: var(--r-md);
   padding: 12px 14px;
   color: var(--ink-0);
-  font-size: 12.5px;
-  font-variation-settings: "wght" 500;
-  box-shadow:
-    inset 0 1px 0 0 oklch(1 0 0 / 0.07),
-    var(--elev-1);
+  font-size: 13px;
+  box-shadow: var(--shadow-node);
   transition:
-    border-color 0.18s var(--e-out),
-    box-shadow 0.18s var(--e-out),
-    background 0.18s var(--e-out),
+    border-color 0.15s var(--e-out),
+    box-shadow 0.15s var(--e-out),
+    background 0.15s var(--e-out),
     transform 0.15s var(--e-out);
   user-select: none;
   /* NodeCard sets an explicit height from the layout engine; keep the content
@@ -955,10 +898,8 @@ html[data-theme="light"] .ai-pill {
   overflow: hidden;
 }
 .node:hover {
-  border-color: var(--stroke-3);
-  box-shadow:
-    inset 0 1px 0 0 oklch(1 0 0 / 0.1),
-    var(--elev-2);
+  border-color: var(--ink-3);
+  box-shadow: var(--shadow-2);
   transform: translateY(-1px);
 }
 /* A draggable node reads as grabbable, matching FigJam/Miro affordances. */
@@ -989,40 +930,37 @@ html[data-theme="light"] .ai-pill {
 .node .node-title {
   font-size: 13px;
   color: var(--ink-0);
-  font-variation-settings: "wght" 520;
+  font-weight: 600;
 }
 .node .node-sub {
   font-size: 11px;
   color: var(--ink-2);
   margin-top: 2px;
-  font-variation-settings: "wght" 400;
+  font-weight: 400;
 }
 .node.selected {
-  border-color: var(--amber-2);
-  box-shadow:
-    inset 0 1px 0 0 oklch(1 0 0 / 0.12),
-    0 0 0 1px var(--amber-2),
-    var(--glow-amber-soft);
+  border-color: var(--bloom-2);
+  box-shadow: var(--shadow-bloom);
 }
 .node.emerging {
-  border-color: var(--amber-2);
-  box-shadow: var(--glow-amber);
-  background: oklch(0.18 0.01 252);
+  border-color: var(--bloom-2);
+  box-shadow: var(--shadow-bloom);
+  background: var(--paper-0);
 }
 .node.ghost {
   border-style: dashed;
-  border-color: var(--stroke-2);
+  border-color: var(--ink-3);
   color: var(--ink-2);
   background: transparent;
 }
 .node.proposed {
-  border-color: oklch(0.82 0.15 75 / 0.6);
+  border-color: var(--bloom-2);
   border-style: dashed;
-  background: oklch(0.18 0.01 252 / 0.7);
+  background: oklch(from var(--bloom-1) l c h / 0.06);
 }
 
 .node-statement-chip {
-  background: oklch(0.12 0.008 252 / 0.6);
+  background: oklch(from var(--paper-0) l c h / 0.6);
   backdrop-filter: blur(8px);
   box-shadow: inset 0 1px 0 0 oklch(1 0 0 / 0.05);
   transition: opacity 0.15s var(--e-out), border-color 0.15s var(--e-out);
@@ -1242,7 +1180,7 @@ html[data-theme="light"] .node-statement-chip {
   bottom: 90px;
   right: 12px;
   width: 320px;
-  background: oklch(0.17 0.007 252 / 0.9);
+  background: oklch(from var(--paper-0) l c h / 0.9);
   backdrop-filter: blur(20px);
   border: 1px solid var(--stroke-1);
   border-radius: var(--r-xl);
@@ -1305,7 +1243,7 @@ html[data-theme="light"] .node-statement-chip {
   padding: 10px 12px;
   border-radius: var(--r-md);
   border: 1px solid var(--stroke-1);
-  background: oklch(0.19 0.008 252 / 0.6);
+  background: oklch(from var(--paper-2) l c h / 0.6);
   margin-bottom: 6px;
   display: flex;
   align-items: flex-start;
@@ -1536,7 +1474,7 @@ html[data-theme="light"] .empty-omnibar {
   flex: 1;
 }
 .btn.primary:hover {
-  background: oklch(0.94 0.005 252);
+  background: var(--paper-2);
 }
 .btn.ghost {
   color: var(--ink-1);
@@ -1671,407 +1609,33 @@ html[data-theme="light"] .empty-omnibar {
    ============================================================ */
 
 html[data-theme="light"] {
-  /* Canvas becomes a warm cream, not white */
-  --canvas-0: oklch(0.965 0.01 82);
-  --canvas-1: oklch(0.975 0.008 82);
-  --canvas-2: oklch(1 0.004 82);
-  --canvas-3: oklch(0.94 0.01 82);
-  --canvas-4: oklch(0.91 0.012 252);
-  --grid-dot: oklch(0.78 0.012 252 / 0.55);
+  /* Canvas and ink map cleanly to Atelier paper and espresso ink */
+  --canvas-0: var(--paper-1);
+  --canvas-1: var(--paper-0);
+  --canvas-2: var(--paper-2);
+  --canvas-3: var(--paper-3);
+  --canvas-4: var(--paper-4);
+  --grid-dot: oklch(from var(--ink-3) l c h / 0.35);
 
-  /* Ink flips (dark text on cream) */
-  --ink-0: oklch(0.2 0.01 252);
-  --ink-1: oklch(0.36 0.01 252);
-  --ink-2: oklch(0.5 0.01 252);
-  --ink-3: oklch(0.52 0.01 252);
-  --ink-4: oklch(0.72 0.01 252);
+  --stroke-1: oklch(from var(--paper-4) l c h / 0.6);
+  --stroke-2: oklch(from var(--paper-4) l c h / 0.8);
+  --stroke-3: var(--paper-edge);
 
-  /* Strokes get warmer & softer */
-  --stroke-1: oklch(0.88 0.014 252);
-  --stroke-2: oklch(0.8 0.016 78);
-  --stroke-3: oklch(0.68 0.018 75);
-
-  /* Paper equals canvas in light mode so chrome + canvas share the surface */
-  --paper-0: oklch(0.975 0.008 82);
-  --paper-1: oklch(1 0.004 82);
-  --paper-2: oklch(0.9 0.012 252);
-  --paper-3: oklch(0.82 0.014 78);
-  --paper-ink-0: oklch(0.2 0.01 252);
-  --paper-ink-1: oklch(0.4 0.01 252);
-  --paper-ink-2: oklch(0.55 0.01 252);
-
-  /* Amber gets slightly deeper on cream so it reads */
-  --amber-1: oklch(0.72 0.16 68);
-  --amber-2: oklch(0.66 0.16 62);
-  --amber-3: oklch(0.55 0.16 55);
-  --amber-glow: oklch(0.75 0.17 65 / 0.35);
-  --amber-glow-soft: oklch(0.75 0.17 65 / 0.15);
-
-  /* Elevation flips to warm soft shadows */
-  --elev-1: 0 1px 0 oklch(1 0 0 / 0.6) inset, 0 1px 2px oklch(0.4 0.05 252 / 0.08);
-  --elev-2: 0 1px 0 oklch(1 0 0 / 0.7) inset, 0 8px 24px -10px oklch(0.4 0.05 252 / 0.16);
-  --elev-3: 0 1px 0 oklch(1 0 0 / 0.8) inset, 0 24px 60px -20px oklch(0.4 0.05 252 / 0.22);
-  --glow-amber: 0 0 0 1px oklch(0.65 0.17 65 / 0.5), 0 0 32px -4px var(--amber-glow);
-  --glow-amber-soft: 0 0 0 1px oklch(0.65 0.17 65 / 0.28), 0 0 24px -6px var(--amber-glow-soft);
+  --paper-ink-0: var(--ink-0);
+  --paper-ink-1: var(--ink-1);
+  --paper-ink-2: var(--ink-2);
 }
-
-/* Light-mode overrides for surfaces that were tuned for dark */
-html[data-theme="light"] body {
-  background: var(--canvas-0);
-}
-
-html[data-theme="light"] .canvas-vignette {
-  background: radial-gradient(
-    ellipse at center,
-    transparent 0%,
-    transparent 55%,
-    oklch(0.88 0.012 82 / 0.4) 100%
-  );
-}
-
-html[data-theme="light"] .top-bar .crumb {
-  color: var(--ink-1);
-}
-html[data-theme="light"] .top-bar .crumb.current {
-  color: var(--ink-0);
-}
-html[data-theme="light"] .top-bar .crumb-sep {
-  color: var(--ink-3);
-}
-html[data-theme="light"] .brand .logo::after {
-  background: var(--canvas-0);
-}
-
-html[data-theme="light"] .icon-btn {
-  color: var(--ink-1);
-}
-html[data-theme="light"] .icon-btn:hover {
-  background: var(--canvas-3);
-  color: var(--ink-0);
-}
-html[data-theme="light"] .icon-btn.primary {
-  background: var(--ink-0);
-  color: var(--canvas-0);
-}
-html[data-theme="light"] .icon-btn.primary:hover {
-  background: oklch(0.15 0.01 252);
-}
-
-html[data-theme="light"] .avatar {
-  background: linear-gradient(135deg, oklch(0.78 0.12 55), oklch(0.62 0.14 30));
-  border-color: var(--stroke-2);
-  color: var(--canvas-0);
-}
-
-html[data-theme="light"] .left-rail {
-  background: oklch(1 0 0 / 0.6);
-  border-color: var(--stroke-1);
-  backdrop-filter: blur(20px);
-}
-html[data-theme="light"] .rail-btn {
-  color: var(--ink-2);
-}
-html[data-theme="light"] .rail-btn:hover {
-  background: var(--canvas-3);
-  color: var(--ink-0);
-}
-html[data-theme="light"] .rail-btn.active {
-  background: var(--canvas-3);
-  color: var(--ink-0);
-}
-html[data-theme="light"] .rail-divider {
-  background: var(--stroke-1);
-}
-
-html[data-theme="light"] .screen-switcher {
-  background: oklch(1 0 0 / 0.75);
-  border-color: var(--stroke-1);
-  color: var(--ink-0);
-}
-html[data-theme="light"] .screen-switcher .screen-name {
-  color: var(--ink-1);
-}
-html[data-theme="light"] .screen-switcher button.dot {
-  color: var(--ink-3);
-}
-html[data-theme="light"] .screen-switcher button.dot:hover {
-  background: var(--canvas-3);
-  color: var(--ink-0);
-}
-html[data-theme="light"] .screen-switcher button.dot.active {
-  background: var(--ink-0);
-  color: var(--canvas-0);
-}
-html[data-theme="light"] .screen-switcher .arrow {
-  color: var(--ink-2);
-}
-html[data-theme="light"] .screen-switcher .arrow:hover {
-  background: var(--canvas-3);
-  color: var(--ink-0);
-}
-html[data-theme="light"] .screen-switcher .label {
-  color: var(--ink-3);
-}
-
-html[data-theme="light"] .ai-pill {
-  background: oklch(1 0 0 / 0.9);
-  border-color: var(--stroke-1);
-  box-shadow: 0 20px 50px -20px oklch(0.4 0.05 252 / 0.28);
-}
-html[data-theme="light"] .ai-pill input {
-  color: var(--ink-0);
-}
-html[data-theme="light"] .ai-pill input::placeholder {
-  color: var(--ink-3);
-}
-html[data-theme="light"] .ai-pill .kbd {
-  background: oklch(0.94 0.01 252);
-  border-color: var(--stroke-1);
-  color: var(--ink-2);
-}
-html[data-theme="light"] .mic-btn {
-  background: var(--canvas-3);
-  color: var(--ink-0);
-}
-html[data-theme="light"] .mic-btn:hover {
-  background: var(--canvas-4);
-}
-html[data-theme="light"] .send-btn {
-  background: var(--ink-0);
-  color: var(--canvas-0);
-}
-
-html[data-theme="light"] .pill-status {
-  background: oklch(1 0 0 / 0.9);
-  border-color: var(--stroke-1);
-  color: var(--ink-1);
-}
-
-html[data-theme="light"] .node {
-  background: oklch(1 0 0 / 0.95);
-  border-color: var(--stroke-1);
-  color: var(--ink-0);
-  box-shadow:
-    0 1px 2px oklch(0.4 0.05 252 / 0.06),
-    0 2px 6px -2px oklch(0.4 0.05 252 / 0.08);
-}
-html[data-theme="light"] .node:hover {
-  border-color: var(--stroke-3);
-}
-html[data-theme="light"] .node .node-meta {
-  color: var(--ink-3);
-}
-html[data-theme="light"] .node .node-sub {
-  color: var(--ink-2);
-}
-html[data-theme="light"] .node.ghost {
-  background: oklch(1 0 0 / 0.4);
-  color: var(--ink-3);
-  border-color: var(--stroke-1);
-}
-
-html[data-theme="light"] .frame {
-  border-color: var(--stroke-1);
-}
-html[data-theme="light"] .frame-label {
-  color: var(--ink-3);
-}
-
-html[data-theme="light"] .connectors path {
-  stroke: oklch(0.55 0.015 75);
-}
-html[data-theme="light"] .connectors path.emerging {
-  stroke: var(--amber-2);
-}
-
-/* Selection HUD popover */
-html[data-theme="light"] .top-bar {
-  background: oklch(0.985 0.004 252 / 0.85);
-  border-bottom: 1px solid oklch(0 0 0 / 0.08);
-  box-shadow: 0 1px 0 0 oklch(1 1 1 / 0.4);
-  color: inherit;
-}
-html[data-theme="light"] .stack {
-  color: inherit;
-}
-
-/* Zoom + status badges — inherit theme */
-html[data-theme="light"] .ai-pill-wrap > div[style*="bottom"] {
-  /* no-op guard */
-}
-
-/* Selection HUD is a raw inline div with dark background — override the specific style pattern in the JSX by fixing there. We'll rely on CSS class instead. */
-
-/* Additional adjustments so the bottom chrome (zoom, status, mic tips) reads on light */
-.chrome-badge {
-  background: oklch(0.17 0.007 252 / 0.85);
-  border: 1px solid var(--stroke-1);
-  color: var(--ink-1);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-}
-html[data-theme="light"] .chrome-badge {
-  background: oklch(1 0 0 / 0.85);
-  border: 1px solid var(--stroke-1);
-  color: var(--ink-1);
-}
-.chrome-badge button {
-  color: var(--ink-2);
-}
-.chrome-badge button:hover {
-  color: var(--ink-0);
-}
-
-/* Selection HUD popover */
-.selection-hud {
-  position: absolute;
-  transform: translateX(-50%);
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  padding: 3px;
-  background: oklch(0.19 0.008 252 / 0.95);
-  backdrop-filter: blur(16px);
-  border: 1px solid var(--stroke-2);
-  border-radius: 8px;
-  box-shadow: var(--elev-2);
-  z-index: 8;
-}
-html[data-theme="light"] .selection-hud {
-  background: oklch(1 0 0 / 0.98);
-  border: 1px solid var(--stroke-1);
-}
-.selection-hud button {
-  padding: 5px 10px;
-  font-size: 11.5px;
-  color: var(--ink-1);
-  border-radius: 5px;
-  transition: background 0.12s;
-}
-.selection-hud button:hover {
-  background: var(--canvas-3);
-  color: var(--ink-0);
-}
-.selection-hud .sep {
-  width: 1px;
-  height: 16px;
-  background: var(--stroke-1);
-  margin: 0 2px;
-}
-
-/* AI pill history bubble uses theme-aware bg */
-.ai-history-bubble {
-  background: oklch(0.17 0.007 252 / 0.9);
-  border: 1px solid var(--stroke-1);
-  color: var(--ink-0);
-}
-html[data-theme="light"] .ai-history-bubble {
-  background: oklch(1 0 0 / 0.92);
-  border-color: var(--stroke-1);
-}
-.ai-msg-count-btn {
-  background: oklch(0.17 0.007 252 / 0.6);
-  border: 1px solid var(--stroke-1);
-  color: var(--ink-2);
-  backdrop-filter: blur(12px);
-}
-html[data-theme="light"] .ai-msg-count-btn {
-  background: oklch(1 0 0 / 0.75);
-  border-color: var(--stroke-1);
-  color: var(--ink-2);
-}
-
-html[data-theme="light"] .right-panel {
-  background: oklch(1 0 0 / 0.9);
-  border-color: var(--stroke-1);
-  box-shadow: 0 20px 60px -20px oklch(0.4 0.05 252 / 0.22);
-}
-html[data-theme="light"] .right-panel .panel-title {
-  color: var(--ink-0);
-}
-html[data-theme="light"] .right-panel .panel-sub {
-  color: var(--ink-3);
-}
-html[data-theme="light"] .right-panel .panel-head {
-  border-bottom-color: var(--stroke-1);
-}
-html[data-theme="light"] .right-panel .panel-foot {
-  border-top-color: var(--stroke-1);
-}
-html[data-theme="light"] .change-item {
-  background: oklch(1 0 0 / 0.6);
-  border-color: var(--stroke-1);
-}
-html[data-theme="light"] .change-title {
-  color: var(--ink-0);
-}
-html[data-theme="light"] .change-sub {
-  color: var(--ink-2);
-}
-
-html[data-theme="light"] .btn.primary {
-  background: var(--ink-0);
-  color: var(--canvas-0);
-}
-html[data-theme="light"] .btn.primary:hover {
-  background: oklch(0.15 0.01 252);
-}
-html[data-theme="light"] .btn.ghost {
-  color: var(--ink-1);
-  border-color: var(--stroke-1);
-  background: oklch(1 0 0 / 0.5);
-}
-html[data-theme="light"] .btn.ghost:hover {
-  background: var(--canvas-3);
-  color: var(--ink-0);
-}
-
-html[data-theme="light"] .panel-body::-webkit-scrollbar-thumb {
-  background: var(--stroke-2);
-}
-
-/* Left rail markers */
-html[data-theme="light"] .rail-btn.active::before {
-  background: var(--amber-2);
-}
-
-/* Adjust arrow markers to be theme-aware (defs are inlined; fill uses currentColor via stroke tokens) */
 
 /* ============================================================
-   ACCENT PALETTES
-   The default is amber. Users can pick violet, cyan, rose, or mono.
-   Only the amber-* tokens are overridden so glows, selection,
-   AI states, and CTAs shift together.
+   ACCENT PALETTES — single axis (Atelier)
+   The accent axis lives in atelier.css: html[data-accent="madder|moss|
+   saffron|graphite"] re-points --bloom-*, and the cobalt default is the base.
+   Because --amber-* is aliased to --bloom-* at :root (see top of this file),
+   every legacy --amber-* consumer follows the chosen accent automatically —
+   no per-accent --amber-* override is needed here. The old violet/cyan/rose/
+   mono blocks recolored only --amber-* and left --bloom-* cobalt (a split
+   two-tone palette), so they were removed.
    ============================================================ */
-
-html[data-accent="violet"] {
-  --amber-1: oklch(0.8 0.16 300);
-  --amber-2: oklch(0.68 0.19 297);
-  --amber-3: oklch(0.52 0.19 295);
-  --amber-glow: oklch(0.7 0.2 297 / 0.35);
-  --amber-glow-soft: oklch(0.7 0.2 297 / 0.14);
-}
-html[data-accent="cyan"] {
-  --amber-1: oklch(0.85 0.13 215);
-  --amber-2: oklch(0.72 0.15 210);
-  --amber-3: oklch(0.55 0.14 208);
-  --amber-glow: oklch(0.75 0.16 212 / 0.35);
-  --amber-glow-soft: oklch(0.75 0.16 212 / 0.14);
-}
-html[data-accent="rose"] {
-  --amber-1: oklch(0.82 0.14 12);
-  --amber-2: oklch(0.72 0.17 10);
-  --amber-3: oklch(0.56 0.17 8);
-  --amber-glow: oklch(0.72 0.18 10 / 0.35);
-  --amber-glow-soft: oklch(0.72 0.18 10 / 0.14);
-}
-html[data-accent="mono"] {
-  --amber-1: oklch(0.92 0.004 252);
-  --amber-2: oklch(0.8 0.006 252);
-  --amber-3: oklch(0.55 0.008 252);
-  --amber-glow: oklch(0.8 0.006 252 / 0.32);
-  --amber-glow-soft: oklch(0.8 0.006 252 / 0.14);
-}
 
 /* ============================================================
    FIGJAM-STYLE SHAPE TOOLBAR
@@ -2084,7 +1648,7 @@ html[data-accent="mono"] {
   align-items: center;
   gap: 2px;
   padding: 5px;
-  background: oklch(0.14 0.006 252 / 0.88);
+  background: oklch(from var(--paper-0) l c h / 0.88);
   backdrop-filter: blur(24px) saturate(1.5);
   -webkit-backdrop-filter: blur(24px) saturate(1.5);
   border: 1px solid var(--stroke-1);
@@ -2211,20 +1775,14 @@ html[data-accent="mono"] {
   left: calc(100% + 8px);
   transform: translateY(-50%);
 }
-html[data-theme="light"] .shape-toolbar {
-  background: oklch(1 0 0 / 0.88);
-  border-color: var(--stroke-1);
-}
-
 /* Left rail can be flipped to the right */
 .left-rail.on-right {
   left: auto;
   right: 12px;
 }
-.left-rail.on-right .rail-btn.active::before {
-  left: auto;
-  right: 2px;
-  border-radius: 999px;
+.left-rail.on-right .rail-btn.active::after {
+  right: auto;
+  left: -8px;
 }
 .shape-toolbar .tool {
   width: 36px;
@@ -2263,7 +1821,7 @@ html[data-theme="light"] .shape-toolbar {
   left: 50%;
   transform: translateX(-50%);
   padding: 4px 8px;
-  background: oklch(0.1 0.005 252 / 0.95);
+  background: oklch(from var(--paper-0) l c h / 0.95);
   color: var(--ink-0);
   font-family: var(--font-mono);
   font-size: 10px;
@@ -2278,12 +1836,6 @@ html[data-theme="light"] .shape-toolbar {
 .shape-toolbar .tool[data-tip]:hover::after {
   opacity: 1;
 }
-html[data-theme="light"] .shape-toolbar .tool[data-tip]::after {
-  background: oklch(0.2 0.01 252);
-  color: oklch(0.98 0.005 82);
-  border-color: var(--stroke-2);
-}
-
 /* ============================================================
    SHAPES dropped on canvas
    ============================================================ */
@@ -2296,7 +1848,7 @@ html[data-theme="light"] .shape-toolbar .tool[data-tip]::after {
   transform: scale(1.02);
 }
 .shape.rect {
-  background: oklch(0.19 0.008 252);
+  background: var(--paper-2);
   border: 1.5px solid var(--stroke-2);
   border-radius: 8px;
   display: grid;
@@ -2306,7 +1858,7 @@ html[data-theme="light"] .shape-toolbar .tool[data-tip]::after {
   padding: 8px 14px;
 }
 .shape.ellipse {
-  background: oklch(0.19 0.008 252);
+  background: var(--paper-2);
   border: 1.5px solid var(--stroke-2);
   border-radius: 999px;
   display: grid;
@@ -2316,7 +1868,7 @@ html[data-theme="light"] .shape-toolbar .tool[data-tip]::after {
   padding: 8px 20px;
 }
 .shape.diamond {
-  background: oklch(0.19 0.008 252);
+  background: var(--paper-2);
   border: 1.5px solid var(--stroke-2);
   transform: rotate(45deg);
   display: grid;
@@ -2329,7 +1881,7 @@ html[data-theme="light"] .shape-toolbar .tool[data-tip]::after {
 }
 .shape.sticky {
   background: oklch(0.9 0.11 92);
-  color: oklch(0.2 0.02 252);
+  color: var(--graphite);
   border-radius: 3px;
   padding: 12px 14px 14px;
   font-size: 13px;
@@ -2374,7 +1926,7 @@ html[data-theme="light"] .shape.diamond {
   background: oklch(1 0 0);
   border-color: var(--stroke-2);
   color: var(--ink-0);
-  box-shadow: 0 1px 3px oklch(0.4 0.05 252 / 0.08);
+  box-shadow: 0 1px 3px oklch(from var(--ink-0) l c h / 0.08);
 }
 
 /* Selected dropped shape: amber ring, matches node selection language. */
@@ -2619,7 +2171,7 @@ html[data-motion="reduced"] * {
   z-index: 210;
   width: 260px;
   padding: 6px;
-  background: oklch(0.17 0.007 252 / 0.96);
+  background: oklch(from var(--paper-0) l c h / 0.96);
   backdrop-filter: blur(24px);
   border: 1px solid var(--stroke-2);
   border-radius: 12px;
@@ -2737,14 +2289,14 @@ html[data-theme="light"] .profile-menu {
   position: fixed;
   inset: 0;
   z-index: 400;
-  background: oklch(0.1 0.005 252 / 0.72);
+  background: oklch(0.1 0.005 60 / 0.72);
   animation: scrim-in 0.18s ease-out backwards;
 }
 .modal-scrim.closing {
   animation: scrim-out 0.13s ease-in both;
 }
 html[data-theme="light"] .modal-scrim {
-  background: oklch(0.3 0.01 252 / 0.42);
+  background: oklch(0.3 0.01 60 / 0.42);
 }
 
 .settings-modal {
@@ -2878,13 +2430,13 @@ html[data-theme="light"] .settings-modal {
   border: 1px solid var(--stroke-1);
 }
 .theme-card .preview.dark {
-  background: linear-gradient(135deg, oklch(0.16 0.007 252), oklch(0.22 0.008 252));
+  background: linear-gradient(135deg, oklch(0.16 0.007 55), oklch(0.22 0.008 55));
 }
 .theme-card .preview.light {
   background: linear-gradient(135deg, oklch(0.975 0.008 82), oklch(0.94 0.01 82));
 }
 .theme-card .preview.system {
-  background: linear-gradient(90deg, oklch(0.16 0.007 252) 50%, oklch(0.975 0.008 82) 50%);
+  background: linear-gradient(90deg, oklch(0.16 0.007 55) 50%, oklch(0.975 0.008 82) 50%);
 }
 .theme-card .preview::before {
   content: "";
@@ -4202,7 +3754,7 @@ html[data-board="sketch"] .frame-tag {
   gap: 3px;
   padding: 4px 6px;
   border-radius: 999px;
-  background: oklch(0.14 0.006 252 / 0.92);
+  background: oklch(from var(--paper-0) l c h / 0.92);
   border: 1px solid var(--stroke-2);
   box-shadow: var(--elev-2);
   backdrop-filter: blur(16px);
@@ -4266,7 +3818,7 @@ html[data-theme="light"] .engagement-bar {
   font-size: 10px;
   line-height: 1.5;
   border: 1px solid var(--stroke-2);
-  background: oklch(0.14 0.006 252 / 0.9);
+  background: oklch(from var(--paper-0) l c h / 0.9);
   color: var(--ink-1);
   box-shadow: var(--elev-1);
 }
@@ -4504,7 +4056,7 @@ html[data-theme="light"] .badge-react {
   background: var(--ink-0);
 }
 .cmt-send:hover {
-  background: oklch(0.94 0.005 252);
+  background: var(--paper-2);
 }
 .cmt-names {
   padding: 0 12px 10px;
@@ -4817,7 +4369,7 @@ html[data-theme="light"] .badge-react {
   font-variation-settings: "wght" 550;
 }
 .menu-item.auth-submit:hover {
-  background: oklch(0.94 0.005 252);
+  background: var(--paper-2);
 }
 .menu-item.auth-submit:disabled {
   opacity: 0.5;
@@ -5190,7 +4742,6 @@ html[data-theme="light"] .badge-react {
   z-index: 26;
 }
 
-/* ─────────────────────────── M1.8: auth shell ──────────────────────────── */
 .auth-shell {
   min-height: 100vh;
   display: flex;
@@ -5199,30 +4750,32 @@ html[data-theme="light"] .badge-react {
   justify-content: center;
   gap: 16px;
   padding: 32px 16px;
-  background: linear-gradient(180deg, var(--bg-0, #0e0f12) 0%, var(--bg-1, #161821) 100%);
-  color: var(--text-0, #e7e9ee);
+  background: var(--paper-1);
+  color: var(--ink-0);
 }
 .auth-card {
   width: 100%;
   max-width: 420px;
-  background: var(--panel-0, rgba(255, 255, 255, 0.04));
-  border: 1px solid var(--border-0, rgba(255, 255, 255, 0.08));
-  border-radius: 12px;
-  padding: 28px;
+  background: var(--paper-0);
+  border: 1px solid oklch(from var(--paper-4) l c h / 0.6);
+  border-radius: 16px;
+  padding: 32px;
   display: flex;
   flex-direction: column;
   gap: 18px;
-  backdrop-filter: blur(8px);
+  box-shadow: var(--shadow-2);
 }
 .auth-brand {
   display: flex;
   align-items: baseline;
   gap: 10px;
   font-size: 18px;
+  font-family: var(--font-serif);
+  color: var(--ink-0);
 }
 .auth-tag {
   font-size: 12px;
-  color: var(--text-1, #9095a0);
+  color: var(--ink-2);
 }
 .auth-form {
   display: flex;
@@ -5231,60 +4784,70 @@ html[data-theme="light"] .badge-react {
 }
 .auth-form h1 {
   margin: 0 0 4px;
-  font-size: 20px;
+  font-size: 22px;
+  font-family: var(--font-serif);
+  color: var(--ink-0);
 }
 .auth-help {
   margin: 0;
   font-size: 13px;
-  color: var(--text-1, #9095a0);
+  color: var(--ink-2);
 }
 .auth-field {
   display: flex;
   flex-direction: column;
   gap: 6px;
   font-size: 13px;
-  color: var(--text-1, #9095a0);
+  color: var(--ink-1);
 }
 .auth-field input {
-  background: rgba(0, 0, 0, 0.2);
-  border: 1px solid var(--border-0, rgba(255, 255, 255, 0.12));
-  color: var(--text-0, #e7e9ee);
-  padding: 8px 10px;
-  border-radius: 6px;
+  background: var(--paper-2);
+  border: 1px solid oklch(from var(--paper-4) l c h / 0.8);
+  color: var(--ink-0);
+  padding: 10px 14px;
+  border-radius: 8px;
   font-size: 14px;
+  font-family: var(--font-sans);
   outline: none;
+  transition: all 0.12s var(--e-out);
 }
-.auth-field input:focus {
-  border-color: var(--accent, #7aa2ff);
+.auth-field input:focus-visible {
+  outline: none;
+  border-color: var(--bloom-2);
+  box-shadow: var(--focus-ring);
 }
 .auth-submit {
   margin-top: 4px;
-  background: var(--accent, #7aa2ff);
-  color: #0e0f12;
+  background: var(--ink-0);
+  color: var(--paper-0);
   border: 0;
   padding: 10px 14px;
-  border-radius: 6px;
-  font-weight: 600;
+  border-radius: 8px;
+  font-weight: 500;
   cursor: pointer;
+  transition: opacity 0.12s var(--e-out);
+}
+.auth-submit:hover {
+  opacity: 0.9;
 }
 .auth-submit[disabled] {
-  opacity: 0.6;
+  opacity: 0.5;
   cursor: progress;
 }
 .auth-error {
   margin: 0;
   font-size: 13px;
-  color: #ff8c8c;
+  color: var(--madder);
 }
 .auth-info {
   margin: 0;
   font-size: 13px;
-  color: #7ad07a;
+  color: var(--moss);
 }
 .auth-switch {
   margin: 0;
   font-size: 13px;
-  color: var(--text-1, #9095a0);
+  color: var(--ink-2);
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
@@ -5292,11 +4855,11 @@ html[data-theme="light"] .badge-react {
 .auth-switch button {
   background: transparent;
   border: 0;
-  color: var(--accent, #7aa2ff);
-  padding: 0;
-  cursor: pointer;
-  font: inherit;
+  color: var(--bloom-2);
   text-decoration: underline;
+  cursor: pointer;
+  padding: 0;
+  font: inherit;
 }
 /* Federated sign-in (M1.8). Quiet secondary buttons under the primary submit:
    the provider's own branding does the recognition work, so these stay plain
@@ -5384,7 +4947,7 @@ html[data-theme="light"] .badge-react {
   max-height: min(560px, calc(100vh - 80px));
   display: flex;
   flex-direction: column;
-  background: oklch(0.17 0.007 252 / 0.96);
+  background: oklch(from var(--paper-0) l c h / 0.96);
   backdrop-filter: blur(24px);
   border: 1px solid var(--stroke-2);
   border-radius: 12px;
@@ -6094,7 +5657,7 @@ html[data-theme="light"] .allowance-note.spent {
   position: fixed;
   inset: 0;
   z-index: 280;
-  background: oklch(0.1 0.005 252 / 0.45);
+  background: oklch(0.1 0.005 60 / 0.45);
   backdrop-filter: blur(3px);
 }
 .tour-card {
@@ -6177,8 +5740,8 @@ html[data-theme="light"] .allowance-note.spent {
   overflow: hidden;
   background: radial-gradient(
     circle at 50% 40%,
-    oklch(0.18 0.01 250) 0%,
-    oklch(0.11 0.005 250) 100%
+    oklch(from var(--paper-2) l c h) 0%,
+    oklch(from var(--paper-3) l c h) 100%
   );
 }
 .meeting-stage {
@@ -6220,7 +5783,7 @@ html[data-theme="light"] .allowance-note.spent {
   width: 100%;
   height: 100%;
   max-height: 480px;
-  background: oklch(0.14 0.008 250);
+  background: var(--paper-2);
   border: 2px solid var(--stroke-1);
   border-radius: 14px;
   overflow: hidden;
@@ -6270,7 +5833,7 @@ html[data-theme="light"] .allowance-note.spent {
   position: absolute;
   bottom: 12px;
   left: 14px;
-  background: oklch(0.1 0.005 250 / 0.82);
+  background: oklch(from var(--paper-0) l c h / 0.82);
   backdrop-filter: blur(12px);
   padding: 4px 10px;
   border-radius: 8px;
@@ -6303,7 +5866,7 @@ html[data-theme="light"] .allowance-note.spent {
   align-items: center;
   gap: 8px;
   padding: 8px 14px;
-  background: oklch(0.14 0.008 250 / 0.92);
+  background: oklch(from var(--paper-0) l c h / 0.92);
   backdrop-filter: blur(24px) saturate(1.5);
   border: 1px solid var(--stroke-1);
   border-radius: 999px;
@@ -7146,8 +6709,8 @@ textarea:focus-visible {
   z-index: 20;
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
-  background: rgba(14, 16, 21, 0.85);
-  border-bottom: 1px solid var(--stroke-1, rgba(255, 255, 255, 0.08));
+  background: oklch(from var(--paper-0) l c h / 0.85);
+  border-bottom: 1px solid var(--stroke-1);
 }
 
 .legal-header-inner {
@@ -7171,8 +6734,8 @@ textarea:focus-visible {
 .legal-logo {
   width: 32px;
   height: 32px;
-  background: linear-gradient(135deg, var(--accent, #7aa2ff), #9d7aff);
-  color: #0c0d10;
+  background: linear-gradient(135deg, var(--bloom-1), var(--bloom-3));
+  color: var(--paper-0);
   font-weight: 800;
   font-size: 16px;
   display: flex;
@@ -7223,8 +6786,8 @@ textarea:focus-visible {
 }
 
 .legal-nav-btn.active {
-  background: var(--accent, #7aa2ff);
-  color: #0b0c10;
+  background: var(--bloom-2);
+  color: var(--paper-0);
   font-weight: 600;
 }
 
@@ -7261,7 +6824,7 @@ textarea:focus-visible {
   border: 1px solid var(--stroke-1, rgba(255, 255, 255, 0.08));
   border-radius: 14px;
   padding: 44px 48px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+  box-shadow: var(--elev-3);
 }
 
 @media (max-width: 680px) {
@@ -7281,9 +6844,9 @@ textarea:focus-visible {
 }
 
 .legal-badge {
-  background: rgba(122, 162, 255, 0.12);
-  color: var(--accent, #7aa2ff);
-  border: 1px solid rgba(122, 162, 255, 0.28);
+  background: var(--bloom-wash);
+  color: var(--bloom-1);
+  border: 1px solid var(--bloom-wash-2);
   padding: 3px 10px;
   border-radius: 999px;
   font-size: 11.5px;
@@ -7312,8 +6875,8 @@ textarea:focus-visible {
 }
 
 .legal-callout {
-  background: linear-gradient(135deg, rgba(122, 162, 255, 0.08), rgba(96, 220, 160, 0.06));
-  border: 1px solid rgba(122, 162, 255, 0.24);
+  background: linear-gradient(135deg, var(--bloom-wash), oklch(from var(--moss) l c h / 0.08));
+  border: 1px solid oklch(from var(--bloom-1) l c h / 0.24);
   border-radius: 10px;
   padding: 18px 22px;
   margin-bottom: 36px;
@@ -7390,7 +6953,7 @@ textarea:focus-visible {
 }
 
 .legal-section a:hover {
-  color: #9cbaff;
+  color: var(--bloom-1);
 }
 
 .legal-contact-card {

@@ -5,6 +5,7 @@ import type { WorkspaceState } from "../workspace.js";
 import type { Workspace } from "@lucent/core";
 import { searchBoard, type BoardSearchHit, type BoardSearchResponse } from "../boards.js";
 import { resolveLocale, t } from "@lucent/i18n";
+import { listProjects } from "../persistence.js";
 import {
   buildResults,
   groupSearchHits,
@@ -49,6 +50,7 @@ export function CommandOverlay({
     undo,
     redo,
     newProject,
+    openProject,
     boardId,
     ask,
     setPillMode,
@@ -60,6 +62,7 @@ export function CommandOverlay({
     undo: () => void;
     redo: () => void;
     newProject: () => void;
+    openProject: (id: string) => void;
     boardId: string | null;
     ask: WorkspaceState["ask"];
     setPillMode: WorkspaceState["setPillMode"];
@@ -154,6 +157,48 @@ export function CommandOverlay({
         group: "view",
         run: { kind: "view", view: "sequence" },
       },
+      {
+        id: "v-home",
+        label: "Go to Home",
+        hint: "Atelier · Workspace overview",
+        group: "view",
+        run: { kind: "view", view: "home" },
+      },
+      {
+        id: "v-workspace",
+        label: "Open Workspace",
+        hint: "Boards · Meetings · Team",
+        group: "view",
+        run: { kind: "view", view: "workspace" },
+      },
+      {
+        id: "v-admin",
+        label: "Open Admin & Organization",
+        hint: "Members · Audit · SAML & SCIM",
+        group: "view",
+        run: { kind: "view", view: "admin" },
+      },
+      {
+        id: "v-review",
+        label: "Open Review Queue",
+        hint: "Proposals · Changes",
+        group: "view",
+        run: { kind: "view", view: "review" },
+      },
+      {
+        id: "v-execution",
+        label: "Open Execution & Tasks",
+        hint: "Linear · GitHub · Jira",
+        group: "view",
+        run: { kind: "view", view: "execution" },
+      },
+      {
+        id: "v-integrations",
+        label: "Manage Integrations",
+        hint: "Connected Services",
+        group: "view",
+        run: { kind: "view", view: "integrations" },
+      },
     ],
     [],
   );
@@ -172,6 +217,20 @@ export function CommandOverlay({
       if (n.label.toLowerCase().includes(needle) || n.nodeType.toLowerCase().includes(needle)) {
         hits.push({ id: n.id, title: n.label, hint: `Node · ${n.nodeType}` });
       }
+      if (n.statement) {
+        const st = n.statement;
+        if (
+          n.label.toLowerCase().includes(needle) ||
+          st.kind.toLowerCase().includes(needle) ||
+          (st.topic && st.topic.toLowerCase().includes(needle))
+        ) {
+          hits.push({
+            id: n.id,
+            title: n.label,
+            hint: `${st.kind.toUpperCase()} · ${st.status}`,
+          });
+        }
+      }
     }
     for (const s of Object.values(workspace.shapes)) {
       const text = s.text ?? "";
@@ -183,7 +242,21 @@ export function CommandOverlay({
         });
       }
     }
-    return hits.slice(0, 8);
+    try {
+      const projects = listProjects();
+      for (const p of projects) {
+        if (p.name.toLowerCase().includes(needle)) {
+          hits.push({
+            id: p.id,
+            title: p.name,
+            hint: `Board · ${new Date(p.updatedAt).toLocaleDateString()}`,
+          });
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+    return hits.slice(0, 10);
   }, [q, useLocalScan, workspace.nodes, workspace.shapes]);
 
   // Server search (shared boards): debounced, aborted per keystroke, and
@@ -301,6 +374,11 @@ export function CommandOverlay({
     if (useLocalScan) {
       const hit = results.board[index - itemCount];
       if (hit) {
+        if (hit.hint.startsWith("Board ·")) {
+          openProject(hit.id);
+        } else {
+          onCitation({ kind: "node", id: hit.id });
+        }
         setView("canvas");
         onClose();
         return;

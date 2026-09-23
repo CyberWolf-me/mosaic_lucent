@@ -12,7 +12,13 @@ export type { MeetingMode };
  */
 
 export type Theme = "dark" | "light" | "system";
-export type Accent = "amber" | "violet" | "cyan" | "rose" | "mono";
+/**
+ * The Atelier accent axis. Each value re-points --bloom-* in atelier.css so the
+ * whole app recolors as one system. The pre-redesign set (amber/violet/cyan/
+ * rose/mono) is retired; stale stored values are coerced to "bloom" on load.
+ */
+export type Accent = "bloom" | "madder" | "moss" | "saffron" | "graphite";
+const ACCENTS: readonly Accent[] = ["bloom", "madder", "moss", "saffron", "graphite"];
 export type GridStyle = "dots" | "lines" | "off";
 export type Motion = "full" | "reduced";
 export type BoardStyle = "clean" | "sketch";
@@ -48,10 +54,11 @@ export interface Settings {
 }
 
 const LS_KEY = "lucent.settings";
+const MIGRATION_KEY = "lucent.v2.theme_init";
 
 export const DEFAULT_SETTINGS: Settings = {
-  theme: "dark",
-  accent: "amber",
+  theme: "light",
+  accent: "bloom",
   gridStyle: "dots",
   motion: "full",
   aiSound: false,
@@ -72,12 +79,26 @@ type Listener = (s: Settings) => void;
 function createStore() {
   let state: Settings = DEFAULT_SETTINGS;
   try {
+    const migrated = localStorage.getItem(MIGRATION_KEY);
     const raw = localStorage.getItem(LS_KEY);
     if (raw) {
       const parsed = JSON.parse(raw) as Partial<Settings>;
+      // If user hasn't yet migrated to v2 Atelier light default, force light & bloom initially
+      if (!migrated) {
+        parsed.theme = "light";
+        parsed.accent = "bloom";
+        localStorage.setItem(MIGRATION_KEY, "true");
+        localStorage.setItem(LS_KEY, JSON.stringify({ ...DEFAULT_SETTINGS, ...parsed }));
+      }
       state = { ...DEFAULT_SETTINGS, ...parsed };
+      // A retired accent (amber/violet/cyan/rose/mono) stored before the Atelier
+      // consolidation would set data-accent to a value no CSS block matches,
+      // leaving the app on cobalt with a dead swatch — coerce it back to bloom.
+      if (!ACCENTS.includes(state.accent)) state.accent = "bloom";
       if (!state.livekitUrl?.trim()) state.livekitUrl = DEFAULT_SETTINGS.livekitUrl;
       if (!state.livekitTokenUrl?.trim()) state.livekitTokenUrl = DEFAULT_SETTINGS.livekitTokenUrl;
+    } else if (!migrated) {
+      localStorage.setItem(MIGRATION_KEY, "true");
     }
   } catch {
     /* ignore */

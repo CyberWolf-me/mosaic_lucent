@@ -80,9 +80,10 @@ export function CanvasBackdrop({
   style?: CSSProperties;
 }) {
   return (
-    <div style={{ position: "absolute", inset: 0, background: "var(--canvas-1)", ...style }}>
-      <div className="canvas-grid" />
-      <div className="canvas-vignette" />
+    <div style={{ position: "absolute", inset: 0, background: "var(--paper-1)", ...style }}>
+      <div className="paper-bg" />
+      <div className="paper-grid" />
+      <div className="paper-grain" />
       {children}
     </div>
   );

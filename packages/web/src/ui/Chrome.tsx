@@ -1,12 +1,19 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Ico } from "./icons.js";
-import { CommandOverlay } from "./CommandOverlay.js";
 import { NotificationTray } from "./NotificationTray.js";
 import { ProfileMenu } from "./ProfileMenu.js";
 import { getSessionUser } from "../session.js";
 import { Dialog } from "./primitives.js";
 import { useWorkspace, type CanvasLens, type View } from "../workspace.js";
+import {
+  HomeIcon,
+  IntelIcon,
+  ActionIcon,
+  BellIcon,
+  useNotifCount,
+  AtelierNotificationPopover,
+} from "./atelierAtoms.js";
 import {
   classifyBoard,
   createShareLink,
@@ -58,15 +65,27 @@ export function TopBar({
     <div className="top-bar">
       <button
         className="brand"
-        onClick={() => setView("dashboard")}
-        title="Dashboard"
-        aria-label="Dashboard"
-        style={{ background: "none", border: 0, padding: 0, cursor: "pointer" }}
+        onClick={() => setView("home")}
+        title="Lucent Home"
+        aria-label="Home"
+        style={{
+          background: "none",
+          border: 0,
+          padding: 0,
+          cursor: "pointer",
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          fontFamily: "var(--font-serif)",
+          fontSize: 16,
+          fontWeight: 500,
+          color: "var(--ink-0)",
+        }}
       >
-        <div className="logo" />
+        <div className="brand-mark" />
         <span>Lucent</span>
       </button>
-      <span className="crumb-sep">/</span>
+      <span className="crumb-sep">·</span>
       {crumbs.map((c, i) => (
         <span key={i} style={{ display: "contents" }}>
           {c.view ? (
@@ -663,22 +682,14 @@ function ShareDialog({ onClose }: { onClose: () => void }) {
   );
 }
 
-/** UX-1 shell: primary surfaces. Lens items below are canvas lenses, not views. */
-const RAIL_ITEMS: { id: string; icon: keyof typeof Ico; label: string; view: View }[] = [
-  { id: "projects", icon: "Folder", label: "Projects", view: "dashboard" },
-  { id: "canvas", icon: "Layers", label: "Canvas", view: "canvas" },
-  { id: "meeting", icon: "Journey", label: "Meeting", view: "meeting" },
-  { id: "intelligence", icon: "Sparkle", label: "Intelligence", view: "intelligence" },
-  { id: "execution", icon: "Gauge", label: "Execution", view: "execution" },
-];
-
-/** Second rail group: alternate canvas lenses on the same board (UX-1). */
-const RAIL_LENSES: { id: string; icon: keyof typeof Ico; label: string; lens: CanvasLens }[] = [
-  { id: "kanban", icon: "Grid", label: "Kanban", lens: "kanban" },
-  { id: "document", icon: "Book", label: "Document", lens: "document" },
-  { id: "wireframe", icon: "Grid", label: "Wireframe", lens: "wireframe" },
-  { id: "sequence", icon: "Flow", label: "Sequence", lens: "sequence" },
-  { id: "er", icon: "Mind", label: "ER diagram", lens: "er" },
+const ATELIER_RAIL_ITEMS: { id: string; icon: () => React.ReactNode; label: string; view: View }[] = [
+  { id: "home", icon: () => <HomeIcon />, label: "Home", view: "home" },
+  { id: "workspace", icon: () => <Ico.Folder />, label: "Workspace", view: "workspace" },
+  { id: "board", icon: () => <Ico.Layers />, label: "Board", view: "canvas" },
+  { id: "meeting", icon: () => <Ico.Present />, label: "Meeting", view: "meeting" },
+  { id: "intel", icon: () => <IntelIcon />, label: "Intelligence", view: "intelligence" },
+  { id: "exec", icon: () => <ActionIcon />, label: "Execution", view: "execution" },
+  { id: "history", icon: () => <Ico.History />, label: "History", view: "history" },
 ];
 
 export function LeftRail({
@@ -688,8 +699,9 @@ export function LeftRail({
   side?: "left" | "right";
   onOpenSettings?: (section?: string) => void;
 }) {
-  const { view, setView, lens, setLens, newProject, workspace } = useWorkspace();
-  const [searchOpen, setSearchOpen] = useState(false);
+  const { view, setView, newProject, workspace } = useWorkspace();
+  const notifCount = useNotifCount();
+  const [notifOpen, setNotifOpen] = useState(false);
   const [confirmNew, setConfirmNew] = useState(false);
 
   // Does the current board hold work worth warning about before replacing it?
@@ -698,29 +710,50 @@ export function LeftRail({
     Object.keys(workspace.shapes).length > 0 ||
     Object.keys(workspace.wireframes).length > 0;
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      const t = e.target as HTMLElement | null;
-      const typing = t?.tagName === "INPUT" || t?.tagName === "TEXTAREA";
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
-        e.preventDefault();
-        setSearchOpen(true);
-      }
-      // Escape shouldn't close search while the user is mid-word in the field's
-      // sibling inputs elsewhere on the page.
-      if (e.key === "Escape" && !typing) setSearchOpen(false);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, []);
-
   return (
     <>
       <div className={`left-rail ${side === "right" ? "on-right" : ""}`}>
-        {RAIL_ITEMS.map((it) => {
-          const Icon = Ico[it.icon];
+        <button
+          className="rail-btn-new"
+          style={{
+            width: 38,
+            height: 38,
+            borderRadius: 10,
+            background: "var(--bloom-2)",
+            color: "white",
+            display: "grid",
+            placeItems: "center",
+            boxShadow: "0 4px 12px -3px var(--bloom-glow)",
+            marginBottom: 6,
+            border: 0,
+            cursor: "pointer",
+          }}
+          title="New workspace · ⌘N"
+          aria-label="New workspace"
+          onClick={() => (hasWork ? setConfirmNew(true) : newProject())}
+        >
+          <Ico.Plus />
+        </button>
+
+        {ATELIER_RAIL_ITEMS.map((it) => {
           const active =
-            it.view === "canvas" ? view === "canvas" && lens === "visual" : view === it.view;
+            it.id === "board"
+              ? view === "canvas" ||
+                view === "main" ||
+                view === "board" ||
+                view === "empty" ||
+                view === "generating" ||
+                view === "proposing"
+              : it.id === "meeting"
+                ? view === "meeting" || view === "meeting_board" || view === "voice"
+                : it.id === "intel"
+                  ? view === "intelligence" ||
+                    view === "decisions" ||
+                    view === "actions" ||
+                    view === "knowledge"
+                  : it.id === "exec"
+                    ? view === "execution" || view === "projects" || view === "task"
+                    : view === it.view;
           return (
             <button
               key={it.id}
@@ -731,67 +764,69 @@ export function LeftRail({
               aria-current={active ? "page" : undefined}
               onClick={() => setView(it.view)}
             >
-              <Icon />
+              {it.icon()}
             </button>
           );
         })}
-        <div className="rail-divider" />
-        {RAIL_LENSES.map((it) => {
-          const Icon = Ico[it.icon];
-          const active = view === "canvas" && lens === it.lens;
-          return (
-            <button
-              key={it.id}
-              className={`rail-btn ${active ? "active" : ""}`}
-              data-tip={it.label}
-              title={it.label}
-              aria-label={it.label}
-              aria-current={active ? "page" : undefined}
-              onClick={() => {
-                // setView first: setView("canvas") resets to the visual lens,
-                // so the explicit lens applies after.
-                setView("canvas");
-                setLens(it.lens);
-              }}
-            >
-              <Icon />
-            </button>
-          );
-        })}
+
         <div style={{ flex: 1 }} />
-        <button
-          className={`rail-btn ${view === "history" ? "active" : ""}`}
-          data-tip="History"
-          title="History"
-          aria-label="History"
-          aria-current={view === "history" ? "page" : undefined}
-          onClick={() => setView("history")}
-        >
-          <Ico.History />
-        </button>
+
         <button
           className="rail-btn"
           data-tip="Search · ⌘K"
           title="Search · ⌘K"
           aria-label="Search"
-          onClick={() => setSearchOpen(true)}
+          onClick={() => window.dispatchEvent(new CustomEvent("lucent:open-command-overlay"))}
         >
           <Ico.Search />
         </button>
-        <div className="rail-divider" />
-        {/* Kept at the bottom, away from the view switcher: this replaces the
-            current board, and sitting directly above "Canvas"/"Wireframe" made it
-            easy to wipe a board while reaching for a view. */}
+
         <button
-          className="rail-btn"
-          data-tip="New workspace"
-          title="New workspace"
-          aria-label="New workspace"
-          onClick={() => (hasWork ? setConfirmNew(true) : newProject())}
+          className={`rail-btn ${view === "notif" ? "active" : ""}`}
+          data-tip="Notifications"
+          title="Notifications"
+          aria-label="Notifications"
+          onClick={() => setNotifOpen((v) => !v)}
+          style={{ position: "relative" }}
         >
-          <Ico.Plus />
+          <BellIcon />
+          {notifCount > 0 && (
+            <span
+              style={{
+                position: "absolute",
+                top: 4,
+                right: 4,
+                minWidth: 15,
+                height: 15,
+                borderRadius: 999,
+                background: "var(--madder)",
+                color: "white",
+                fontFamily: "var(--font-mono)",
+                fontSize: 9,
+                fontWeight: 700,
+                padding: "0 4px",
+                display: "grid",
+                placeItems: "center",
+                border: "2px solid var(--paper-0)",
+              }}
+            >
+              {notifCount}
+            </span>
+          )}
+        </button>
+
+        <button
+          className={`rail-btn ${view === "admin" ? "active" : ""}`}
+          data-tip="Admin"
+          title="Admin"
+          aria-label="Admin"
+          onClick={() => (onOpenSettings ? onOpenSettings("admin") : setView("admin"))}
+        >
+          <Ico.Settings />
         </button>
       </div>
+
+      {notifOpen && <AtelierNotificationPopover onClose={() => setNotifOpen(false)} />}
       {confirmNew && (
         <ConfirmNewWorkspace
           onCancel={() => setConfirmNew(false)}
@@ -800,9 +835,6 @@ export function LeftRail({
             newProject();
           }}
         />
-      )}
-      {searchOpen && (
-        <CommandOverlay onClose={() => setSearchOpen(false)} onOpenSettings={onOpenSettings} />
       )}
     </>
   );
@@ -859,7 +891,7 @@ export function ZoomBadge({
       style={{
         position: "absolute",
         bottom: 20,
-        left: 20,
+        right: 24,
         zIndex: 25,
         display: "flex",
         alignItems: "center",
@@ -920,8 +952,8 @@ export function StatusBadge({ children }: { children: React.ReactNode }) {
       style={{
         position: "absolute",
         bottom: 20,
-        right: 20,
-        zIndex: 25,
+        right: 220,
+        zIndex: 24,
         display: "flex",
         alignItems: "center",
         gap: 8,

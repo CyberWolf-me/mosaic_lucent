@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Ico } from "../ui/icons.js";
 import { useWorkspace } from "../workspace.js";
 import type { Operation } from "@lucent/core";
 
-/** Proposal review panel, ported from reference/screen_proposing.jsx and wired
- * to the real pending proposal + apply-as-one-commit action (docs/15). */
+/**
+ * Proposal review panel, styled in the Atelier design system and wired
+ * to the real pending proposal + apply-as-one-commit action (docs/15).
+ */
 export function ProposalPanel() {
   const { proposal, applyProposal, cancelProposal, chat } = useWorkspace();
   const [closing, setClosing] = useState(false);
@@ -49,9 +51,20 @@ export function ProposalPanel() {
     return () => window.removeEventListener("keydown", onKey);
   }, [proposal, closing, handleCancel, handleApply]);
 
+  const changes = useMemo(() => {
+    if (!proposal) return [];
+    return proposal.operations.map(describe);
+  }, [proposal]);
+
+  const additions = useMemo(() => changes.filter((c) => c.op === "add"), [changes]);
+  const modifications = useMemo(
+    () => changes.filter((c) => c.op === "mod" || c.op === "move"),
+    [changes],
+  );
+  const removals = useMemo(() => changes.filter((c) => c.op === "del"), [changes]);
+
   if (!proposal) return null;
 
-  const changes = proposal.operations.map(describe);
   // Partial-application honesty (M1/UX-2): the gate or the server may have
   // skipped ops while proposing the rest. The proposal record itself carries
   // no skipped list, so fall back to the review-gate reply in chat.
@@ -62,97 +75,170 @@ export function ProposalPanel() {
   const skipped = proposalSkipped ?? chatSkipped ?? [];
 
   return (
-    <div className={`right-panel ${closing ? "leaving" : ""}`}>
-      <div className="panel-head">
-        <div>
-          <div className="panel-title" style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span
-              style={{
-                width: 18,
-                height: 18,
-                borderRadius: "var(--r-sm)",
-                background: "linear-gradient(135deg, var(--amber-2), var(--amber-3))",
-                display: "grid",
-                placeItems: "center",
-                color: "var(--canvas-0)",
-              }}
-            >
-              <Ico.Sparkle />
-            </span>
-            Lucent proposes {proposal.operations.length} changes
-          </div>
-          <div className="panel-sub">Preview · applies what still fits · reports the rest</div>
-          {skipped.length > 0 && (
-            <div className="mono" style={{ fontSize: 10.5, color: "var(--amber-2)", marginTop: 4 }}>
-              {skipped.length} change{skipped.length === 1 ? "" : "s"} didn&apos;t fit — see chat
-              for details
+    <div
+      role="dialog"
+      aria-label="Proposed changes"
+      className={`right-panel ${closing ? "leaving" : ""}`}
+      style={{
+        background: "var(--paper-0)",
+        border: "1px solid oklch(from var(--paper-4) l c h / 0.8)",
+        boxShadow: "var(--shadow-3)",
+      }}
+    >
+      <div className="panel-head" style={{ borderBottom: "1px solid oklch(from var(--paper-4) l c h / 0.5)" }}>
+        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between" }}>
+          <div>
+            <div className="panel-title" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span
+                style={{
+                  width: 20,
+                  height: 20,
+                  borderRadius: 6,
+                  background: "var(--bloom-wash)",
+                  display: "grid",
+                  placeItems: "center",
+                  color: "var(--bloom-2)",
+                }}
+              >
+                <Ico.Sparkle style={{ width: 13, height: 13 }} />
+              </span>
+              <span>Lucent proposes {proposal.operations.length} changes</span>
             </div>
-          )}
+            <div className="panel-sub" style={{ marginTop: 4 }}>
+              Preview · applies what fits · reports remainder
+            </div>
+            {skipped.length > 0 && (
+              <div className="mono" style={{ fontSize: 10.5, color: "var(--amber-2)", marginTop: 4 }}>
+                {skipped.length} change{skipped.length === 1 ? "" : "s"} didn&apos;t fit — see chat
+                for details
+              </div>
+            )}
+          </div>
+          <button
+            type="button"
+            className="icon-btn"
+            style={{ padding: 6, height: 28, color: "var(--ink-3)", background: "none", border: 0, cursor: "pointer" }}
+            onClick={handleCancel}
+            title="Dismiss proposal (Escape)"
+          >
+            <Ico.X style={{ width: 14, height: 14 }} />
+          </button>
         </div>
-        <button className="icon-btn" style={{ padding: 6, height: 28 }} onClick={handleCancel}>
-          <Ico.X />
-        </button>
       </div>
+
       <div className="panel-body">
+        {/* Request prompt card */}
         <div
           style={{
-            padding: 12,
-            borderRadius: 8,
-            background: "oklch(from var(--canvas-2) l c h / 0.6)",
-            border: "1px solid var(--stroke-1)",
-            marginBottom: 10,
-            fontSize: 12,
+            padding: "10px 14px",
+            borderRadius: 10,
+            background: "var(--paper-1)",
+            border: "1px solid oklch(from var(--paper-4) l c h / 0.6)",
+            marginBottom: 14,
+            fontSize: 12.5,
             color: "var(--ink-1)",
-            lineHeight: 1.55,
+            lineHeight: 1.5,
           }}
         >
           <div
+            className="mono-caps"
             style={{
-              fontSize: 10,
-              fontFamily: "var(--font-mono)",
-              letterSpacing: "0.06em",
-              textTransform: "uppercase",
+              fontSize: 9.5,
               color: "var(--ink-3)",
-              marginBottom: 6,
+              marginBottom: 4,
             }}
           >
-            Request
+            Origin Prompt
           </div>
-          "{proposal.request}"
+          &ldquo;{proposal.request}&rdquo;
         </div>
-        <div
-          style={{
-            fontSize: 10,
-            fontFamily: "var(--font-mono)",
-            letterSpacing: "0.08em",
-            textTransform: "uppercase",
-            color: "var(--ink-3)",
-            margin: "10px 4px 8px",
-          }}
-        >
-          Proposed edits
-        </div>
-        {changes.map((c, i) => (
-          <div key={i} className="change-item">
-            <span className={`change-op ${c.op}`}>{c.op}</span>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div className="change-title">{c.title}</div>
-              <div className="change-sub">{c.sub}</div>
+
+        {/* Additions Section */}
+        {additions.length > 0 && (
+          <div style={{ marginBottom: 14 }}>
+            <div className="mono-caps" style={{ color: "var(--moss)", marginBottom: 6, fontSize: 10 }}>
+              {additions.length} addition{additions.length === 1 ? "" : "s"}
             </div>
+            {additions.map((c, i) => (
+              <div key={`add-${i}`} className="change-item">
+                <span className="change-op add">Add</span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div className="change-title">{c.title}</div>
+                  <div className="change-sub">{c.sub}</div>
+                </div>
+              </div>
+            ))}
           </div>
-        ))}
+        )}
+
+        {/* Modifications Section */}
+        {modifications.length > 0 && (
+          <div style={{ marginBottom: 14 }}>
+            <div className="mono-caps" style={{ color: "var(--bloom-2)", marginBottom: 6, fontSize: 10 }}>
+              {modifications.length} modification{modifications.length === 1 ? "" : "s"}
+            </div>
+            {modifications.map((c, i) => (
+              <div key={`mod-${i}`} className="change-item">
+                <span className={`change-op ${c.op}`}>{c.op === "move" ? "Move" : "Mod"}</span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div className="change-title">{c.title}</div>
+                  <div className="change-sub">{c.sub}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Removals Section */}
+        {removals.length > 0 && (
+          <div style={{ marginBottom: 14 }}>
+            <div className="mono-caps" style={{ color: "var(--madder)", marginBottom: 6, fontSize: 10 }}>
+              {removals.length} removal{removals.length === 1 ? "" : "s"}
+            </div>
+            {removals.map((c, i) => (
+              <div key={`del-${i}`} className="change-item">
+                <span className="change-op del">Del</span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div className="change-title" style={{ textDecoration: "line-through", opacity: 0.8 }}>
+                    {c.title}
+                  </div>
+                  <div className="change-sub">{c.sub}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
-      <div className="panel-foot">
-        <button className="btn ghost" onClick={handleCancel} title="Cancel proposal (Esc)">
-          Cancel <span style={{ opacity: 0.6, fontSize: 10, marginLeft: 4 }}>Esc</span>
+
+      <div
+        className="panel-foot"
+        style={{
+          borderTop: "1px solid oklch(from var(--paper-4) l c h / 0.5)",
+          padding: 12,
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+        }}
+      >
+        <button
+          type="button"
+          className="btn-atelier ghost"
+          onClick={handleCancel}
+          title="Cancel proposal (Esc)"
+          style={{ height: 32, fontSize: 12 }}
+        >
+          Cancel <span className="mono" style={{ opacity: 0.6, fontSize: 10, marginLeft: 4 }}>Esc</span>
         </button>
         <button
-          className="btn amber"
+          type="button"
+          className="btn-atelier primary"
           onClick={handleApply}
           title="Apply all changes (⌘Enter or Ctrl+Enter)"
+          style={{ height: 32, fontSize: 12, padding: "0 14px" }}
         >
-          <Ico.Check /> Apply all{" "}
-          <span style={{ opacity: 0.8, fontSize: 10, marginLeft: 4 }}>⌘↵</span>
+          <Ico.Check style={{ width: 14, height: 14 }} />
+          <span>Apply all</span>
+          <span className="mono" style={{ opacity: 0.8, fontSize: 10, marginLeft: 4 }}>⌘↵</span>
         </button>
       </div>
     </div>

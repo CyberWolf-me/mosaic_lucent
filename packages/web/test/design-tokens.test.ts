@@ -29,7 +29,9 @@ describe("design tokens", () => {
 
   it("defines the pill radius and focus ring", () => {
     expect(css).toContain("--r-pill: 999px");
-    expect(css).toMatch(/--focus-ring:\s*.+var\(--amber-1\)/);
+    // The Atelier redesign moved the accent from the old amber beam to the
+    // cobalt "bloom"; the focus ring follows it.
+    expect(css).toMatch(/--focus-ring:\s*.+var\(--bloom-2\)/);
   });
 
   it("applies a visible keyboard focus ring globally", () => {

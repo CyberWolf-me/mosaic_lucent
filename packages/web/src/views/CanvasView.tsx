@@ -3,7 +3,13 @@ import { resolveLocale, t } from "@lucent/i18n";
 import { applyLayout, applyRoutes, computeLayoutWithRoutes } from "@lucent/core";
 import { Ico } from "../ui/icons.js";
 import { AIPill } from "../ui/AIPill.js";
-import { TopBar, LeftRail, ZoomBadge, StatusBadge } from "../ui/Chrome.js";
+import { ZoomBadge, StatusBadge } from "../ui/Chrome.js";
+import {
+  GlobalRail,
+  AtelierBoardToolbar,
+  AtelierNodeInspector,
+  AtelierEmptyState,
+} from "../ui/atelierAtoms.js";
 import { CanvasViewport, emitHaptic, type ViewportControls } from "../ui/atoms.js";
 import { DiagramLayer } from "../ui/DiagramLayer.js";
 import {
@@ -51,7 +57,7 @@ import { CommentInbox, CommentPanel, CommentPins, NotificationBell } from "./Com
 import { PresenceBar, PresenceCursors } from "./Presence.js";
 import { toggleVoteOps } from "../board/engagement.js";
 import { openThreadCount } from "../board/comments.js";
-import { useWorkspace } from "../workspace.js";
+import { useWorkspace, type View } from "../workspace.js";
 import { useSettings } from "../settings.js";
 import { useToast } from "../ui/Toast.js";
 import { generateImage } from "../api.js";
@@ -243,8 +249,11 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
     projectName,
     undo,
     redo,
+    canUndo,
+    canRedo,
     peers,
     readOnly,
+    view,
     setView,
     lens,
     syncStatus,
@@ -412,6 +421,21 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement;
+      if (e.key === "Escape") {
+        if (target.tagName === "INPUT" || target.tagName === "TEXTAREA") {
+          target.blur();
+        }
+        if (proposal) {
+          cancelProposal();
+          return;
+        }
+        setTool("select");
+        setSelectedShapes(new Set());
+        setSelectedNodes(new Set());
+        setSelected(null);
+        setSelectedLink(null);
+        return;
+      }
       if (target.tagName === "INPUT" || target.tagName === "TEXTAREA") return;
       const mod = e.metaKey || e.ctrlKey;
 
@@ -727,8 +751,8 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
     [applyManual, notify, shapes, viewportBox, workspace, chat, projectName, settings.aiSound],
   );
 
-  const submit = useCallback(() => {
-    const text = message.trim();
+  const submit = useCallback((overrideText?: unknown) => {
+    const text = (typeof overrideText === "string" ? overrideText : message).trim();
     if (!text) return;
     setMessage("");
     if (proposal) {
@@ -1717,8 +1741,15 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
   useEffect(() => {
     const had = prevCountRef.current;
     prevCountRef.current = objectCount;
-    // -1 is the mount pass: fit whatever was restored.
-    if ((had === -1 || had === 0) && objectCount > 0) {
+    // -1 is the mount pass: fit whatever was restored. 0 -> N is the first
+    // generation on an empty board. A jump of 3+ objects is an AI batch landing
+    // on a board that already had content — without a refit those new nodes lay
+    // outside the current viewport and the user reads "nothing generated" even
+    // though the ops applied (a single manual add is +1, so it never refits and
+    // steals the user's place). Any of these three cases fits the new content
+    // into view.
+    const batchAdded = had > 0 && objectCount - had >= 3;
+    if (((had === -1 || had === 0) && objectCount > 0) || batchAdded) {
       const t = setTimeout(() => fitRef.current(), 260);
       return () => clearTimeout(t);
     }
@@ -2014,21 +2045,53 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
   // UX-6: names of peers currently selecting something (contest awareness).
   const peerEditors = peers.filter((p) => (p.selection?.length ?? 0) > 0);
 
-  // The proposal panel occupies the right rail; hide the top-right tool cluster
-  // and the minimap while it is open so nothing overlaps the review panel.
+  // The proposal panel and inspector panel occupy the right rail; hide the top-right
+  // tool cluster and the minimap while open so nothing overlaps the inspector.
   // A viewer on someone else's shared board gets no authoring cluster at all.
-  const rightClusterVisible = mode === "edit" && canvasPhase !== "proposing" && !readOnly;
+  const rightClusterVisible =
+    mode === "edit" &&
+    canvasPhase !== "proposing" &&
+    !readOnly &&
+    !selected &&
+    selectedShapes.size === 0;
 
   // Editing chrome is hidden outright for viewers rather than shown and then
   // failing: the server rejects their operations, so an enabled tool would be a
   // lie. Read-only affordances (pan/zoom, export, present, comments) stay.
   const canEdit = mode === "edit" && !readOnly;
 
+  // Derived connected nodes for the selected node inspector.
+  const selectedConnectedNodes = useMemo(() => {
+    if (!selected || !workspace.nodes[selected]) return [];
+    const res: Array<{ id: string; label: string; direction: "in" | "out" }> = [];
+    for (const edge of Object.values(workspace.edges)) {
+      if (edge.source === selected && workspace.nodes[edge.target]) {
+        res.push({
+          id: edge.target,
+          label: workspace.nodes[edge.target]?.label ?? "",
+          direction: "out",
+        });
+      } else if (edge.target === selected && workspace.nodes[edge.source]) {
+        res.push({
+          id: edge.source,
+          label: workspace.nodes[edge.source]?.label ?? "",
+          direction: "in",
+        });
+      }
+    }
+    return res;
+  }, [selected, workspace.nodes, workspace.edges]);
+
   // The first-run hero replaces the whole canvas, including the draw layer. If a
   // drawing tool is armed we must show the board instead, or picking a shape on a
   // fresh board silently does nothing — the drag lands on the hero.
   const drawingArmed = tool !== "select" && tool !== "hand";
-  const showHero = canvasPhase === "empty" && !drawingArmed && !blankBoardStarted;
+  const showHero =
+    (canvasPhase === "empty" || view === "empty") &&
+    !drawingArmed &&
+    !blankBoardStarted &&
+    nodeCount === 0 &&
+    shapes.length === 0;
 
   // UX-1: lenses render here, inside the Canvas entry — one board URL
   // (?view=canvas&lens=kanban) covers them. Each lens view is a full
@@ -2045,23 +2108,51 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
   return (
     <div style={{ position: "absolute", inset: 0 }}>
       {showHero ? (
-        <>
-          <div style={{ position: "absolute", inset: 0 }}>
-            <div className="canvas-grid" />
-            <div className="canvas-vignette" />
-          </div>
-          <TopBar crumbs={crumbs} meta={meta} onOpenSettings={onOpenSettings} />
-          <LeftRail onOpenSettings={onOpenSettings} />
-          {/* The shape toolbar is NOT on the hero. It is `position: fixed`, so
-              on the first-run page it floated over the prompt and the mode
-              cluster, reading as UI that belongs to no board — a fresh user
-              sees tools for a canvas they haven't made yet. Drawing is still
-              one click away: "start with a blank board" below arms the sticky
-              tool and swaps the hero for the real canvas. */}
-          <EmptyState
+        <div style={{ position: "absolute", inset: 0, overflow: "hidden", background: "var(--paper-1)" }}>
+          <div className="paper-bg" />
+          <div className="paper-grid" />
+          <div className="paper-grain" />
+          <header className="top-bar">
+            <button
+              type="button"
+              className="brand"
+              onClick={() => setView("home" as View)}
+              title="Lucent Home"
+              style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer", background: "none", border: 0, padding: 0 }}
+            >
+              <div className="brand-mark" />
+              <span className="serif" style={{ fontSize: 16 }}>Lucent</span>
+              <span className="mono" style={{ fontSize: 10, color: "var(--ink-3)", padding: "2px 6px", borderRadius: 4, background: "oklch(from var(--paper-2) l c h / 0.8)", border: "1px solid oklch(from var(--paper-4) l c h / 0.5)" }}>
+                Atelier
+              </span>
+            </button>
+            <div className="top-sep" />
+            <div className="breadcrumbs">
+              <span className="crumb current">{projectName || "Untitled workspace"}</span>
+            </div>
+            <div style={{ flex: 1 }} />
+            <button
+              type="button"
+              className="avatar"
+              onClick={() => onOpenSettings?.()}
+              title="Settings"
+              style={{ width: 32, height: 32, borderRadius: 999, background: "oklch(0.55 0.16 25)", color: "white", display: "grid", placeItems: "center", fontSize: 11, fontFamily: "var(--font-mono)", fontWeight: 700, border: "2px solid var(--paper-0)", boxShadow: "var(--shadow-1)", cursor: "pointer" }}
+            >
+              AK
+            </button>
+          </header>
+          <GlobalRail active="board" onOpenSettings={onOpenSettings} />
+          <AtelierEmptyState
             value={message}
             onChange={setMessage}
-            onSubmit={submit}
+            onSubmit={(prompt) => {
+              setMessage(prompt);
+              void submit(prompt);
+            }}
+            onBlankBoard={() => {
+              setBlankBoardStarted(true);
+              setTool("select");
+            }}
             onSpeak={toggleVoice}
             onStartVoiceCall={toggleVoiceAgent}
             voiceAgentActive={
@@ -2070,15 +2161,46 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
               voiceAgentState !== "error"
             }
             listening={listening}
-            onGenImage={() => generateImageShape()}
-            onBlankBoard={() => setBlankBoardStarted(true)}
-            failedAttempt={heroFailure}
           />
-          {/* The tour overlays the hero: it is the first-minute surface, and
-              it unmounts itself once seen (or dismissed) — no flag threading
-              through the workspace state for something read once per browser. */}
-          <Tour />
-        </>
+          <AIPill
+            status={status}
+            phase={genPhase}
+            progressNote={genProgress}
+            onCancel={busy ? () => cancelSend() : undefined}
+            placeholder="Describe your idea — Lucent will construct the board…"
+            value={message}
+            onChange={setMessage}
+            onSubmit={submit}
+            mode={pillMode}
+            onModeChange={setPillMode}
+            onCitation={onCitation}
+            listening={listening}
+            onToggleMic={toggleVoice}
+            voiceSupported={voiceSupported}
+            onToggleVoiceAgent={toggleVoiceAgent}
+            voiceAgentActive={
+              voiceAgentState !== "idle" &&
+              voiceAgentState !== "disconnected" &&
+              voiceAgentState !== "error"
+            }
+            history={chat}
+            busy={busy}
+            readOnly={readOnly}
+          />
+          <ZoomBadge
+            zoom={zoom}
+            onZoomIn={() => controls.current?.zoomIn()}
+            onZoomOut={() => controls.current?.zoomOut()}
+            onReset={() => controls.current?.reset()}
+            onFit={fitToContent}
+            overviewOn={overviewOpen}
+            onToggleOverview={() => setOverviewOpen((v) => !v)}
+          />
+          <StatusBadge>
+            <span style={{ width: 6, height: 6, borderRadius: 999, background: "var(--sig-green)", boxShadow: "0 0 6px oklch(0.78 0.11 155 / 0.6)" }} />
+            <span className="mono">Ready</span>
+          </StatusBadge>
+        </div>
       ) : (
         <>
           <CanvasViewport
@@ -2307,7 +2429,82 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
             </div>
           )}
 
-          {canvasPhase === "voice" && <VoiceOverlay transcript={message} />}
+          {canvasPhase === "voice" && (
+            <VoiceOverlay
+              transcript={message}
+              onSubmit={commitVoiceTurn}
+              onCancel={stopVoiceSession}
+            />
+          )}
+
+          {canvasPhase === "generating" && (
+            <div
+              role="status"
+              aria-live="polite"
+              aria-label="Generation progress"
+              style={{
+                position: "absolute",
+                top: 60,
+                left: "50%",
+                transform: "translateX(-50%)",
+                zIndex: 35,
+                display: "flex",
+                alignItems: "center",
+                gap: 12,
+                padding: "8px 16px",
+                background: "var(--paper-0)",
+                border: "1px solid oklch(from var(--paper-4) l c h / 0.8)",
+                borderRadius: 999,
+                boxShadow: "var(--shadow-2)",
+                animation: "pop-in 0.2s var(--e-out)",
+              }}
+            >
+              <span
+                style={{
+                  width: 8,
+                  height: 8,
+                  borderRadius: 999,
+                  background: "var(--bloom-1)",
+                  boxShadow: "0 0 10px var(--bloom-glow)",
+                  animation: "pulse-bloom 1.4s ease-in-out infinite",
+                }}
+              />
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  fontSize: 12.5,
+                  color: "var(--ink-0)",
+                  fontWeight: 500,
+                }}
+              >
+                <span>{aiPhase ? PHASE_LABEL[aiPhase] : "Constructing diagram…"}</span>
+                {streamChars > 0 && (
+                  <span
+                    className="mono"
+                    style={{
+                      fontSize: 10,
+                      padding: "1px 6px",
+                      borderRadius: 4,
+                      background: "var(--paper-2)",
+                      color: "var(--ink-2)",
+                    }}
+                  >
+                    {streamChars} chars
+                  </span>
+                )}
+              </div>
+              <button
+                type="button"
+                className="btn-atelier ghost"
+                onClick={() => cancelSend()}
+                style={{ height: 22, fontSize: 10.5, padding: "0 8px", borderRadius: 999 }}
+              >
+                Cancel
+              </button>
+            </div>
+          )}
 
           {mode === "present" && canvasPhase === "main" && (
             <PresentMode
@@ -2326,7 +2523,77 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
           {/* Polish lives in the Board-tools menu (UX-1): one entry point,
               not a permanent button competing with the canvas. */}
 
-          <TopBar crumbs={crumbs} meta={meta} onOpenSettings={onOpenSettings} />
+          <header className="top-bar">
+            <button
+              type="button"
+              className="brand"
+              onClick={() => setView("home" as View)}
+              title="Lucent Home"
+              style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer", background: "none", border: 0, padding: 0 }}
+            >
+              <div className="brand-mark" />
+              <span className="serif" style={{ fontSize: 16 }}>Lucent</span>
+              <span className="mono" style={{ fontSize: 10, color: "var(--ink-3)", padding: "2px 6px", borderRadius: 4, background: "oklch(from var(--paper-2) l c h / 0.8)", border: "1px solid oklch(from var(--paper-4) l c h / 0.5)" }}>
+                Atelier
+              </span>
+            </button>
+            <div className="top-sep" />
+            <div className="breadcrumbs">
+              <button
+                type="button"
+                className="crumb"
+                onClick={() => setView("home" as View)}
+                style={{ background: "none", border: 0, cursor: "pointer", padding: 0, font: "inherit", color: "var(--ink-2)" }}
+              >
+                Personal
+              </button>
+              <span className="crumb-sep">/</span>
+              <span className="crumb current">{projectName || "Untitled workspace"}</span>
+            </div>
+            <div style={{ flex: 1 }} />
+            <div className="top-actions" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <button
+                type="button"
+                className="btn-atelier ghost"
+                onClick={enterPresent}
+                title="Present board"
+                style={{ height: 32, fontSize: 12.5 }}
+              >
+                <Ico.Present /> Present
+              </button>
+              <div className="export-btn export-menu" style={{ position: "relative" }}>
+                <button
+                  type="button"
+                  className="btn-atelier ghost"
+                  title="Export board"
+                  style={{ height: 32, fontSize: 12.5 }}
+                >
+                  <Ico.Share /> Export
+                </button>
+                <div className="export-pop">
+                  <button onClick={exportSvg}>SVG</button>
+                  <button onClick={exportPng}>PNG</button>
+                  <button onClick={exportPdf}>PDF</button>
+                  <button onClick={exportJson}>JSON</button>
+                  <button onClick={exportMarkdown}>Markdown</button>
+                  <button onClick={exportCsv}>CSV</button>
+                  <button onClick={exportMermaid}>Mermaid</button>
+                  <div className="export-sep" />
+                  <button onClick={() => void copyMermaid()}>Copy Mermaid</button>
+                  <button onClick={importMermaid}>Paste Mermaid…</button>
+                </div>
+              </div>
+              <button
+                type="button"
+                className="avatar"
+                onClick={() => onOpenSettings?.()}
+                title="Settings"
+                style={{ width: 32, height: 32, borderRadius: 999, background: "oklch(0.55 0.16 25)", color: "white", display: "grid", placeItems: "center", fontSize: 11, fontFamily: "var(--font-mono)", fontWeight: 700, border: "2px solid var(--paper-0)", boxShadow: "var(--shadow-1)", cursor: "pointer" }}
+              >
+                AK
+              </button>
+            </div>
+          </header>
           {/* Screen-reader mirror of board structure: counts plus selection,
               announced politely on change. Visual focus-dimming (focusSet) has
               no DOM-focus meaning, so without this structural edits are silent
@@ -2403,20 +2670,22 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
             </div>
           )}
           {canEdit && (
-            <ShapeToolbar
+            <AtelierBoardToolbar
               activeTool={tool}
               onSelectTool={changeTool}
+              onUndo={undo}
+              onRedo={redo}
+              canUndo={canUndo}
+              canRedo={canRedo}
               onEmbed={addEmbed}
               onGenImage={generateImageShape}
-              orientation="left"
             />
           )}
-          <LeftRail onOpenSettings={onOpenSettings} />
+          <GlobalRail active="board" onOpenSettings={onOpenSettings} />
 
           {/* UX-1 L1/L2/L3: one Board-tools menu (L2) replaces the four-button
               right pileup (Polish/Templates/Timer/Vote). The comment bell
               stays separate — comments are attention, not tools. */}
-          {/* Top-right consolidated Activity & Utilities Bar */}
           {rightClusterVisible && (
             <div className="canvas-utility-bar">
               <div className="utility-bar-item">
@@ -2569,22 +2838,28 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
           {timerOpen && <TimerWidget onClose={() => setTimerOpen(false)} />}
           {templatesOpen && <TemplatePicker onClose={() => setTemplatesOpen(false)} />}
 
-          {canvasPhase === "main" && (
-            <ModeBar
-              mode={mode}
-              onEdit={() => setMode("edit")}
-              onPresent={enterPresent}
-              onFocus={() => {
-                if (!selected) {
-                  notify("Select a node, then Focus to spotlight it.");
-                  return;
-                }
-                setMode((m) => (m === "focus" ? "edit" : "focus"));
+
+
+          {canvasPhase === "proposing" && <ProposalPanel />}
+
+          {canEdit && canvasPhase !== "proposing" && selected !== null && workspace.nodes[selected] && (
+            <AtelierNodeInspector
+              node={workspace.nodes[selected]}
+              connectedNodes={selectedConnectedNodes}
+              onClose={() => setSelected(null)}
+              onRename={(label) => renameNode(selected, label)}
+              onDelete={() => {
+                applyManual([{ op: "DELETE_NODE", id: selected }], "Delete node");
+                setSelected(null);
+              }}
+              onComment={() => setCommentTarget(selected)}
+              onExplain={(label) => void send(`Explain the "${label}" node and its role.`)}
+              onSelectNode={(id) => {
+                setSelected(id);
+                controls.current?.focusOn(workspace.nodes[id]?.position?.x ?? 0, workspace.nodes[id]?.position?.y ?? 0);
               }}
             />
           )}
-
-          {canvasPhase === "proposing" && <ProposalPanel />}
 
           {canEdit && canvasPhase !== "proposing" && selectedShapes.size > 0 && (
             <ShapeInspector
@@ -2658,23 +2933,7 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
             overviewOn={overviewOpen}
             onToggleOverview={() => setOverviewOpen((v) => !v)}
           />
-          <div className="export-btn export-menu">
-            <button title="Export board">
-              <Ico.Share /> Export
-            </button>
-            <div className="export-pop">
-              <button onClick={exportSvg}>SVG</button>
-              <button onClick={exportPng}>PNG</button>
-              <button onClick={exportPdf}>PDF</button>
-              <button onClick={exportJson}>JSON</button>
-              <button onClick={exportMarkdown}>Markdown</button>
-              <button onClick={exportCsv}>CSV</button>
-              <button onClick={exportMermaid}>Mermaid</button>
-              <div className="export-sep" />
-              <button onClick={() => void copyMermaid()}>Copy Mermaid</button>
-              <button onClick={importMermaid}>Paste Mermaid…</button>
-            </div>
-          </div>
+
           {mode === "edit" && overviewOpen && canvasPhase !== "proposing" && (
             <Minimap
               workspace={workspace}
@@ -3241,42 +3500,4 @@ const REGION_KIND_ORDER: import("@lucent/core").DiagramKind[] = [
   "orgchart",
 ];
 
-/** Mode switcher: edit / present / focus. The extension point where remote
- * collaboration modes (Follow, Spotlight) register later (docs/12). */
-function ModeBar({
-  mode,
-  onEdit,
-  onPresent,
-  onFocus,
-}: {
-  mode: "edit" | "present" | "focus";
-  onEdit: () => void;
-  onPresent: () => void;
-  onFocus: () => void;
-}) {
-  return (
-    <div className="mode-bar">
-      <button
-        className={`mode-btn ${mode === "edit" ? "active" : ""}`}
-        onClick={onEdit}
-        title="Edit"
-      >
-        <ToolIco.Select /> Edit
-      </button>
-      <button
-        className={`mode-btn ${mode === "focus" ? "active" : ""}`}
-        onClick={onFocus}
-        title="Focus selected node"
-      >
-        <Ico.Layers /> Focus
-      </button>
-      <button
-        className={`mode-btn ${mode === "present" ? "active" : ""}`}
-        onClick={onPresent}
-        title="Present walkthrough"
-      >
-        <Ico.Play /> Present
-      </button>
-    </div>
-  );
-}
+

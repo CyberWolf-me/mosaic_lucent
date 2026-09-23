@@ -8,7 +8,8 @@ import {
   derivedExecution,
   pointsByCategory,
 } from "@lucent/core";
-import { TopBar, LeftRail, StatusBadge } from "../ui/Chrome.js";
+import { TopBar, StatusBadge } from "../ui/Chrome.js";
+import { GlobalRail } from "../ui/atelierAtoms.js";
 import { AIPill } from "../ui/AIPill.js";
 import { useToast } from "../ui/Toast.js";
 import { fetchIntegrationLinks, type IntegrationLink } from "../boards.js";
@@ -136,11 +137,10 @@ export function BoardView({ onOpenSettings }: { onOpenSettings: (section?: strin
   };
 
   return (
-    <div style={{ position: "absolute", inset: 0 }}>
-      <div style={{ position: "absolute", inset: 0 }}>
-        <div className="canvas-grid" />
-        <div className="canvas-vignette" />
-      </div>
+    <div style={{ position: "absolute", inset: 0, overflow: "hidden", background: "var(--paper-1)" }}>
+      <div className="paper-bg" />
+      <div className="paper-grid" />
+      <div className="paper-grain" />
       <TopBar
         crumbs={[
           { label: "Personal" },
@@ -149,7 +149,7 @@ export function BoardView({ onOpenSettings }: { onOpenSettings: (section?: strin
         ]}
         onOpenSettings={onOpenSettings}
       />
-      <LeftRail />
+      <GlobalRail active="board" onOpenSettings={onOpenSettings} />
 
       {total === 0 ? (
         <div className="view-empty">

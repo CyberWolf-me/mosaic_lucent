@@ -81,8 +81,16 @@ import { settingsStore } from "./settings.js";
  */
 
 export type View =
+  | "home"
+  | "workspace"
+  | "review"
+  | "integrations"
   | "dashboard"
   | "canvas"
+  | "canvas-live"
+  | "legacy"
+  | "main"
+  | "knowledge"
   | "history"
   | "meeting"
   | "intelligence"
@@ -93,7 +101,20 @@ export type View =
   | "board"
   | "document"
   | "admin"
-  | "analytics";
+  | "analytics"
+  | "system"
+  | "ia"
+  | "empty"
+  | "generating"
+  | "proposing"
+  | "meeting_board"
+  | "voice"
+  | "decisions"
+  | "actions"
+  | "projects"
+  | "task"
+  | "ask"
+  | "notif";
 
 /** Canvas sub-state is derived from the data, not stored separately. */
 export type CanvasPhase = "empty" | "generating" | "main" | "proposing" | "voice";
@@ -585,7 +606,15 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       restored ? "loaded" : "initial",
     ),
   );
-  const [view, setViewState] = useState<View>("canvas");
+  const initialView = useMemo<View>(() => {
+    if (typeof window === "undefined") return "home";
+    const params = new URLSearchParams(window.location.search);
+    const q = params.get("view");
+    if (q) return q as View;
+    const hasBoard = params.has("board");
+    return hasBoard ? "canvas" : "home";
+  }, []);
+  const [view, setViewState] = useState<View>(initialView);
   const [lens, setLens] = useState<CanvasLens>("visual");
   /**
    * UX-1: legacy board-like views are canvas lenses now. Keep the `View` type

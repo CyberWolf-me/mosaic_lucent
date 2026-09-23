@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { TopBar, LeftRail, StatusBadge } from "../ui/Chrome.js";
+import { TopBar, StatusBadge } from "../ui/Chrome.js";
+import { GlobalRail } from "../ui/atelierAtoms.js";
 import { AIPill } from "../ui/AIPill.js";
 import { ConnectorDefs } from "../ui/atoms.js";
 import { Ico } from "../ui/icons.js";
@@ -50,11 +51,10 @@ export function SequenceView({ onOpenSettings }: { onOpenSettings: (section?: st
   const bottomY = Math.max(580, MSG_bottom(messages) + 60);
 
   return (
-    <div style={{ position: "absolute", inset: 0 }}>
-      <div style={{ position: "absolute", inset: 0 }}>
-        <div className="canvas-grid" />
-        <div className="canvas-vignette" />
-      </div>
+    <div style={{ position: "absolute", inset: 0, overflow: "hidden", background: "var(--paper-1)" }}>
+      <div className="paper-bg" />
+      <div className="paper-grid" />
+      <div className="paper-grain" />
       <TopBar
         crumbs={[
           { label: "Personal" },
@@ -63,7 +63,7 @@ export function SequenceView({ onOpenSettings }: { onOpenSettings: (section?: st
         ]}
         onOpenSettings={onOpenSettings}
       />
-      <LeftRail />
+      <GlobalRail active="board" onOpenSettings={onOpenSettings} />
 
       {!usingReal && !showSample ? (
         <div className="view-empty">

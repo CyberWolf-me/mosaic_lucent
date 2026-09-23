@@ -423,31 +423,35 @@ export function SettingsModal({
     { id: "light", name: "Light", hint: "Creamy · Warm luminous" },
     { id: "system", name: "System", hint: "Match device" },
   ];
+  // The Atelier accent axis: every option re-points --bloom-* (atelier.css
+  // html[data-accent=…]), so selection, focus, CTAs and connectors recolor as
+  // one system. The old amber/violet/cyan/rose/mono set only moved --amber-*
+  // and left the cobalt bloom behind — a split palette — so it was retired.
   const palettes: { id: Accent; name: string; color: string }[] = [
     {
-      id: "amber",
-      name: "Amber",
-      color: "linear-gradient(135deg, oklch(0.86 0.14 78), oklch(0.62 0.13 65))",
+      id: "bloom",
+      name: "Cobalt",
+      color: "linear-gradient(135deg, oklch(0.62 0.20 258), oklch(0.42 0.22 262))",
     },
     {
-      id: "violet",
-      name: "Violet",
-      color: "linear-gradient(135deg, oklch(0.80 0.16 300), oklch(0.52 0.19 295))",
+      id: "madder",
+      name: "Madder",
+      color: "linear-gradient(135deg, oklch(0.64 0.20 22), oklch(0.48 0.21 24))",
     },
     {
-      id: "cyan",
-      name: "Cyan",
-      color: "linear-gradient(135deg, oklch(0.85 0.13 215), oklch(0.55 0.14 208))",
+      id: "moss",
+      name: "Moss",
+      color: "linear-gradient(135deg, oklch(0.60 0.15 148), oklch(0.46 0.14 150))",
     },
     {
-      id: "rose",
-      name: "Rose",
-      color: "linear-gradient(135deg, oklch(0.82 0.14 12), oklch(0.56 0.17 8))",
+      id: "saffron",
+      name: "Saffron",
+      color: "linear-gradient(135deg, oklch(0.75 0.16 78), oklch(0.60 0.15 68))",
     },
     {
-      id: "mono",
-      name: "Mono",
-      color: "linear-gradient(135deg, oklch(0.92 0.004 60), oklch(0.55 0.008 60))",
+      id: "graphite",
+      name: "Graphite",
+      color: "linear-gradient(135deg, oklch(0.50 0.010 60), oklch(0.34 0.010 60))",
     },
   ];
   const grids: { id: GridStyle; label: string }[] = [
@@ -462,34 +466,7 @@ export function SettingsModal({
       <div className="settings-modal" role="dialog" aria-label="Preferences">
         <nav className="settings-nav">
           <div className="brand-block">
-            <div
-              className="logo"
-              style={{
-                width: 16,
-                height: 16,
-                borderRadius: 4,
-                background: "linear-gradient(135deg, var(--amber-1), var(--amber-3))",
-                position: "relative",
-                flexShrink: 0,
-              }}
-            >
-              <div
-                style={{
-                  position: "absolute",
-                  inset: 3,
-                  borderRadius: 2,
-                  background: "var(--canvas-0)",
-                }}
-              />
-              <div
-                style={{
-                  position: "absolute",
-                  inset: 6,
-                  borderRadius: 1,
-                  background: "var(--amber-1)",
-                }}
-              />
-            </div>
+            <div className="brand-mark" style={{ width: 18, height: 18 }} />
             Preferences
           </div>
           {sections.map((sec) => (
@@ -505,19 +482,30 @@ export function SettingsModal({
         <div className="settings-body">
           <button
             onClick={onClose}
+            aria-label="Close preferences"
             style={{
               position: "absolute",
-              top: 14,
-              right: 14,
-              width: 28,
-              height: 28,
+              top: 16,
+              right: 16,
+              width: 30,
+              height: 30,
               borderRadius: 999,
               display: "grid",
               placeItems: "center",
               color: "var(--ink-2)",
-              background: "var(--canvas-3)",
-              border: "1px solid var(--stroke-1)",
+              background: "oklch(from var(--paper-2) l c h / 0.8)",
+              border: "1px solid oklch(from var(--paper-4) l c h / 0.6)",
+              cursor: "pointer",
               zIndex: 1,
+              transition: "all 0.1s var(--e-out)",
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.color = "var(--ink-0)";
+              e.currentTarget.style.background = "var(--paper-2)";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.color = "var(--ink-2)";
+              e.currentTarget.style.background = "oklch(from var(--paper-2) l c h / 0.8)";
             }}
           >
             <Ico.X />
@@ -848,8 +836,8 @@ export function SettingsModal({
                         width: "100%",
                         maxWidth: 320,
                         padding: "9px 12px",
-                        background: "var(--canvas-2)",
-                        border: "1px solid var(--stroke-1)",
+                        background: "var(--paper-1)",
+                        border: "1px solid oklch(from var(--paper-4) l c h / 0.6)",
                         borderRadius: 8,
                         fontSize: 13,
                         color: "var(--ink-0)",
@@ -1055,8 +1043,8 @@ export function SettingsModal({
                     style={{
                       flex: 1,
                       padding: "9px 12px",
-                      background: "var(--canvas-2)",
-                      border: "1px solid var(--stroke-1)",
+                      background: "var(--paper-1)",
+                      border: "1px solid oklch(from var(--paper-4) l c h / 0.6)",
                       borderRadius: 8,
                       fontSize: 13,
                       color: "var(--ink-0)",
@@ -1136,12 +1124,12 @@ function SupportPane() {
         style={{
           width: "100%",
           minHeight: 220,
-          fontFamily: "var(--mono, monospace)",
+          fontFamily: "var(--font-mono, monospace)",
           fontSize: 11.5,
           padding: 10,
           borderRadius: 8,
-          border: "1px solid var(--stroke-1)",
-          background: "var(--canvas-1)",
+          border: "1px solid oklch(from var(--paper-4) l c h / 0.6)",
+          background: "var(--paper-1)",
           color: "var(--ink-1)",
         }}
       />
