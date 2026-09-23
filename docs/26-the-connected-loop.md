@@ -1,0 +1,434 @@
+# 26 — The connected loop: from a canvas to the whole product
+
+- Status: **Proposed** — nothing here is built yet
+- Date: 2026-09-24 · branch `lucent/atelier`
+- Inputs: the product definition (42 sections) and the user-flow specification
+  (139 flows) written by the founder; a code audit of this branch
+  (2026-09-24, file-level, three passes: meetings/voice, canvas/diagrams/assets,
+  workspace/search/governance).
+
+This document maps the specification onto what exists, names the defects the
+audit found, and sequences the work. Each phase ends in something a user can
+do end-to-end, measured against the **golden flow** (§10).
+
+---
+
+## 1. What Lucent is
+
+> **Lucent is a collaborative visual workspace that turns conversations into
+> structured knowledge and execution, and keeps that knowledge connected to the
+> canvas, meetings, decisions, and work over time.**
+
+The loop, in one line: _work → communicate → visualize → meet → capture →
+understand → decide → execute → synchronize → remember → retrieve → continue._
+
+Four **surfaces** over one **semantic layer**:
+
+| Surface      | What the user does there                                  |
+| ------------ | --------------------------------------------------------- |
+| Canvas       | Think visually; the AI constructs, the user shapes        |
+| Meeting      | Talk; Lucent listens, transcribes, understands            |
+| Intelligence | See what the team knows: decisions, questions, risks …    |
+| Execution    | See what the team is doing, and why                       |
+
+The semantic layer — typed statements with lifecycles, relationships,
+provenance, the sequenced op log — is the product. Surfaces are lenses on it.
+That is why most of this plan is about **joins** (§4), not new screens.
+
+Three verbs stay distinct everywhere, in the UI and in routing:
+
+| Verb        | Meaning                        | Example                                   |
+| ----------- | ------------------------------ | ----------------------------------------- |
+| **Search**  | Find what exists               | "Postgres"                                |
+| **Ask**     | Reason over what exists        | "Why did we choose Postgres?"             |
+| **Command** | Change something (a proposal)  | "Add Postgres to the architecture"        |
+
+## 2. Ground rules
+
+Carried forward unchanged: operations are the AI's only contract; the LLM
+never owns geometry; diagrams stay semantic; every AI action is reversible;
+spatial additivity (ADR 0015); one bad op costs itself (M1); one mutation path
+for every writer (ADR 0041); server-authoritative sequenced log (ADR 0001).
+
+Added by this plan:
+
+1. **The trust ladder.** Every piece of workspace truth records how it got
+   there: _human-created · AI-suggested · human-approved · human-edited ·
+   system-derived_. AI output is a proposal until a human — or an explicit
+   policy — promotes it.
+2. **Evidence or silence.** Answers show evidence, source and confidence. No
+   evidence → say so. Confidence is computed from evidence coverage, never a
+   model's self-assessment.
+3. **Honest capabilities.** An unsupported feature is absent or marked
+   unsupported (external meeting adapters, integrations), never faked.
+4. **No sample data in product surfaces** — the Atelier rule, stated in
+   `packages/web/src/lucent.css` and `ui/kit.tsx`: real data or an honest
+   empty state.
+5. **Workspace boundaries are privacy boundaries.** Search, Ask, memory and AI
+   context never cross personal ↔ team ↔ org without explicit permission.
+
+## 3. Where we are
+
+Legend: ✅ exists · 🟡 partial · ❌ missing. File references are in the audit
+notes; the headline status per area:
+
+| Spec area                      | Status | Reality in the code                                                                                                     |
+| ------------------------------ | :----: | ----------------------------------------------------------------------------------------------------------------------- |
+| Orgs, personal org, roles      |   🟡   | Org → boards only. Roles owner/editor/viewer. No teams, projects, commenter, guests-as-type                             |
+| Favorites, trash, activity     |   ❌   | Board delete is hard and cascading; no favorites; no user activity feed                                                 |
+| Infinite canvas                |   🟡   | Pan/zoom/fit/minimap/marquee/snap/align ✅; no rotate handle, lasso, back/forward, zoom-to-frame, system clipboard      |
+| Object kinds                   |   🟡   | 12 shape kinds; no tables, code, rich text, icons, **vector/SVG**                                                       |
+| Diagram intelligence           |   ✅   | 8 kinds, regions, 4 layout strategies + ELK, sequence/ER lenses, statements, provenance, typed edges                    |
+| AI copilot (generate/edit)     |   ✅   | One prompt, 38 ops, validated; inspection ("find contradictions") only through free-form chat                           |
+| AI conversation                |   🟡   | Chat is per board in localStorage, 8 turns; no threads, no scopes beyond the board                                      |
+| Native meetings (A/V)          |   🟡   | LiveKit room works; no lobby preview, device choice, roles, chat, hands, captions, reconnect; **token route unguarded** |
+| Voice                          |   🟡   | 4 STT providers, TTS, wake phrase, conversational lease ✅; barge-in mostly unreachable; hosted STT drops finals        |
+| Transcript                     |   🟡   | Labels, search, jump ✅; no correction, confidence not stored, speakers not mapped to people                            |
+| Meeting intelligence           |   🟡   | Live differential extraction + Meeting brief ✅; no end-of-meeting pass, summary, review step                           |
+| Memory (cross-meeting)         |   🟡   | Within one board only (ADR 0023); nothing crosses boards                                                                |
+| Search                         |   🟡   | One board, keyword; comments not searched; no workspace search                                                          |
+| Ask                            |   🟡   | One shared board, verified citations ✅; no confidence, no scopes, not on local boards                                  |
+| History                        |   🟡   | Server op log with actors ✅; no compare, AI model not recorded on changes                                              |
+| Human review                   |   🟡   | One pending proposal per board; external actions and inbound changes each have their own gate; no unified center        |
+| Execution                      |   🟡   | Actions with issues, rollups, blockers, drives-chain ✅; no project/workstream entity                                   |
+| Integrations                   |   🟡   | Linear/GitHub/Jira out + human-gated; inbound status only; env-var credentials, no OAuth, no degraded state            |
+| External meeting adapters      |   🟡   | Seam + mock only; capability model written but unused                                                                  |
+| Collaboration                  |   🟡   | Presence, comments, mentions ✅; **viewers can't comment**; no follow/spotlight across users                            |
+| Templates                      |   🟡   | 4 board templates; no meeting templates; templates carry no extraction rules                                           |
+| Lenses                         |   🟡   | Diagram, Kanban, Document, Wireframe, Sequence, ER; no timeline, dependency, decision lens                             |
+| Semantic zoom                  |   🟡   | Three tiers + region collapse; no density ladder                                                                        |
+| Files / assets                 |   🟡   | Upload API exists but **no web client**; every image lives as a data URL in the op log                                 |
+| AI images / vectors            |   🟡   | Raster image generation ✅; **no vector/SVG creation**; SVG import is a naive regex                                     |
+| Notifications                  |   🟡   | 7 kinds (invites/mentions/replies); none for approvals, meetings, decisions, blocked work                               |
+| Command palette                |   🟡   | Navigation + a few actions; no canvas commands                                                                         |
+| Mobile                         |   🟡   | Read-only board + comments; no approvals, meetings, Ask                                                                 |
+| Security / classification      |   ✅   | Classification floors, provider policy, SSO/SAML/SCIM users/TOTP, sessions                                             |
+| Audit                          |   🟡   | Append-only log ✅; invites, role changes, share links, approvals, integration connects **not audited**                 |
+| AI governance                  |   🟡   | Actor model ✅; which model/provider ran lives only in usage metering                                                   |
+| Billing / usage                |   ✅   | 4 plans, Stripe, metering; analytics are usage-only                                                                    |
+| Automation                     |   ❌   | Job queue ✅; outbox has **no consumers**; 3 job types are stubs; no user rules                                         |
+| MCP / API                      |   🟡   | 4 MCP tools, one board, session token; no API tokens, no versioned API                                                 |
+
+## 4. Fix first — defects the audit found (Phase 0)
+
+These are wrong today, independent of any new feature. Ordered by severity.
+
+| #   | Defect                                                                                                                                                                 | Where                                                     | Fix                                                                                     |
+| --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| F1  | **Any signed-in user can get a LiveKit token for any room** — `board-<anyId>` joins another team's call                                                              | `server/src/app.ts` LiveKit token route                   | Require viewer+ on the board behind the room; deny unknown rooms; audit it              |
+| F2  | **The voice agent bypasses the governed pipeline** (no metering, approval, provider policy, mode gating) and **defaults to a hardcoded third-party LLM endpoint** | `packages/voice-agent/src/agent.ts`                       | Route through generate/proposal with actor `ai`; remove the default URL; policy check  |
+| F3  | Hosted STT (default buffer-at-close) drops every final and the last chunk; tests mock an empty close                                                                  | `web/src/stt/hosted.ts`                                   | Flush before `stopped`; send the last chunk; test with a non-empty close               |
+| F4  | Finals are dropped while TTS plays → "Lucent, stop" can't fire and those turns vanish from the transcript                                                             | `MeetingView.tsx` `onFinal`, `stt/browser.ts`              | Keep finals (tag `duringTts`), let the lease decide; never lose transcript              |
+| F5  | Leaving the meeting view ends the call and leaves the transcript open; the call dock can never appear                                                                  | `MeetingView.tsx` unmount cleanup                         | Session outlives the view; end transcript on real stop only                             |
+| F6  | Your own tile shows twice in the native room; own speaking ring never lights                                                                                           | `meeting-room/NativeRoom.tsx`, `roomPeers.ts`             | Filter the local peer; wire local speaking                                               |
+| F7  | Sticky and inspector colours (`oklch(...)`) are **silently dropped** by the schema on shared boards and on reload                                                      | `core/src/schemaPrimitives.ts` `CSS_COLOR`                | Accept bounded `oklch()/oklab()`; keep `var()` out (it can't export)                    |
+| F8  | Viewers cannot comment — comments need editor                                                                                                                          | `server/src/room.ts`                                      | Commenter capability (see A6); comment ops allowed for commenter+                        |
+| F9  | Invites, role changes, share links, proposal approvals, integration connects are not audited                                                                           | server routes                                             | Audit events for each                                                                   |
+| F10 | Duplicating an image shape drops its `src`; exports omit connectors and rotation and include hidden shapes                                                            | `ShapeInspector.tsx`, `board/geometry.ts buildBoardSvg`   | Carry `src`; export links, rotation; skip hidden                                         |
+| F11 | Docs 22 and 25 are stale (say "native AV room not built"; omit the conversational lease)                                                                               | docs                                                      | Update                                                                                  |
+
+## 5. The joins — structural changes that make it one product
+
+These seven changes are what turn five good modules into one loop. Each needs
+an ADR before code.
+
+### J1 · Meetings become workspace objects
+
+Today a meeting is a transcript row owned by one board (`MeetingTranscript
+{id, boardId, turns…}` — no title, participants, schedule or host).
+
+- `Meeting { id, orgId, projectId?, title, status, startsAt?, durationMin?,
+  hostId, participants[], boards[] (0..n), templateId?, mode, classification }`
+- Status lifecycle: `scheduled → live → ended → summarized → reviewed`.
+- Turns gain `confidence`, provider `startMs`, and **corrections** (edited text
+  with the original preserved and the editor recorded).
+- Migration: every existing transcript becomes a meeting with `boards=[boardId]`,
+  title derived from its start time. Board-scoped routes keep working.
+- One workspace Meetings list; a board shows the meetings linked to it.
+
+### J2 · Projects (the connective tissue)
+
+`Project { id, orgId, name, objective, members[], boards[], meetings[], status }`.
+Workstreams are **regions inside the project's plan board** (groups already
+carry kinds; ADR 0014) — no second task table. Tasks stay **action nodes with
+issues** (ADR 0027 "the action is executable work"): the chain
+_meeting → decision → action → external issue_ already exists and is kept.
+
+### J3 · The workspace intelligence index
+
+A **derived, rebuildable projection** (ADR 0040: derived, never canonical) of
+every statement across the boards a user can see:
+`{ nodeId, boardId, projectId?, kind, status, topic, supersedes, assignee,
+dueDate, provenance, updatedSeq }`, maintained on commit by an outbox consumer
+(the outbox has none today). It powers workspace Home, workspace
+Intelligence, notifications, Search and Ask — the same principle as ADR 0023
+("memory is a projection"), widened from one board to the workspace.
+
+### J4 · Scoped Search and Ask
+
+- Scopes everywhere: _selection · frame · board · meeting · project ·
+  workspace · time range_ ("everything from this week").
+- Search: Postgres full-text over the index, transcripts, comments, board and
+  meeting names. Keyword first; embeddings stay gated by docs/21's evidence
+  rule (ADR 0024).
+- Ask returns **answer → evidence → source → confidence**, where confidence is
+  coverage (how many independent citations support each claim, whether any
+  contradict). "No evidence" is a first-class answer.
+- Ask works on local boards too (the request carries the board summary, as
+  generate does).
+
+### J5 · The Review center (trust ladder)
+
+One queue for everything awaiting a human: AI canvas proposals, **extracted
+statements as candidates**, external actions, inbound integration changes,
+duplicate/contradiction recommendations. Actions: approve · edit · reject ·
+merge · split · assign.
+
+Model: statements gain a separate `trust` field
+(`ai-suggested | human-approved | human-edited | human-created | system`)
+rather than new lifecycle statuses — ADR 0021's freeze rule is about
+lifecycles, and trust is orthogonal to them. Meeting extraction lands as
+`ai-suggested`; a direct user request lands as `human-approved` (the user
+asked for it); a promotion is an ordinary validated op.
+
+### J6 · AI run records (governance)
+
+`ai_runs { id, initiatedBy, surface (canvas|meeting|voice|mcp|automation),
+provider, model, contextScope, tools, outputHash, proposalId?, opSeqs[],
+approvedBy? }`. The op log and proposals reference the run. Answers "which
+model, what context, who approved" for every AI change, and feeds the audit
+log.
+
+### J7 · One conversation model
+
+Conversations move server-side as **threads** bound to a scope (board, meeting,
+project, workspace). Text chat, Ask, and the voice lease write to the same
+thread, so "What about PostgreSQL?" after a spoken answer continues the same
+context in either medium. Replaces the 8-turn localStorage chat.
+
+## 6. The visual engine, v2 — "not just one model"
+
+### 6.1 A representation registry
+
+Today the families are scattered (`DiagramKind`, lens code, prompt text,
+templates). Make one table-driven registry: each family declares its semantic
+kind, allowed ops, layout engine, lens renderer, prompt section and starter
+template. The AI prompt's family list and the "convert to…" menu are
+generated from it, so a new family is an additive change.
+
+| Family                          | Today | Plan                                                             |
+| ------------------------------- | :---: | ---------------------------------------------------------------- |
+| Flowchart, process, swimlane    |  ✅   | —                                                                |
+| Architecture                    |  ✅   | + C4 levels (context/container/component) and icons              |
+| Mind map, org chart, tree       |  ✅   | + expand/collapse ops                                            |
+| Journey, decision tree          |  ✅   | —                                                                |
+| BPMN                            |  🟡   | Wire the existing XML import/export; add to prompt and picker    |
+| Sequence, ER                    |  🟡   | Derived lenses today → also AI-generatable directly              |
+| State machine                   |  ❌   | New: states, transitions, guards                                 |
+| Timeline / roadmap              |  ❌   | New: time axis layout; links to actions' due dates               |
+| Dependency graph                |  ❌   | New lens over `depends_on/blocks/drives`                          |
+| Matrix (2×2, SWOT, RACI)        |  🟡   | SWOT template → a real matrix layout                             |
+| Table                           |  ❌   | New object kind; also "extract structured data" target           |
+| Charts (bar/line/pie from data) |  ❌   | New: data-bound vector charts (CSV/table → chart)                |
+| Wireframe                       |  ✅   | + icons, vector assets in elements                               |
+| Presentation layout             |  🟡   | Present mode exists → frame-ordered slides, export PDF           |
+| Network / infrastructure        |  ❌   | Architecture variant with zones and trust boundaries             |
+
+### 6.2 Icons everywhere
+
+- Bundle **Iconoir** (MIT, ~1,670 outline icons) and **Simple Icons** (CC0
+  paths, ~3,000 brand marks) as an icon registry: searchable by name and tags,
+  lazy-loaded, tree-shaken.
+- `node.icon` becomes a validated field: the AI names an icon from the
+  registry (`"iconoir:database"`, `"simple:postgresql"`), never emits markup.
+  Architecture boards get real Postgres, Stripe, Kafka marks instead of the 19
+  hand-drawn glyphs in `techMarks.tsx`.
+- An **icon shape** on the canvas: recolour, resize, use in wireframes.
+- Licensing: ship Iconoir's MIT notice. Simple Icons' paths are CC0 but the
+  logos remain their owners' trademarks — used only to identify the named
+  product, never as Lucent branding; the picker links each brand's guidelines.
+
+### 6.3 Vector Studio — SVG as a first-class, editable object
+
+**Model.** A new shape kind `vector` holding **structured paths, not markup**:
+`{ viewBox, paths: [{ d, fill, stroke, strokeWidth, fillRule, opacity }],
+gradients: [...] }`. Every path passes the SVG path grammar (extended for
+exponents, with a normalizer that rounds and splits long paths); every colour
+passes the colour grammar (with F7's `oklch`). Nothing is ever inserted as raw
+SVG into the DOM; rendering is React `<path>` elements, like the `draw` shape.
+Provenance on the shape: `{ generator, model, prompt, sourceAssetId }`.
+
+**One sanitizing importer**, shared by every path in: parse → keep an allowlist
+(`path rect circle ellipse line polyline polygon g linearGradient
+radialGradient stop`) → flatten groups, transforms and viewBox → structured
+paths. Scripts, `foreignObject`, event handlers, external references and CSS
+are dropped. It replaces today's regex `svgToOps`.
+
+**Five ways to make a vector:**
+
+| Path                   | How                                                                                                       | Runs where                          |
+| ---------------------- | --------------------------------------------------------------------------------------------------------- | ----------------------------------- |
+| Import / paste SVG     | The sanitizing importer                                                                                   | Browser                             |
+| Icon → vector          | Registry icon becomes an editable vector                                                                  | Browser                             |
+| Text → SVG             | `VectorProvider` seam: **QuiverAI Arrow** (API), **Recraft V4 Vector** (API or OpenRouter), or a baseline where the configured LLM authors structured paths | Server (provider policy applies)    |
+| Raster → vector        | **VTracer** (MIT, WebAssembly) in a worker — free and private, allowed on restricted boards; optional **Vectorizer.AI** API for best quality | Browser worker / server             |
+| Sketch → vector        | Pen strokes → simplify and smooth → vector                                                                | Browser                             |
+
+**Editing:** recolour (board palette), stroke width, fill on/off, simplify,
+split into parts (each path selectable), "edit with AI" ("make it flat,
+two colours") through providers that support SVG editing, and "give me three
+directions" (variations side by side). Export a single asset as SVG/PNG.
+
+**Where vectors land:** on the canvas, as a node's icon, inside a wireframe
+element, on a slide.
+
+**Governance:** vector generation is media, not a diagram (docs/14 decision 3
+holds: diagrams stay semantic). Provider policy and classification apply —
+restricted boards only use local vectorizing and the org-approved LLM. New
+metered kind `vector.generation`. Small vectors live in the workspace; large
+ones as assets (the asset store refuses raw SVG by design — it stores the
+structured JSON instead).
+
+### 6.4 Canvas editor gaps to close
+
+Rotate handle and numeric inspector (x, y, w, h, rotation, opacity, stroke
+width); 8-handle resize with aspect lock; one-step z-order; system clipboard
+(copy/paste across boards and from other apps, incl. SVG and images); copy and
+paste nodes; zoom-to-frame; camera back/forward; lasso; highlighter; tables;
+code blocks; minimal rich text; node ↔ shape links; canvas commands in ⌘K
+(align, group, convert, auto-layout, zoom); the asset upload client (images
+stop living in the op log).
+
+### 6.5 Semantic zoom ladder
+
+The spec's density ladder, on top of today's three tiers and region collapse:
+1–30 objects full detail · 30–80 grouping · 80–150 regions · 150–300 overview ·
+300+ semantic overview (each region as a summary card: kind, counts, open
+decisions and risks). Measured against the 40/80/150-node benchmark boards.
+
+## 7. Meetings and voice — the full lifecycle
+
+| Stage            | Plan                                                                                                                                             |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Schedule         | Title, time, participants, project/boards, template, AI mode. Email invites with an `.ics`; calendar integrations later                         |
+| Lobby            | Camera preview, mic test with level meter, device pickers, AI settings, permission errors explained                                              |
+| Room             | Roster, screen share with permissions, chat, raise hand, reactions, live captions (interim), host/co-host (LiveKit grants + RoomService), reconnect with token refresh |
+| Board in meeting | Board side by side; follow presenter, spotlight, "bring everyone here" (presence carries viewport + focus)                                       |
+| Transcription    | **Per participant** — each client transcribes its own mic under its identity (today only the recorder's mic is captured)                        |
+| Voice            | Keep the conversational lease; fix barge-in (F4); device switching; "AI listening" toggle alongside "AI speaking"                                |
+| End              | Finalize transcript → end-of-meeting extraction pass → LLM summary with citations → candidates into the Review center                            |
+| Follow-up        | Approve/edit candidates, create tasks, schedule the next meeting, notify owners, add a board section                                            |
+| Next meeting     | Loads context: previous decisions, open actions, unresolved questions, risks from the project                                                   |
+| External         | Capability model surfaced in the UI; transcript import first; Zoom/Meet/Teams adapters later (vendor apps needed)                                |
+| Templates        | A meeting template = agenda + extraction rules + recommended questions (e.g. retro, design review, incident, interview)                         |
+
+## 8. Execution, integrations, automation
+
+- **Project dashboard:** objective, progress, workstreams, blockers with the
+  full _why_ chain (blocker → dependency → owner → decision → meeting turn).
+- **Integrations:** OAuth connect flows; connection states
+  `active · degraded · needs-reauth · revoked`; inbound sync beyond status
+  (assignee, due date); Slack outbound (meeting summaries, decision digests).
+- **Automation v1:** rules over outbox events, each automated change still
+  passing the review policy. First rules: _meeting ended → extract → review_,
+  _decision approved → propose plan_, _action overdue → notify owner_,
+  _external issue closed → action completed_.
+
+## 9. Workspace, collaboration, administration
+
+Teams inside an org (and SCIM Groups); routes to change a member's role and
+remove a member; a **commenter** role; guests as a type with scoped access;
+favorites; trash with a 30-day window (boards, meetings, projects); a personal
+activity feed; org-wide 2FA requirement; scoped **API tokens** and a versioned
+API; MCP tools over the index (`search_workspace`, `get_meeting`,
+`list_decisions`, `get_project`); notification kinds for approvals, meeting
+summaries, assignments, blocked work, superseded decisions.
+
+## 10. The golden flow — the acceptance spine
+
+Every phase is judged by how much of this runs end-to-end, on a real
+Postgres deployment, with two real users.
+
+| Steps (spec §137)                                         | Made real by |
+| --------------------------------------------------------- | ------------ |
+| 1–4 open Lucent, open a project, open a board, edit it    | A1           |
+| 5–6 invite a teammate, they join                          | A6 (exists in part) |
+| 7–11 start a meeting: camera, mic, screen share, board    | A3           |
+| 12–13 Lucent captures speech, live transcript             | Phase 0, A3  |
+| 14–17 "Lucent, summarize…" → voice answer → follow-up     | Phase 0, A4  |
+| 18–21 meeting ends → intelligence generated               | A3           |
+| 22–24 review and approve decisions and actions            | A2           |
+| 25–28 decision drives work → plan → tasks → Linear/Jira   | A5           |
+| 29–31 external work changes → Lucent updates              | A5           |
+| 32–36 "Why are we doing this?" → decision, meeting, turn  | A4           |
+| 37–38 jump to canvas, highlight affected architecture     | A4, V-track  |
+| 39–41 edit, history records it, next meeting loads context| A1–A3        |
+
+## 11. Roadmap
+
+Two tracks run in parallel; they share only the kit and the op contract.
+
+**Phase 0 — Fix first** (§4). Small, mostly independent; F1 and F2 before
+anything ships.
+
+**Track A — the loop**
+
+| Phase | Name                    | Scope                                                                                       | Ends when                                                                 |
+| ----- | ----------------------- | ------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| A1    | Workspace spine         | J1 meeting objects, J2 projects, J3 intelligence index, workspace Home/Intelligence/Meetings | A user sees every decision, meeting and open question across boards       |
+| A2    | Trust                   | J5 Review center + trust field, J6 AI runs, audit coverage, new notification kinds          | Nothing AI-extracted becomes trusted without a visible human step         |
+| A3    | Meeting lifecycle       | §7: schedule, lobby, room controls, per-participant transcription, end → summary → review   | Golden steps 7–21 run with two people                                     |
+| A4    | Ask everywhere          | J4 scoped Search/Ask with confidence, J7 threads, Ask → canvas views, MCP v2                | "Why are we doing this?" answers with decision → meeting → turn           |
+| A5    | Execution & automation  | Project dashboard, OAuth integrations, inbound beyond status, automation v1                 | Golden steps 25–31 run against a real Linear/Jira                         |
+| A6    | Enterprise & sharing    | Teams, commenter, guests, trash, favorites, API tokens, 2FA policy                          | An org can onboard a team and a client guest safely                       |
+
+**Track V — the visual engine**
+
+| Phase | Name                      | Scope                                                                                  | Ends when                                                              |
+| ----- | ------------------------- | -------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| V1    | Icons & editor            | §6.2 icon registry + `node.icon`, §6.4 editor gaps, asset upload client, export fixes  | An architecture board shows real brand marks; shapes rotate and export |
+| V2    | Vector Studio, local      | `vector` kind, sanitizing importer, icon → vector, VTracer raster → vector, sketch → vector, editing | Paste a logo PNG → an editable, recolourable vector, no external calls |
+| V3    | Vector Studio, generative | `VectorProvider` seam: LLM baseline + QuiverAI and/or Recraft, variations, AI edit     | "Three icon directions for our four services" lands as editable vectors|
+| V4    | Representation registry   | §6.1 registry + state machine, timeline/roadmap, dependency, matrix, table, charts, C4, BPMN wired | "Turn this into a roadmap/state machine/C4" works from any board        |
+| V5    | Semantic zoom ladder      | §6.5, measured on 80/150/300-object boards                                             | A 300-object board is readable at every zoom                           |
+
+Recommended order: **Phase 0 → (A1 ‖ V1) → (A2 ‖ V2) → (A3 ‖ V3) → A4 → V4 →
+A5 → A6 → V5.** A1 comes first on Track A because every later surface reads
+the index; V1 comes first on Track V because icons and editor basics lift
+every board immediately and V2 depends on the asset client.
+
+## 12. Decisions needed before building
+
+1. **Order.** Is the recommended order right, or should the visual track lead?
+2. **Paid vector providers.** Which, if any: QuiverAI (credits), Recraft (API
+   or via OpenRouter), Vectorizer.AI (credits)? Without them V2 + the LLM
+   baseline still ship; V3 quality depends on this.
+3. **Projects as a first-class entity** (recommended) vs grouping boards only.
+4. **Meeting ↔ board**: a meeting as its own object linked to 0..n boards
+   (recommended) vs staying board-owned.
+5. **Review default**: meeting extraction lands as _suggested_ and needs
+   approval (recommended; more friction, more trust) vs today's auto-apply
+   with undo.
+6. **Scheduling**: Lucent's own scheduler + email/`.ics` first (recommended),
+   Google/Microsoft calendar sync later.
+7. **New statement kinds** the spec lists (assumption, constraint, fact, idea).
+   Recommended: add `assumption` (validated/invalidated) and `constraint`
+   (changed/lifted) — both have real lifecycles, as ADR 0021 requires; keep
+   fact and idea as ordinary notes.
+8. **Postgres as a requirement** for workspace features (index, search,
+   meetings list). In-memory stays for local development only.
+
+## 13. Risks
+
+- **Scope.** The spec is 41 areas. The golden flow is the spine; anything that
+  doesn't move a golden step waits.
+- **Production migrations.** J1 and J2 change stored shapes on the live
+  Postgres (main auto-deploys). Every migration ships with a backfill and a
+  reversible path, and lands on a branch deploy first.
+- **Third-party data egress.** Vector and STT providers see prompts, images or
+  audio. Provider policy and classification must gate every call (F2 shows the
+  current gap).
+- **Cost.** Paid vector APIs are per-call; meter them and cap per plan.
+- **Generated SVG quality.** The LLM baseline is a fallback; the product
+  promise rests on the dedicated vector models or on import/vectorize.
+- **Trademarks.** Brand marks identify products, never imply endorsement.
