@@ -1,4 +1,5 @@
 import type { Operation } from "@lucent/core";
+import { svgToVectorOp } from "../vector/ops.js";
 import { nextZ, shapeId } from "../shapes.js";
 
 /**
@@ -7,7 +8,7 @@ import { nextZ, shapeId } from "../shapes.js";
  * Each turns a file's text into board operations, so an import lands as one
  * undoable commit and every imported object is a first-class shape the AI can
  * read and edit. Nothing is rasterized: a document becomes real sticky notes and
- * an SVG becomes real shapes, not a picture of one.
+ * an SVG becomes one editable vector, not a picture of one.
  *
  * PDF text extraction is deliberately dependency-free — it reads the text-showing
  * operators out of uncompressed content streams. That covers text-based PDFs
@@ -137,148 +138,22 @@ export function pdfToOps(raw: string, existing: { z?: number }[] = []): Operatio
   return stickyOps(blocks, nextZ(existing));
 }
 
-interface SvgElement {
-  tag: string;
-  attrs: Record<string, string>;
-}
-
-/** Parse the flat list of drawable SVG elements out of markup. */
-export function parseSvgElements(svg: string): SvgElement[] {
-  const out: SvgElement[] = [];
-  for (const match of svg.matchAll(/<(rect|circle|ellipse|line|text|polygon|path)\b([^>]*)>/gi)) {
-    const tag = (match[1] ?? "").toLowerCase();
-    const attrs: Record<string, string> = {};
-    for (const attr of (match[2] ?? "").matchAll(/([\w:-]+)\s*=\s*"([^"]*)"/g)) {
-      attrs[(attr[1] ?? "").toLowerCase()] = attr[2] ?? "";
-    }
-    out.push({ tag, attrs });
-  }
-  // <text>label</text> content sits between tags, so pair it up separately.
-  const texts = [...svg.matchAll(/<text\b[^>]*>([\s\S]*?)<\/text>/gi)].map((m) =>
-    (m[1] ?? "")
-      .replace(/<[^>]*>/g, "")
-      .replace(/\s+/g, " ")
-      .trim(),
-  );
-  let textIndex = 0;
-  for (const el of out) {
-    if (el.tag === "text") {
-      el.attrs.__content = texts[textIndex++] ?? "";
-    }
-  }
-  return out;
-}
-
-const num = (v: string | undefined, fallback = 0): number => {
-  const parsed = Number.parseFloat(v ?? "");
-  return Number.isFinite(parsed) ? parsed : fallback;
-};
-
 /**
- * Import an SVG as editable shapes rather than an embedded image.
+ * Import an SVG file as ONE editable vector (docs/26 §6.3, V2) through core's
+ * sanitizing importer: styles, transforms and <use> resolved, scripts and
+ * external references dropped, geometry kept exactly. It replaced a regex
+ * pass that scattered primitives into loose rects and ellipses, ignored
+ * transforms, and let any attribute value through as a colour.
  *
- * Rect/circle/ellipse/line/text map onto real shape kinds. A `path` becomes a
- * `draw` shape carrying its own path data, so freehand and vector art survive a
- * round trip through the board.
+ * Empty when nothing drawable survives; the caller says so.
  */
-export function svgToOps(svg: string, existing: { z?: number }[] = []): Operation[] {
-  const elements = parseSvgElements(svg);
-  const ops: Operation[] = [];
-  const baseZ = nextZ(existing);
-
-  for (const { tag, attrs } of elements) {
-    const stroke = attrs.stroke && attrs.stroke !== "none" ? attrs.stroke : undefined;
-    const fill = attrs.fill && attrs.fill !== "none" ? attrs.fill : undefined;
-    const style = {
-      ...(fill ? { fill } : {}),
-      ...(stroke ? { stroke } : {}),
-      ...(attrs["stroke-width"] ? { strokeWidth: num(attrs["stroke-width"], 1) } : {}),
-    };
-    const common = { id: shapeId(), z: baseZ, ...(Object.keys(style).length ? { style } : {}) };
-
-    if (tag === "rect") {
-      ops.push({
-        op: "CREATE_SHAPE",
-        ...common,
-        kind: "rect",
-        position: { x: num(attrs.x), y: num(attrs.y) },
-        size: {
-          width: Math.max(1, num(attrs.width, 100)),
-          height: Math.max(1, num(attrs.height, 60)),
-        },
-        ...(attrs.rx ? { style: { ...style, radius: num(attrs.rx) } } : {}),
-      });
-    } else if (tag === "circle") {
-      const r = Math.max(1, num(attrs.r, 30));
-      ops.push({
-        op: "CREATE_SHAPE",
-        ...common,
-        kind: "ellipse",
-        position: { x: num(attrs.cx) - r, y: num(attrs.cy) - r },
-        size: { width: r * 2, height: r * 2 },
-      });
-    } else if (tag === "ellipse") {
-      const rx = Math.max(1, num(attrs.rx, 40));
-      const ry = Math.max(1, num(attrs.ry, 25));
-      ops.push({
-        op: "CREATE_SHAPE",
-        ...common,
-        kind: "ellipse",
-        position: { x: num(attrs.cx) - rx, y: num(attrs.cy) - ry },
-        size: { width: rx * 2, height: ry * 2 },
-      });
-    } else if (tag === "line") {
-      // A straight line is a one-segment drawing, kept as vector data.
-      const x1 = num(attrs.x1);
-      const y1 = num(attrs.y1);
-      const x2 = num(attrs.x2);
-      const y2 = num(attrs.y2);
-      const minX = Math.min(x1, x2);
-      const minY = Math.min(y1, y2);
-      ops.push({
-        op: "CREATE_SHAPE",
-        ...common,
-        kind: "draw",
-        position: { x: minX, y: minY },
-        size: { width: Math.max(1, Math.abs(x2 - x1)), height: Math.max(1, Math.abs(y2 - y1)) },
-        path: `M ${x1 - minX} ${y1 - minY} L ${x2 - minX} ${y2 - minY}`,
-      });
-    } else if (tag === "text") {
-      const content = attrs.__content;
-      if (!content) continue;
-      ops.push({
-        op: "CREATE_SHAPE",
-        ...common,
-        kind: "text",
-        position: { x: num(attrs.x), y: num(attrs.y) - num(attrs["font-size"], 14) },
-        size: { width: Math.max(60, content.length * 8), height: 32 },
-        text: content,
-      });
-    } else if (tag === "polygon" || tag === "path") {
-      const points = attrs.points;
-      const d = attrs.d;
-      const data = d ?? (points ? `M ${points.trim().replace(/\s+/g, " L ")} Z` : "");
-      if (!data) continue;
-      // Bounds from the numbers in the path data: enough for a draggable box.
-      const coords = [...data.matchAll(/-?\d+(?:\.\d+)?/g)].map((m) => Number(m[0]));
-      const xs = coords.filter((_, i) => i % 2 === 0);
-      const ys = coords.filter((_, i) => i % 2 === 1);
-      const minX = xs.length ? Math.min(...xs) : 0;
-      const minY = ys.length ? Math.min(...ys) : 0;
-      const maxX = xs.length ? Math.max(...xs) : 100;
-      const maxY = ys.length ? Math.max(...ys) : 100;
-      ops.push({
-        op: "CREATE_SHAPE",
-        ...common,
-        kind: "draw",
-        position: { x: minX, y: minY },
-        size: { width: Math.max(1, maxX - minX), height: Math.max(1, maxY - minY) },
-        path: data,
-      });
-    }
-  }
-
-  return ops;
+export function svgToOps(
+  svg: string,
+  existing: { z?: number }[] = [],
+  at: { x: number; y: number } = { x: 320, y: 240 },
+): Operation[] {
+  const r = svgToVectorOp(svg, at, nextZ(existing));
+  return r.ok ? [r.op] : [];
 }
 
 export type ImportKind = "json" | "csv" | "svg" | "pdf" | "document" | "image" | "unknown";

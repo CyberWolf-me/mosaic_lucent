@@ -1,3 +1,4 @@
+import type { VectorData } from "./vector.js";
 /**
  * Core semantic model for the Lucent workspace.
  *
@@ -604,7 +605,8 @@ export type ShapeKind =
   | "image"
   | "frame"
   | "embed"
-  | "file";
+  | "file"
+  | "vector";
 
 export interface ShapeStyle {
   fill?: string;
@@ -633,6 +635,8 @@ export interface Shape {
    * http(s) URL. Embed URL for kind "embed", which stays http(s)-only.
    */
   src?: string;
+  /** Kind "vector": structured paths (docs/26 §6.3, vector.ts). */
+  vector?: VectorData;
   style?: ShapeStyle;
   /** Explicit z-order; higher renders on top. */
   z?: number;

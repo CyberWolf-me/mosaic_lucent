@@ -1,5 +1,6 @@
 import * as z from "zod/v4";
 import { createWorkspace, type Workspace } from "./model.js";
+import { vectorDataSchema } from "./vector.js";
 import {
   iconRef,
   isImageDataUrl,
@@ -141,6 +142,7 @@ const shapeSchema = z
       "frame",
       "embed",
       "file",
+      "vector",
     ]),
     position: z.object({ x: z.number(), y: z.number() }),
     size: z.object({ width: z.number().positive(), height: z.number().positive() }),
@@ -148,6 +150,9 @@ const shapeSchema = z
     text: z.string().optional(),
     path: optionalSvgPathData,
     src: optionalImageSrc,
+    // docs/26 §6.3. Tolerant like `icon`: a stored vector that no longer parses
+    // is dropped (the shape shows its placeholder), never a refused board.
+    vector: vectorDataSchema.optional().catch(undefined),
     style: shapeStyleSchema.optional(),
     z: z.number().optional(),
     groupId: z.string().min(1).optional(),

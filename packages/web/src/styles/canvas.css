@@ -59,6 +59,56 @@
   align-items: center;
   gap: 8px;
 }
+/* Icons & vectors (docs/26 §6.3): the icon picker, placing editable vectors. */
+.vectors-pop {
+  position: absolute;
+  top: 112px;
+  left: 50%;
+  z-index: 40;
+  width: min(320px, calc(100vw - 32px));
+  transform: translateX(-50%);
+  padding: 12px 14px 14px;
+  border-radius: 14px;
+  background: oklch(from var(--paper-1) l c h / 0.98);
+  border: 1px solid oklch(from var(--paper-4) l c h / 0.7);
+  box-shadow: var(--elev-3, 0 12px 32px rgb(0 0 0 / 0.14));
+  animation: camera-nav-in 0.18s var(--e-out, ease-out) both;
+}
+.vectors-pop-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink-0);
+}
+.vectors-pop-head button {
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: 7px;
+  font-size: 16px;
+  line-height: 1;
+  color: var(--ink-3);
+  background: transparent;
+  cursor: pointer;
+}
+.vectors-pop-head button:hover {
+  color: var(--ink-0);
+  background: var(--paper-3);
+}
+.vectors-pop-hint {
+  margin: 6px 0 0;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--ink-3);
+}
+@media (prefers-reduced-motion: reduce) {
+  .vectors-pop {
+    animation: none;
+  }
+}
+
 /* Camera history (docs/26 §6.4): shown only after a jump, so it reads as
    "you came from somewhere" rather than as permanent chrome. */
 .camera-nav {

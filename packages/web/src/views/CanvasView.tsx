@@ -35,6 +35,17 @@ import { PenLayer } from "./PenLayer.js";
 import { onCanvasCommand, sendCanvasCommand, type CanvasCommand } from "../canvasCommands.js";
 import { preloadExportData } from "../board/exportData.js";
 import { placeImage } from "../assets.js";
+import {
+  replaceWithVectorOps,
+  sketchToVectorOps,
+  svgToVectorOp,
+  vectorFromGlyph,
+  vectorShapeOp,
+} from "../vector/ops.js";
+import { traceImage } from "../vector/trace.js";
+import { assetUrl } from "../assets.js";
+import { IconPicker } from "../icons/IconPicker.js";
+import { loadIcon } from "../icons/registry.js";
 import { MarqueeLayer } from "./MarqueeLayer.js";
 import { cullRect, visibleShapes } from "../board/culling.js";
 import { ShapeDrawLayer } from "./ShapeDrawLayer.js";
@@ -72,7 +83,6 @@ import {
   documentToOps,
   pdfIsCompressed,
   pdfToOps,
-  svgToOps,
 } from "../board/importers.js";
 import { classifyCodeFile, codeToOps } from "../board/codeImport.js";
 import {
@@ -284,6 +294,7 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
   }, []);
   const [zoom, setZoom] = useState(85);
   const [mode, setMode] = useState<"edit" | "present" | "focus">("edit");
+  const canEdit = mode === "edit" && !readOnly;
   const [presentStep, setPresentStep] = useState(0);
   const [templatesOpen, setTemplatesOpen] = useState(false);
   const [timerOpen, setTimerOpen] = useState(false);
@@ -1301,6 +1312,38 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
     notify(`Restored ${ids.length} hidden object${ids.length > 1 ? "s" : ""}.`);
   }, [shapes, applyManual, notify]);
 
+  const traceShape = useCallback(
+    async (image: import("@lucent/core").Shape, preset: "logo" | "illustration") => {
+      const url = image.src ? (assetUrl(image.src) ?? image.src) : null;
+      if (!url) return;
+      notify("Tracing on this device…");
+      const r = await traceImage(url, preset);
+      if (!r.ok) {
+        notify(r.error);
+        return;
+      }
+      if (applyManual(replaceWithVectorOps(image, r.vector), "Trace to vector")) {
+        notify(`Traced into an editable vector (${r.vector.paths.length} parts).`);
+      }
+    },
+    [applyManual, notify],
+  );
+
+  const sketchSelectionToVector = useCallback(
+    (strokes: import("@lucent/core").Shape[]) => {
+      const ops = sketchToVectorOps(strokes, nextZ(Object.values(workspace.shapes)));
+      if (!ops) {
+        notify("Those strokes couldn't be turned into a vector.");
+        return;
+      }
+      const created = ops.find((o) => o.op === "CREATE_SHAPE");
+      if (applyManual(ops, "Smooth into vector") && created && "id" in created) {
+        setSelectedShapes(new Set([created.id]));
+      }
+    },
+    [applyManual, notify, workspace.shapes],
+  );
+
   const buildMenuItems = useCallback((): MenuItem[] => {
     const ids = [...selectedShapes].filter((id) => workspace.shapes[id]);
     const canGroup = ids.length >= 2;
@@ -1311,7 +1354,24 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
       .filter(Boolean) as import("@lucent/core").Shape[];
     const onlyFrame =
       ids.length === 1 && workspace.shapes[ids[0]!]?.kind === "frame" ? ids[0]! : null;
+    // Vector Studio (docs/26 §6.3): an image traces into an editable vector
+    // (locally, in a worker); pen strokes smooth into one.
+    const onlyImage =
+      ids.length === 1 && workspace.shapes[ids[0]!]?.kind === "image" ? workspace.shapes[ids[0]!]! : null;
+    const sketches = src.filter((s) => s.kind === "draw" && s.path);
+    const vectorItems: MenuItem[] = [
+      ...(onlyImage && canEdit
+        ? [
+            { label: "Trace to vector — flat art", onClick: () => void traceShape(onlyImage, "logo") },
+            { label: "Trace to vector — detailed", onClick: () => void traceShape(onlyImage, "illustration") },
+          ]
+        : []),
+      ...(sketches.length > 0 && canEdit
+        ? [{ label: sketches.length > 1 ? "Smooth strokes into a vector" : "Smooth stroke into a vector", onClick: () => sketchSelectionToVector(sketches) }]
+        : []),
+    ];
     const items: MenuItem[] = [
+      ...(vectorItems.length ? [...vectorItems, { label: "", onClick: () => {}, sep: true }] : []),
       ...(onlyFrame
         ? [
             { label: "Zoom to frame", onClick: () => sendCanvasCommand({ kind: "frame", id: onlyFrame }) },
@@ -1372,6 +1432,9 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
     }
     return items;
   }, [
+    canEdit,
+    traceShape,
+    sketchSelectionToVector,
     selectedShapes,
     workspace.shapes,
     workspace.groups,
@@ -1592,12 +1655,23 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
         return;
       }
 
-      // An SVG as markup (from a design tool or a code editor): shown as an
-      // image until Vector Studio can import it as an editable vector.
+      // An SVG as markup (from a design tool or a code editor) becomes an
+      // editable vector (docs/26 §6.3); one too complex to edit still lands,
+      // as an image, with the reason said.
       const svgText = dt.getData("image/svg+xml") || dt.getData("text/plain");
       const svg = svgTextToDataUrl(svgText);
       if (svg) {
         e.preventDefault();
+        const asVector = svgToVectorOp(svgText, at, topZ());
+        if (asVector.ok) {
+          if (applyManual([asVector.op], "Paste SVG")) {
+            setSelectedShapes(new Set([asVector.op.id]));
+            if (asVector.dropped.length)
+              notify(`Pasted as a vector. Skipped what can't be edited: ${asVector.dropped.join(", ")}.`);
+          }
+          return;
+        }
+        notify(`${asVector.error} Pasted it as an image instead.`);
         const size = svgSize(svgText);
         applyManual(
           [
@@ -1759,14 +1833,29 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
           reader.onload = () => {
             const content = String(reader.result);
             const existing = Object.values(workspace.shapes);
+            if (kind === "svg") {
+              // One editable vector where it was dropped (docs/26 §6.3).
+              const r = svgToVectorOp(content, { x: dropX + 120, y: dropY + 90 }, nextZ(existing));
+              if (!r.ok) {
+                notify(`${file.name}: ${r.error}`);
+                return;
+              }
+              if (applyManual([r.op], `Import ${file.name}`)) {
+                setSelectedShapes(new Set([r.op.id]));
+                notify(
+                  r.dropped.length
+                    ? `Imported ${file.name} as a vector. Skipped: ${r.dropped.join(", ")}.`
+                    : `Imported ${file.name} as an editable vector.`,
+                );
+              }
+              return;
+            }
             const ops =
-              kind === "svg"
-                ? svgToOps(content, existing)
-                : kind === "pdf"
-                  ? pdfToOps(content, existing)
-                  : kind === "csv"
-                    ? csvToStickyOps(content)
-                    : documentToOps(content, existing);
+              kind === "pdf"
+                ? pdfToOps(content, existing)
+                : kind === "csv"
+                  ? csvToStickyOps(content)
+                  : documentToOps(content, existing);
             if (ops.length === 0) {
               notify(
                 kind === "pdf" && pdfIsCompressed(content)
@@ -1815,6 +1904,30 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
         applyManual([{ op: "UPDATE_SHAPE", id, size: { width, height } }], "Resize shape");
     },
     [applyManual],
+  );
+
+  // Icons & vectors (docs/26 §6.3): a registry icon placed as an editable
+  // vector at the centre of the view. Brand marks keep their colour; outline
+  // icons take the shape's ink.
+  const [vectorsOpen, setVectorsOpen] = useState(false);
+  const insertIconVector = useCallback(
+    async (ref: string) => {
+      const glyph = await loadIcon(ref);
+      const vector = glyph ? vectorFromGlyph(glyph) : null;
+      if (!vector) {
+        notify("That icon couldn't be placed.");
+        return;
+      }
+      const at = viewportBox
+        ? { x: viewportBox.x + viewportBox.width / 2, y: viewportBox.y + viewportBox.height / 2 }
+        : { x: 400, y: 300 };
+      const op = vectorShapeOp(vector, at, { width: 72, height: 72 }, nextZ(Object.values(workspace.shapes)));
+      if (applyManual([op], "Insert icon")) {
+        setSelectedShapes(new Set([op.id]));
+        setVectorsOpen(false);
+      }
+    },
+    [applyManual, notify, viewportBox, workspace.shapes],
   );
 
   const rotateShape = useCallback(
@@ -2289,7 +2402,6 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
   // Editing chrome is hidden outright for viewers rather than shown and then
   // failing: the server rejects their operations, so an enabled tool would be a
   // lie. Read-only affordances (pan/zoom, export, present, comments) stay.
-  const canEdit = mode === "edit" && !readOnly;
 
   // The first-run hero replaces the whole canvas, including the draw layer. If a
   // drawing tool is armed we must show the board instead, or picking a shape on a
@@ -2319,6 +2431,21 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
           </div>
           {/* No "what the board knows" stamp yet: an empty board knows nothing. */}
           <TopBar crumbs={crumbs} onOpenSettings={onOpenSettings} />
+          {vectorsOpen && canEdit && (
+            <div className="vectors-pop" role="dialog" aria-label="Icons and vectors">
+              <div className="vectors-pop-head">
+                <span>Icons & vectors</span>
+                <button onClick={() => setVectorsOpen(false)} aria-label="Close" title="Close · Esc">
+                  ×
+                </button>
+              </div>
+              <p className="vectors-pop-hint">
+                Places an editable vector. Paste or drop an SVG to import one; right-click an image to
+                trace it, or pen strokes to smooth them into a vector.
+              </p>
+              <IconPicker onChoose={(ref) => void insertIconVector(ref)} onClose={() => setVectorsOpen(false)} />
+            </div>
+          )}
           <LeftRail onOpenSettings={onOpenSettings} />
           {/* The shape toolbar is NOT on the hero. It is `position: fixed`, so
               on the first-run page it floated over the prompt and the mode
@@ -2626,6 +2753,7 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
               onSelectTool={changeTool}
               onEmbed={addEmbed}
               onGenImage={generateImageShape}
+              onVectors={() => setVectorsOpen((v) => !v)}
               orientation="top"
             />
           )}

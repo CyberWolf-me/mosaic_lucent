@@ -1,5 +1,5 @@
 import type { Shape, ShapeLink, Workspace } from "@lucent/core";
-import { routeStyleFor, routedVertices } from "@lucent/core";
+import { routeStyleFor, routedVertices, vectorPathsMarkup } from "@lucent/core";
 import { DIAGRAM_LABELS } from "../scene.js";
 import { glyphSvg, nodeGlyphNow } from "../icons/exportSvg.js";
 import { peekAssetData } from "../assets.js";
@@ -442,6 +442,13 @@ export function buildBoardSvg(workspace: Workspace, pad = 40): string {
       // future model that smuggles a `"` can't break out of the attribute (M0.5).
       parts.push(
         `<path transform="translate(${s.position.x},${s.position.y})" d="${escapeAttr(s.path)}" fill="none" stroke="${escapeAttr(s.style?.stroke ?? "#eee")}" stroke-width="${s.style?.strokeWidth ?? 2}"/>`,
+      );
+    } else if (s.kind === "vector" && s.vector) {
+      // An editable vector exports as itself — its paths in a nested <svg>
+      // mapping its own viewBox onto the shape's box, as the canvas does.
+      // Unfilled parts take the shape's ink (light, on the dark export).
+      parts.push(
+        `<svg x="${s.position.x}" y="${s.position.y}" width="${s.size.width}" height="${s.size.height}" viewBox="${s.vector.viewBox.join(" ")}" preserveAspectRatio="xMidYMid meet" overflow="visible" color="${escapeAttr(s.style?.color ?? "#eeeeee")}">${vectorPathsMarkup(s.vector)}</svg>`,
       );
     } else if (s.kind === "frame") {
       parts.push(

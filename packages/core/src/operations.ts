@@ -1,4 +1,5 @@
 import * as z from "zod/v4";
+import { vectorDataSchema } from "./vector.js";
 import {
   iconRef,
   normalizeIconRef,
@@ -193,6 +194,8 @@ export const shapeKind = z.enum([
   "frame",
   "embed",
   "file",
+  // docs/26 §6.3: an editable vector — structured paths in `vector`, never markup.
+  "vector",
 ]);
 
 const shapeStyleSchema = z.object({
@@ -423,6 +426,8 @@ const operationSchema = z.discriminatedUnion("op", [
     // the semantic validator, where `kind` and the existing shape are in scope.
     path: optionalSvgPathData,
     src: optionalImageSrc,
+    /** Kind "vector" only: structured paths (vector.ts). */
+    vector: vectorDataSchema.optional(),
     style: shapeStyleSchema.optional(),
     z: z.number().optional(),
     groupId: z.string().min(1).optional(),
@@ -436,6 +441,8 @@ const operationSchema = z.discriminatedUnion("op", [
     size: z.object({ width: z.number().positive(), height: z.number().positive() }).optional(),
     rotation: z.number().optional(),
     text: z.string().optional(),
+    /** Replace a vector shape's paths (recolour, restroke, simplify, AI edit). */
+    vector: vectorDataSchema.optional(),
     style: shapeStyleSchema.optional(),
     z: z.number().optional(),
     groupId: z.string().min(1).nullable().optional(),

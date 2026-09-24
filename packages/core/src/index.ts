@@ -2,6 +2,7 @@ export * from "./model.js";
 export * from "./operations.js";
 export * from "./toolSchema.js";
 export * from "./schemaPrimitives.js";
+export * from "./vector.js";
 export * from "./workspaceSchema.js";
 export * from "./validator.js";
 export * from "./reducer.js";

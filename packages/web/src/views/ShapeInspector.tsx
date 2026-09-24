@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { Operation, Shape } from "@lucent/core";
 import { cloneShapeOp, shapeId, zOrderOps, type ZMove } from "../shapes.js";
+import { VectorSection } from "../vector/VectorSection.js";
 import { alignPositions, distributePositions, type AlignMode } from "../board/geometry.js";
 
 /**
@@ -219,6 +220,7 @@ export function ShapeInspector({
     );
 
   const selectedShapes = ids.map((id) => shapes[id]!);
+  const allVectors = selectedShapes.every((s) => s.kind === "vector");
   const anyLocked = selectedShapes.some((s) => s.locked);
 
   const toggleLock = () =>
@@ -266,90 +268,97 @@ export function ShapeInspector({
   return (
     <div className="shape-inspector">
       <div className="insp-label">{ids.length > 1 ? `${ids.length} selected` : "Shape"}</div>
-      <div className="insp-group">
-        <span className="insp-cap">Fill</span>
-        <div className="insp-swatches">
-          {FILLS.map((c) => (
-            <button
-              key={c}
-              className="insp-swatch"
-              style={{ background: c }}
-              onClick={() => setFill(c)}
-              title="Fill"
-              aria-label={`Fill ${c}`}
-            />
-          ))}
+      <VectorSection shapes={selectedShapes} onApply={onApply} />
+      {/* A vector's paint lives in its paths (VectorSection); the box styling
+          below would only draw a background and border around it. */}
+      {!allVectors && (
+        <>
+        <div className="insp-group">
+          <span className="insp-cap">Fill</span>
+          <div className="insp-swatches">
+            {FILLS.map((c) => (
+              <button
+                key={c}
+                className="insp-swatch"
+                style={{ background: c }}
+                onClick={() => setFill(c)}
+                title="Fill"
+                aria-label={`Fill ${c}`}
+              />
+            ))}
+          </div>
         </div>
-      </div>
-      <div className="insp-group">
-        <span className="insp-cap">Stroke</span>
-        <div className="insp-swatches">
-          {STROKES.map((c) => (
-            <button
-              key={c}
-              className="insp-swatch"
-              style={{ background: c }}
-              onClick={() => setStroke(c)}
-              title="Stroke"
-              aria-label={`Stroke ${c}`}
-            />
-          ))}
+        <div className="insp-group">
+          <span className="insp-cap">Stroke</span>
+          <div className="insp-swatches">
+            {STROKES.map((c) => (
+              <button
+                key={c}
+                className="insp-swatch"
+                style={{ background: c }}
+                onClick={() => setStroke(c)}
+                title="Stroke"
+                aria-label={`Stroke ${c}`}
+              />
+            ))}
+          </div>
         </div>
-      </div>
-      <div className="insp-group">
-        <span className="insp-cap">Text</span>
-        <div className="segmented">
-          <button onClick={toggleBold} style={{ fontWeight: 700 }} aria-label="Bold" title="Bold">
-            B
-          </button>
-          <button onClick={() => setFontSize(12)} aria-label="Small text" title="Small">
-            S
-          </button>
-          <button onClick={() => setFontSize(16)} aria-label="Medium text" title="Medium">
-            M
-          </button>
-          <button onClick={() => setFontSize(22)} aria-label="Large text" title="Large">
-            L
-          </button>
+        <div className="insp-group">
+          <span className="insp-cap">Text</span>
+          <div className="segmented">
+            <button onClick={toggleBold} style={{ fontWeight: 700 }} aria-label="Bold" title="Bold">
+              B
+            </button>
+            <button onClick={() => setFontSize(12)} aria-label="Small text" title="Small">
+              S
+            </button>
+            <button onClick={() => setFontSize(16)} aria-label="Medium text" title="Medium">
+              M
+            </button>
+            <button onClick={() => setFontSize(22)} aria-label="Large text" title="Large">
+              L
+            </button>
+          </div>
+          <div className="segmented" style={{ marginTop: 6 }}>
+            <button onClick={() => setAlign("left")} aria-label="Align left" title="Align left">
+              ◧
+            </button>
+            <button onClick={() => setAlign("center")} aria-label="Align center" title="Align center">
+              ▣
+            </button>
+            <button onClick={() => setAlign("right")} aria-label="Align right" title="Align right">
+              ◨
+            </button>
+          </div>
+          <div className="insp-swatches" style={{ marginTop: 6 }}>
+            {TEXT_COLORS.map((c) => (
+              <button
+                key={c}
+                className="insp-swatch"
+                style={{ background: c }}
+                onClick={() => setColor(c)}
+                title="Text colour"
+                aria-label={`Text colour ${c}`}
+              />
+            ))}
+          </div>
         </div>
-        <div className="segmented" style={{ marginTop: 6 }}>
-          <button onClick={() => setAlign("left")} aria-label="Align left" title="Align left">
-            ◧
-          </button>
-          <button onClick={() => setAlign("center")} aria-label="Align center" title="Align center">
-            ▣
-          </button>
-          <button onClick={() => setAlign("right")} aria-label="Align right" title="Align right">
-            ◨
-          </button>
+        <div className="insp-group">
+          <span className="insp-cap">Corners</span>
+          <div className="segmented">
+            <button onClick={() => setRadius(0)} title="Square corners">
+              ▢
+            </button>
+            <button onClick={() => setRadius(8)} title="Rounded">
+              ▣
+            </button>
+            <button onClick={() => setRadius(22)} title="Very rounded">
+              ◍
+            </button>
+          </div>
         </div>
-        <div className="insp-swatches" style={{ marginTop: 6 }}>
-          {TEXT_COLORS.map((c) => (
-            <button
-              key={c}
-              className="insp-swatch"
-              style={{ background: c }}
-              onClick={() => setColor(c)}
-              title="Text colour"
-              aria-label={`Text colour ${c}`}
-            />
-          ))}
-        </div>
-      </div>
-      <div className="insp-group">
-        <span className="insp-cap">Corners</span>
-        <div className="segmented">
-          <button onClick={() => setRadius(0)} title="Square corners">
-            ▢
-          </button>
-          <button onClick={() => setRadius(8)} title="Rounded">
-            ▣
-          </button>
-          <button onClick={() => setRadius(22)} title="Very rounded">
-            ◍
-          </button>
-        </div>
-      </div>
+        </>
+      )}
       {ids.length > 1 && (
         <div className="insp-group">
           <span className="insp-cap">Align</span>
@@ -414,15 +423,17 @@ export function ShapeInspector({
             suffix="%"
             onCommit={setOpacity}
           />
-          <NumField
-            label="—"
-            title="Stroke width"
-            value={selectedShapes[0]!.style?.strokeWidth ?? 1.5}
-            min={0}
-            max={24}
-            step={0.5}
-            onCommit={setStrokeWidth}
-          />
+          {!allVectors && (
+            <NumField
+              label="—"
+              title="Stroke width"
+              value={selectedShapes[0]!.style?.strokeWidth ?? 1.5}
+              min={0}
+              max={24}
+              step={0.5}
+              onCommit={setStrokeWidth}
+            />
+          )}
         </div>
       </div>
       <div className="insp-sep" />

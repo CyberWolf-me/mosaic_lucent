@@ -273,6 +273,12 @@ radialGradient stop`) → flatten groups, transforms and viewBox → structured
 paths. Scripts, `foreignObject`, event handlers, external references and CSS
 are dropped. It replaces today's regex `svgToOps`.
 
+**Status (2026-09-24, V2):** built (ADR 0044) — the `vector` shape kind, the
+core importer, paste/drop/board-import of SVG, icon → vector, local tracing
+in a worker (flat-art and detailed presets), pen strokes → smooth vector, the
+inspector's palette recolour, ink, stroke weight and SVG download, and
+vectors in exports. Not yet: split into parts, simplify, gradients.
+
 **Five ways to make a vector:**
 
 | Path                   | How                                                                                                       | Runs where                          |

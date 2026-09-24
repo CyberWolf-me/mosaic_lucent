@@ -25,9 +25,9 @@ import { Avatar, Button, KindBadge } from "../ui/kit.js";
 import { StatementGlyph } from "../ui/StatementGlyph.js";
 import { Ico } from "../ui/icons.js";
 import { autoIconFor } from "../icons/auto.js";
-import { IconSvg, NodeIcon, brandInk } from "../icons/Icon.js";
-import { loadIconIndex, useIcon, type IconIndex } from "../icons/registry.js";
-import { SUGGESTED_ICONS, searchIcons, type IconHit } from "../icons/search.js";
+import { NodeIcon } from "../icons/Icon.js";
+import { IconPicker } from "../icons/IconPicker.js";
+import { useIcon } from "../icons/registry.js";
 
 /**
  * The node inspector: what a node IS on this board, not how it looks.
@@ -157,30 +157,9 @@ function IconSection({
   const auto = autoIconFor(node.label, node.nodeType);
   const chosen = useIcon(node.icon);
   const [open, setOpen] = useState(false);
-  const [query, setQuery] = useState("");
-  const [index, setIndex] = useState<IconIndex | null>(null);
-
-  // The name index (~50 KB gzipped) loads on the first keystroke, not with
-  // the board: most people never search for an icon.
-  useEffect(() => {
-    if (open && query && !index) void loadIconIndex().then(setIndex);
-  }, [open, query, index]);
-
-  const hits = useMemo(() => (index && query.trim() ? searchIcons(index, query, 36) : null), [index, query]);
-  const suggestions = useMemo<IconHit[]>(
-    () =>
-      [...new Set([...(auto ? [auto] : []), ...SUGGESTED_ICONS])].map((ref) => ({
-        ref,
-        set: ref.startsWith("simple:") ? "simple" : "iconoir",
-        name: iconName(ref),
-      })),
-    [auto],
-  );
-
   const choose = (ref: string | null) => {
     onApply([{ op: "SET_NODE_ICON", id: node.id, icon: ref }], ref ? "Set icon" : "Automatic icon");
     setOpen(false);
-    setQuery("");
   };
 
   const source = node.icon
@@ -229,57 +208,14 @@ function IconSection({
         </p>
       )}
       {open && (
-        <div className="ni-icon-picker">
-          <input
-            className="ni-icon-search"
-            autoFocus
-            aria-label="Search icons and brands"
-            placeholder="Search icons and brands — database, stripe…"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && hits?.[0]) choose(hits[0].ref);
-              if (e.key === "Escape") {
-                e.stopPropagation();
-                setOpen(false);
-              }
-            }}
-          />
-          <div className="ni-icon-grid" role="listbox" aria-label="Icons">
-            {(hits ?? suggestions).map((hit) => (
-              <IconChoice key={hit.ref} hit={hit} selected={hit.ref === node.icon} onChoose={choose} />
-            ))}
-          </div>
-          {query.trim() && !index && <p className="ni-none">Loading the library…</p>}
-          {hits && hits.length === 0 && <p className="ni-none">No icon or brand matches “{query.trim()}”.</p>}
-        </div>
+        <IconPicker
+          selected={node.icon}
+          lead={auto}
+          onChoose={choose}
+          onClose={() => setOpen(false)}
+        />
       )}
     </section>
-  );
-}
-
-function IconChoice({
-  hit,
-  selected,
-  onChoose,
-}: {
-  hit: IconHit;
-  selected: boolean;
-  onChoose: (ref: string) => void;
-}) {
-  const glyph = useIcon(hit.ref);
-  return (
-    <button
-      className={`ni-icon-choice${selected ? " is-selected" : ""}`}
-      role="option"
-      aria-selected={selected}
-      aria-label={hit.name}
-      title={hit.set === "simple" ? `${hit.name} (brand)` : hit.name}
-      onClick={() => onChoose(hit.ref)}
-      style={glyph?.set === "simple" && brandInk(glyph.hex) ? { color: brandInk(glyph.hex) } : undefined}
-    >
-      {glyph ? <IconSvg glyph={glyph} size={18} /> : <span className="ni-icon-loading" />}
-    </button>
   );
 }
 

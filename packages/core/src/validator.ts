@@ -324,6 +324,10 @@ export function validateOperations(workspace: Workspace, ops: Operation[]): Vali
         // An inline base64 image is how pasted and generated images travel, but
         // only an image shape renders `src` in an <img>: on an embed the same
         // field reaches an iframe, so it stays http(s)-only there.
+        // A vector shape is its paths; only a vector shape carries them.
+        if (op.kind === "vector" && !op.vector) err(`vector shape "${op.id}" has no paths`);
+        if (op.vector && op.kind !== "vector")
+          err(`only a vector shape carries paths, not "${op.kind}"`);
         if (op.src && op.kind !== "image" && isImageDataUrl(op.src)) {
           err(`a data URL src is only allowed on an image shape, not "${op.kind}"`);
         }

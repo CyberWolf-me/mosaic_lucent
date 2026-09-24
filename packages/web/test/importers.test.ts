@@ -4,7 +4,6 @@ import {
   classifyImport,
   documentToBlocks,
   documentToOps,
-  parseSvgElements,
   pdfIsCompressed,
   pdfToBlocks,
   pdfToOps,
@@ -136,7 +135,7 @@ endobj`;
   });
 });
 
-describe("SVG import", () => {
+describe("SVG import (docs/26 V2: one editable vector)", () => {
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300">
     <rect x="10" y="20" width="120" height="60" rx="8" fill="#f5c542" stroke="#333" stroke-width="2"/>
     <circle cx="200" cy="100" r="40" fill="#5599ff"/>
@@ -146,73 +145,35 @@ describe("SVG import", () => {
     <path d="M 5 5 L 60 40 L 5 40 Z" fill="#eee"/>
   </svg>`;
 
-  it("parses each drawable element with its attributes", () => {
-    const els = parseSvgElements(svg);
-    expect(els.map((e) => e.tag)).toEqual(["rect", "circle", "ellipse", "line", "text", "path"]);
-    expect(els[0]?.attrs.fill).toBe("#f5c542");
-  });
-
-  it("maps primitives onto editable shape kinds, not an image", () => {
+  it("lands as one vector shape holding every drawable element, not an image", () => {
     const ws = apply(svgToOps(svg));
-    const kinds = Object.values(ws.shapes)
-      .map((s) => s.kind)
-      .sort();
-    expect(kinds).toEqual(["draw", "draw", "ellipse", "ellipse", "rect", "text"]);
-    expect(kinds).not.toContain("image");
+    const shapes = Object.values(ws.shapes);
+    expect(shapes).toHaveLength(1);
+    expect(shapes[0]!.kind).toBe("vector");
+    expect(shapes[0]!.vector?.paths).toHaveLength(5);
+    expect(shapes[0]!.vector?.viewBox).toEqual([0, 0, 400, 300]);
   });
 
-  it("converts a circle to a centred ellipse of the right size", () => {
-    const ws = apply(svgToOps(`<svg><circle cx="100" cy="100" r="25"/></svg>`));
-    const shape = Object.values(ws.shapes)[0]!;
-    expect(shape.position).toEqual({ x: 75, y: 75 });
-    expect(shape.size).toEqual({ width: 50, height: 50 });
+  it("keeps paint and geometry: fill, stroke and width, fill=none, exact path data", () => {
+    const paths = Object.values(apply(svgToOps(svg)).shapes)[0]!.vector!.paths;
+    expect(paths[0]).toMatchObject({ fill: "#f5c542", stroke: "#333", strokeWidth: 2 });
+    expect(paths[2]).toMatchObject({ fill: "none", stroke: "#0a0" });
+    expect(paths[4]).toMatchObject({ d: "M5 5L60 40L5 40Z", fill: "#eee" });
   });
 
-  it("carries text content into a text shape", () => {
-    const ws = apply(svgToOps(svg));
-    const text = Object.values(ws.shapes).find((s) => s.kind === "text");
-    expect(text?.text).toBe("Hello board");
+  it("sizes the shape from the file, fitted to the board", () => {
+    const shape = Object.values(apply(svgToOps(svg)).shapes)[0]!;
+    expect(shape.size).toEqual({ width: 320, height: 240 });
   });
 
-  it("keeps a path as vector data rather than flattening it", () => {
-    const ws = apply(svgToOps(`<svg><path d="M 5 5 L 60 40 L 5 40 Z"/></svg>`));
-    const shape = Object.values(ws.shapes)[0]!;
-    expect(shape.kind).toBe("draw");
-    expect(shape.path).toContain("M 5 5");
+  it("imports nothing when nothing drawable survives", () => {
+    expect(svgToOps("<svg><text>only words</text></svg>")).toEqual([]);
+    expect(svgToOps("<svg><script>alert(1)</script></svg>")).toEqual([]);
   });
 
-  it("preserves fill and stroke styling", () => {
-    const ws = apply(
-      svgToOps(
-        `<svg><rect x="0" y="0" width="10" height="10" fill="#abc" stroke="#def" stroke-width="3"/></svg>`,
-      ),
-    );
-    const shape = Object.values(ws.shapes)[0]!;
-    expect(shape.style?.fill).toBe("#abc");
-    expect(shape.style?.stroke).toBe("#def");
-    expect(shape.style?.strokeWidth).toBe(3);
-  });
-
-  it("treats fill=none as no fill", () => {
-    const ws = apply(
-      svgToOps(`<svg><rect x="0" y="0" width="10" height="10" fill="none" stroke="#111"/></svg>`),
-    );
-    expect(Object.values(ws.shapes)[0]?.style?.fill).toBeUndefined();
-  });
-
-  it("produces a batch the engine accepts", () => {
-    expect(validateOperations(createWorkspace(), svgToOps(svg))).toHaveLength(0);
-  });
-
-  it("ignores markup with nothing drawable", () => {
-    expect(svgToOps(`<svg><defs><marker id="a"/></defs></svg>`)).toEqual([]);
-  });
-
-  it("stacks imported shapes above what is already on the board", () => {
-    const ops = svgToOps(svg, [{ z: 5 }]);
-    for (const op of ops) {
-      if (op.op === "CREATE_SHAPE") expect(op.z).toBeGreaterThan(5);
-    }
+  it("stacks the import above what is already there", () => {
+    const [op] = svgToOps(svg, [{ z: 7 }]);
+    expect(op).toMatchObject({ z: 8 });
   });
 });
 

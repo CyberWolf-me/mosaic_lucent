@@ -855,6 +855,25 @@ export const ToolIco = {
       <path d="M6 3v18M18 3v18M3 6h18M3 18h18" />
     </svg>
   ),
+  /** Icons & vectors (docs/26 §6.3): a circle, a square, a triangle, a curve. */
+  Vectors: (p: P) => (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      {...p}
+    >
+      <circle cx="7" cy="7" r="3.5" />
+      <rect x="13.5" y="3.5" width="7" height="7" rx="1" />
+      <path d="M7 13.5 10.5 20h-7z" />
+      <path d="M14 20c1.5-4 5-4 6.5-6.5" />
+    </svg>
+  ),
   Media: (p: P) => (
     <svg
       width="16"

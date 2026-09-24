@@ -6,6 +6,7 @@ import type { Shape } from "@lucent/core";
 import { inkOn, normalizeZ, type DropKind } from "../shapes.js";
 import { DRAG_HYSTERESIS_PX, shapeLinkEnds, shapeLinkPath } from "../board/geometry.js";
 import { embedModeOf } from "../embed.js";
+import { VectorSvg } from "../vector/VectorSvg.js";
 
 export type { DropKind };
 
@@ -66,12 +67,15 @@ export function ShapeToolbar({
   onSelectTool,
   onEmbed,
   onGenImage,
+  onVectors,
   orientation = "left",
 }: {
   activeTool?: Tool;
   onSelectTool?: (t: Tool) => void;
   onEmbed?: () => void;
   onGenImage?: () => void;
+  /** Open Icons & vectors (docs/26 §6.3). */
+  onVectors?: () => void;
   orientation?: "left" | "bottom" | "top";
 }) {
   const [tool, setTool] = useState<Tool>(activeTool);
@@ -142,6 +146,14 @@ export function ShapeToolbar({
       <T id="frame" tip="Frame · F">
         <ToolIco.Frame />
       </T>
+      <button
+        className="tool"
+        data-tip="Icons & vectors"
+        aria-label="Insert an icon or vector"
+        onClick={() => onVectors?.()}
+      >
+        <ToolIco.Vectors />
+      </button>
       <button
         className="tool"
         data-tip="Embed GIF / video / link"
@@ -777,6 +789,34 @@ export function ShapeElement({
         {liveRotation !== null && <span className="shape-rotate-readout">{liveRotation}°</span>}
       </>
     ) : null;
+
+  // An editable vector (docs/26 §6.3): its paint lives in its paths, so the
+  // box styling (fill background, stroke border) doesn't apply; `style.color`
+  // is the ink every unfilled path takes. It has no text to edit.
+  if (kind === "vector") {
+    return (
+      <div
+        {...commonProps}
+        onDoubleClick={(e) => e.stopPropagation()}
+        style={{
+          ...style,
+          width: w,
+          height: h,
+          background: "transparent",
+          border: "none",
+          padding: 0,
+          color: sty?.color ?? "var(--ink-0)",
+        }}
+      >
+        {shape.vector ? (
+          <VectorSvg vector={shape.vector} />
+        ) : (
+          <span className="vector-missing">Vector unavailable</span>
+        )}
+        {resizeHandle}
+      </div>
+    );
+  }
 
   if (kind === "diamond") {
     return (
