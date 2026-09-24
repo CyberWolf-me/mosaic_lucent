@@ -308,6 +308,17 @@ code blocks; minimal rich text; node ↔ shape links; canvas commands in ⌘K
 (align, group, convert, auto-layout, zoom); the asset upload client (images
 stop living in the op log).
 
+**Status (2026-09-24):** built — rotate handle (Shift snaps 15°), numeric
+inspector (x, y, w, h, rotation, opacity, stroke width), one-step z-order
+(⌘] / ⌘[) with a stacking model that fixes Send to back, the system
+clipboard (Lucent payload between boards and tabs; images, SVG, links and
+text from other apps; schema-gated), zoom to frame, camera back/forward,
+⌘K canvas commands (fit, zoom to selection, camera, go to frame), and the
+asset upload client (shared boards store `asset:` references; exports inline
+the bytes). Fill-aware shape text fixes dark-mode legibility. Still open:
+8-handle resize with aspect lock, lasso, highlighter, tables, code blocks,
+rich text, node ↔ shape links, and align/group/convert in ⌘K.
+
 ### 6.5 Semantic zoom ladder
 
 The spec's density ladder, on top of today's three tiers and region collapse:

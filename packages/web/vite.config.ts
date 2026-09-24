@@ -16,6 +16,10 @@ import type { ServerResponse } from "node:http";
 // (b) a vitest config that imports `defineConfig` from "vitest/config"
 // instead of "vite" and adds `test: { environment: "jsdom", globals: false }`
 // — the "vite" `defineConfig` used below does not accept a `test` key.
+//
+// The test script passes --testTimeout=20000: the ELK suites run real layouts,
+// and several sit near vitest's 5 s default (the determinism case takes ~4.6 s
+// alone), so a busy machine failed them on the clock rather than on geometry.
 export default defineConfig({
   plugins: [react()],
   // BUILD_ID reaches the bundle as a literal (support.ts reads it from
