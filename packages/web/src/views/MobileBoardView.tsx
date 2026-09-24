@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { buildBoardSvg } from "../board/geometry.js";
-import { nodeIconRefs } from "../icons/exportSvg.js";
-import { preloadIcons } from "../icons/registry.js";
+import { preloadExportData } from "../board/exportData.js";
 import { useWorkspace } from "../workspace.js";
 import { Ico } from "../ui/icons.js";
 
@@ -47,13 +46,13 @@ export function MobileBoardView(): React.ReactElement {
   const [iconsLoaded, setIconsLoaded] = useState(0);
   useEffect(() => {
     let live = true;
-    void preloadIcons(nodeIconRefs(Object.values(workspace.nodes))).then(() => {
+    void preloadExportData(workspace).then(() => {
       if (live) setIconsLoaded((n) => n + 1);
     });
     return () => {
       live = false;
     };
-  }, [workspace.nodes]);
+  }, [workspace]);
   // iconsLoaded is the recompute signal: the export reads icons from the
   // registry's module cache, which React can't see change.
   // eslint-disable-next-line react-hooks/exhaustive-deps

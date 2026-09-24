@@ -2,6 +2,7 @@ import type { Shape, ShapeLink, Workspace } from "@lucent/core";
 import { routeStyleFor, routedVertices } from "@lucent/core";
 import { DIAGRAM_LABELS } from "../scene.js";
 import { glyphSvg, nodeGlyphNow } from "../icons/exportSvg.js";
+import { peekAssetData } from "../assets.js";
 
 /**
  * Pure board geometry helpers, extracted from CanvasView so they can be unit
@@ -474,11 +475,13 @@ export function buildBoardSvg(workspace: Workspace, pad = 40): string {
         `<polygon points="${pts.join(" ")}" fill="${escapeAttr(fill)}" stroke="${escapeAttr(s.style?.stroke ?? "#0000")}"/>`,
       );
     } else if (s.kind === "image") {
-      // Data-URL images embed directly; a remote src would need CORS at
-      // rasterization time, so it is drawn as a labelled placeholder instead.
-      if (s.src?.startsWith("data:")) {
+      // Data-URL images embed directly, and so do stored assets once the
+      // export has fetched their bytes (preloadExportData); a remote src would
+      // need CORS at rasterization time, so it is a labelled placeholder.
+      const inline = s.src?.startsWith("data:") ? s.src : peekAssetData(s.src);
+      if (inline) {
         parts.push(
-          `<image x="${s.position.x}" y="${s.position.y}" width="${s.size.width}" height="${s.size.height}" href="${escapeXml(s.src)}" preserveAspectRatio="xMidYMid slice"/>`,
+          `<image x="${s.position.x}" y="${s.position.y}" width="${s.size.width}" height="${s.size.height}" href="${escapeXml(inline)}" preserveAspectRatio="xMidYMid slice"/>`,
         );
       } else {
         parts.push(

@@ -33,8 +33,8 @@ import { StatementGlyph } from "../ui/StatementGlyph.js";
 import { PresentMode } from "./PresentMode.js";
 import { PenLayer } from "./PenLayer.js";
 import { onCanvasCommand, sendCanvasCommand, type CanvasCommand } from "../canvasCommands.js";
-import { preloadIcons } from "../icons/registry.js";
-import { nodeIconRefs } from "../icons/exportSvg.js";
+import { preloadExportData } from "../board/exportData.js";
+import { placeImage } from "../assets.js";
 import { MarqueeLayer } from "./MarqueeLayer.js";
 import { cullRect, visibleShapes } from "../board/culling.js";
 import { ShapeDrawLayer } from "./ShapeDrawLayer.js";
@@ -75,7 +75,6 @@ import {
   svgToOps,
 } from "../board/importers.js";
 import { classifyCodeFile, codeToOps } from "../board/codeImport.js";
-import { downscaleImage } from "../board/images.js";
 import {
   LUCENT_CLIP_MIME,
   clipFromSelection,
@@ -1622,16 +1621,15 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
         ?.getAsFile();
       if (file) {
         e.preventDefault();
-        // Downscale before it becomes a data URL (M0.5). A 12 MP screenshot is
-        // several megabytes; localStorage has a 5–10 MB budget for the whole
-        // origin, so pasting a few would silently break autosave.
-        void downscaleImage(file).then((scaled) => {
-          if (!scaled) {
+        // Downscaled (M0.5), then uploaded on a shared board so the op log
+        // carries a reference, not megabytes (assets.ts).
+        void placeImage(file, boardId).then((img) => {
+          if (!img) {
             notify("That image could not be read.");
             return;
           }
-          const k = Math.min(1, 320 / scaled.width);
-          const size = { width: Math.round(scaled.width * k), height: Math.round(scaled.height * k) };
+          const k = Math.min(1, 320 / img.width);
+          const size = { width: Math.round(img.width * k), height: Math.round(img.height * k) };
           applyManual(
             [
               {
@@ -1640,7 +1638,7 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
                 kind: "image",
                 position: { x: Math.round(at.x - size.width / 2), y: Math.round(at.y - size.height / 2) },
                 size,
-                src: scaled.dataUrl,
+                src: img.src,
                 z: topZ(),
               },
             ],
@@ -1667,7 +1665,7 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
       document.removeEventListener("cut", onCut);
       document.removeEventListener("paste", onPaste);
     };
-  }, [workspace, selectedShapes, selectedNodes, readOnly, viewportBox, applyManual, notify]);
+  }, [workspace, selectedShapes, selectedNodes, readOnly, viewportBox, applyManual, notify, boardId]);
 
   // Citation jump (Stage C1): a clicked citation chip with kind "node" sets
   // ?reveal=<id> and switches to the canvas (workspace.tsx onCitation). This
@@ -1703,10 +1701,8 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
         const dropX = 260 + i * 30;
         const dropY = 200 + i * 30;
         if (file.type.startsWith("image/")) {
-          // Same downscale as the paste path (M0.5): the shape carries a data
-          // URL until M3 moves assets to object storage, so it has to fit in
-          // the localStorage budget.
-          void downscaleImage(file).then((scaled) => {
+          // Same path as paste: downscaled, and uploaded on a shared board.
+          void placeImage(file, boardId).then((scaled) => {
             if (!scaled) {
               notify(`${file.name} could not be read as an image.`);
               return;
@@ -1723,7 +1719,7 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
                     width: Math.round(scaled.width * displayScale),
                     height: Math.round(scaled.height * displayScale),
                   },
-                  src: scaled.dataUrl,
+                  src: scaled.src,
                   z: normalizeZ(baseZ + i),
                 },
               ],
@@ -1811,7 +1807,7 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
       window.removeEventListener("dragover", onDragOver);
       window.removeEventListener("drop", onDrop);
     };
-  }, [applyManual, workspace.shapes, notify]);
+  }, [applyManual, workspace.shapes, notify, boardId]);
 
   const resizeShape = useCallback(
     (id: string, width: number, height: number, commit: boolean) => {
@@ -1959,7 +1955,7 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
   // Export the current board (nodes + shapes) as a downloadable SVG snapshot.
   // Icons first: culled cards never loaded theirs, and the export is sync.
   const exportSvg = useCallback(async () => {
-    await preloadIcons(nodeIconRefs(Object.values(workspace.nodes)));
+    await preloadExportData(workspace);
     const svg = buildBoardSvg(workspace);
     const blob = new Blob([svg], { type: "image/svg+xml" });
     const url = URL.createObjectURL(blob);
@@ -1973,7 +1969,7 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
 
   // Rasterize the SVG snapshot to a PNG via an offscreen canvas.
   const exportPng = useCallback(async () => {
-    await preloadIcons(nodeIconRefs(Object.values(workspace.nodes)));
+    await preloadExportData(workspace);
     const svg = buildBoardSvg(workspace);
     const svgBlob = new Blob([svg], { type: "image/svg+xml" });
     const url = URL.createObjectURL(svgBlob);
@@ -2094,7 +2090,7 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
   // a sandboxed document that the parent can't talk to, and the print dialog is
   // triggered programmatically on its `contentWindow`.
   const exportPdf = useCallback(async () => {
-    await preloadIcons(nodeIconRefs(Object.values(workspace.nodes)));
+    await preloadExportData(workspace);
     const svg = buildBoardSvg(workspace);
     const host = document.createElement("div");
     host.style.position = "fixed";

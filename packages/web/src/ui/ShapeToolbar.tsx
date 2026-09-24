@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ToolIco } from "./icons.js";
-import { isImageDataUrl } from "@lucent/core";
+import { isAssetRef, isImageDataUrl } from "@lucent/core";
+import { assetUrl } from "../assets.js";
 import type { Shape } from "@lucent/core";
 import { inkOn, normalizeZ, type DropKind } from "../shapes.js";
 import { DRAG_HYSTERESIS_PX, shapeLinkEnds, shapeLinkPath } from "../board/geometry.js";
@@ -26,7 +27,7 @@ function isHttpUrl(src: string | undefined): boolean {
  * than a second regex here, so the two ends of the contract cannot drift.
  */
 export function isSafeImageSrc(src: string | undefined): boolean {
-  return src !== undefined && (isHttpUrl(src) || isImageDataUrl(src));
+  return src !== undefined && (isHttpUrl(src) || isImageDataUrl(src) || isAssetRef(src));
 }
 
 /** Figjam-style shape toolbar + dropped shape element. Shapes are real
@@ -556,7 +557,9 @@ export function ShapeElement({
     return (
       <img
         className={`shape image ${selected ? "selected" : ""} ${dragging ? "dragging" : ""}`}
-        src={src}
+        // A stored asset loads from the gateway (same-origin: the session
+        // cookie authorises it); data and http(s) srcs load as they are.
+        src={assetUrl(src!) ?? src}
         alt=""
         {...dragProps}
         style={{
@@ -569,6 +572,8 @@ export function ShapeElement({
           borderRadius: 8,
           zIndex: z,
           cursor: "grab",
+          // Rotation reaches images too (the export already rotated them).
+          ...(rotation ? { transform: `rotate(${rotation}deg)` } : {}),
         }}
       />
     );
