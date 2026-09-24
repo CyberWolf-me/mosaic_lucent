@@ -5,13 +5,23 @@ import { ANSWER_TOOL_NAME, anthropicAnswerToolDefinition } from "../answer.js";
 import type { ExternalPlanRequest, ExternalPlanResult } from "../externalPlan.js";
 import { EXTERNAL_PLAN_TOOL_NAME, anthropicExternalPlanToolDefinition } from "../externalPlan.js";
 import {
-  NOTES_TOOL_NAME,
   anthropicNotesToolDefinition,
   parseNotesDraft,
   type NotesRequest,
   type NotesResult,
 } from "../notes.js";
-import { NOTES_SYSTEM_PROMPT, buildNotesUserPrompt } from "../prompt.js";
+import {
+  anthropicThemesToolDefinition,
+  parseThemesDraft,
+  type ThemesRequest,
+  type ThemesResult,
+} from "../themes.js";
+import {
+  NOTES_SYSTEM_PROMPT,
+  THEMES_SYSTEM_PROMPT,
+  buildNotesUserPrompt,
+  buildThemesUserPrompt,
+} from "../prompt.js";
 import {
   ANSWER_SYSTEM_PROMPT,
   EXTERNAL_PLAN_SYSTEM_PROMPT,
@@ -349,6 +359,37 @@ export class AnthropicProvider implements LLMProvider {
 
   /** docs/27 N1: enhance a person's meeting notes — placements plus cited lines. */
   async generateNotes(request: NotesRequest): Promise<NotesResult> {
+    return this.forcedTool(
+      NOTES_SYSTEM_PROMPT,
+      buildNotesUserPrompt(request),
+      anthropicNotesToolDefinition(),
+      parseNotesDraft,
+    );
+  }
+
+  /** docs/27 D2: sort sticky notes into titled themes, by index. */
+  async generateThemes(request: ThemesRequest): Promise<ThemesResult> {
+    return this.forcedTool(
+      THEMES_SYSTEM_PROMPT,
+      buildThemesUserPrompt(request),
+      anthropicThemesToolDefinition(),
+      parseThemesDraft,
+      2048,
+    );
+  }
+
+  /**
+   * One forced tool call with the provider's retry policy — the shape every
+   * structured side-call (notes, themes) shares: system + user in, the named
+   * tool's arguments parsed out, the completion's model and usage attached.
+   */
+  private async forcedTool<T extends object>(
+    system: string,
+    user: string,
+    tool: { name: string; description: string; input_schema: unknown },
+    parse: (raw: string | object) => T,
+    maxTokens = 4096,
+  ): Promise<T & ReturnType<typeof completionMeta>> {
     let lastDetail = "";
     let lastStatus = 0;
     for (let attempt = 0; attempt < this.maxRetries; attempt++) {
@@ -363,11 +404,11 @@ export class AnthropicProvider implements LLMProvider {
           },
           body: JSON.stringify({
             model: this.model,
-            max_tokens: 4096,
-            system: NOTES_SYSTEM_PROMPT,
-            messages: [{ role: "user", content: buildNotesUserPrompt(request) }],
-            tools: [anthropicNotesToolDefinition()],
-            tool_choice: { type: "tool", name: NOTES_TOOL_NAME },
+            max_tokens: maxTokens,
+            system,
+            messages: [{ role: "user", content: user }],
+            tools: [tool],
+            tool_choice: { type: "tool", name: tool.name },
           }),
           signal: AbortSignal.timeout(this.timeoutMs),
         });
@@ -394,8 +435,8 @@ export class AnthropicProvider implements LLMProvider {
       const toolUse = data.content?.find((c) => c.type === "tool_use");
       const draft =
         toolUse?.input !== undefined
-          ? parseNotesDraft(toolUse.input as object)
-          : parseNotesDraft(data.content?.find((c) => c.type === "text")?.text ?? "");
+          ? parse(toolUse.input as object)
+          : parse(data.content?.find((c) => c.type === "text")?.text ?? "");
       return { ...draft, ...meta };
     }
     throw new Error(`Anthropic request failed (${lastStatus}): ${lastDetail}`);

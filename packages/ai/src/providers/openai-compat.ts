@@ -5,13 +5,23 @@ import { ANSWER_TOOL_NAME, openAiAnswerToolDefinition } from "../answer.js";
 import type { ExternalPlanRequest, ExternalPlanResult } from "../externalPlan.js";
 import { EXTERNAL_PLAN_TOOL_NAME, openAiExternalPlanToolDefinition } from "../externalPlan.js";
 import {
-  NOTES_TOOL_NAME,
   openAiNotesToolDefinition,
   parseNotesDraft,
   type NotesRequest,
   type NotesResult,
 } from "../notes.js";
-import { NOTES_SYSTEM_PROMPT, buildNotesUserPrompt } from "../prompt.js";
+import {
+  openAiThemesToolDefinition,
+  parseThemesDraft,
+  type ThemesRequest,
+  type ThemesResult,
+} from "../themes.js";
+import {
+  NOTES_SYSTEM_PROMPT,
+  THEMES_SYSTEM_PROMPT,
+  buildNotesUserPrompt,
+  buildThemesUserPrompt,
+} from "../prompt.js";
 import { sseEvents } from "./sse.js";
 import {
   ANSWER_SYSTEM_PROMPT,
@@ -468,12 +478,43 @@ export class OpenAICompatibleProvider implements LLMProvider {
    * human-decided retry, not worth re-asking.
    */
   /** docs/27 N1: enhance a person's meeting notes — placements plus cited lines. */
+  /** docs/27 N1: enhance a person's meeting notes — placements plus cited lines. */
   async generateNotes(request: NotesRequest): Promise<NotesResult> {
-    const models = this.candidateModels();
+    return this.forcedTool(
+      NOTES_SYSTEM_PROMPT,
+      buildNotesUserPrompt(request),
+      openAiNotesToolDefinition(),
+      parseNotesDraft,
+    );
+  }
+
+  /** docs/27 D2: sort sticky notes into titled themes, by index. */
+  async generateThemes(request: ThemesRequest): Promise<ThemesResult> {
+    return this.forcedTool(
+      THEMES_SYSTEM_PROMPT,
+      buildThemesUserPrompt(request),
+      openAiThemesToolDefinition(),
+      parseThemesDraft,
+      2048,
+    );
+  }
+
+  /**
+   * One forced tool call across the candidate models, with the provider's
+   * retry and tool-choice fallback — the shape every structured side-call
+   * (notes, themes) shares.
+   */
+  private async forcedTool<T extends object>(
+    system: string,
+    user: string,
+    tool: { type: "function"; function: { name: string; description: string; parameters: unknown } },
+    parse: (raw: string | object) => T,
+    maxTokens = 4096,
+  ): Promise<T & ReturnType<typeof completionMeta>> {
     let lastError: Error | null = null;
-    for (const modelToUse of models) {
+    for (const modelToUse of this.candidateModels()) {
       try {
-        return await this.executeGenerateNotes(request, modelToUse);
+        return await this.executeForcedTool(modelToUse, system, user, tool, parse, maxTokens);
       } catch (err) {
         lastError = err as Error;
       }
@@ -481,16 +522,24 @@ export class OpenAICompatibleProvider implements LLMProvider {
     throw lastError ?? new Error("Provider request failed");
   }
 
-  private async executeGenerateNotes(request: NotesRequest, modelToUse: string): Promise<NotesResult> {
+  private async executeForcedTool<T extends object>(
+    modelToUse: string,
+    system: string,
+    user: string,
+    tool: { type: "function"; function: { name: string; description: string; parameters: unknown } },
+    parse: (raw: string | object) => T,
+    maxTokens: number,
+  ): Promise<T & ReturnType<typeof completionMeta>> {
+    const toolName = tool.function.name;
     let body = JSON.stringify({
       model: modelToUse,
       messages: [
-        { role: "system", content: NOTES_SYSTEM_PROMPT },
-        { role: "user", content: buildNotesUserPrompt(request) },
+        { role: "system", content: system },
+        { role: "user", content: user },
       ],
-      tools: [openAiNotesToolDefinition()],
-      tool_choice: this.forceAutoToolChoice ? "auto" : { type: "function", function: { name: NOTES_TOOL_NAME } },
-      max_tokens: 4096,
+      tools: [tool],
+      tool_choice: this.forceAutoToolChoice ? "auto" : { type: "function", function: { name: toolName } },
+      max_tokens: maxTokens,
       temperature: 0.2,
       stream: false,
     });
@@ -532,10 +581,10 @@ export class OpenAICompatibleProvider implements LLMProvider {
       const data = (await response.json()) as ChatResponse;
       const message = data.choices?.[0]?.message;
       const meta = completionMeta(data.model ?? modelToUse, data.usage?.prompt_tokens, data.usage?.completion_tokens);
-      const call = message?.tool_calls?.find((c) => c.function?.name === NOTES_TOOL_NAME) ?? message?.tool_calls?.[0];
+      const call = message?.tool_calls?.find((c) => c.function?.name === toolName) ?? message?.tool_calls?.[0];
       const draft = call?.function?.arguments
-        ? parseNotesDraft(call.function.arguments)
-        : parseNotesDraft(message?.content ?? "");
+        ? parse(call.function.arguments)
+        : parse(message?.content ?? "");
       return { ...draft, ...meta };
     }
     throw new Error(`Provider request failed (${lastStatus}): ${lastDetail}`);

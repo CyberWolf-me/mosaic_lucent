@@ -1,6 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { applyOperations, createWorkspace, validateOperations } from "@lucent/core";
-import { boardToMermaid, mermaidToOps, parseMermaid } from "../src/board/mermaid.js";
+import {
+  applyOperations,
+  boardToMermaid,
+  createWorkspace,
+  mermaidToOps,
+  parseMermaid,
+  validateOperations,
+} from "@lucent/core";
 
 /**
  * Mermaid is the practical integration surface: GitHub, GitLab, and Notion render

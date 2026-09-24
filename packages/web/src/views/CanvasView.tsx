@@ -50,7 +50,9 @@ import { loadIcon } from "../icons/registry.js";
 import { MarqueeLayer } from "./MarqueeLayer.js";
 import { cullRect, visibleShapes } from "../board/culling.js";
 import { ShapeDrawLayer } from "./ShapeDrawLayer.js";
-import { ShapeInspector, Z_MOVE_LABEL } from "./ShapeInspector.js";
+import { ShapeInspector, Z_MOVE_LABEL, type StructureAction } from "./ShapeInspector.js";
+import { planThemeLayout, sortableStickies } from "../board/themeLayout.js";
+import { sortIntoThemes, sortedBy } from "../themes.js";
 import { LinkInspector } from "./LinkInspector.js";
 import { Minimap } from "./Minimap.js";
 import { TemplatePicker } from "./TemplatePicker.js";
@@ -77,7 +79,8 @@ import {
 import { cloneShapeOp, nextZ, normalizeZ, shapeId, zOrderOps, type ZMove } from "../shapes.js";
 import { resolveEmbed } from "../embed.js";
 import { boardToMarkdown, boardToCsv, csvToStickyOps } from "../board/serialize.js";
-import { boardToMermaid, mermaidToOps } from "../board/mermaid.js";
+import { boardToMermaid, detectMermaid } from "@lucent/core";
+import { planMermaidImport } from "../board/mermaidImport.js";
 import {
   classifyImport,
   collectAttachments,
@@ -229,6 +232,20 @@ const ON_CANVAS_WF_SIZE: Record<string, { w: number; label: string }> = {
 };
 
 /**
+ * docs/27 D2: the diagram verbs for a selection of stickies. The notes'
+ * wording is the person's, so it is kept; the result lands beside the
+ * stickies as its own region, and the stickies stay put.
+ */
+const STRUCTURE_PROMPTS: Record<Exclude<StructureAction, "themes">, string> = {
+  flowchart:
+    "Turn the selected sticky notes into a flowchart: each note becomes one step or decision, labelled with the note's own wording, connected in the order the process runs. Build it as its own diagram region beside the notes, and leave the sticky notes where they are.",
+  mindmap:
+    "Turn the selected sticky notes into a mind map: choose the central topic they share, and make each note a branch or sub-branch labelled with its own wording. Build it as its own diagram region beside the notes, and leave the sticky notes where they are.",
+  matrix:
+    "Place the selected sticky notes on a 2×2 matrix — impact × effort, unless the notes clearly suggest better axes: one group per quadrant, each note a node in the quadrant it belongs to, labelled with its own wording. Build it as its own matrix region beside the notes, and leave the sticky notes where they are.",
+};
+
+/**
  * The canvas view. Its sub-state (empty / generating / main / proposing /
  * voice) is derived from real data in the workspace context, not stored
  * separately (docs/11). Coordinates come from computeLayout; the AI only
@@ -249,6 +266,7 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
     listening,
     setListening,
     send,
+    proposeOps,
     ask,
     pillMode,
     setPillMode,
@@ -1723,7 +1741,23 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
         return;
       }
 
-      const op = textPasteOp(dt.getData("text/plain"), at, topZ());
+      // Mermaid text is a diagram, not a sticky (docs/27 D2): it lands as
+      // semantic nodes — the whole board when empty, a region otherwise.
+      const plain = dt.getData("text/plain");
+      if (detectMermaid(plain)) {
+        const plan = planMermaidImport(workspace, plain);
+        if (plan.ok) {
+          e.preventDefault();
+          if (applyManual(plan.ops, "Import Mermaid")) {
+            setSelectedShapes(new Set());
+            setSelectedNodes(new Set(plan.nodeIds));
+            notify(plan.message);
+          }
+          return;
+        }
+      }
+
+      const op = textPasteOp(plain, at, topZ());
       if (op) {
         e.preventDefault();
         if (applyManual([op], op.kind === "embed" ? "Paste link" : "Paste text")) {
@@ -2197,23 +2231,81 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
     }
   }, [workspace, notify]);
 
-  /** Import a Mermaid diagram pasted from a repo or doc. */
-  const importMermaid = useCallback(() => {
-    const text = window.prompt("Paste a Mermaid flowchart (flowchart TD / graph LR):");
-    if (!text) return;
-    const ops = mermaidToOps(text);
-    if (ops.length === 0) {
-      notify("Couldn't find a Mermaid flowchart in that text.");
+  /**
+   * Stickies → structure (docs/27 D2), always as a proposal. Sorting into
+   * themes asks only for MEANING (themes of note indices, /api/themes) and
+   * lays the frames out here; the diagram verbs go through the one generate
+   * pipeline with the stickies as the selection, forced to review.
+   */
+  const [structuring, setStructuring] = useState(false);
+  const structureStickies = useCallback(
+    async (action: StructureAction) => {
+      const stickies = sortableStickies(workspace, selectedShapes);
+      if (stickies.length < 3) {
+        notify("Select at least three sticky notes with text.");
+        return;
+      }
+      setStructuring(true);
+      try {
+        if (action === "themes") {
+          const answer = await sortIntoThemes(
+            stickies.map((s) => s.text ?? ""),
+            { boardId },
+          );
+          if ("error" in answer) {
+            notify(answer.error);
+            return;
+          }
+          const ops = planThemeLayout(stickies, answer, shapeId);
+          const n = answer.themes.length;
+          const proposed = await proposeOps(
+            ops,
+            `Sort ${stickies.length} sticky notes into themes`,
+            `${n} theme${n === 1 ? "" : "s"}: ${answer.themes.map((t) => t.title).join(", ")} — ${sortedBy(answer)}`,
+          );
+          if (!proposed) notify("Those notes couldn't be sorted on this board.");
+          return;
+        }
+        const ids = stickies.map((s) => s.id);
+        const outcome = await send(STRUCTURE_PROMPTS[action], ids, { propose: true });
+        if (outcome.outcome === "busy") notify("Lucent is still working on the last request.");
+      } finally {
+        setStructuring(false);
+      }
+    },
+    [workspace, selectedShapes, boardId, proposeOps, send, notify],
+  );
+
+  /**
+   * Import a Mermaid diagram copied from a repo or doc (docs/27 D2). Reads the
+   * clipboard: the old single-line prompt dropped the newlines Mermaid needs.
+   * Pasting Mermaid straight onto the canvas does the same (onPaste).
+   */
+  const importMermaid = useCallback(async () => {
+    let text: string;
+    try {
+      text = await navigator.clipboard.readText();
+    } catch {
+      notify("Clipboard access was blocked — paste the Mermaid onto the canvas with Ctrl/⌘ V instead.");
       return;
     }
-    if (applyManual(ops, "Import Mermaid")) {
-      const nodes = ops.filter((o) => o.op === "CREATE_NODE").length;
-      notify(`Imported ${nodes} node${nodes === 1 ? "" : "s"} from Mermaid.`);
-    } else {
-      // Most often an id already on the board; say so rather than failing quietly.
-      notify("That Mermaid diagram conflicts with ids already on this board.");
+    const plan = planMermaidImport(workspace, text);
+    if (!plan.ok) {
+      notify(
+        detectMermaid(text)
+          ? plan.error
+          : "Copy a Mermaid flowchart, stateDiagram or mindmap first — or paste it straight onto the canvas.",
+      );
+      return;
     }
-  }, [applyManual, notify]);
+    if (applyManual(plan.ops, "Import Mermaid")) {
+      setSelectedShapes(new Set());
+      setSelectedNodes(new Set(plan.nodeIds));
+      notify(plan.message);
+    } else {
+      notify("That Mermaid diagram couldn't be added to this board.");
+    }
+  }, [workspace, applyManual, notify]);
 
   // Export to PDF by opening the board SVG in a print window (user picks
   // "Save as PDF"). No dependency; works in every browser's print dialog.
@@ -3001,6 +3093,8 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
               selectedIds={selectedShapes}
               onApply={applyManual}
               onSelect={setSelectedShapes}
+              onStructure={(a) => void structureStickies(a)}
+              structuring={structuring}
             />
           )}
 
@@ -3081,7 +3175,7 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
               <button onClick={exportMermaid}>Mermaid</button>
               <div className="export-sep" />
               <button onClick={() => void copyMermaid()}>Copy Mermaid</button>
-              <button onClick={importMermaid}>Paste Mermaid…</button>
+              <button onClick={() => void importMermaid()}>Paste Mermaid…</button>
             </div>
           </div>
           {mode === "edit" && overviewOpen && canvasPhase !== "proposing" && (

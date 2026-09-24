@@ -2955,6 +2955,19 @@ html[data-theme="light"] .segmented button.active {
   height: 1px;
   background: var(--stroke-1);
 }
+/* docs/27 D2: stickies → structure. The primary verb reads as the AI action. */
+.insp-structure {
+  height: 30px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-variation-settings: "wght" 560;
+  color: var(--paper-0);
+  background: var(--ink-0);
+}
+.insp-structure:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
 /* Numeric geometry (docs/26 §6.4): two columns of compact label+value cells. */
 .insp-fields {
   display: grid;

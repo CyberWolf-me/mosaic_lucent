@@ -185,6 +185,12 @@ export interface SendAttachments {
    * meeting loop already stamps its evidence.
    */
   plan?: { statementIds: string[] };
+  /**
+   * docs/27 D2: this request's result is ALWAYS a proposal, whatever its
+   * size and however empty the board — "make these stickies a flowchart"
+   * restructures the person's own content, so they review it first.
+   */
+  propose?: boolean;
 }
 
 /** UX-2: user-facing generation phases (stream chars are display-only detail). */
@@ -307,6 +313,12 @@ export interface WorkspaceState {
     id: string;
     turnRange?: [number, number];
   }) => void;
+  /**
+   * docs/27 D2: open a client-computed batch (a sorted sticky wall) as a
+   * proposal. False when there is nothing valid to propose or the board is
+   * read-only.
+   */
+  proposeOps: (operations: Operation[], request: string, explanation: string) => Promise<boolean>;
   applyProposal: () => void;
   cancelProposal: () => void;
   undo: () => void;
@@ -1255,6 +1267,80 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     };
   }, [adoptBoard]);
 
+  /**
+   * Open a batch for review. Shared board (Stage B3): the record goes to the
+   * SERVER, which is what makes a pending proposal visible to every member —
+   * the localStorage path could never do that. The server supersedes any
+   * pending predecessor; peers' panels open via proposal-created. Local board
+   * (or the server create failed — the panel must still open): the
+   * localStorage record is that path's durability.
+   */
+  const openProposal = useCallback(
+    async ({
+      operations,
+      request,
+      explanation,
+      provenance,
+    }: {
+      operations: Operation[];
+      request: string;
+      explanation: string;
+      provenance?: SendAttachments["provenance"];
+    }): Promise<void> => {
+      const serverRecord = boardId
+        ? await createServerProposal(boardId, {
+            operations,
+            request,
+            explanation,
+            ...(provenance?.meetingId ? { meetingId: provenance.meetingId } : {}),
+            ...(provenance?.turnRange || provenance?.turnKinds?.length || provenance?.turns?.length
+              ? {
+                  provenance: {
+                    // Stage C2: the full evidence record, so the server's
+                    // approve-time enrichment (ADR 0022) can stamp the ops
+                    // for every peer, not just the proposer's browser.
+                    ...(provenance.turnRange ? { turnRange: provenance.turnRange } : {}),
+                    ...(provenance.turnKinds?.length ? { turnKinds: provenance.turnKinds } : {}),
+                    ...(provenance.turns?.length
+                      ? { quote: provenance.turns.join(" ").slice(0, 240) }
+                      : {}),
+                  },
+                }
+              : {}),
+          })
+        : null;
+      if (serverRecord) {
+        serverProposalRef.current = {
+          boardId: boardId ?? serverRecord.boardId,
+          id: serverRecord.id,
+        };
+        decidedRef.current = null;
+        setProposal(serverProposalToPanel(serverRecord));
+        return;
+      }
+      const opened = openProposalIn(
+        { proposal: proposalRecordRef.current, proposalHistory: proposalHistoryRef.current },
+        {
+          id: newProposalId(),
+          boardId,
+          meetingId: provenance?.meetingId ?? null,
+          ...(provenance?.turns ? { turns: provenance.turns } : {}),
+          ...(provenance?.turnRange ? { turnRange: provenance.turnRange } : {}),
+          ...(provenance?.turnKinds?.length ? { turnKinds: provenance.turnKinds } : {}),
+          operations,
+          createdAt: Date.now(),
+          request,
+          explanation,
+        },
+      );
+      proposalRecordRef.current = opened.proposal;
+      proposalHistoryRef.current = opened.proposalHistory;
+      decidedRef.current = null; // the new record is undecided
+      setProposal(opened.proposal);
+    },
+    [boardId],
+  );
+
   const send = useCallback(
     async (
       message: string,
@@ -1452,7 +1538,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         // proposes), large=>5, never=>Infinity (destructive/external still
         // propose on the server path; kept simple here).
         const isLarge =
-          result.operations.length > proposalThreshold() && Object.keys(workspace.nodes).length > 0;
+          attachments?.propose === true ||
+          (result.operations.length > proposalThreshold() &&
+            Object.keys(workspace.nodes).length > 0);
         setGenPhase("applying");
 
         if (isLarge) {
@@ -1466,74 +1554,15 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           ];
           setChat(conversation);
           setBusy(true);
-          // Shared board (Stage B3): the record goes to the SERVER, which is
-          // what makes a pending proposal visible to every member — the
-          // localStorage path could never do that. The server supersedes any
-          // pending predecessor; peers' panels open via proposal-created.
-          const serverRecord = boardId
-            ? await createServerProposal(boardId, {
-                // Enriched+FOLDED ops (Stage C2 + C5): the client already
-                // carries the evidence; the server's approve-time enrichment
-                // is idempotent over these and backfills any older client's raw
-                // ops. Either way the committed batch carries provenance, and
-                // the approve-time fold (Batch 3) is idempotent over ours.
-                operations: foldedOps,
-                request: text,
-                explanation,
-                ...(provenance?.meetingId ? { meetingId: provenance.meetingId } : {}),
-                ...(provenance?.turnRange ||
-                provenance?.turnKinds?.length ||
-                provenance?.turns?.length
-                  ? {
-                      provenance: {
-                        // Stage C2: the full evidence record, so the server's
-                        // approve-time enrichment (ADR 0022) can stamp the ops
-                        // for every peer, not just the proposer's browser.
-                        ...(provenance.turnRange ? { turnRange: provenance.turnRange } : {}),
-                        ...(provenance.turnKinds?.length
-                          ? { turnKinds: provenance.turnKinds }
-                          : {}),
-                        ...(provenance.turns?.length
-                          ? { quote: provenance.turns.join(" ").slice(0, 240) }
-                          : {}),
-                      },
-                    }
-                  : {}),
-              })
-            : null;
-          if (serverRecord) {
-            serverProposalRef.current = {
-              boardId: boardId ?? serverRecord.boardId,
-              id: serverRecord.id,
-            };
-            decidedRef.current = null;
-            setProposal(serverProposalToPanel(serverRecord));
-          } else {
-            // Local board (or the server create failed — the panel must still
-            // open; the localStorage record is that path's durability).
-            const opened = openProposalIn(
-              {
-                proposal: proposalRecordRef.current,
-                proposalHistory: proposalHistoryRef.current,
-              },
-              {
-                id: newProposalId(),
-                boardId,
-                meetingId: provenance?.meetingId ?? null,
-                ...(provenance?.turns ? { turns: provenance.turns } : {}),
-                ...(provenance?.turnRange ? { turnRange: provenance.turnRange } : {}),
-                ...(provenance?.turnKinds?.length ? { turnKinds: provenance.turnKinds } : {}),
-                operations: foldedOps,
-                createdAt: Date.now(),
-                request: text,
-                explanation,
-              },
-            );
-            proposalRecordRef.current = opened.proposal;
-            proposalHistoryRef.current = opened.proposalHistory;
-            decidedRef.current = null; // the new record is undecided
-            setProposal(opened.proposal);
-          }
+          // Enriched+FOLDED ops (Stage C2 + C5): the client already carries
+          // the evidence; the server's approve-time enrichment is idempotent
+          // over these and backfills any older client's raw ops.
+          await openProposal({
+            operations: foldedOps,
+            request: text,
+            explanation,
+            ...(provenance ? { provenance } : {}),
+          });
           // The ops themselves apply only on approval, but the request and
           // the review-gate reply are durable from this moment on.
           persist(workspace, conversation, projectName);
@@ -1587,7 +1616,30 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         genAbortRef.current = null;
       }
     },
-    [busy, chat, workspace, commitAndShare, projectName, readOnly, persist, boardId],
+    [busy, chat, workspace, commitAndShare, projectName, readOnly, persist, openProposal],
+  );
+
+  /**
+   * A batch computed on this side (docs/27 D2: a sticky wall sorted into
+   * themes) that must be reviewed before it lands: validated here, then
+   * opened as a proposal exactly like a model's large batch, with the request
+   * and the review-gate reply in the chat.
+   */
+  const proposeOps = useCallback(
+    async (operations: Operation[], request: string, explanation: string): Promise<boolean> => {
+      if (readOnly || operations.length === 0) return false;
+      if (validateOperations(workspace, operations).length > 0) return false;
+      const conversation: ChatEntry[] = [
+        ...chat,
+        { role: "user", text: request },
+        { role: "ai", text: `${explanation} — review ${operations.length} proposed changes.` },
+      ];
+      setChat(conversation);
+      await openProposal({ operations, request, explanation });
+      persist(workspace, conversation, projectName);
+      return true;
+    },
+    [readOnly, workspace, chat, openProposal, persist, projectName],
   );
 
   /**
@@ -2225,6 +2277,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     startSharing,
     openBoard,
     send,
+    proposeOps,
     ask,
     pillMode,
     setPillMode,

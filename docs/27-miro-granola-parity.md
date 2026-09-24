@@ -116,8 +116,8 @@ boundaries. Notes are a new object, not a new rule.
 ```text
 D1  timeline, matrix, statemachine kinds + prompt + templates       (done)
 N1  notepad (stamped lines) + enhance with citations + templates     (done)
-D2  Mermaid import; stickies → cluster / structure                  (next)
-N2  live outline, private ask, speaker names everywhere
+D2  Mermaid import; stickies → cluster / structure                  (done)
+N2  live outline, private ask, speaker names everywhere              (next)
 D3  UML class (node details), story map, C4 levels
 N3  follow-up drafts through the gate; cross-meeting chat
 ```
@@ -163,3 +163,55 @@ are all N2. (6) — the note's decisions and actions being the _same_
 statements as the canvas — isn't built. Today the note cites transcript turns,
 and the canvas statements cite the same turns, so the two meet at the
 transcript rather than sharing one record. (10) follow-ups are N3.
+
+**D2 — done.** Against §1's AI capabilities 1 and 2:
+
+- **Mermaid in and out** (`core/src/mermaid.ts`, moved from web so the MCP
+  server shares it). Three flavours are imported, each as the Lucent kind it
+  means:
+  - **Flowchart** (`flowchart` / `graph`) → flowchart, or process when it runs
+    left-right. It reads chains (`A --> B --> C`), `&` fans, dotted, thick and
+    circle/cross links, text on links (`-- yes -->`), one-line diagrams
+    (`graph TD; A-->B`), v11 `@{ shape: … }`, subgraphs with bracket, quoted or
+    bare titles, and a ```` ```mermaid ```` fence or YAML front matter.
+  - **`stateDiagram-v2`** → statemachine. `[*]` becomes start and end
+    pseudo-states, `<<choice>>` becomes a decision, events become edge labels,
+    and composite states become groups. A transition into a composite enters
+    at its start.
+  - **`mindmap`** → mindmap: the indentation tree becomes branch edges.
+
+  Styling, clicks, notes and descriptions are skipped *and counted*, so the
+  toast says what didn't come in. Ids are prefixed per import, so pasting the
+  same snippet twice lands twice. Paste Mermaid onto the canvas, or use
+  **Paste Mermaid…**, which now reads the clipboard. The old `window.prompt`
+  was single-line, so it dropped the newlines Mermaid needs.
+
+  An empty board *becomes* the diagram. A board with content *gains* it as a
+  region of its own kind, so a pasted state diagram never turns an
+  architecture into a state machine.
+
+  Export is per kind: a state machine exports as `stateDiagram-v2`, a
+  tree-shaped mind map as `mindmap`, and everything else as a flowchart. So
+  the new families round-trip as themselves.
+- **MCP speaks Mermaid**: `import_mermaid` and `export_mermaid`, in both the
+  local and the remote session, apply through the same
+  validate-and-stamp pipeline as `apply_canvas_operations`.
+- **Stickies → structure.** Select three or more stickies, and the shape
+  inspector offers **Sort into themes**, **Flowchart**, **Mind map** and
+  **2×2**. *Every result is a proposal* (`propose` on the send attachments;
+  `proposeOps` for client-built batches).
+  - **Sort into themes** asks the model only for meaning: `POST /api/themes`
+    returns themes of note *indices* (the `sticky-themes` prompt, with notes
+    enveloped as untrusted).
+  - The client lays out the titled frames and the grid inside each one
+    deterministically (`board/themeLayout.ts`).
+  - Every note lands exactly once: dropped indices go to "Other".
+  - A restricted board, no model, a failed model or an unreachable server get
+    the offline keyword sorter, and the proposal says which sorter answered.
+  - The diagram verbs go through the one generate pipeline, with the stickies
+    as the selection. The notes keep their wording, and the result is its own
+    region.
+
+**Not in D2:** state-diagram notes and descriptions (the text would need a
+node "details" field, D3), and nested composite states (flattened to their
+innermost group).

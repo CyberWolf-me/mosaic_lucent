@@ -18,6 +18,42 @@ describe("MCP tool surface", () => {
   });
 });
 
+describe("Mermaid over MCP (docs/27 D2)", () => {
+  it("advertises import_mermaid and export_mermaid", () => {
+    const names = listTools().map((t) => t.name);
+    expect(names).toEqual(expect.arrayContaining(["import_mermaid", "export_mermaid"]));
+  });
+
+  it("an empty board becomes the diagram; a second import lands as a region", () => {
+    const s = new BoardSession();
+    const first = s.callTool("import_mermaid", {
+      mermaid: "```mermaid\nflowchart LR\n  A[Cart] --> B{Paid?} -->|yes| C[Ship]\n```",
+    });
+    expect(first.isError).toBeUndefined();
+    expect(s.workspace.diagramKind).toBe("process");
+    expect(Object.keys(s.workspace.nodes)).toHaveLength(3);
+
+    const second = s.callTool("import_mermaid", {
+      mermaid: "mindmap\n  root((Launch))\n    Blog\n    Press",
+    });
+    expect(second.isError).toBeUndefined();
+    expect(s.workspace.diagramKind).toBe("process");
+    const region = Object.values(s.workspace.groups).find((g) => g.kind === "mindmap");
+    expect(region?.label).toBe("Imported mind map");
+    expect(Object.values(s.workspace.nodes).filter((n) => n.groupId === region?.id)).toHaveLength(
+      3,
+    );
+
+    expect(s.callTool("export_mermaid", {}).content[0]!.text).toMatch(/^flowchart LR/);
+  });
+
+  it("refuses text that isn't Mermaid, saying what would work", () => {
+    const res = new BoardSession().callTool("import_mermaid", { mermaid: "A then B" });
+    expect(res.isError).toBe(true);
+    expect(res.content[0]!.text).toContain("stateDiagram-v2");
+  });
+});
+
 describe("BoardSession", () => {
   it("applies valid operations and reflects them in the summary", () => {
     const s = new BoardSession();

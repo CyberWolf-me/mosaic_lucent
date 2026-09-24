@@ -120,6 +120,7 @@ import { registerInviteRoutes } from "./routes/invites.js";
 import { registerBoardOpsRoutes } from "./routes/boardOps.js";
 import { registerMeetingRoutes } from "./routes/meetings.js";
 import { registerMeetingNotesRoutes } from "./routes/meetingNotes.js";
+import { registerThemesRoutes } from "./routes/themes.js";
 import { InMemoryMeetingNotesStore } from "./meetingNotes.js";
 import { registerOrgSettingsRoutes } from "./routes/settings.js";
 import { registerProposalRoutes } from "./routes/proposals.js";
@@ -1988,6 +1989,7 @@ export function createApp(deps: AppDeps): App {
   registerBoardOpsRoutes(router, services);
   registerMeetingRoutes(router, services);
   registerMeetingNotesRoutes(router, services);
+  registerThemesRoutes(router, services);
   registerProposalRoutes(router, services);
   registerSsoRoutes(router, services);
   registerHistoryRoutes(router, services);

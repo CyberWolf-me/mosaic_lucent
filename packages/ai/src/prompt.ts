@@ -1,4 +1,5 @@
 import { NOTE_TEMPLATES, type NotesRequest } from "./notes.js";
+import { THEME_LIMITS, themeCap, type ThemesRequest } from "./themes.js";
 import { getPrompt } from "./registry.js";
 import { REQUEST_LIMITS } from "./provider.js";
 import type { GenerateRequest } from "./provider.js";
@@ -924,5 +925,41 @@ export function buildNotesUserPrompt(request: NotesRequest): string {
   sections.push(
     `<meeting-notes lines="${request.notes.length}">\n${notes.join("\n") || "(the person took no notes — write the note from the transcript)"}\n</meeting-notes>`,
   );
+  return sections.join("\n\n");
+}
+
+/**
+ * The sticky sorter (docs/27 D2), bound the same way. Emits no operations:
+ * it returns themes of note indices and the app lays them out.
+ */
+const STICKY_THEMES = getPrompt("sticky-themes");
+export const THEMES_SYSTEM_PROMPT: string = STICKY_THEMES.systemPrompt;
+export const THEMES_SYSTEM_PROMPT_ID: string = STICKY_THEMES.id;
+export const THEMES_SYSTEM_PROMPT_VERSION: number = STICKY_THEMES.version;
+
+/**
+ * The sorter's user turn. Sticky text is whatever anyone on the board wrote,
+ * so every note is enveloped and instruction-stripped like any other
+ * untrusted text; the person's steer is their own words, escaped but kept.
+ */
+export function buildThemesUserPrompt(request: ThemesRequest): string {
+  const sections: string[] = [`At most ${themeCap(request)} themes.`];
+  if (request.hint?.trim()) {
+    sections.push(`The person's steer: ${escapeHarnessTags(request.hint.trim().slice(0, 200))}`);
+  }
+  const notes = request.items.slice(0, THEME_LIMITS.items).map((it, i) => {
+    const clamped = clamp(it.text, THEME_LIMITS.itemChars);
+    const body = stripInstructionLike(clamped.text);
+    return envelope(
+      "untrusted-sticky",
+      {
+        index: i,
+        ...truncationAttribute(clamped.dropped),
+        ...(body.count ? { redacted: body.count } : {}),
+      },
+      body.text,
+    );
+  });
+  sections.push(`<sticky-notes count="${request.items.length}">\n${notes.join("\n")}\n</sticky-notes>`);
   return sections.join("\n\n");
 }

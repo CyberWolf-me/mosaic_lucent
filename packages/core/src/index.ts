@@ -21,3 +21,4 @@ export * from "./authorship.js";
 export * from "./partial.js";
 export * from "./topicFold.js";
 export * from "./routing.js";
+export * from "./mermaid.js";

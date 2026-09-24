@@ -253,6 +253,30 @@ describe("RemoteBoardSession against a real server (E3/R1)", () => {
     expect(res.content[0]!.text).toMatch(/LUCENT_MCP_TOKEN|refused/);
   });
 
+  it("import_mermaid lands on the server's board, and export_mermaid reads it back", async () => {
+    h = await harness();
+    const { token, boardId } = await ownerWithBoard(h);
+    const session = new RemoteBoardSession({ baseUrl: h.base, token, boardId });
+
+    const imported = await session.callTool("import_mermaid", {
+      mermaid: "stateDiagram-v2\n  [*] --> Draft\n  Draft --> Live : publish\n  Live --> [*]",
+    });
+    expect(imported.isError).toBeUndefined();
+    const summary = JSON.parse((await session.callTool("get_board", {})).content[0]!.text) as {
+      diagramKind: string;
+      nodeCount: number;
+    };
+    expect(summary).toMatchObject({ diagramKind: "statemachine", nodeCount: 4 });
+
+    const exported = await session.callTool("export_mermaid", {});
+    // Imported ids carry a per-import prefix; the labels are the Mermaid's own.
+    expect(exported.content[0]!.text).toMatch(/_Draft --> \w+_Live : publish/);
+    expect(exported.content[0]!.text).toContain('state "Draft" as');
+
+    const refused = await session.callTool("import_mermaid", { mermaid: "hello" });
+    expect(refused.isError).toBe(true);
+  });
+
   it("remoteConfigFromEnv requires all three variables", () => {
     expect(remoteConfigFromEnv({})).toBeNull();
     expect(remoteConfigFromEnv({ LUCENT_MCP_URL: "http://x" })).toBeNull();

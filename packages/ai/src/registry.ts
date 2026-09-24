@@ -4,6 +4,7 @@ import visualAgentFile from "./prompts/visual-agent.json" with { type: "json" };
 import boardHistorianFile from "./prompts/board-historian.json" with { type: "json" };
 import externalSelectorFile from "./prompts/external-selector.json" with { type: "json" };
 import meetingNotesFile from "./prompts/meeting-notes.json" with { type: "json" };
+import stickyThemesFile from "./prompts/sticky-themes.json" with { type: "json" };
 
 /**
  * The prompt registry (M5). Prompts are data, not string literals in code.
@@ -187,6 +188,7 @@ const REGISTRY = Object.freeze({
   "board-historian": loadPromptFile(boardHistorianFile),
   "external-selector": loadPromptFile(externalSelectorFile),
   "meeting-notes": loadPromptFile(meetingNotesFile),
+  "sticky-themes": loadPromptFile(stickyThemesFile),
 });
 
 /** The ids callers may ask for, checked by the compiler. */

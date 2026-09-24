@@ -106,19 +106,31 @@ function NumField({
   );
 }
 
+export type StructureAction = "themes" | "flowchart" | "mindmap" | "matrix";
+
 export function ShapeInspector({
   shapes,
   selectedIds,
   onApply,
   onSelect,
+  onStructure,
+  structuring = false,
 }: {
   shapes: Record<string, Shape>;
   selectedIds: Set<string>;
   onApply: (ops: Operation[], label: string) => void;
   onSelect: (ids: Set<string>) => void;
+  /** docs/27 D2: turn the selected stickies into structure (always a proposal). */
+  onStructure?: (action: StructureAction) => void;
+  /** A structure request is in flight. */
+  structuring?: boolean;
 }) {
   const ids = [...selectedIds].filter((id) => shapes[id]);
   if (ids.length === 0) return null;
+  const stickyCount = ids.filter((id) => {
+    const s = shapes[id]!;
+    return s.kind === "sticky" && !s.locked && !s.hidden && s.text?.trim();
+  }).length;
 
   const setFill = (fill: string) =>
     onApply(
@@ -358,6 +370,42 @@ export function ShapeInspector({
           </div>
         </div>
         </>
+      )}
+      {onStructure && stickyCount >= 3 && (
+        <div className="insp-group">
+          <span className="insp-cap">Structure {stickyCount} notes</span>
+          <button
+            className="insp-structure primary"
+            onClick={() => onStructure("themes")}
+            disabled={structuring}
+            title="Group these notes into titled frames by theme — you review it before it lands"
+          >
+            {structuring ? "Working…" : "Sort into themes"}
+          </button>
+          <div className="segmented" style={{ marginTop: 6 }}>
+            <button
+              onClick={() => onStructure("flowchart")}
+              disabled={structuring}
+              title="Make these notes a flowchart — proposed for review"
+            >
+              Flowchart
+            </button>
+            <button
+              onClick={() => onStructure("mindmap")}
+              disabled={structuring}
+              title="Make these notes a mind map — proposed for review"
+            >
+              Mind map
+            </button>
+            <button
+              onClick={() => onStructure("matrix")}
+              disabled={structuring}
+              title="Place these notes on a 2×2 matrix — proposed for review"
+            >
+              2×2
+            </button>
+          </div>
+        </div>
       )}
       {ids.length > 1 && (
         <div className="insp-group">

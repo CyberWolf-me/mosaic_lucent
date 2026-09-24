@@ -27,7 +27,7 @@ export type PlanCode = (typeof PLAN_CODES)[number];
 
 /**
  * Export formats the app can actually produce today: the four buttons in
- * `CanvasView.tsx` plus the Mermaid round-trip in `board/mermaid.ts`. Gating a
+ * `CanvasView.tsx` plus the Mermaid round-trip in core `mermaid.ts`. Gating a
  * format the renderer cannot emit would be a promise, not a limit.
  */
 export const EXPORT_FORMATS = ["png", "svg", "pdf", "json", "mermaid"] as const;

@@ -26,7 +26,7 @@ a `postgres:16` service so they run there.
 - `@lucent/ai` — `LLMProvider` interface + prompt harness + `MockProvider` (offline), `AnthropicProvider`, and an OpenAI-compatible provider; plus an `ImageProvider`. The moat lives here as a model-independent harness, not a specific vendor.
 - `@lucent/server` — framework-free HTTP + WebSocket server: `/api/generate`, `/api/image`, auth, boards, realtime rooms, usage limits, `/metrics`. Owns the API key, schema-parses input, validates AI operations before returning them. Never move key handling to the client.
 - `@lucent/web` — React renders `core` through a **bespoke DOM + SVG canvas** (not tldraw or React Flow — neither is installed); `stt/` (three speech providers), `boardSync.ts` (realtime), `persistence.ts` (localStorage projects).
-- `@lucent/mcp` — MCP stdio server exposing `apply_canvas_operations`, `get_board`, `list_external_links`, `reset_board`, derived from the same core Zod union so an agent can never send an operation the validator would reject.
+- `@lucent/mcp` — MCP stdio server exposing `apply_canvas_operations`, `get_board`, `list_external_links`, `import_mermaid`, `export_mermaid`, `reset_board`, derived from the same core Zod union so an agent can never send an operation the validator would reject. Mermaid (flowchart, state, mind map) converts in `core/src/mermaid.ts` and lands through the same validated operations.
 
 ## Read before changing design or architecture
 

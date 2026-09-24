@@ -10,6 +10,9 @@ import {
   boardColumns,
   decisionDriveGraph,
   derivedExecution,
+  boardToMermaid,
+  detectMermaid,
+  mermaidToOps,
   type Operation,
   type Workspace,
 } from "@lucent/core";
@@ -59,6 +62,36 @@ export function listTools(): McpTool[] {
       inputSchema: { type: "object", properties: {}, additionalProperties: false },
     },
     {
+      name: "import_mermaid",
+      description:
+        "Import a Mermaid diagram (flowchart / graph, stateDiagram-v2, or mindmap) " +
+        "as real, editable Lucent nodes and edges — never a picture. An empty " +
+        "board becomes that diagram; a board with content gains it as its own " +
+        "region, keeping the board's kind. Styling, click and note lines are " +
+        "skipped. Prefer this over hand-writing operations when you already " +
+        "have Mermaid.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          mermaid: {
+            type: "string",
+            description: "The Mermaid source, with or without a ```mermaid fence.",
+            maxLength: MERMAID_MAX_CHARS,
+          },
+        },
+        required: ["mermaid"],
+        additionalProperties: false,
+      },
+    },
+    {
+      name: "export_mermaid",
+      description:
+        "Return the board as Mermaid text — a state machine as stateDiagram-v2, " +
+        "a tree-shaped mind map as mindmap, anything else as a flowchart with " +
+        "groups as subgraphs — for a README, ticket or doc.",
+      inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    },
+    {
       name: "reset_board",
       description: "Clear the board to an empty workspace. Destructive and not undoable here.",
       inputSchema: {
@@ -81,6 +114,41 @@ export function listTools(): McpTool[] {
       },
     },
   ];
+}
+
+export const MERMAID_MAX_CHARS = 100_000;
+
+/**
+ * docs/27 D2: the operations an `import_mermaid` call means on this board —
+ * the whole board when it is empty, a region of the diagram's own kind when
+ * it isn't — or the sentence saying why there are none. Shared by the local
+ * and remote sessions so both answer identically.
+ */
+export function mermaidImportOps(
+  ws: Workspace,
+  source: unknown,
+): { ops: Operation[] } | { error: string } {
+  if (typeof source !== "string" || !source.trim()) {
+    return { error: "`mermaid` must be the Mermaid source text." };
+  }
+  if (source.length > MERMAID_MAX_CHARS) {
+    return { error: `\`mermaid\` is over ${MERMAID_MAX_CHARS} characters.` };
+  }
+  if (!detectMermaid(source)) {
+    return {
+      error:
+        "Not a Mermaid diagram Lucent imports. Start with `flowchart TD` / `graph LR`, " +
+        "`stateDiagram-v2`, or `mindmap`.",
+    };
+  }
+  const prefix = `mcp${Date.now().toString(36).slice(-4)}${Math.random().toString(36).slice(2, 4)}`;
+  const onto = Object.keys(ws.nodes).length > 0;
+  const ops = mermaidToOps(source, {
+    idPrefix: prefix,
+    ...(onto ? { region: { id: `${prefix}-region` } } : {}),
+  });
+  if (ops.length === 0) return { error: "That Mermaid diagram has no nodes to import." };
+  return { ops };
 }
 
 export interface ToolResult {
@@ -216,6 +284,13 @@ export class BoardSession {
         return text(
           JSON.stringify({ links: [], note: "no link registry in the local session" }, null, 2),
         );
+      case "import_mermaid": {
+        const plan = mermaidImportOps(this.ws, args.mermaid);
+        if ("error" in plan) return errorResult(plan.error);
+        return this.applyOps({ operations: plan.ops, explanation: "Imported from Mermaid." });
+      }
+      case "export_mermaid":
+        return text(boardToMermaid(this.ws));
       case "reset_board": {
         const kind = typeof args.diagramKind === "string" ? args.diagramKind : undefined;
         this.ws = createWorkspace(

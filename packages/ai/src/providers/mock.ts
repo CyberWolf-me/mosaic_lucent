@@ -8,6 +8,7 @@ import type {
 } from "../provider.js";
 import type { AnswerCitation, AnswerRequest, AnswerResult } from "../answer.js";
 import { fallbackNotesDraft, type NotesRequest, type NotesResult } from "../notes.js";
+import { fallbackThemes, type ThemesRequest, type ThemesResult } from "../themes.js";
 import {
   MAX_AI_SELECTED_ACTIONS,
   type ExternalPlanRequest,
@@ -1031,6 +1032,16 @@ export class MockProvider implements LLMProvider {
     };
   }
 
+  /** docs/27 N1: offline — the deterministic enhancer, so the flow works with no key. */
+  async generateNotes(request: NotesRequest): Promise<NotesResult> {
+    return { ...fallbackNotesDraft(request), model: "mock" };
+  }
+
+  /** docs/27 D2: offline — the keyword sorter, so the flow works with no key. */
+  async generateThemes(request: ThemesRequest): Promise<ThemesResult> {
+    return { ...fallbackThemes(request), model: "mock" };
+  }
+
   /**
    * The external-plan path (Stage D9). Deterministic narrowing: the
    * candidates whose label or statement topic shares a word with the
@@ -1039,11 +1050,6 @@ export class MockProvider implements LLMProvider {
    * The mock grounds its selection in the same candidate list the server
    * computed, so the offline flow exercises the real intersection.
    */
-  /** docs/27 N1: offline — the deterministic enhancer, so the flow works with no key. */
-  async generateNotes(request: NotesRequest): Promise<NotesResult> {
-    return { ...fallbackNotesDraft(request), model: "mock" };
-  }
-
   async generateExternalPlan(request: ExternalPlanRequest): Promise<ExternalPlanResult> {
     const words = new Set(
       request.request

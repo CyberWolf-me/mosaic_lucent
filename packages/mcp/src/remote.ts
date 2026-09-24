@@ -1,4 +1,5 @@
 import {
+  boardToMermaid,
   isHumanOnlyOperation,
   repairOperations,
   stampAuthorship,
@@ -6,7 +7,7 @@ import {
   type Operation,
   type Workspace,
 } from "@lucent/core";
-import { summarizeBoard, type ToolResult } from "./tools.js";
+import { mermaidImportOps, summarizeBoard, type ToolResult } from "./tools.js";
 
 /**
  * RemoteBoardSession (E3 / R1): the same three-tool MCP surface as
@@ -88,6 +89,10 @@ export class RemoteBoardSession {
         return this.getBoard();
       case "list_external_links":
         return this.listExternalLinks();
+      case "import_mermaid":
+        return this.importMermaid(args);
+      case "export_mermaid":
+        return this.exportMermaid();
       case "reset_board":
         // No server route destroys a board's contents, and inventing one
         // for parity with the local session would be a footgun an agent can
@@ -173,6 +178,27 @@ export class RemoteBoardSession {
         },
       ],
     };
+  }
+
+  /**
+   * docs/27 D2: Mermaid in. Whether the diagram becomes the board or a region
+   * depends on what the board holds, so read it first (which also primes the
+   * local pre-validation), then apply through the one pipeline.
+   */
+  private async importMermaid(args: Record<string, unknown>): Promise<ToolResult> {
+    if (!this.cached) {
+      const read = await this.getBoard();
+      if (read.isError) return read;
+    }
+    const plan = mermaidImportOps(this.cached!, args.mermaid);
+    if ("error" in plan) return this.failure(plan.error);
+    return this.applyOps({ operations: plan.ops });
+  }
+
+  private async exportMermaid(): Promise<ToolResult> {
+    const read = await this.getBoard();
+    if (read.isError) return read;
+    return { content: [{ type: "text", text: boardToMermaid(this.cached!) }] };
   }
 
   private async applyOps(args: Record<string, unknown>): Promise<ToolResult> {

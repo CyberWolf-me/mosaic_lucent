@@ -1,4 +1,5 @@
 import type { NotesRequest, NotesResult } from "./notes.js";
+import type { ThemesRequest, ThemesResult } from "./themes.js";
 import type { DiagramKind, Operation, Workspace } from "@lucent/core";
 import { commentThreads, compositionLine, reactionTally, voteRanking } from "@lucent/core";
 import type { AnswerRequest, AnswerResult } from "./answer.js";
@@ -227,6 +228,12 @@ export interface LLMProvider {
    * the server's offline enhancer — so test stubs need not grow a method.
    */
   generateNotes?(request: NotesRequest): Promise<NotesResult>;
+  /**
+   * The sticky-sort call type (docs/27 D2): group sticky notes into titled
+   * themes, by index. Optional for the same reason — without it the server's
+   * offline keyword sorter answers.
+   */
+  generateThemes?(request: ThemesRequest): Promise<ThemesResult>;
   /**
    * Streaming variant. Optional: the single-shot contract stays the default,
    * and `streamViaGenerate` adapts any non-streaming provider so callers can
