@@ -179,13 +179,9 @@ export function registerAssetRoutes(
       const user = (await deps.requireUser(req, res)) as { id: string } | null;
       if (!user) return true;
       if (deps.meter && !deps.meter(req, res, "/api/assets/:id")) return true;
-      const orgId = await resolveOrgId(deps, req, user.id);
-      if (!orgId.ok) {
-        deps.send(res, orgId.status, { error: orgId.error });
-        return true;
-      }
       const id = getMatch[1]!;
-      const hit = await deps.assetService.read(orgId.value, id);
+      const org = await readableOrgFor(deps, req, user.id, id);
+      const hit = org === undefined ? undefined : await deps.assetService.read(org, id);
       if (!hit) {
         deps.send(res, 404, { error: "asset not found" });
         return true;
@@ -202,13 +198,9 @@ export function registerAssetRoutes(
       const user = (await deps.requireUser(req, res)) as { id: string } | null;
       if (!user) return true;
       if (deps.meter && !deps.meter(req, res, "/api/assets/:id/thumb")) return true;
-      const orgId = await resolveOrgId(deps, req, user.id);
-      if (!orgId.ok) {
-        deps.send(res, orgId.status, { error: orgId.error });
-        return true;
-      }
       const id = getMatch[1]!;
-      const hit = await deps.assetService.thumb(orgId.value, id);
+      const org = await readableOrgFor(deps, req, user.id, id);
+      const hit = org === undefined ? undefined : await deps.assetService.thumb(org, id);
       if (!hit) {
         deps.send(res, 404, { error: "thumbnail not available" });
         return true;
@@ -256,6 +248,36 @@ export function registerAssetRoutes(
   // the whole app.
   void formatAssetRef;
   return handle;
+}
+
+/**
+ * The org whose copy of asset `id` this user may read, or undefined.
+ *
+ * Reads used to go through `resolveOrgId` alone, which trusts an
+ * `X-Lucent-Org-Id` header verbatim — and unlike upload and delete, the GET
+ * routes never followed it with `requireOrgRole`. So any signed-in user who
+ * named another org in the header could read that org's assets by id. The
+ * org is now always one of the caller's own memberships: a named org must be
+ * one of them, and with no header each of them is tried (an <img> can't send
+ * headers, and a multi-org user viewing a board in their second org used to
+ * get their first org and a 404). "Not a member" and "no such asset" stay the
+ * same 404, so neither org ids nor asset ids can be enumerated.
+ */
+async function readableOrgFor(
+  deps: AssetRoutesContext,
+  req: IncomingMessage,
+  userId: string,
+  id: string,
+): Promise<string | undefined> {
+  const orgs = (await deps.membershipsFor(userId)).map((m) => m.orgId);
+  const header = req.headers["x-lucent-org-id"];
+  if (typeof header === "string" && header.length > 0) {
+    return orgs.includes(header) ? header : undefined;
+  }
+  for (const org of orgs) {
+    if (await deps.assetService.lookup(org, id)) return org;
+  }
+  return undefined;
 }
 
 /**

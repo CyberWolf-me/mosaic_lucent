@@ -275,6 +275,35 @@ describe("asset gateway routes", () => {
     expect(fromAlice.status).toBe(200);
   });
 
+  it("never serves another org's asset because the request named that org", async () => {
+    // docs/26 audit: the GET routes trusted X-Lucent-Org-Id without checking
+    // the caller belonged to it, so naming the victim's org read their bytes.
+    const alice = await h.signup("alice3@example.com");
+    const mallory = await h.signup("mallory3@example.com");
+    const upload = await h.request(alice.cookies, {
+      method: "POST",
+      path: "/api/assets",
+      body: PNG_1x1,
+      csrf: alice.csrf.headerValue,
+    });
+    expect(upload.status).toBe(201);
+    const orgs = await h.request(alice.cookies, { path: "/api/orgs" });
+    const aliceOrg = (orgs.body as { orgs: Array<{ id: string }> }).orgs[0]!.id;
+    for (const path of [String(upload.body.url), `${String(upload.body.url)}/thumb`]) {
+      const res = await h.request(mallory.cookies, {
+        path,
+        extraHeaders: { "x-lucent-org-id": aliceOrg },
+      });
+      expect(res.status).toBe(404);
+    }
+    // Alice naming her own org still reads it.
+    const own = await h.request(alice.cookies, {
+      path: String(upload.body.url),
+      extraHeaders: { "x-lucent-org-id": aliceOrg },
+    });
+    expect(own.status).toBe(200);
+  });
+
   it("rejects anonymous requests with 401", async () => {
     const res = await fetch(`${h.base}/api/assets`);
     expect(res.status).toBe(401);
