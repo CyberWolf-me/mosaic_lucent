@@ -83,17 +83,21 @@ export function stricterOf(a: BoardClassification, b: BoardClassification): Boar
 
 /**
  * True when the provider's output requires leaving this process. The offline
- * mock (`name === "mock"`) runs in-process; anything else — a real vendor, a
- * gateway, or a test double whose name we do not recognize — is treated as
- * external. Fail-closed is the right direction for a gate: the cost of a false
- * positive is a refusal an operator can see and explain, and the cost of a
- * false negative is company content at a third party the policy said no to.
+ * mocks run in-process — the text/vector mock (`"mock"`) and the image
+ * placeholder, which draws an SVG locally (`"mock-image"`); anything else — a
+ * real vendor, a gateway, or a test double whose name we do not recognize — is
+ * treated as external. Fail-closed is the right direction for a gate: the cost
+ * of a false positive is a refusal an operator can see and explain, and the
+ * cost of a false negative is company content at a third party the policy
+ * said no to.
  *
  * Phase C (docs/24) replaces this heuristic with the org's provider policy;
  * until then it is deliberately conservative and documented as such.
  */
+const IN_PROCESS_PROVIDERS = new Set(["mock", "mock-image"]);
+
 export function providerLeavesProcess(provider: { name: string }): boolean {
-  return provider.name !== "mock";
+  return !IN_PROCESS_PROVIDERS.has(provider.name);
 }
 
 /** A refusal, ready to become the route's response body. */

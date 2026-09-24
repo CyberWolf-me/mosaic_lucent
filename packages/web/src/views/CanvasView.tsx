@@ -706,7 +706,7 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
       const prompt = enrichImagePromptWithContext(rawPrompt, workspace, chat, projectName);
       notify("Generating reference image with Lucent Imagine…");
       try {
-        const { src, explanation } = await generateImage(prompt, "landscape");
+        const { src, explanation } = await generateImage(prompt, "landscape", boardId);
         const posX = viewportBox
           ? Math.round(viewportBox.x + Math.max(0, (viewportBox.width - 400) / 2))
           : 320;
@@ -738,7 +738,7 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
         notify((err as Error).message);
       }
     },
-    [applyManual, notify, shapes, viewportBox, workspace, chat, projectName, settings.aiSound],
+    [applyManual, notify, shapes, viewportBox, workspace, chat, projectName, settings.aiSound, boardId],
   );
 
   // The hero's attach path: a screenshot or document chosen before there is

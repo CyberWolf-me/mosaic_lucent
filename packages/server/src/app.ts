@@ -4428,9 +4428,41 @@ export function createApp(deps: AppDeps): App {
         // usage log without an image's cost moving out of the AI allowance. A
         // real per-image ceiling is then a plans.ts number, not a rework.
         //
-        // /api/image carries no boardId (see image.ts), so this bills to the
-        // caller's first org rather than to any board's.
-        const imageCtx = await resolveAiContext(auth.userId, undefined);
+        // The board the image is for (image.ts). The canvas folds the board's
+        // own labels into the prompt, so the board's AI boundary decides
+        // whether it may reach the image vendor — the same gate /api/vector
+        // applies — and the image bills to the board's org. A local board
+        // sends none and bills to the caller's first org.
+        let imageBoard: StoredBoard | undefined;
+        const requestedBoardId =
+          typeof parsed.boardId === "string" && parsed.boardId ? parsed.boardId : undefined;
+        if (requestedBoardId) {
+          const caller = auth.userId ? await userStore.findById(auth.userId) : undefined;
+          if (!caller) {
+            send(res, 401, { error: "authentication required" });
+            return;
+          }
+          const guard = await requireBoardRole(
+            req,
+            res,
+            requestedBoardId,
+            "editor",
+            "/api/image",
+            caller,
+          );
+          if (!guard.ok) return;
+          imageBoard = guard.board;
+          const refusal = await outboundRefusal(imageBoard, "ai", { provider: imageProvider });
+          if (refusal) {
+            send(res, 403, {
+              error: refusal.error,
+              classification: refusal.classification,
+              boundary: refusal.boundary,
+            });
+            return;
+          }
+        }
+        const imageCtx = await resolveAiContext(auth.userId, imageBoard);
         const allowance = imageCtx.orgId
           ? await gateMonthly(req, res, imageCtx.orgId, "ai.generationsPerMonth", "/api/image")
           : null;
@@ -4467,6 +4499,7 @@ export function createApp(deps: AppDeps): App {
             meterUsage(imageCtx.orgId, "image.generation", 1, {
               ...drawnBy,
               billedAs: "ai.generation",
+              ...(imageBoard ? { boardId: imageBoard.id } : {}),
             });
           }
           body = withAllowance(body, allowance);

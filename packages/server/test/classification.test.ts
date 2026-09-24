@@ -125,9 +125,18 @@ describe("classification policy (unit)", () => {
     expect(checkOutbound("restricted", "ai", { provider: { name: "gateway" } })).not.toBeNull();
   });
 
-  it("treats only the offline mock as in-process", () => {
+  it("treats only the offline mocks as in-process", () => {
     expect(providerLeavesProcess({ name: "mock" })).toBe(false);
-    for (const name of ["anthropic", "openai", "openai-compatible", "bedrock", ""]) {
+    // The image placeholder draws its SVG locally.
+    expect(providerLeavesProcess({ name: "mock-image" })).toBe(false);
+    for (const name of [
+      "anthropic",
+      "openai",
+      "openai-compatible",
+      "bedrock",
+      "pollinations",
+      "",
+    ]) {
       expect(providerLeavesProcess({ name })).toBe(true);
     }
   });

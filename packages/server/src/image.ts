@@ -16,6 +16,12 @@ import {
 export const imageRequestSchema = z.object({
   prompt: z.string().min(1).max(1000),
   size: z.enum(["square", "landscape", "portrait"]).optional(),
+  /**
+   * The board the image is for. The canvas enriches a prompt with the board's
+   * own labels, so the board's AI boundary decides whether it may leave —
+   * the same gate /api/vector and /api/generate apply.
+   */
+  boardId: z.string().min(1).max(200).optional(),
 });
 
 export interface HandleResult {
@@ -83,7 +89,9 @@ export async function handleImage(
     return { status: 400, body: { error: "invalid request", detail: parsed.error.format() } };
   }
   try {
-    const result = await provider.generateImage(parsed.data);
+    // Prompt and size only: the board id is Lucent's routing, never the vendor's.
+    const { prompt, size } = parsed.data;
+    const result = await provider.generateImage({ prompt, ...(size ? { size } : {}) });
     return { status: 200, body: { ...result, provider: provider.name } };
   } catch (err) {
     return {

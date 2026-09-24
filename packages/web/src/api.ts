@@ -609,10 +609,12 @@ export interface ImageResponse {
 export async function generateImage(
   prompt: string,
   size?: "square" | "landscape" | "portrait",
+  /** The shared board the image is for: its AI boundary decides (server image route). */
+  boardId?: string | null,
 ): Promise<ImageResponse> {
   const res = await apiFetch("/api/image", {
     method: "POST",
-    body: JSON.stringify({ prompt, size }),
+    body: JSON.stringify({ prompt, size, ...(boardId ? { boardId } : {}) }),
   });
   if (!res.ok) {
     // Through the same mapping as /api/generate rather than a message of its
