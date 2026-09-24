@@ -52,6 +52,8 @@ import { InMemoryNotificationStore, type NotificationStore } from "./notificatio
 import { PostgresNotificationStore } from "./store/pg-notifications.js";
 import { InMemoryMeetingStore } from "./meetings.js";
 import { PostgresMeetingStore } from "./store/pg-meetings.js";
+import { PostgresMeetingNotesStore } from "./store/pg-meeting-notes.js";
+import { InMemoryMeetingNotesStore } from "./meetingNotes.js";
 import { InMemoryProposalStore } from "./proposals.js";
 import { PostgresProposalStore } from "./store/pg-proposals.js";
 import { PostgresAssetStore } from "./store/pg-assets.js";
@@ -160,6 +162,7 @@ function makeStores(databaseUrl: string | undefined): {
   usageStore: UsageStore;
   /** E3/R3: meeting transcripts — in-memory for dev, Postgres when configured. */
   meetings: import("./meetings.js").MeetingStore;
+  meetingNotes: import("./meetingNotes.js").MeetingNotesStore;
   /** F1: SSO connections + domain claims, on the same store-per-database rule. */
   ssoStore: import("./ssoStore.js").SsoStore;
   /** Stage B3: review-gate proposals — in-memory for dev, Postgres when set. */
@@ -198,6 +201,7 @@ function makeStores(databaseUrl: string | undefined): {
       notifications: new InMemoryNotificationStore(),
       usageStore: new InMemoryUsageStore(),
       meetings: new InMemoryMeetingStore(),
+      meetingNotes: new InMemoryMeetingNotesStore(),
       ssoStore: new InMemorySsoStore(),
       integrations: {
         store: new InMemoryIntegrationStore(),
@@ -243,6 +247,7 @@ function makeStores(databaseUrl: string | undefined): {
     notifications: new PostgresNotificationStore(target),
     usageStore: new PostgresUsageStore(target),
     meetings: new PostgresMeetingStore(target),
+    meetingNotes: new PostgresMeetingNotesStore(target),
     ssoStore: new PostgresSsoStore(target),
     proposals: new PostgresProposalStore(target),
     assetStore: new PostgresAssetStore(target),
@@ -586,6 +591,7 @@ const { server, realtime } = createApp({
   notifications: stores.notifications,
   // E3/R3: meeting transcripts, on the same store-per-database rule as the rest.
   meetings: stores.meetings,
+  meetingNotes: stores.meetingNotes,
   // Stage B3: review-gate proposals, same rule — the server is now the
   // record for what Lucent wants to change on a shared board.
   proposals: stores.proposals,

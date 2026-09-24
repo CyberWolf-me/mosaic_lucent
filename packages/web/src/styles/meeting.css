@@ -1006,3 +1006,208 @@ html[data-theme="dark"] .meet-search {
     animation: none;
   }
 }
+
+/* ---- Meeting notes (docs/27 N1) ------------------------------------------
+   Granola's split, made visible: the person's own lines in full ink, what
+   Lucent added in muted ink with a turn chip that names its source. */
+.mn {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+}
+.mn-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.mn-toggle {
+  display: inline-flex;
+  padding: 2px;
+  border-radius: var(--r-sm);
+  background: oklch(from var(--paper-2) l c h / 0.8);
+  border: 1px solid oklch(from var(--paper-4) l c h / 0.55);
+}
+.mn-toggle button {
+  padding: 4px 10px;
+  border-radius: calc(var(--r-sm) - 2px);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ink-2);
+}
+.mn-toggle button.on {
+  color: var(--ink-0);
+  background: var(--paper-0);
+  box-shadow: 0 1px 2px oklch(0 0 0 / 0.08);
+}
+.mn-toggle button:disabled {
+  color: var(--ink-4);
+  cursor: default;
+}
+.mn-template {
+  height: 28px;
+  padding: 0 8px;
+  font-size: 12px;
+  color: var(--ink-1);
+  border-radius: var(--r-sm);
+  background: oklch(from var(--paper-2) l c h / 0.8);
+  border: 1px solid oklch(from var(--paper-4) l c h / 0.55);
+}
+.mn-pad {
+  flex: 1;
+  min-height: 160px;
+  resize: none;
+  padding: 12px 14px;
+  font: inherit;
+  font-size: 13.5px;
+  line-height: 1.65;
+  color: var(--ink-0);
+  border-radius: var(--r-sm);
+  background: var(--paper-0);
+  border: 1px solid oklch(from var(--paper-4) l c h / 0.55);
+}
+.mn-pad:focus-visible {
+  outline: none;
+  border-color: var(--bloom-wash-2);
+  box-shadow: 0 0 0 3px var(--bloom-wash);
+}
+.mn-pad::placeholder {
+  color: var(--ink-3);
+}
+.mn-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.mn-state {
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: var(--ink-3);
+}
+.mn-go {
+  flex-shrink: 0;
+  height: 30px;
+  padding: 0 12px;
+  border-radius: var(--r-sm);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--paper-0);
+  background: var(--ink-0);
+}
+.mn-go:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.mn-go.ghost {
+  color: var(--ink-1);
+  background: transparent;
+  border: 1px solid oklch(from var(--paper-4) l c h / 0.8);
+}
+.mn-note {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding-right: 2px;
+}
+.mn-offline {
+  margin: 0;
+  padding: 8px 10px;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--ink-2);
+  border-radius: var(--r-sm);
+  background: oklch(from var(--paper-2) l c h / 0.8);
+}
+.mn-sec h4 {
+  margin: 0 0 6px;
+  font-family: var(--font-serif);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink-0);
+}
+.mn-sec ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.mn-item {
+  position: relative;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding-left: 14px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.mn-item::before {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 0.62em;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.6;
+}
+.mn-item.user {
+  color: var(--ink-0);
+  font-weight: 500;
+}
+.mn-item.ai {
+  color: var(--ink-2);
+}
+.mn-text {
+  flex: 1;
+  min-width: 0;
+  cursor: text;
+}
+.mn-cite {
+  flex-shrink: 0;
+  min-width: 20px;
+  height: 18px;
+  padding: 0 5px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 999px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--bloom-2);
+  background: var(--bloom-wash);
+  border: 1px solid var(--bloom-wash-2);
+}
+.mn-cite:hover {
+  background: var(--bloom-wash-2);
+}
+.mn-edit {
+  flex: 1;
+  min-width: 0;
+  resize: none;
+  padding: 2px 6px;
+  font: inherit;
+  line-height: 1.5;
+  color: var(--ink-0);
+  border-radius: 4px;
+  background: var(--paper-0);
+  border: 1px solid var(--bloom-wash-2);
+}
+.mn-edit:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--bloom-wash);
+}
+.mn-error {
+  margin: 0;
+  font-size: 12px;
+  color: var(--madder);
+}

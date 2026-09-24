@@ -114,10 +114,52 @@ boundaries. Notes are a new object, not a new rule.
 ## 5. Order
 
 ```text
-D1  timeline, matrix, statemachine kinds + prompt + templates       (now)
-N1  notepad (stamped lines) + enhance with citations + templates     (next)
-D2  Mermaid import; stickies → cluster / structure                  (then)
+D1  timeline, matrix, statemachine kinds + prompt + templates       (done)
+N1  notepad (stamped lines) + enhance with citations + templates     (done)
+D2  Mermaid import; stickies → cluster / structure                  (next)
 N2  live outline, private ask, speaker names everywhere
 D3  UML class (node details), story map, C4 levels
 N3  follow-up drafts through the gate; cross-meeting chat
 ```
+
+## 6. Status
+
+**D1 — done.** `timeline`, `matrix` and `statemachine` are diagram kinds
+with their own layout strategies (`timeline`, `grid`, layered with
+pseudo-states), prompt guidance (visual-agent v15), and starter templates
+(Roadmap, Impact × effort, State machine).
+
+**N1 — done.** What shipped, against §2's list:
+
+- (1) The **Notes** tab in the meeting panel: a private notepad. Each line
+  carries the turn count when it was written, and keeps it through edits.
+  Unchanged lines are matched by text, so inserting a line mid-page doesn't
+  move the lines below it in time. `#` / `-` / `[ ]` are kept verbatim,
+  not parsed.
+- (2) **Enhance** runs on demand, and automatically once an ended meeting's
+  stored record opens (so its last turns are flushed first). The model returns
+  _placements_ of the user's lines plus added lines, each with turn citations.
+  The server (`assembleNotes`) copies the user's lines verbatim, and drops
+  added lines that are uncited, out of range, span more than 30 turns, or
+  duplicate another line. The UI shows citations as chips: hover shows the
+  quote, click jumps to the transcript.
+- (3) Editing an added line makes it the user's (full ink, citation removed);
+  a saved edit is re-checked, so a citation pointing outside the meeting is
+  dropped. Re-enhancing keeps every typed line and every rewritten one.
+- (5) Six templates: general, 1:1, standup, design review, customer call,
+  retro.
+- Privacy: rows are keyed (meeting, user). Every route reads and writes only
+  the caller's row, at the viewer floor. There is a Postgres table
+  (`meeting_notes`, migration 0031, RLS on) and an in-memory store.
+- Boundaries: a board whose AI boundary refuses still gets a note, made by the
+  offline enhancer and **labelled** as such. So does a deployment with no
+  model, or a model call that fails. Enhancing is metered as an AI
+  generation.
+- "Copy as Markdown" is the only way out. There is no sharing and no
+  auto-email (§2.9).
+
+**Not in N1:** (4) speaker names, (7) the live outline and (8) the private ask
+are all N2. (6) — the note's decisions and actions being the _same_
+statements as the canvas — isn't built. Today the note cites transcript turns,
+and the canvas statements cite the same turns, so the two meet at the
+transcript rather than sharing one record. (10) follow-ups are N3.

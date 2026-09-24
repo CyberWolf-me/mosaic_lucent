@@ -4,6 +4,14 @@ import type { AnswerRequest, AnswerResult } from "../answer.js";
 import { ANSWER_TOOL_NAME, openAiAnswerToolDefinition } from "../answer.js";
 import type { ExternalPlanRequest, ExternalPlanResult } from "../externalPlan.js";
 import { EXTERNAL_PLAN_TOOL_NAME, openAiExternalPlanToolDefinition } from "../externalPlan.js";
+import {
+  NOTES_TOOL_NAME,
+  openAiNotesToolDefinition,
+  parseNotesDraft,
+  type NotesRequest,
+  type NotesResult,
+} from "../notes.js";
+import { NOTES_SYSTEM_PROMPT, buildNotesUserPrompt } from "../prompt.js";
 import { sseEvents } from "./sse.js";
 import {
   ANSWER_SYSTEM_PROMPT,
@@ -459,6 +467,80 @@ export class OpenAICompatibleProvider implements LLMProvider {
    * in. Same no-repair/no-streaming posture — a dropped selection is a
    * human-decided retry, not worth re-asking.
    */
+  /** docs/27 N1: enhance a person's meeting notes — placements plus cited lines. */
+  async generateNotes(request: NotesRequest): Promise<NotesResult> {
+    const models = this.candidateModels();
+    let lastError: Error | null = null;
+    for (const modelToUse of models) {
+      try {
+        return await this.executeGenerateNotes(request, modelToUse);
+      } catch (err) {
+        lastError = err as Error;
+      }
+    }
+    throw lastError ?? new Error("Provider request failed");
+  }
+
+  private async executeGenerateNotes(request: NotesRequest, modelToUse: string): Promise<NotesResult> {
+    let body = JSON.stringify({
+      model: modelToUse,
+      messages: [
+        { role: "system", content: NOTES_SYSTEM_PROMPT },
+        { role: "user", content: buildNotesUserPrompt(request) },
+      ],
+      tools: [openAiNotesToolDefinition()],
+      tool_choice: this.forceAutoToolChoice ? "auto" : { type: "function", function: { name: NOTES_TOOL_NAME } },
+      max_tokens: 4096,
+      temperature: 0.2,
+      stream: false,
+    });
+    let lastDetail = "";
+    let lastStatus = 0;
+    for (let attempt = 0; attempt < this.maxRetries; attempt++) {
+      let response: Response;
+      try {
+        response = await this.fetchImpl(this.baseUrl, {
+          method: "POST",
+          headers: { "content-type": "application/json", authorization: `Bearer ${this.apiKey}` },
+          body,
+          signal: AbortSignal.timeout(this.timeoutMs),
+        });
+      } catch (err) {
+        lastDetail = (err as Error).message;
+        lastStatus = 0;
+        if (attempt < this.maxRetries - 1) {
+          await sleep(400 * 2 ** attempt);
+          continue;
+        }
+        throw new Error(`Provider request failed (network): ${lastDetail}`);
+      }
+      if (!response.ok) {
+        lastStatus = response.status;
+        lastDetail = await response.text().catch(() => "");
+        if (isToolChoiceUnsupported(lastStatus, lastDetail) && !this.forceAutoToolChoice) {
+          this.forceAutoToolChoice = true;
+          body = withAutoToolChoice(body);
+          attempt--;
+          continue;
+        }
+        if (RETRYABLE_STATUS.has(response.status) && attempt < this.maxRetries - 1) {
+          await sleep(400 * 2 ** attempt + Math.random() * 250);
+          continue;
+        }
+        throw new Error(`Provider request failed (${lastStatus}): ${lastDetail}`);
+      }
+      const data = (await response.json()) as ChatResponse;
+      const message = data.choices?.[0]?.message;
+      const meta = completionMeta(data.model ?? modelToUse, data.usage?.prompt_tokens, data.usage?.completion_tokens);
+      const call = message?.tool_calls?.find((c) => c.function?.name === NOTES_TOOL_NAME) ?? message?.tool_calls?.[0];
+      const draft = call?.function?.arguments
+        ? parseNotesDraft(call.function.arguments)
+        : parseNotesDraft(message?.content ?? "");
+      return { ...draft, ...meta };
+    }
+    throw new Error(`Provider request failed (${lastStatus}): ${lastDetail}`);
+  }
+
   async generateExternalPlan(request: ExternalPlanRequest): Promise<ExternalPlanResult> {
     const models = this.candidateModels();
     let lastError: Error | null = null;

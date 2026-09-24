@@ -5,6 +5,14 @@ import { ANSWER_TOOL_NAME, anthropicAnswerToolDefinition } from "../answer.js";
 import type { ExternalPlanRequest, ExternalPlanResult } from "../externalPlan.js";
 import { EXTERNAL_PLAN_TOOL_NAME, anthropicExternalPlanToolDefinition } from "../externalPlan.js";
 import {
+  NOTES_TOOL_NAME,
+  anthropicNotesToolDefinition,
+  parseNotesDraft,
+  type NotesRequest,
+  type NotesResult,
+} from "../notes.js";
+import { NOTES_SYSTEM_PROMPT, buildNotesUserPrompt } from "../prompt.js";
+import {
   ANSWER_SYSTEM_PROMPT,
   EXTERNAL_PLAN_SYSTEM_PROMPT,
   SYSTEM_PROMPT,
@@ -335,6 +343,60 @@ export class AnthropicProvider implements LLMProvider {
       const text = data.content?.find((c) => c.type === "text")?.text ?? "";
       if (!text) throw new Error("Anthropic returned neither a tool call nor text");
       return parseExternalPlanModelJson(text, meta);
+    }
+    throw new Error(`Anthropic request failed (${lastStatus}): ${lastDetail}`);
+  }
+
+  /** docs/27 N1: enhance a person's meeting notes — placements plus cited lines. */
+  async generateNotes(request: NotesRequest): Promise<NotesResult> {
+    let lastDetail = "";
+    let lastStatus = 0;
+    for (let attempt = 0; attempt < this.maxRetries; attempt++) {
+      let response: Response;
+      try {
+        response = await this.fetchImpl(this.baseUrl, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-api-key": this.apiKey,
+            "anthropic-version": "2023-06-01",
+          },
+          body: JSON.stringify({
+            model: this.model,
+            max_tokens: 4096,
+            system: NOTES_SYSTEM_PROMPT,
+            messages: [{ role: "user", content: buildNotesUserPrompt(request) }],
+            tools: [anthropicNotesToolDefinition()],
+            tool_choice: { type: "tool", name: NOTES_TOOL_NAME },
+          }),
+          signal: AbortSignal.timeout(this.timeoutMs),
+        });
+      } catch (err) {
+        lastDetail = (err as Error).message;
+        lastStatus = 0;
+        if (attempt < this.maxRetries - 1) {
+          await sleep(400 * 2 ** attempt);
+          continue;
+        }
+        throw new Error(`Anthropic request failed (network): ${lastDetail}`);
+      }
+      if (!response.ok) {
+        lastStatus = response.status;
+        lastDetail = await response.text().catch(() => "");
+        if (RETRYABLE_STATUS.has(response.status) && attempt < this.maxRetries - 1) {
+          await sleep(400 * 2 ** attempt + Math.random() * 250);
+          continue;
+        }
+        throw new Error(`Anthropic request failed (${lastStatus}): ${lastDetail}`);
+      }
+      const data = (await response.json()) as AnthropicResponse;
+      const meta = completionMeta(data.model ?? this.model, data.usage?.input_tokens, data.usage?.output_tokens);
+      const toolUse = data.content?.find((c) => c.type === "tool_use");
+      const draft =
+        toolUse?.input !== undefined
+          ? parseNotesDraft(toolUse.input as object)
+          : parseNotesDraft(data.content?.find((c) => c.type === "text")?.text ?? "");
+      return { ...draft, ...meta };
     }
     throw new Error(`Anthropic request failed (${lastStatus}): ${lastDetail}`);
   }

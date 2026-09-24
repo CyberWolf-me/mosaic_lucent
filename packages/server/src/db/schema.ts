@@ -1067,6 +1067,41 @@ export type DbMeetingTranscript = typeof meetingTranscripts.$inferSelect;
 export type DbNewMeetingTranscript = typeof meetingTranscripts.$inferInsert;
 
 /**
+ * Meeting notes (docs/27 N1): one person's notes on one meeting — the lines
+ * they typed and, once enhanced, the structured note. Keyed by (meeting,
+ * user) because notes are private: the routes only ever read or write the
+ * caller's own row. Cascades with the meeting (a deleted transcript takes
+ * the notes about it) and with the user (their private notes go with them).
+ */
+export const meetingNotes = pgTable(
+  "meeting_notes",
+  {
+    meetingId: text("meeting_id")
+      .notNull()
+      .references(() => meetingTranscripts.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    boardId: text("board_id")
+      .notNull()
+      .references(() => boards.id, { onDelete: "cascade" }),
+    orgId: text("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    template: text("template").notNull(),
+    lines: jsonb("lines").notNull(),
+    enhanced: jsonb("enhanced"),
+    updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.meetingId, t.userId] }),
+    userIdx: index("meeting_notes_user_idx").on(t.userId),
+  }),
+);
+
+export type DbMeetingNotes = typeof meetingNotes.$inferSelect;
+
+/**
  * Per-org SSO connections (F1 / ADR 0013). One row per IdP an org trusts;
  * in practice one, but `(org_id, idp_entity_id)` unique rather than
  * `org_id` unique so a migration-period org can carry a second IdP while

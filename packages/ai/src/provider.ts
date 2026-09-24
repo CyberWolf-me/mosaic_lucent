@@ -1,3 +1,4 @@
+import type { NotesRequest, NotesResult } from "./notes.js";
 import type { DiagramKind, Operation, Workspace } from "@lucent/core";
 import { commentThreads, compositionLine, reactionTally, voteRanking } from "@lucent/core";
 import type { AnswerRequest, AnswerResult } from "./answer.js";
@@ -220,6 +221,12 @@ export interface LLMProvider {
    * contract is a platform promise, not a per-provider courtesy.
    */
   generateExternalPlan(request: ExternalPlanRequest): Promise<ExternalPlanResult>;
+  /**
+   * The meeting-notes call type (docs/27 N1): enhance a person's notes with
+   * cited lines from the transcript. Optional — a provider without it gets
+   * the server's offline enhancer — so test stubs need not grow a method.
+   */
+  generateNotes?(request: NotesRequest): Promise<NotesResult>;
   /**
    * Streaming variant. Optional: the single-shot contract stays the default,
    * and `streamViaGenerate` adapts any non-streaming provider so callers can

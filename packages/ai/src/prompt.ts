@@ -1,3 +1,4 @@
+import { NOTE_TEMPLATES, type NotesRequest } from "./notes.js";
 import { getPrompt } from "./registry.js";
 import { REQUEST_LIMITS } from "./provider.js";
 import type { GenerateRequest } from "./provider.js";
@@ -91,6 +92,15 @@ export const EXTERNAL_PLAN_SYSTEM_PROMPT_VOCABULARY: readonly string[] =
   EXTERNAL_SELECTOR.vocabulary;
 export const EXTERNAL_PLAN_SYSTEM_PROMPT_ID: string = EXTERNAL_SELECTOR.id;
 export const EXTERNAL_PLAN_SYSTEM_PROMPT_VERSION: number = EXTERNAL_SELECTOR.version;
+
+/**
+ * The meeting-notes enhancer (docs/27 N1), bound the same way. Emits no
+ * operations: it places the person's lines and adds cited ones.
+ */
+const MEETING_NOTES = getPrompt("meeting-notes");
+export const NOTES_SYSTEM_PROMPT: string = MEETING_NOTES.systemPrompt;
+export const NOTES_SYSTEM_PROMPT_ID: string = MEETING_NOTES.id;
+export const NOTES_SYSTEM_PROMPT_VERSION: number = MEETING_NOTES.version;
 
 /* -------------------------------------------------------------------------- */
 /* Untrusted content framing (M5)                                             */
@@ -856,6 +866,63 @@ export function buildExternalPlanUserPrompt(request: ExternalPlanRequest): strin
     `User request: ${escapeHarnessTags(asked.text)}${
       asked.dropped ? ` [the harness dropped ${asked.dropped} characters over its limit]` : ""
     }`,
+  );
+  return sections.join("\n\n");
+}
+
+/** Budgets for the notes call: a long meeting keeps its latest turns. */
+export const NOTES_LIMITS = { turns: 600, turnChars: 1_200, notes: 200, noteChars: 400 } as const;
+
+/**
+ * The notes enhancer's user turn (docs/27 N1). The transcript and the
+ * person's notes are both meeting data: every turn and every note line is
+ * enveloped and passed through the same instruction-stripping as any other
+ * untrusted text. Indices are the ones the tool cites and places by.
+ */
+export function buildNotesUserPrompt(request: NotesRequest): string {
+  const template = NOTE_TEMPLATES[request.template];
+  const sections: string[] = [];
+  const today = todayLine(request.today);
+  if (today) sections.push(today);
+  sections.push(
+    `Template: ${template.name}. Sections, in order:\n${template.sections
+      .map((s) => `  - ${s.title}: ${s.guide}`)
+      .join("\n")}`,
+  );
+  if (request.title) sections.push(`Meeting title: ${escapeHarnessTags(request.title.slice(0, 200))}`);
+
+  const firstTurn = Math.max(0, request.transcript.length - NOTES_LIMITS.turns);
+  const turns = request.transcript.slice(firstTurn).map((t, k) => {
+    const clamped = clamp(t.text, NOTES_LIMITS.turnChars);
+    const body = stripInstructionLike(clamped.text);
+    return envelope(
+      "untrusted-turn",
+      {
+        index: firstTurn + k,
+        speaker: t.speaker,
+        ...truncationAttribute(clamped.dropped),
+        ...(body.count ? { redacted: body.count } : {}),
+      },
+      body.text,
+    );
+  });
+  sections.push(
+    `<meeting-transcript turns="${request.transcript.length}"${firstTurn ? ` shown-from="${firstTurn}"` : ""}>\n${
+      turns.join("\n") || "(no speech was captured)"
+    }\n</meeting-transcript>`,
+  );
+
+  const notes = request.notes.slice(0, NOTES_LIMITS.notes).map((n, i) => {
+    const clamped = clamp(n.text, NOTES_LIMITS.noteChars);
+    const body = stripInstructionLike(clamped.text);
+    return envelope(
+      "untrusted-note",
+      { index: i, "typed-after-turn": n.turn, ...(body.count ? { redacted: body.count } : {}) },
+      body.text,
+    );
+  });
+  sections.push(
+    `<meeting-notes lines="${request.notes.length}">\n${notes.join("\n") || "(the person took no notes — write the note from the transcript)"}\n</meeting-notes>`,
   );
   return sections.join("\n\n");
 }

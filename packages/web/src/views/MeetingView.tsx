@@ -53,6 +53,7 @@ import {
   sliceBatch,
 } from "../meeting-engine.js";
 import { isLiveProvenance, objectsByTurn, pointsAtLive } from "../meetingTimeline.js";
+import { MeetingNotes } from "./MeetingNotes.js";
 import {
   TOPIC_BREAK_LINE,
   citationTurns,
@@ -295,7 +296,7 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
   // room's dock still names the old "extract" panel; that button now scrolls
   // the brief into view instead (see onRoomPanel).
   const [panelOpen, setPanelOpen] = useState(true);
-  const [activePanel, setActivePanel] = useState<"transcript" | "saved">("transcript");
+  const [activePanel, setActivePanel] = useState<"transcript" | "notes" | "saved">("transcript");
   const [callOpen, setCallOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [turnFilter, setTurnFilter] = useState<TurnFilter>("all");
@@ -1070,7 +1071,7 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
 
   // The video room's dock buttons: minutes/saved toggle this column; its
   // "extracted statements" button now means the brief.
-  const onRoomPanel = (p: "transcript" | "extract" | "saved"): void => {
+  const onRoomPanel = (p: "transcript" | "extract" | "saved" | "notes"): void => {
     if (p === "extract") {
       document
         .getElementById("meet-brief")
@@ -1594,6 +1595,8 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
                 panelOpen={panelOpen}
                 onTogglePanel={onRoomPanel}
                 activePanel={activePanel}
+                onToggleNotes={() => onRoomPanel("notes")}
+                notesOpen={panelOpen && activePanel === "notes"}
                 turnsCount={displayTurns.length}
               />
             </div>
@@ -1754,6 +1757,15 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
                 >
                   Transcript
                   <span className="meet-tab-count">{displayTurns.length}</span>
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={activePanel === "notes"}
+                  className={activePanel === "notes" ? "on" : ""}
+                  onClick={() => setActivePanel("notes")}
+                >
+                  Notes
                 </button>
                 <button
                   type="button"
@@ -1933,6 +1945,17 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
                     )}
                 </div>
               </>
+            )}
+
+            {activePanel === "notes" && (
+              <MeetingNotes
+                boardId={boardId}
+                meetingId={shown ? shown.id : liveMeetingId}
+                turns={displayTurns}
+                live={phase === "live"}
+                title={title}
+                onJumpToTurn={jumpToTurn}
+              />
             )}
 
             {activePanel === "saved" && (

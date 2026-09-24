@@ -99,6 +99,8 @@ export interface RouteServices {
   readonly usageStore: UsageStore | undefined;
   /** E3/R3: meeting transcripts; undefined → the meetings routes answer 503. */
   readonly meetings: MeetingStore | undefined;
+  /** docs/27 N1: one person's notes per meeting; undefined → the notes routes answer 503. */
+  readonly meetingNotes: import("../meetingNotes.js").MeetingNotesStore | undefined;
   /**
    * docs/24 Phase E: external meeting connectors (Zoom/Meet/Teams → turns).
    * The registry always carries at least the mock source; vendor adapters

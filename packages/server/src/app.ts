@@ -119,6 +119,8 @@ import { registerNotificationRoutes } from "./routes/notifications.js";
 import { registerInviteRoutes } from "./routes/invites.js";
 import { registerBoardOpsRoutes } from "./routes/boardOps.js";
 import { registerMeetingRoutes } from "./routes/meetings.js";
+import { registerMeetingNotesRoutes } from "./routes/meetingNotes.js";
+import { InMemoryMeetingNotesStore } from "./meetingNotes.js";
 import { registerOrgSettingsRoutes } from "./routes/settings.js";
 import { registerProposalRoutes } from "./routes/proposals.js";
 import { registerSsoRoutes } from "./routes/sso.js";
@@ -275,6 +277,8 @@ export interface AppDeps {
    * LUCENT_DATABASE_URL is set, in-memory otherwise).
    */
   meetings?: import("./meetings.js").MeetingStore;
+  /** docs/27 N1: meeting notes; defaults to an in-memory store beside `meetings`. */
+  meetingNotes?: import("./meetingNotes.js").MeetingNotesStore;
   /**
    * docs/24 Phase E: external meeting connectors. Optional in deps —
    * omitted means the mock-only registry, so every existing harness keeps
@@ -1900,6 +1904,9 @@ export function createApp(deps: AppDeps): App {
     notificationStore,
     usageStore,
     meetings,
+    // Notes live beside transcripts: with a meeting store and no notes store
+    // (tests, in-memory dev), keep notes in memory rather than refusing them.
+    meetingNotes: deps.meetingNotes ?? (meetings ? new InMemoryMeetingNotesStore() : undefined),
     ssoStore,
     integrations,
     proposals: proposalStore,
@@ -1980,6 +1987,7 @@ export function createApp(deps: AppDeps): App {
   registerInviteRoutes(router, services);
   registerBoardOpsRoutes(router, services);
   registerMeetingRoutes(router, services);
+  registerMeetingNotesRoutes(router, services);
   registerProposalRoutes(router, services);
   registerSsoRoutes(router, services);
   registerHistoryRoutes(router, services);

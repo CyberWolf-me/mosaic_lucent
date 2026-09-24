@@ -202,7 +202,7 @@ export function NativeRoom({
   onToggleRecording?: () => void;
   panelOpen?: boolean;
   onTogglePanel?: (panel: "transcript" | "extract" | "saved") => void;
-  activePanel?: "transcript" | "extract" | "saved";
+  activePanel?: "transcript" | "extract" | "saved" | "notes";
   turnsCount?: number;
   onToggleNotes?: () => void;
   notesOpen?: boolean;
@@ -617,7 +617,9 @@ export function NativeRoom({
         {onToggleNotes && (
           <button
             onClick={onToggleNotes}
-            title={notesOpen ? "Hide meeting notes" : "Show meeting notes & transcript"}
+            title={notesOpen ? "Hide your notes" : "Your notes — private to you"}
+            aria-label={notesOpen ? "Hide your notes" : "Show your notes"}
+            aria-pressed={notesOpen}
             style={{
               width: 46,
               height: 46,

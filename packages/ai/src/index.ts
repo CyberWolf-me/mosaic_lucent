@@ -9,6 +9,7 @@ export { OpenAICompatibleProvider } from "./providers/openai-compat.js";
 export { parseModelJson, parseToolArguments } from "./providers/toolCall.js";
 export * from "./image.js";
 export * from "./vector.js";
+export * from "./notes.js";
 export * from "./cache.js";
 export * from "./evals.js";
 export { GOLDEN_SET } from "./golden.js";
