@@ -1,5 +1,6 @@
+import { useEffect, useState } from "react";
 import type { Operation, Shape } from "@lucent/core";
-import { cloneShapeOp, shapeId } from "../shapes.js";
+import { cloneShapeOp, shapeId, zOrderOps, type ZMove } from "../shapes.js";
 import { alignPositions, distributePositions, type AlignMode } from "../board/geometry.js";
 
 /**
@@ -37,6 +38,73 @@ const TEXT_COLORS = [
   "oklch(0.78 0.11 155)",
 ];
 
+export const Z_MOVE_LABEL: Record<ZMove, string> = {
+  front: "Bring to front",
+  forward: "Bring forward",
+  backward: "Send backward",
+  back: "Send to back",
+};
+
+/**
+ * A compact number field that commits on Enter or blur, reverts on Escape,
+ * and follows the board when someone else changes the value meanwhile.
+ */
+function NumField({
+  label,
+  title,
+  value,
+  onCommit,
+  min,
+  max,
+  step = 1,
+  suffix,
+}: {
+  label: string;
+  title?: string;
+  value: number;
+  onCommit: (v: number) => void;
+  min?: number;
+  max?: number;
+  step?: number;
+  suffix?: string;
+}) {
+  const shown = Math.round(value * 100) / 100;
+  const [draft, setDraft] = useState(String(shown));
+  useEffect(() => setDraft(String(shown)), [shown]);
+  const commit = () => {
+    const n = Number.parseFloat(draft);
+    if (!Number.isFinite(n)) return setDraft(String(shown));
+    const clamped = Math.min(max ?? Infinity, Math.max(min ?? -Infinity, n));
+    if (clamped !== shown) onCommit(clamped);
+    else setDraft(String(shown));
+  };
+  return (
+    <label className="insp-num" title={title ?? label}>
+      <span aria-hidden>{label}</span>
+      <input
+        type="number"
+        inputMode="decimal"
+        aria-label={title ?? label}
+        value={draft}
+        step={step}
+        {...(min !== undefined ? { min } : {})}
+        {...(max !== undefined ? { max } : {})}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          e.stopPropagation();
+          if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+          if (e.key === "Escape") {
+            setDraft(String(shown));
+            (e.target as HTMLInputElement).blur();
+          }
+        }}
+      />
+      {suffix && <i aria-hidden>{suffix}</i>}
+    </label>
+  );
+}
+
 export function ShapeInspector({
   shapes,
   selectedIds,
@@ -63,14 +131,44 @@ export function ShapeInspector({
       "Restyle stroke",
     );
 
-  const bringOrder = (dir: 1 | -1) => {
-    const zs = Object.values(shapes).map((s) => s.z ?? 0);
-    const edge = dir === 1 ? Math.max(0, ...zs) + 1 : Math.min(0, ...zs) - 1;
+  const order = (move: ZMove) => {
+    const ops = zOrderOps(shapes, ids, move);
+    if (ops.length) onApply(ops, Z_MOVE_LABEL[move]);
+  };
+
+  // Numeric geometry (docs/26 §6.4): one shape at a time, committed on Enter
+  // or blur — never per keystroke, so a typed "120" is one undo step.
+  const one = ids.length === 1 ? shapes[ids[0]!]! : null;
+  const setGeometry = (patch: { x?: number; y?: number; w?: number; h?: number; r?: number }) => {
+    if (!one) return;
     onApply(
-      ids.map((id, i) => ({ op: "UPDATE_SHAPE", id, z: edge + i * dir })),
-      dir === 1 ? "Bring to front" : "Send to back",
+      [
+        {
+          op: "UPDATE_SHAPE",
+          id: one.id,
+          ...(patch.x !== undefined || patch.y !== undefined
+            ? { position: { x: patch.x ?? one.position.x, y: patch.y ?? one.position.y } }
+            : {}),
+          ...(patch.w !== undefined || patch.h !== undefined
+            ? { size: { width: patch.w ?? one.size.width, height: patch.h ?? one.size.height } }
+            : {}),
+          ...(patch.r !== undefined ? { rotation: patch.r } : {}),
+        },
+      ],
+      patch.r !== undefined ? "Rotate shape" : patch.w !== undefined || patch.h !== undefined ? "Resize shape" : "Move shape",
     );
   };
+  const opacityOf = (s: Shape) => Math.round((s.style?.opacity ?? 1) * 100);
+  const setOpacity = (pct: number) =>
+    onApply(
+      ids.map((id) => ({ op: "UPDATE_SHAPE", id, style: { opacity: pct / 100 } })),
+      "Opacity",
+    );
+  const setStrokeWidth = (strokeWidth: number) =>
+    onApply(
+      ids.map((id) => ({ op: "UPDATE_SHAPE", id, style: { strokeWidth } })),
+      "Stroke width",
+    );
 
   const duplicate = () => {
     const ops: Operation[] = [];
@@ -289,13 +387,59 @@ export function ShapeInspector({
           )}
         </div>
       )}
+      <div className="insp-group">
+        <span className="insp-cap">{one ? "Position · size" : "Appearance"}</span>
+        <div className="insp-fields">
+          {one && (
+            <>
+              <NumField label="X" value={one.position.x} onCommit={(x) => setGeometry({ x })} />
+              <NumField label="Y" value={one.position.y} onCommit={(y) => setGeometry({ y })} />
+              <NumField label="W" value={one.size.width} min={4} onCommit={(w) => setGeometry({ w })} />
+              <NumField label="H" value={one.size.height} min={4} onCommit={(h) => setGeometry({ h })} />
+              <NumField
+                label="↻"
+                title="Rotation, degrees"
+                value={one.rotation ?? 0}
+                suffix="°"
+                onCommit={(r) => setGeometry({ r: ((((r + 180) % 360) + 360) % 360) - 180 })}
+              />
+            </>
+          )}
+          <NumField
+            label="α"
+            title="Opacity, percent"
+            value={opacityOf(selectedShapes[0]!)}
+            min={5}
+            max={100}
+            suffix="%"
+            onCommit={setOpacity}
+          />
+          <NumField
+            label="—"
+            title="Stroke width"
+            value={selectedShapes[0]!.style?.strokeWidth ?? 1.5}
+            min={0}
+            max={24}
+            step={0.5}
+            onCommit={setStrokeWidth}
+          />
+        </div>
+      </div>
       <div className="insp-sep" />
-      <button className="insp-btn" onClick={() => bringOrder(1)}>
-        Front
-      </button>
-      <button className="insp-btn" onClick={() => bringOrder(-1)}>
-        Back
-      </button>
+      <div className="segmented insp-order" role="group" aria-label="Stacking order">
+        <button onClick={() => order("back")} title="Send to back · ⇧⌘[">
+          ⤓
+        </button>
+        <button onClick={() => order("backward")} title="Send backward · ⌘[">
+          ↓
+        </button>
+        <button onClick={() => order("forward")} title="Bring forward · ⌘]">
+          ↑
+        </button>
+        <button onClick={() => order("front")} title="Bring to front · ⇧⌘]">
+          ⤒
+        </button>
+      </div>
       <button className="insp-btn" onClick={duplicate}>
         Duplicate
       </button>

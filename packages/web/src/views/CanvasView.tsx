@@ -37,7 +37,7 @@ import { nodeIconRefs } from "../icons/exportSvg.js";
 import { MarqueeLayer } from "./MarqueeLayer.js";
 import { cullRect, visibleShapes } from "../board/culling.js";
 import { ShapeDrawLayer } from "./ShapeDrawLayer.js";
-import { ShapeInspector } from "./ShapeInspector.js";
+import { ShapeInspector, Z_MOVE_LABEL } from "./ShapeInspector.js";
 import { LinkInspector } from "./LinkInspector.js";
 import { Minimap } from "./Minimap.js";
 import { TemplatePicker } from "./TemplatePicker.js";
@@ -61,7 +61,7 @@ import {
   type VoiceAgentController,
   type VoiceAgentState,
 } from "../stt/voiceAgentSession.js";
-import { cloneShapeOp, nextZ, normalizeZ, shapeId } from "../shapes.js";
+import { cloneShapeOp, nextZ, normalizeZ, shapeId, zOrderOps, type ZMove } from "../shapes.js";
 import { resolveEmbed } from "../embed.js";
 import { boardToMarkdown, boardToCsv, csvToStickyOps } from "../board/serialize.js";
 import { boardToMermaid, mermaidToOps } from "../board/mermaid.js";
@@ -433,6 +433,15 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
       if (mod && e.key.toLowerCase() === "y") {
         e.preventDefault();
         redo();
+        return;
+      }
+
+      // Stacking order: ⌘] / ⌘[ one step, with Shift all the way. By code,
+      // not key, so it works on layouts where Shift turns ] into }.
+      if (mod && (e.code === "BracketRight" || e.code === "BracketLeft") && selectedShapes.size > 0) {
+        e.preventDefault();
+        const up = e.code === "BracketRight";
+        orderSelection(e.shiftKey ? (up ? "front" : "back") : up ? "forward" : "backward");
         return;
       }
 
@@ -1254,15 +1263,10 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
   }, [selectedShapes, workspace.shapes, applyManual]);
 
   const orderSelection = useCallback(
-    (dir: 1 | -1) => {
-      const ids = [...selectedShapes].filter((id) => workspace.shapes[id]);
-      if (ids.length === 0) return;
-      const zs = Object.values(workspace.shapes).map((s) => s.z ?? 0);
-      const edge = dir === 1 ? Math.max(0, ...zs) + 1 : Math.min(0, ...zs) - 1;
-      applyManual(
-        ids.map((id, i) => ({ op: "UPDATE_SHAPE" as const, id, z: edge + i * dir })),
-        dir === 1 ? "Bring to front" : "Send to back",
-      );
+    (move: ZMove) => {
+      const ops = zOrderOps(workspace.shapes, selectedShapes, move);
+      if (ops.length === 0) return;
+      applyManual(ops, Z_MOVE_LABEL[move]);
     },
     [selectedShapes, workspace.shapes, applyManual],
   );
@@ -1326,8 +1330,10 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
       .filter(Boolean) as import("@lucent/core").Shape[];
     const items: MenuItem[] = [
       { label: "Duplicate", onClick: () => pasteShapes(src, 24), disabled: ids.length === 0 },
-      { label: "Bring to front", onClick: () => orderSelection(1), disabled: ids.length === 0 },
-      { label: "Send to back", onClick: () => orderSelection(-1), disabled: ids.length === 0 },
+      { label: "Bring to front", onClick: () => orderSelection("front"), disabled: ids.length === 0 },
+      { label: "Bring forward", onClick: () => orderSelection("forward"), disabled: ids.length === 0 },
+      { label: "Send backward", onClick: () => orderSelection("backward"), disabled: ids.length === 0 },
+      { label: "Send to back", onClick: () => orderSelection("back"), disabled: ids.length === 0 },
       { label: "", onClick: () => {}, sep: true },
       { label: "Group", onClick: groupSelection, disabled: !canGroup },
       { label: "Ungroup", onClick: ungroupSelection, disabled: !canUngroup },
@@ -1684,6 +1690,13 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
     (id: string, width: number, height: number, commit: boolean) => {
       if (commit)
         applyManual([{ op: "UPDATE_SHAPE", id, size: { width, height } }], "Resize shape");
+    },
+    [applyManual],
+  );
+
+  const rotateShape = useCallback(
+    (id: string, rotation: number, commit: boolean) => {
+      if (commit) applyManual([{ op: "UPDATE_SHAPE", id, rotation }], "Rotate shape");
     },
     [applyManual],
   );
@@ -2234,6 +2247,7 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
                   onSelect={onShapePrimary}
                   onMove={moveShape}
                   onResize={resizeShape}
+                  onRotate={rotateShape}
                   onChangeLabel={relabelShape}
                   onAltDragDuplicate={altDragDuplicate}
                   editRequested={editShapeId === sh.id}

@@ -1887,7 +1887,8 @@ html[data-theme="light"] {
 }
 .shape.diamond span {
   transform: rotate(-45deg);
-  color: var(--ink-0);
+  /* The box's ink: the theme's, or the one its fill needs (shapes.ts inkOn). */
+  color: inherit;
   font-size: 12px;
 }
 .shape.sticky {
@@ -2931,6 +2932,56 @@ html[data-theme="light"] .segmented button.active {
   height: 1px;
   background: var(--stroke-1);
 }
+/* Numeric geometry (docs/26 §6.4): two columns of compact label+value cells. */
+.insp-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 5px;
+}
+.insp-num {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 7px;
+  height: 26px;
+  border-radius: 7px;
+  background: var(--canvas-3);
+  border: 1px solid var(--stroke-1);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink-3);
+}
+.insp-num:focus-within {
+  border-color: var(--bloom-2);
+  box-shadow: 0 0 0 2px var(--bloom-wash);
+}
+.insp-num input {
+  flex: 1;
+  min-width: 0;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  font: inherit;
+  font-size: 11.5px;
+  color: var(--ink-0);
+  text-align: right;
+  -moz-appearance: textfield;
+}
+.insp-num input::-webkit-outer-spin-button,
+.insp-num input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.insp-num i {
+  font-style: normal;
+  color: var(--ink-3);
+}
+.insp-order {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+}
 .insp-btn {
   padding: 7px 10px;
   border-radius: 7px;
@@ -2965,6 +3016,50 @@ html[data-theme="light"] .segmented button.active {
   border: 1px solid var(--canvas-0);
   cursor: nwse-resize;
   z-index: 2;
+}
+/* Rotate handle (docs/26 §6.4): a knob on a short stem above the top edge.
+   It lives inside the shape, so it turns with it. */
+.shape-rotate {
+  position: absolute;
+  top: -30px;
+  left: 50%;
+  width: 12px;
+  height: 12px;
+  margin-left: -6px;
+  border-radius: 50%;
+  background: var(--canvas-0);
+  border: 1.5px solid var(--amber-2);
+  cursor: grab;
+  z-index: 2;
+  touch-action: none;
+}
+.shape-rotate::after {
+  content: "";
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  width: 1px;
+  height: 18px;
+  margin-left: -0.5px;
+  background: var(--amber-2);
+  pointer-events: none;
+}
+.shape-rotate:active {
+  cursor: grabbing;
+}
+.shape-rotate-readout {
+  position: absolute;
+  top: -54px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 2px 6px;
+  border-radius: 6px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--canvas-0);
+  background: var(--ink-0);
+  pointer-events: none;
+  white-space: nowrap;
 }
 .shape.link-source {
   outline: 2px dashed var(--amber-2);

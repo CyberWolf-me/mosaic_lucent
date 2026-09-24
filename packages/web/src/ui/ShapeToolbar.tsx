@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { ToolIco } from "./icons.js";
 import { isImageDataUrl } from "@lucent/core";
 import type { Shape } from "@lucent/core";
-import { normalizeZ, type DropKind } from "../shapes.js";
+import { inkOn, normalizeZ, type DropKind } from "../shapes.js";
 import { DRAG_HYSTERESIS_PX, shapeLinkEnds, shapeLinkPath } from "../board/geometry.js";
 import { embedModeOf } from "../embed.js";
 
@@ -172,6 +172,7 @@ export function ShapeElement({
   onSelect,
   onMove,
   onResize,
+  onRotate,
   onChangeLabel,
   onContextMenu,
   onAltDragDuplicate,
@@ -185,6 +186,8 @@ export function ShapeElement({
   onSelect?: (id: string, additive: boolean) => void;
   onMove?: (id: string, x: number, y: number, commit: boolean) => void;
   onResize?: (id: string, width: number, height: number, commit: boolean) => void;
+  /** Rotation in degrees from the rotate handle (docs/26 §6.4); commit on release. */
+  onRotate?: (id: string, degrees: number, commit: boolean) => void;
   onChangeLabel?: (id: string, label: string) => void;
   onContextMenu?: (id: string, x: number, y: number) => void;
   /**
@@ -208,6 +211,8 @@ export function ShapeElement({
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(text ?? "");
   const [liveSize, setLiveSize] = useState<{ width: number; height: number } | null>(null);
+  const [liveRotation, setLiveRotation] = useState<number | null>(null);
+  const rotateRef = useRef<{ cx: number; cy: number } | null>(null);
   const dragRef = useRef<{
     startX: number;
     startY: number;
@@ -295,6 +300,47 @@ export function ShapeElement({
     onPointerUp: (e: React.PointerEvent) => endResize(e, true),
     // Takeover (scroll, alert): drop the live size, skip the commit.
     onPointerCancel: (e: React.PointerEvent) => endResize(e, false),
+  };
+
+  // Rotate (docs/26 §6.4): the angle from the shape's centre to the pointer,
+  // 0° with the handle straight up. The centre is read from the rendered box —
+  // rotation turns a box about its centre, so the bounding rect's centre is
+  // the shape's. Shift snaps to 15°; any angle within 4° of a right angle
+  // snaps to it, because "straight" is what people are nearly always after.
+  const angleAt = (e: React.PointerEvent, snap15: boolean): number => {
+    const c = rotateRef.current!;
+    let deg = (Math.atan2(e.clientY - c.cy, e.clientX - c.cx) * 180) / Math.PI + 90;
+    deg = ((((deg + 180) % 360) + 360) % 360) - 180;
+    if (snap15) return Math.round(deg / 15) * 15;
+    const right = Math.round(deg / 90) * 90;
+    return Math.abs(deg - right) < 4 ? right : Math.round(deg);
+  };
+  const rotateProps = {
+    onPointerDown: (e: React.PointerEvent) => {
+      e.stopPropagation();
+      e.preventDefault();
+      const box = (e.currentTarget.parentElement as HTMLElement).getBoundingClientRect();
+      rotateRef.current = { cx: box.left + box.width / 2, cy: box.top + box.height / 2 };
+      try {
+        e.currentTarget.setPointerCapture(e.pointerId);
+      } catch {
+        // Best-effort, as for resize.
+      }
+    },
+    onPointerMove: (e: React.PointerEvent) => {
+      if (rotateRef.current) setLiveRotation(angleAt(e, e.shiftKey));
+    },
+    onPointerUp: (e: React.PointerEvent) => {
+      if (!rotateRef.current) return;
+      const deg = angleAt(e, e.shiftKey);
+      rotateRef.current = null;
+      setLiveRotation(null);
+      if (deg !== (rotation ?? 0)) onRotate?.(id, deg, true);
+    },
+    onPointerCancel: () => {
+      rotateRef.current = null;
+      setLiveRotation(null);
+    },
   };
 
   const onPointerDown = (e: React.PointerEvent) => {
@@ -610,7 +656,18 @@ export function ShapeElement({
     animation: "emerge 0.35s var(--e-out) backwards",
     ...(sty?.fill ? { background: sty.fill } : {}),
     ...(sty?.stroke ? { borderColor: sty.stroke } : {}),
-    ...(sty?.color ? { color: sty.color } : {}),
+    // The inspector's stroke width (docs/26 §6.4) is the box's border (the
+    // draw kind returned above, reading it as its path's stroke).
+    ...(sty?.strokeWidth !== undefined
+      ? { borderWidth: sty.strokeWidth, borderStyle: sty.strokeWidth > 0 ? "solid" : "none" }
+      : {}),
+    // Explicit text colour, else one that reads on the fill in either theme
+    // (stickies keep their own graphite from CSS).
+    ...(sty?.color
+      ? { color: sty.color }
+      : kind !== "sticky" && inkOn(sty?.fill)
+        ? { color: inkOn(sty?.fill) }
+        : {}),
     ...(sty?.fontSize ? { fontSize: sty.fontSize } : {}),
     ...(sty?.fontWeight
       ? { fontVariationSettings: `'wght' ${sty.fontWeight}`, fontWeight: sty.fontWeight }
@@ -618,7 +675,9 @@ export function ShapeElement({
     ...(sty?.align ? { textAlign: sty.align } : {}),
     ...(sty?.opacity !== undefined ? { opacity: sty.opacity } : {}),
     ...(sty?.radius !== undefined ? { borderRadius: sty.radius } : {}),
-    ...(rotation ? { transform: `rotate(${rotation}deg)` } : {}),
+    ...((liveRotation ?? rotation)
+      ? { transform: `rotate(${liveRotation ?? rotation}deg)` }
+      : {}),
   };
 
   // Inline editing uses a multi-line textarea so text/sticky notes support
@@ -700,7 +759,18 @@ export function ShapeElement({
 
   const resizeHandle =
     selected && !shape.locked ? (
-      <span className="shape-resize" {...resizeProps} title="Resize" />
+      <>
+        <span className="shape-resize" {...resizeProps} title="Resize" />
+        {onRotate && (
+          <span
+            className="shape-rotate"
+            {...rotateProps}
+            title="Rotate · Shift snaps to 15°"
+            aria-hidden
+          />
+        )}
+        {liveRotation !== null && <span className="shape-rotate-readout">{liveRotation}°</span>}
+      </>
     ) : null;
 
   if (kind === "diamond") {

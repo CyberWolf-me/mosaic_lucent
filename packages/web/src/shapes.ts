@@ -71,6 +71,91 @@ export function normalizeZ(z: number | undefined): number {
   return Math.min(Math.round(z), Z_MAX);
 }
 
+const INK_DARK = "oklch(0.20 0.030 45)";
+const INK_LIGHT = "oklch(0.96 0.014 82)";
+
+/**
+ * Text colour that reads on a shape's own fill, whatever the theme. Shape text
+ * used to take the theme's ink, so in dark mode every pastel sticky and
+ * swatch fill carried near-white text. Fills are literal colours (the schema's
+ * grammar), so lightness is readable straight off them: oklch/oklab's L, or
+ * the relative luminance of hex and rgb(). Undefined when it can't tell
+ * (hsl), and the theme ink stays.
+ */
+export function inkOn(fill: string | undefined): string | undefined {
+  if (!fill) return undefined;
+  const ok = /^okl(?:ch|ab)\(\s*([0-9.]+)(%?)/.exec(fill);
+  if (ok) {
+    const l = Number.parseFloat(ok[1]!) / (ok[2] ? 100 : 1);
+    return l > 0.62 ? INK_DARK : INK_LIGHT;
+  }
+  let rgb: number[] | undefined;
+  const hex = /^#([0-9a-f]{3}|[0-9a-f]{6})(?:[0-9a-f]{2})?$/i.exec(fill);
+  if (hex) {
+    const h = hex[1]!.length === 3 ? [...hex[1]!].map((c) => c + c).join("") : hex[1]!;
+    rgb = [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16));
+  }
+  const fn = /^rgba?\(\s*([0-9.]+)[\s,]+([0-9.]+)[\s,]+([0-9.]+)/.exec(fill);
+  if (fn) rgb = [fn[1], fn[2], fn[3]].map((v) => Number.parseFloat(v!));
+  if (!rgb) return undefined;
+  const lin = (c: number) => {
+    const s = c / 255;
+    return s <= 0.04045 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+  };
+  const y = 0.2126 * lin(rgb[0]!) + 0.7152 * lin(rgb[1]!) + 0.0722 * lin(rgb[2]!);
+  return y > 0.3 ? INK_DARK : INK_LIGHT;
+}
+
+export type ZMove = "front" | "forward" | "backward" | "back";
+
+/**
+ * The UPDATE_SHAPEs that move `ids` in the stacking order (docs/26 §6.4).
+ *
+ * The order is the one the canvas paints: z, then insertion order for ties. A
+ * one-step move swaps each selected shape past its unselected neighbour; front
+ * and back move the selection as a block, keeping its internal order. The new
+ * order is then written as dense z values, touching only shapes whose z
+ * changes, and nothing at all when the order doesn't change (already on top).
+ *
+ * This replaces "z = min - 1" for Send to back, which went negative and
+ * clamped to 0 on render — tying with the other shapes and often not moving
+ * anything.
+ */
+export function zOrderOps(
+  all: Record<string, Shape>,
+  ids: Iterable<string>,
+  move: ZMove,
+): Array<Extract<Operation, { op: "UPDATE_SHAPE" }>> {
+  const sel = new Set([...ids].filter((id) => all[id]));
+  if (sel.size === 0) return [];
+  const order = Object.values(all)
+    .map((s, i) => ({ id: s.id, z: normalizeZ(s.z), i }))
+    .sort((a, b) => a.z - b.z || a.i - b.i)
+    .map((x) => x.id);
+  let next: string[];
+  if (move === "front") next = [...order.filter((id) => !sel.has(id)), ...order.filter((id) => sel.has(id))];
+  else if (move === "back") next = [...order.filter((id) => sel.has(id)), ...order.filter((id) => !sel.has(id))];
+  else {
+    next = [...order];
+    if (move === "forward") {
+      for (let k = next.length - 2; k >= 0; k--) {
+        if (sel.has(next[k]!) && !sel.has(next[k + 1]!)) [next[k], next[k + 1]] = [next[k + 1]!, next[k]!];
+      }
+    } else {
+      for (let k = 1; k < next.length; k++) {
+        if (sel.has(next[k]!) && !sel.has(next[k - 1]!)) [next[k], next[k - 1]] = [next[k - 1]!, next[k]!];
+      }
+    }
+  }
+  if (next.every((id, k) => id === order[k])) return [];
+  const ops: Array<Extract<Operation, { op: "UPDATE_SHAPE" }>> = [];
+  next.forEach((id, rank) => {
+    const z = Math.min(rank + 1, Z_MAX);
+    if (all[id]!.z !== z) ops.push({ op: "UPDATE_SHAPE", id, z });
+  });
+  return ops;
+}
+
 /** Next z above every existing shape, clamped into the legal band. */
 export function nextZ(shapes: { z?: number }[]): number {
   const top = shapes.reduce((m, s) => Math.max(m, normalizeZ(s.z)), 0);
