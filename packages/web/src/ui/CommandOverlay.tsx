@@ -6,6 +6,7 @@ import type { Workspace } from "@lucent/core";
 import { searchBoard, type BoardSearchHit, type BoardSearchResponse } from "../boards.js";
 import { resolveLocale, t } from "@lucent/i18n";
 import { listProjects } from "../persistence.js";
+import { frameEntries, sendCanvasCommand } from "../canvasCommands.js";
 import {
   buildResults,
   groupSearchHits,
@@ -86,6 +87,44 @@ export function CommandOverlay({
   const items: PaletteItem[] = useMemo(
     () => [
       { id: "undo", label: "Undo", hint: "⌘Z · History", group: "action", run: { kind: "undo" } },
+      // Canvas navigation (docs/26 §6.4): the camera, from anywhere.
+      {
+        id: "c-fit",
+        label: "Fit board",
+        hint: "⇧1 · Canvas",
+        group: "action",
+        run: { kind: "canvas", cmd: { kind: "fit" } },
+      },
+      {
+        id: "c-fit-selection",
+        label: "Zoom to selection",
+        hint: "⇧2 · Canvas",
+        group: "action",
+        run: { kind: "canvas", cmd: { kind: "fitSelection" } },
+      },
+      {
+        id: "c-back",
+        label: "Camera back",
+        hint: "Return to where you were · Canvas",
+        group: "action",
+        run: { kind: "canvas", cmd: { kind: "back" } },
+      },
+      {
+        id: "c-forward",
+        label: "Camera forward",
+        hint: "Canvas",
+        group: "action",
+        run: { kind: "canvas", cmd: { kind: "forward" } },
+      },
+      ...frameEntries(workspace).map(
+        (fr): PaletteItem => ({
+          id: `frame-${fr.id}`,
+          label: `Go to frame · ${fr.title}`,
+          hint: "Frame · Canvas",
+          group: "action",
+          run: { kind: "canvas", cmd: { kind: "frame", id: fr.id } },
+        }),
+      ),
       { id: "redo", label: "Redo", hint: "⌘⇧Z · History", group: "action", run: { kind: "redo" } },
       {
         id: "new",
@@ -186,7 +225,8 @@ export function CommandOverlay({
         run: { kind: "view", view: "admin" },
       },
     ],
-    [],
+    // Frames come from the board, so the list follows it.
+    [workspace],
   );
 
   // Local scan for local boards: nodes by label/type and shapes by text. On a
@@ -324,6 +364,11 @@ export function CommandOverlay({
         break;
       case "view":
         setView(a.view);
+        break;
+      case "canvas":
+        // The command waits for the canvas if this switches to it.
+        setView("canvas");
+        sendCanvasCommand(a.cmd);
         break;
     }
     onClose();

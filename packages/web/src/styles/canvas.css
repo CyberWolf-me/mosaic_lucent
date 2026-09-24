@@ -59,6 +59,52 @@
   align-items: center;
   gap: 8px;
 }
+/* Camera history (docs/26 §6.4): shown only after a jump, so it reads as
+   "you came from somewhere" rather than as permanent chrome. */
+.camera-nav {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 999px;
+  background: oklch(from var(--paper-2) l c h / 0.95);
+  border: 1px solid oklch(from var(--paper-4) l c h / 0.7);
+  box-shadow: var(--elev-2, 0 2px 8px rgb(0 0 0 / 0.08));
+  animation: camera-nav-in 0.18s var(--e-out, ease-out) both;
+}
+.camera-nav-btn {
+  padding: 4px 10px;
+  border: 0;
+  border-radius: 999px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--ink-1);
+  background: transparent;
+  cursor: pointer;
+}
+.camera-nav-btn:hover:not(:disabled) {
+  color: var(--ink-0);
+  background: var(--paper-3);
+}
+.camera-nav-btn:disabled {
+  color: var(--ink-3);
+  cursor: default;
+}
+.camera-nav-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--bloom-wash);
+}
+@keyframes camera-nav-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .camera-nav {
+    animation: none;
+  }
+}
 .canvas-top-right .mode-bar,
 .canvas-top-right .canvas-utility-bar {
   position: static;

@@ -676,6 +676,18 @@ export interface ViewportControls {
    * a "you are here" rectangle instead of only showing what exists.
    */
   visibleBox: () => { x: number; y: number; width: number; height: number } | null;
+  /**
+   * The exact camera, and a glide back to one (docs/26 §6.4 camera history).
+   * Exact on purpose: restoring through focusOn/fitBounds would drift by the
+   * chrome insets and fit padding on every round trip.
+   */
+  getCamera: () => Camera;
+  setCamera: (camera: Camera) => void;
+}
+
+export interface Camera {
+  zoom: number;
+  pan: { x: number; y: number };
 }
 
 export function CanvasViewport({
@@ -821,6 +833,10 @@ export function CanvasViewport({
         glideTo(100, { x: 0, y: 0 });
       },
       getZoom: () => zoom,
+      getCamera: () => ({ zoom, pan: { ...pan } }),
+      setCamera: (camera) => {
+        glideTo(clamp(camera.zoom, ZOOM_MIN, ZOOM_MAX), { ...camera.pan });
+      },
       focusOn: (cx, cy, zoomPercent) => {
         const el = containerRef.current;
         if (!el) return;

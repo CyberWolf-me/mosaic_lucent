@@ -1,3 +1,4 @@
+import type { CanvasCommand } from "../canvasCommands.js";
 import type { View } from "../workspace.js";
 import type { BoardSearchHit } from "../boards.js";
 
@@ -27,7 +28,9 @@ export type PaletteAction =
   | { kind: "newWorkspace" }
   | { kind: "settings"; section?: string }
   | { kind: "export" }
-  | { kind: "view"; view: View };
+  | { kind: "view"; view: View }
+  /** A canvas command (canvasCommands.ts): fit, zoom to a frame, camera history. */
+  | { kind: "canvas"; cmd: CanvasCommand };
 
 export interface PaletteItem {
   id: string;

@@ -4,7 +4,7 @@ import { applyLayout, applyRoutes, computeLayoutWithRoutes } from "@lucent/core"
 import { Ico } from "../ui/icons.js";
 import { AIPill } from "../ui/AIPill.js";
 import { TopBar, LeftRail, ZoomBadge, StatusBadge, type Crumb } from "../ui/Chrome.js";
-import { CanvasViewport, emitHaptic, type ViewportControls } from "../ui/atoms.js";
+import { CanvasViewport, emitHaptic, type Camera, type ViewportControls } from "../ui/atoms.js";
 import { DiagramLayer } from "../ui/DiagramLayer.js";
 import {
   ShapeToolbar,
@@ -32,6 +32,7 @@ import { VoiceOverlay } from "./VoiceOverlay.js";
 import { StatementGlyph } from "../ui/StatementGlyph.js";
 import { PresentMode } from "./PresentMode.js";
 import { PenLayer } from "./PenLayer.js";
+import { onCanvasCommand, sendCanvasCommand, type CanvasCommand } from "../canvasCommands.js";
 import { preloadIcons } from "../icons/registry.js";
 import { nodeIconRefs } from "../icons/exportSvg.js";
 import { MarqueeLayer } from "./MarqueeLayer.js";
@@ -525,12 +526,12 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
       // Shift+1 fits the whole board, Shift+2 the selection (Figma parity).
       if (!mod && e.shiftKey && e.key === "!") {
         e.preventDefault();
-        fitRef.current();
+        sendCanvasCommand({ kind: "fit" });
         return;
       }
       if (!mod && e.shiftKey && e.key === "@") {
         e.preventDefault();
-        fitSelectionRef.current();
+        sendCanvasCommand({ kind: "fitSelection" });
         return;
       }
 
@@ -1309,7 +1310,15 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
     const src = ids
       .map((id) => workspace.shapes[id])
       .filter(Boolean) as import("@lucent/core").Shape[];
+    const onlyFrame =
+      ids.length === 1 && workspace.shapes[ids[0]!]?.kind === "frame" ? ids[0]! : null;
     const items: MenuItem[] = [
+      ...(onlyFrame
+        ? [
+            { label: "Zoom to frame", onClick: () => sendCanvasCommand({ kind: "frame", id: onlyFrame }) },
+            { label: "", onClick: () => {}, sep: true },
+          ]
+        : []),
       { label: "Duplicate", onClick: () => pasteShapes(src, 24), disabled: ids.length === 0 },
       { label: "Bring to front", onClick: () => orderSelection("front"), disabled: ids.length === 0 },
       { label: "Bring forward", onClick: () => orderSelection("forward"), disabled: ids.length === 0 },
@@ -1430,6 +1439,38 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
   );
 
   /** Node click: vote during a round, otherwise select (shift = add to selection). */
+  // Camera history (docs/26 §6.4): every jump the user asks for — fit, fit
+  // selection, go to a frame, follow a citation to a node — remembers where
+  // the camera was, and Back returns there exactly. Manual pans and zooms are
+  // not jumps and aren't recorded. Twenty steps is plenty.
+  const camBack = useRef<Camera[]>([]);
+  const camFwd = useRef<Camera[]>([]);
+  const [camDepth, setCamDepth] = useState({ back: 0, fwd: 0 });
+  const syncCamDepth = () => setCamDepth({ back: camBack.current.length, fwd: camFwd.current.length });
+  const rememberCamera = useCallback(() => {
+    const cam = controls.current?.getCamera();
+    if (!cam) return;
+    camBack.current = [...camBack.current.slice(-19), cam];
+    camFwd.current = [];
+    syncCamDepth();
+  }, []);
+  const cameraBack = useCallback(() => {
+    const prev = camBack.current.pop();
+    const now = controls.current?.getCamera();
+    if (!prev || !now) return;
+    camFwd.current.push(now);
+    controls.current?.setCamera(prev);
+    syncCamDepth();
+  }, []);
+  const cameraForward = useCallback(() => {
+    const next = camFwd.current.pop();
+    const now = controls.current?.getCamera();
+    if (!next || !now) return;
+    camBack.current.push(now);
+    controls.current?.setCamera(next);
+    syncCamDepth();
+  }, []);
+
   // Select a node and bring it into view — the inspector's links (a
   // connection, the decision behind an action) move the camera with them.
   const revealNode = useCallback(
@@ -1437,13 +1478,14 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
       selectNode(id, false);
       const n = workspace.nodes[id];
       if (n?.position) {
+        rememberCamera();
         controls.current?.focusOn(
           n.position.x + (n.size?.width ?? 160) / 2,
           n.position.y + (n.size?.height ?? 64) / 2,
         );
       }
     },
-    [selectNode, workspace.nodes],
+    [selectNode, workspace.nodes, rememberCamera],
   );
 
   // The ✦ trust loop: jump to the meeting that created a node. The meeting id
@@ -1838,8 +1880,6 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
   // as the board overlapping the chrome.
   const fitRef = useRef(fitToContent);
   fitRef.current = fitToContent;
-  const fitSelectionRef = useRef(fitToSelection);
-  fitSelectionRef.current = fitToSelection;
   const objectCount = nodeCount + shapes.length;
   const prevCountRef = useRef(-1);
   // A fit that is owed survives the effect being torn down before its timer
@@ -1861,11 +1901,60 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
     if (((had === -1 || had === 0) && objectCount > 0) || batchAdded) fitOwedRef.current = true;
     if (!fitOwedRef.current) return;
     const t = setTimeout(() => {
+      // A camera command (the palette's "Go to frame", a citation) can cancel
+      // the owed fit: the jump the user asked for outranks the automatic one.
+      if (!fitOwedRef.current) return;
       fitOwedRef.current = false;
       fitRef.current();
     }, 260);
     return () => clearTimeout(t);
   }, [objectCount]);
+
+  /** Frame a frame: its box fills the view, and it becomes the selection. */
+  const zoomToFrame = useCallback(
+    (id: string) => {
+      const s = workspace.shapes[id];
+      if (!s) return;
+      rememberCamera();
+      setSelectedShapes(new Set([id]));
+      setSelectedNodes(new Set());
+      setSelected(null);
+      controls.current?.fitBounds({
+        x: s.position.x,
+        y: s.position.y,
+        width: s.size.width,
+        height: s.size.height,
+      });
+    },
+    [workspace.shapes, rememberCamera],
+  );
+
+  // Commands from the palette (canvasCommands.ts). Declared after the owed-fit
+  // effect so a command that arrived before mount cancels that fit.
+  const commandRef = useRef<(cmd: CanvasCommand) => void>(() => {});
+  commandRef.current = (cmd) => {
+    fitOwedRef.current = false;
+    switch (cmd.kind) {
+      case "fit":
+        rememberCamera();
+        fitToContent();
+        break;
+      case "fitSelection":
+        rememberCamera();
+        fitToSelection();
+        break;
+      case "frame":
+        zoomToFrame(cmd.id);
+        break;
+      case "back":
+        cameraBack();
+        break;
+      case "forward":
+        cameraForward();
+        break;
+    }
+  };
+  useEffect(() => onCanvasCommand((cmd) => commandRef.current(cmd)), []);
 
   // Export the current board (nodes + shapes) as a downloadable SVG snapshot.
   // Icons first: culled cards never loaded theirs, and the export is sync.
@@ -2551,6 +2640,23 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
               stays separate — comments are attention, not tools. */}
           {/* Top-right consolidated Activity & Utilities Bar */}
           <div className="canvas-top-right">
+          {(camDepth.back > 0 || camDepth.fwd > 0) && (
+            <div className="camera-nav" role="group" aria-label="Camera history">
+              <button
+                className="camera-nav-btn"
+                onClick={cameraBack}
+                disabled={camDepth.back === 0}
+                title="Back to where you were"
+              >
+                ↩ Back
+              </button>
+              {camDepth.fwd > 0 && (
+                <button className="camera-nav-btn" onClick={cameraForward} title="Forward again">
+                  ↪
+                </button>
+              )}
+            </div>
+          )}
           {canvasPhase === "main" && (
             <ModeBar
               mode={mode}
@@ -2817,7 +2923,7 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
             onZoomIn={() => controls.current?.zoomIn()}
             onZoomOut={() => controls.current?.zoomOut()}
             onReset={() => controls.current?.reset()}
-            onFit={fitToContent}
+            onFit={() => sendCanvasCommand({ kind: "fit" })}
             overviewOn={overviewOpen}
             onToggleOverview={() => setOverviewOpen((v) => !v)}
           />
