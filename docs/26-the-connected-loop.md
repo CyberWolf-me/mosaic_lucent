@@ -279,6 +279,18 @@ in a worker (flat-art and detailed presets), pen strokes → smooth vector, the
 inspector's palette recolour, ink, stroke weight and SVG download, and
 vectors in exports. Not yet: split into parts, simplify, gradients.
 
+**Status (2026-09-24, V3):** built — the `VectorProvider` seam in `@lucent/ai`
+(Recraft `recraftv4_1_vector` via `b64_json`, and an offline mock); `POST
+/api/vector` (editor of the board, the board's AI boundary, the AI allowance, a
+`vector.generation` line item) sanitizes every vendor document through the core
+importer and strips the backdrop, so the client only ever receives structured
+paths; the Generate tab (style, three variations, click to place, "More" from
+the inspector); a brand guard that offers the real mark from the library instead
+of generating another company's logo (Recraft's terms forbid it); prompt v14
+lets the visual agent draw a small pictogram itself as the free fallback.
+Verified against the live API (one call, 80 units). Not yet: AI edit of an
+existing vector (image-to-image), QuiverAI.
+
 **Five ways to make a vector:**
 
 | Path                   | How                                                                                                       | Runs where                          |

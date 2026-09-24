@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { selectImageProvider } from "./image.js";
+import { selectVectorProvider } from "./vector.js";
 import { selectProvider } from "./provider.js";
 import { UsageTracker, limitsFromEnv } from "./usage.js";
 import { Telemetry } from "./telemetry.js";
@@ -548,11 +549,16 @@ if (scim) {
 // instance the route uses. One provider object, chosen once: the worker path
 // and the request path must bill and behave identically.
 const imageProvider = selectImageProvider();
+// docs/26 §6.3 V3: Recraft when LUCENT_RECRAFT_API_KEY is set, the offline mock
+// otherwise, none with LUCENT_VECTOR_PROVIDER=off.
+const vectorProvider = selectVectorProvider();
+console.log(`[lucent] vector: ${vectorProvider ? vectorProvider.name : "off"}`);
 
 const { server, realtime } = createApp({
   config,
   provider,
   imageProvider,
+  vectorProvider,
   // docs/25 V1: server-hosted diarizing STT. Key + URL mean a live sidecar;
   // anything less is the standby mock and the STT routes answer 503.
   stt: (await import("./stt.js")).selectSttService(process.env),

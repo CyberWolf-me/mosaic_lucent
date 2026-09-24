@@ -8,6 +8,7 @@ import {
   type Shape,
   type VectorData,
 } from "@lucent/core";
+import { openVectorsPanel } from "./VectorsPanel.js";
 
 /**
  * The shape inspector's section for editable vectors (docs/26 §6.3): the
@@ -165,6 +166,14 @@ export function VectorSection({
               Thicker
             </button>
           </>
+        )}
+        {vectors.length === 1 && vectors[0]!.vector.source?.prompt && (
+          <button
+            onClick={() => openVectorsPanel(vectors[0]!.vector.source!.prompt)}
+            title="Generate variations from the same prompt"
+          >
+            More
+          </button>
         )}
         {vectors.length === 1 && (
           <button onClick={download} title="Download this vector as an SVG file">

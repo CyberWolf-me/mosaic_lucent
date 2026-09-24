@@ -81,6 +81,8 @@ export interface StoredPlan {
 export const USAGE_KINDS = [
   "ai.generation",
   "image.generation",
+  // docs/26 §6.3 V3: generated vector variations, one unit per variation.
+  "vector.generation",
   "voice.minute",
   "export",
   "storage.bytes",

@@ -1,6 +1,6 @@
 import type { IncomingMessage, Server, ServerResponse } from "node:http";
 import { createServer } from "node:http";
-import type { LLMProvider, ImageProvider } from "@lucent/ai";
+import type { LLMProvider, ImageProvider, VectorProvider } from "@lucent/ai";
 import { handleGenerate, handleGenerateStream } from "./generate.js";
 import { readByoHeaders, resolveProvider, providerFact } from "./modelRouter.js";
 import {
@@ -18,6 +18,7 @@ import { MockSttService, createSttSessionRegistry } from "./stt.js";
 import { MockTtsService } from "./tts.js";
 import { MockMeetingSource } from "./meetingConnectors.js";
 import { handleImage } from "./image.js";
+import { handleVector, vectorRequestSchema, type VectorRouteRequest } from "./vector.js";
 import type { UsageTracker, UsageLimits } from "./usage.js";
 import type { Telemetry, TelemetryEvent } from "./telemetry.js";
 import {
@@ -164,6 +165,11 @@ export interface AppDeps {
   config: Config;
   provider: LLMProvider;
   imageProvider: ImageProvider;
+  /**
+   * docs/26 §6.3 V3: prompt → vector art. Optional (tests and deployments
+   * without it get a 503 from /api/vector); main.ts wires selectVectorProvider.
+   */
+  vectorProvider?: VectorProvider | null;
   /**
    * docs/25 V1: server-hosted diarizing STT. Optional the way `provider`
    * is not — omitted means the standby mock, so every existing harness
@@ -487,6 +493,7 @@ export function createApp(deps: AppDeps): App {
     config,
     provider,
     imageProvider,
+    vectorProvider = null,
     userStore,
     boardStore,
     secret,
@@ -4304,6 +4311,87 @@ export function createApp(deps: AppDeps): App {
           requestId: traceOf(req),
         });
       }
+      return;
+    }
+
+    // docs/26 §6.3 V3: prompt → editable vector variations. The vendor's SVG
+    // is sanitized into structured paths inside handleVector; the client never
+    // receives SVG text. Metered like /api/image: against the AI allowance,
+    // with its own line item.
+    if (req.method === "POST" && req.url === "/api/vector") {
+      if (!requireCsrf(req, res, "/api/vector")) return;
+      const auth = await requireUserIfNeeded(req, res);
+      if (!auth.ok) return;
+      if (!meter(req, res, "/api/vector")) return;
+      if (!vectorProvider) {
+        send(res, 503, { error: "vector generation is not configured on this deployment" });
+        return;
+      }
+      let request: VectorRouteRequest;
+      try {
+        const raw = await readBody(req);
+        request = vectorRequestSchema.parse(raw ? JSON.parse(raw) : {});
+      } catch (err) {
+        send(res, 400, { error: "bad request", detail: (err as Error).message });
+        return;
+      }
+      let board: StoredBoard | undefined;
+      if (request.boardId) {
+        const caller = auth.userId ? await userStore.findById(auth.userId) : undefined;
+        if (!caller) {
+          send(res, 401, { error: "authentication required" });
+          return;
+        }
+        const guard = await requireBoardRole(req, res, request.boardId, "editor", "/api/vector", caller);
+        if (!guard.ok) return;
+        board = guard.board;
+        // The prompt leaves the deployment for a vendor: the board's AI
+        // boundary (classification, org policy) decides, as for generation.
+        const refusal = await outboundRefusal(board, "ai");
+        if (refusal) {
+          send(res, 403, {
+            error: refusal.error,
+            classification: refusal.classification,
+            boundary: refusal.boundary,
+          });
+          return;
+        }
+      }
+      const vectorCtx = await resolveAiContext(auth.userId, board);
+      const allowance = vectorCtx.orgId
+        ? await gateMonthly(req, res, vectorCtx.orgId, "ai.generationsPerMonth", "/api/vector")
+        : null;
+      if (allowance === false) return;
+      const started = Date.now();
+      const result = await handleVector(vectorProvider, request);
+      if (result.status >= 400) {
+        telemetry.record({
+          kind: "error",
+          route: "/api/vector",
+          status: result.status,
+          message: JSON.stringify((result.body as { error?: string })?.error ?? result.body),
+          requestId: traceOf(req),
+        });
+      } else {
+        telemetry.record({
+          kind: "image",
+          ms: Date.now() - started,
+          provider: vectorProvider.name,
+          requestId: traceOf(req),
+        });
+      }
+      // Billed when the vendor produced art, even if none survived import:
+      // the vendor charged for it either way.
+      if (result.produced > 0 && vectorCtx.orgId) {
+        const drawnBy = { provider: vectorProvider.name, model: vectorProvider.model ?? null };
+        meterUsage(vectorCtx.orgId, "ai.generation", 1, { sort: "vector", ...drawnBy });
+        meterUsage(vectorCtx.orgId, "vector.generation", result.produced, {
+          ...drawnBy,
+          billedAs: "ai.generation",
+          ...(board ? { boardId: board.id } : {}),
+        });
+      }
+      send(res, result.status, result.status < 400 ? withAllowance(result.body, allowance) : result.body);
       return;
     }
 

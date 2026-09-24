@@ -36,15 +36,16 @@ import { onCanvasCommand, sendCanvasCommand, type CanvasCommand } from "../canva
 import { preloadExportData } from "../board/exportData.js";
 import { placeImage } from "../assets.js";
 import {
+  fitSize,
   replaceWithVectorOps,
   sketchToVectorOps,
   svgToVectorOp,
   vectorFromGlyph,
   vectorShapeOp,
 } from "../vector/ops.js";
+import { VECTORS_OPEN_EVENT, VectorsPanel } from "../vector/VectorsPanel.js";
 import { traceImage } from "../vector/trace.js";
 import { assetUrl } from "../assets.js";
-import { IconPicker } from "../icons/IconPicker.js";
 import { loadIcon } from "../icons/registry.js";
 import { MarqueeLayer } from "./MarqueeLayer.js";
 import { cullRect, visibleShapes } from "../board/culling.js";
@@ -1910,6 +1911,27 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
   // vector at the centre of the view. Brand marks keep their colour; outline
   // icons take the shape's ink.
   const [vectorsOpen, setVectorsOpen] = useState(false);
+  const [vectorsPrompt, setVectorsPrompt] = useState<string | undefined>(undefined);
+  // "More like this" from the inspector opens Generate with the vector's prompt.
+  useEffect(() => {
+    const onOpen = (e: Event) => {
+      setVectorsPrompt((e as CustomEvent<{ prompt?: string }>).detail?.prompt);
+      setVectorsOpen(true);
+    };
+    window.addEventListener(VECTORS_OPEN_EVENT, onOpen);
+    return () => window.removeEventListener(VECTORS_OPEN_EVENT, onOpen);
+  }, []);
+  /** A generated variation, placed at the centre of the view, fitted to 200px. */
+  const placeGeneratedVector = useCallback(
+    (vector: import("@lucent/core").VectorData, width: number, height: number) => {
+      const at = viewportBox
+        ? { x: viewportBox.x + viewportBox.width / 2, y: viewportBox.y + viewportBox.height / 2 }
+        : { x: 400, y: 300 };
+      const op = vectorShapeOp(vector, at, fitSize(width, height, 200), nextZ(Object.values(workspace.shapes)));
+      if (applyManual([op], "Place generated vector")) setSelectedShapes(new Set([op.id]));
+    },
+    [applyManual, viewportBox, workspace.shapes],
+  );
   const insertIconVector = useCallback(
     async (ref: string) => {
       const glyph = await loadIcon(ref);
@@ -2432,19 +2454,13 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
           {/* No "what the board knows" stamp yet: an empty board knows nothing. */}
           <TopBar crumbs={crumbs} onOpenSettings={onOpenSettings} />
           {vectorsOpen && canEdit && (
-            <div className="vectors-pop" role="dialog" aria-label="Icons and vectors">
-              <div className="vectors-pop-head">
-                <span>Icons & vectors</span>
-                <button onClick={() => setVectorsOpen(false)} aria-label="Close" title="Close · Esc">
-                  ×
-                </button>
-              </div>
-              <p className="vectors-pop-hint">
-                Places an editable vector. Paste or drop an SVG to import one; right-click an image to
-                trace it, or pen strokes to smooth them into a vector.
-              </p>
-              <IconPicker onChoose={(ref) => void insertIconVector(ref)} onClose={() => setVectorsOpen(false)} />
-            </div>
+            <VectorsPanel
+              boardId={boardId}
+              initialPrompt={vectorsPrompt}
+              onPlaceIcon={(ref) => void insertIconVector(ref)}
+              onPlaceVector={placeGeneratedVector}
+              onClose={() => setVectorsOpen(false)}
+            />
           )}
           <LeftRail onOpenSettings={onOpenSettings} />
           {/* The shape toolbar is NOT on the hero. It is `position: fixed`, so

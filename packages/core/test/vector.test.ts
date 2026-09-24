@@ -15,6 +15,7 @@ import {
   vectorDataSchema,
   vectorPalette,
   vectorToSvg,
+  withoutBackground,
   type Operation,
   type VectorData,
 } from "@lucent/core";
@@ -308,5 +309,23 @@ describe("editing helpers", () => {
     expect((r.vector.paths[0]!.d.match(/C/g) ?? []).length).toBeLessThan(4);
     expect(vectorDataSchema.safeParse(r.vector).success).toBe(true);
     expect(sketchToVector([{ d: "garbage", x: 0, y: 0 }])).toBeNull();
+  });
+});
+
+describe("withoutBackground", () => {
+  const art = (first: string, rest = ["M4 4L6 6"]) =>
+    ({
+      viewBox: [0, 0, 100, 100],
+      paths: [{ d: first, fill: "#ffffff" }, ...rest.map((d) => ({ d, fill: "#ff0000" }))],
+    }) as VectorData;
+
+  it("drops a full-canvas backdrop rectangle, keeps everything else", () => {
+    expect(withoutBackground(art("M0 0L100 0L100 100L0 100Z")).paths).toHaveLength(1);
+    // A shape that merely sits in the middle is art, not a backdrop.
+    expect(withoutBackground(art("M10 10L90 10L90 90L10 90Z")).paths).toHaveLength(2);
+    // A curved full-bleed shape is art too.
+    expect(withoutBackground(art("M0 0C50 -10 100 0 100 100L0 100Z")).paths).toHaveLength(2);
+    // Never strip the only path.
+    expect(withoutBackground(art("M0 0L100 0L100 100L0 100Z", [])).paths).toHaveLength(1);
   });
 });

@@ -38,7 +38,7 @@ export interface VectorPath {
   join?: "miter" | "round" | "bevel";
 }
 
-export type VectorGenerator = "import" | "icon" | "trace" | "sketch" | "recraft" | "llm";
+export type VectorGenerator = "import" | "icon" | "trace" | "sketch" | "recraft" | "llm" | "mock";
 
 export interface VectorData {
   /** [minX, minY, width, height] of the paths' own coordinate space. */
@@ -81,7 +81,7 @@ export const vectorDataSchema = z
     paths: z.array(vectorPathSchema).min(1).max(VECTOR_LIMITS.paths),
     source: z
       .object({
-        generator: z.enum(["import", "icon", "trace", "sketch", "recraft", "llm"]),
+        generator: z.enum(["import", "icon", "trace", "sketch", "recraft", "llm", "mock"]),
         ref: z.string().max(200).optional(),
         prompt: z.string().max(1_000).optional(),
         model: z.string().max(100).optional(),
@@ -1103,6 +1103,27 @@ export function recolorVector(v: VectorData, from: string, to: string): VectorDa
       return next;
     }),
   };
+}
+
+/**
+ * Drop a full-canvas background: generated art (Recraft included) paints a
+ * rectangle behind the drawing, which on a board reads as a white box around
+ * a sticker. Only the first path is considered, only when it covers the
+ * whole viewBox, is a filled shape of a few straight segments, and something
+ * else remains.
+ */
+export function withoutBackground(v: VectorData): VectorData {
+  const [first, ...rest] = v.paths;
+  if (!first || rest.length === 0 || first.fill === "none") return v;
+  const segs = parsePathData(first.d);
+  if (!segs || segs.length > 8 || segs.some((s) => s.t === "C" || s.t === "Q")) return v;
+  const b = pathBounds(first.d);
+  if (!b) return v;
+  const [x, y, w, h] = v.viewBox;
+  const tol = Math.max(w, h) * 0.02;
+  const covers =
+    b.minX <= x + tol && b.minY <= y + tol && b.maxX >= x + w - tol && b.maxY >= y + h - tol;
+  return covers ? { ...v, paths: rest } : v;
 }
 
 /** Multiply every stroke width (the inspector's "stroke weight" control). */
