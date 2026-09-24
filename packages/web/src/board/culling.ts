@@ -141,6 +141,32 @@ export function groupRegions(
       ...(g.kind ? { kind: g.kind } : {}),
     });
   }
+  // A matrix's cells are equal (docs/27 D1): the layout centres each cell's
+  // items in a uniform grid, so growing every box to the largest cell around
+  // its own centre tiles the grid exactly — an empty-ish quadrant is as big as
+  // a full one, which is what makes a 2×2 read as a 2×2.
+  if (workspace.diagramKind === "matrix" && regions.length > 1) {
+    // Cells fill the grid's pitch (the distance between cell centres, less a
+    // gutter) — the layout centres every cell's items, so the centres ARE
+    // the grid — and never shrink below their own contents.
+    const pitch = (vals: number[]) => {
+      const u = [...new Set(vals.map((v) => Math.round(v)))].sort((a, b) => a - b);
+      let best = Infinity;
+      for (let i = 1; i < u.length; i++) best = Math.min(best, u[i]! - u[i - 1]!);
+      return best;
+    };
+    const px = pitch(regions.map((r) => r.x + r.width / 2));
+    const py = pitch(regions.map((r) => r.y + r.height / 2));
+    const GUTTER = 24;
+    const w = Math.max(...regions.map((r) => r.width), Number.isFinite(px) ? px - GUTTER : 0);
+    const h = Math.max(...regions.map((r) => r.height), Number.isFinite(py) ? py - GUTTER : 0);
+    for (const r of regions) {
+      r.x -= (w - r.width) / 2;
+      r.y -= (h - r.height) / 2;
+      r.width = w;
+      r.height = h;
+    }
+  }
   return regions;
 }
 

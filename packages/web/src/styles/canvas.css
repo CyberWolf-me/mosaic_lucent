@@ -59,6 +59,29 @@
   align-items: center;
   gap: 8px;
 }
+/* A timeline board's date axis (docs/27 D1): a dashed guide per tick, the
+   date above the first lane. Behind the cards, never interactive. */
+.timeline-axis {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.timeline-tick {
+  position: absolute;
+  width: 0;
+  border-left: 1px dashed oklch(from var(--paper-4) l c h / 0.8);
+}
+.timeline-tick span {
+  position: absolute;
+  top: -2px;
+  left: 6px;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  color: var(--ink-3);
+}
+
 /* Icons & vectors (docs/26 §6.3): the icon picker, placing editable vectors. */
 .vectors-pop {
   position: absolute;

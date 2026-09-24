@@ -19,7 +19,11 @@ export type DiagramKind =
   | "decisiontree"
   | "process"
   | "orgchart"
-  | "bpmn";
+  | "bpmn"
+  // docs/27 D1: new families.
+  | "timeline"
+  | "matrix"
+  | "statemachine";
 
 /** Coordinates are always assigned by the layout engine, never by the AI. */
 export interface Position {

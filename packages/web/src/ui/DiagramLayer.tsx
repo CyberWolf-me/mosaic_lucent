@@ -3,6 +3,7 @@ import {
   densityBand,
   edgeDensity,
   routedVertices,
+  timelineTicks,
   type DensityBand,
   type Workspace,
 } from "@lucent/core";
@@ -92,6 +93,16 @@ export function DiagramLayer({
   // scene mapping, the id index, the group boxes and the frame bounds were all
   // being rebuilt for every hover, selection change and pan frame.
   const scene = useMemo(() => diagramScene(workspace), [workspace]);
+  // A timeline board's date axis (docs/27 D1), from the same scale the layout
+  // placed its cards with — board-level only: a timeline region is laid out
+  // at an offset the axis would not share.
+  const ticks = useMemo(
+    () =>
+      workspace.diagramKind === "timeline" && !Object.values(workspace.groups).some((g) => g.kind)
+        ? timelineTicks(workspace)
+        : [],
+    [workspace],
+  );
   if (scene.nodes.length === 0) return null;
   const { byId, edges } = scene;
 
@@ -119,13 +130,26 @@ export function DiagramLayer({
 
   // Bounding frame around the whole diagram: every node, on-screen or not, plus
   // whatever a drag is currently pulling past the old edge.
-  const bounds = boundsWithDrag(scene.bounds, byId, dragOverride);
+  const nodeFrame = boundsWithDrag(scene.bounds, byId, dragOverride);
   const pad = 40;
   const label = frameLabel ?? `${DIAGRAM_LABELS[workspace.diagramKind]}`;
 
   // Group boxes are measured over all of a group's members, so only a drag can
   // change one — every other re-render reuses the memoised regions.
   const regions = dragOverride ? groupRegions(workspace, nodeAt) : scene.groups;
+
+  // The frame holds the regions too, not only the cards: a matrix cell or a
+  // swimlane is wider than the items in it (docs/27 D1).
+  const bounds =
+    nodeFrame && regions.length > 0
+      ? (() => {
+          const x = Math.min(nodeFrame.x, ...regions.map((r) => r.x));
+          const y = Math.min(nodeFrame.y, ...regions.map((r) => r.y));
+          const right = Math.max(nodeFrame.x + nodeFrame.width, ...regions.map((r) => r.x + r.width));
+          const bottom = Math.max(nodeFrame.y + nodeFrame.height, ...regions.map((r) => r.y + r.height));
+          return { x, y, width: right - x, height: bottom - y };
+        })()
+      : nodeFrame;
 
   // Selection focus (P1): the selected node plus its direct neighbours stay
   // at full strength while the rest of a busy board recedes. Derived per
@@ -312,6 +336,24 @@ export function DiagramLayer({
           </div>
         );
       })}
+
+      {ticks.length > 0 && scene.bounds && (
+        <div className="timeline-axis" aria-hidden>
+          {ticks.map((t) => (
+            <div
+              key={`${t.x}-${t.label}`}
+              className="timeline-tick"
+              style={{
+                left: t.x,
+                top: scene.bounds!.y - 44,
+                height: scene.bounds!.height + 64,
+              }}
+            >
+              <span>{t.label}</span>
+            </div>
+          ))}
+        </div>
+      )}
 
       <svg
         className="connectors"

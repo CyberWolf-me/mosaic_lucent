@@ -6766,6 +6766,29 @@ textarea:focus-visible {
   border-width: 4px;
 }
 
+/* A state machine's pseudo-states, UML convention (docs/27 D1): a solid
+   dot starts, a bullseye ends. Unlabelled on the canvas — the aria-label
+   still names them. */
+.node.sm-initial,
+.node.sm-final {
+  min-width: 0;
+  padding: 0;
+  border-radius: 50%;
+  border: 0;
+  background: var(--ink-0);
+  box-shadow: none;
+}
+.node.sm-final {
+  background: var(--ink-0);
+  border: 3px solid var(--canvas-1, var(--paper-1));
+  outline: 2px solid var(--ink-0);
+  outline-offset: 0;
+}
+.node.sm-initial > *,
+.node.sm-final > * {
+  display: none;
+}
+
 .node.bpmn-event .node-title,
 .node.bpmn-event-end .node-title,
 .node.bpmn-gateway .node-title,

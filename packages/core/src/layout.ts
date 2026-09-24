@@ -18,7 +18,7 @@ import { getLayoutOverride, type DiagramLayoutEngine } from "./layoutEngine.js";
  * without touching the AI or reducer.
  */
 
-export type LayoutStrategy = "layered" | "radial" | "tree" | "swimlane";
+export type LayoutStrategy = "layered" | "radial" | "tree" | "swimlane" | "timeline" | "grid";
 
 export interface LayoutOptions {
   nodeSize?: Size;
@@ -78,6 +78,10 @@ const STRATEGY_FOR_KIND: Record<DiagramKind, LayoutStrategy> = {
   orgchart: "tree",
   process: "swimlane",
   bpmn: "layered",
+  // docs/27 D1
+  timeline: "timeline",
+  matrix: "grid",
+  statemachine: "layered",
 };
 
 export type LayoutResult = Record<string, { position: Position; size: Size }>;
@@ -203,7 +207,10 @@ function dispatchLayoutWithRoutes(
   if (strategy === "radial") return { layout: radialLayout(workspace, merged), routes: {} };
   if (strategy === "tree") return { layout: treeLayout(workspace, merged), routes: {} };
   if (strategy === "swimlane") return { layout: swimlaneLayout(workspace, merged), routes: {} };
-  return layeredLayoutWithRoutes(workspace, options);
+  if (strategy === "timeline") return { layout: timelineLayout(workspace, merged), routes: {} };
+  if (strategy === "grid") return { layout: gridLayout(workspace, merged), routes: {} };
+  const layered = layeredLayoutWithRoutes(workspace, options);
+  return { ...layered, layout: shrinkPseudoStates(workspace, workspace.diagramKind, layered.layout) };
 }
 
 function layeredLayoutWithRoutes(
@@ -1292,7 +1299,10 @@ function layoutSingleRoutes(
   if (strategy === "radial") return { layout: radialLayout(ws, opts), routes: {} };
   if (strategy === "tree") return { layout: treeLayout(ws, opts), routes: {} };
   if (strategy === "swimlane") return { layout: swimlaneLayout(ws, opts), routes: {} };
-  return layeredLayoutWithRoutes(ws, opts);
+  if (strategy === "timeline") return { layout: timelineLayout(ws, opts), routes: {} };
+  if (strategy === "grid") return { layout: gridLayout(ws, opts), routes: {} };
+  const layered = layeredLayoutWithRoutes(ws, opts);
+  return { ...layered, layout: shrinkPseudoStates(ws, kind, layered.layout) };
 }
 
 /**
@@ -1326,7 +1336,9 @@ function layoutSingle(
   if (strategy === "radial") return radialLayout(ws, opts);
   if (strategy === "tree") return treeLayout(ws, opts);
   if (strategy === "swimlane") return swimlaneLayout(ws, opts);
-  return layeredLayout(ws, opts);
+  if (strategy === "timeline") return timelineLayout(ws, opts);
+  if (strategy === "grid") return gridLayout(ws, opts);
+  return shrinkPseudoStates(ws, kind, layeredLayout(ws, opts));
 }
 
 /**
@@ -1636,3 +1648,260 @@ export const CURRENT_LAYOUT_ENGINE: DiagramLayoutEngine = {
   relayoutRegion: (workspace, groupId, options) =>
     relayoutRegionWithRoutes(workspace, groupId, options ?? {}),
 };
+
+// ---------------------------------------------------------------------------
+// docs/27 D1: new families — timeline and matrix geometry
+// ---------------------------------------------------------------------------
+
+const DAY = 86_400_000;
+
+/** A node's due date as a UTC day timestamp, or undefined. */
+function dueTime(node: Node | undefined): number | undefined {
+  const d = node?.issue?.dueDate;
+  if (!d || !/^\d{4}-\d{2}-\d{2}/.test(d)) return undefined;
+  const t = Date.parse(`${d.slice(0, 10)}T00:00:00Z`);
+  return Number.isFinite(t) ? t : undefined;
+}
+
+/**
+ * The timeline's time → x mapping, shared by the layout and the axis the
+ * canvas draws, so a tick and the card it labels can never disagree. Null
+ * when fewer than two distinct dates exist (then order, not time, decides).
+ */
+export function timelineScale(
+  workspace: Workspace,
+): { t0: number; t1: number; span: number } | null {
+  const times = [
+    ...new Set(Object.values(workspace.nodes).map(dueTime).filter((t): t is number => t !== undefined)),
+  ].sort((a, b) => a - b);
+  if (times.length < 2) return null;
+  return { t0: times[0]!, t1: times[times.length - 1]!, span: Math.max(640, (times.length - 1) * 220) };
+}
+
+/** Axis ticks for a timeline board: weeks, months or quarters, by range. */
+export function timelineTicks(workspace: Workspace): Array<{ x: number; label: string }> {
+  const scale = timelineScale(workspace);
+  if (!scale) return [];
+  const { t0, t1, span } = scale;
+  const range = t1 - t0;
+  const xOf = (t: number) => ((t - t0) / range) * span;
+  const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const ticks: Array<{ x: number; label: string }> = [];
+  const start = new Date(t0);
+  if (range <= 60 * DAY) {
+    // Weekly, on Mondays.
+    const d = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate()));
+    d.setUTCDate(d.getUTCDate() + ((8 - d.getUTCDay()) % 7));
+    for (; d.getTime() <= t1; d.setUTCDate(d.getUTCDate() + 7)) {
+      ticks.push({ x: xOf(d.getTime()), label: `${MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}` });
+    }
+  } else {
+    const step = range > 540 * DAY ? 3 : 1;
+    const d = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + 1, 1));
+    if (step === 3) d.setUTCMonth(Math.ceil(d.getUTCMonth() / 3) * 3);
+    for (; d.getTime() <= t1; d.setUTCMonth(d.getUTCMonth() + step)) {
+      const m = d.getUTCMonth();
+      const label =
+        step === 3 ? `Q${m / 3 + 1} ${d.getUTCFullYear()}` : m === 0 ? `${MONTHS[m]} ${d.getUTCFullYear()}` : MONTHS[m]!;
+      ticks.push({ x: xOf(d.getTime()), label });
+    }
+  }
+  return ticks;
+}
+
+/** Topological rank over the edges, cycle-tolerant, in insertion order. */
+function flowRank(workspace: Workspace): Map<string, number> {
+  const ids = Object.keys(workspace.nodes);
+  const indeg = new Map(ids.map((id) => [id, 0]));
+  const out = new Map<string, string[]>(ids.map((id) => [id, []]));
+  for (const e of Object.values(workspace.edges)) {
+    if (!out.has(e.source) || !indeg.has(e.target) || e.source === e.target) continue;
+    out.get(e.source)!.push(e.target);
+    indeg.set(e.target, indeg.get(e.target)! + 1);
+  }
+  const rank = new Map<string, number>();
+  const queue = ids.filter((id) => indeg.get(id) === 0);
+  let next = 0;
+  while (rank.size < ids.length) {
+    if (queue.length === 0) {
+      // A cycle with no entry: break it at the first unranked node.
+      queue.push(ids.find((id) => !rank.has(id))!);
+    }
+    const id = queue.shift()!;
+    if (rank.has(id)) continue;
+    rank.set(id, next++);
+    for (const t of out.get(id) ?? []) {
+      indeg.set(t, indeg.get(t)! - 1);
+      if (indeg.get(t)! <= 0 && !rank.has(t)) queue.push(t);
+    }
+  }
+  return rank;
+}
+
+/**
+ * Timeline / roadmap: time runs left → right. A dated item (`issue.dueDate`)
+ * sits at its date on the shared scale; undated items follow the flow after
+ * the last date (a roadmap's "later"). Each group is a lane — a team or
+ * workstream — and cards that would overlap in a lane drop into a sub-row.
+ * With fewer than two dates, order alone spaces the cards.
+ */
+function timelineLayout(
+  workspace: Workspace,
+  opts: Required<Omit<LayoutOptions, "strategy">>,
+): LayoutResult {
+  const { nodeSize, nodeGap, laneGap } = opts;
+  const ids = Object.keys(workspace.nodes);
+  const result: LayoutResult = {};
+  if (ids.length === 0) return result;
+  const size = new Map(
+    ids.map((id) => [
+      id,
+      measureNode(workspace.nodes[id]?.label ?? "", nodeSize, {
+        extraHeight: nodeCardExtraHeight(workspace.nodes[id]),
+      }),
+    ]),
+  );
+  const rank = flowRank(workspace);
+  const scale = timelineScale(workspace);
+  const step = Math.max(...[...size.values()].map((s) => s.width)) + nodeGap;
+
+  const centreX = new Map<string, number>();
+  const undated = ids
+    .filter((id) => !scale || dueTime(workspace.nodes[id]) === undefined)
+    .sort((a, b) => rank.get(a)! - rank.get(b)!);
+  if (scale) {
+    for (const id of ids) {
+      const t = dueTime(workspace.nodes[id]);
+      if (t !== undefined) centreX.set(id, ((t - scale.t0) / (scale.t1 - scale.t0)) * scale.span);
+    }
+    undated.forEach((id, i) => centreX.set(id, scale.span + (i + 1) * step));
+  } else {
+    undated.forEach((id, i) => centreX.set(id, i * step));
+  }
+
+  // Lanes: ungrouped first, then groups in board order.
+  const lanes: string[][] = [ids.filter((id) => !workspace.nodes[id]?.groupId)];
+  for (const gid of Object.keys(workspace.groups)) {
+    const members = ids.filter((id) => workspace.nodes[id]?.groupId === gid);
+    if (members.length) lanes.push(members);
+  }
+
+  let laneTop = 0;
+  for (const lane of lanes) {
+    if (lane.length === 0) continue;
+    const rows: number[] = []; // right edge of each sub-row
+    const rowHeight = Math.max(...lane.map((id) => size.get(id)!.height));
+    for (const id of [...lane].sort((a, b) => centreX.get(a)! - centreX.get(b)!)) {
+      const s = size.get(id)!;
+      const left = centreX.get(id)! - s.width / 2;
+      let row = rows.findIndex((right) => right + nodeGap / 2 <= left);
+      if (row < 0) {
+        row = rows.length;
+        rows.push(-Infinity);
+      }
+      rows[row] = left + s.width;
+      result[id] = { position: { x: left, y: laneTop + row * (rowHeight + 24) }, size: s };
+    }
+    laneTop += rows.length * (rowHeight + 24) - 24 + laneGap * 0.7;
+  }
+  return result;
+}
+
+/**
+ * Matrix (2×2, SWOT, prioritisation grids): every group is a cell, cells
+ * tile a grid of equal size in board order (four cells make a 2×2), and each
+ * cell's items are packed in rows at its centre. The model chooses the cell,
+ * never a coordinate. Ungrouped items line up under the grid.
+ */
+function gridLayout(
+  workspace: Workspace,
+  opts: Required<Omit<LayoutOptions, "strategy">>,
+): LayoutResult {
+  const { nodeSize, nodeGap } = opts;
+  const ids = Object.keys(workspace.nodes);
+  const result: LayoutResult = {};
+  if (ids.length === 0) return result;
+  const size = new Map(
+    ids.map((id) => [
+      id,
+      measureNode(workspace.nodes[id]?.label ?? "", nodeSize, {
+        extraHeight: nodeCardExtraHeight(workspace.nodes[id]),
+      }),
+    ]),
+  );
+  const cells = Object.keys(workspace.groups)
+    .map((gid) => ids.filter((id) => workspace.nodes[id]?.groupId === gid))
+    .filter((m) => m.length > 0);
+  const loose = ids.filter((id) => {
+    const gid = workspace.nodes[id]?.groupId;
+    return !gid || !workspace.groups[gid];
+  });
+
+  /** Pack a list into rows of `perRow`; returns item offsets and the block size. */
+  const pack = (members: string[]) => {
+    const perRow = members.length <= 4 ? 2 : 3;
+    const colW = Math.max(...members.map((id) => size.get(id)!.width));
+    const rowH = Math.max(...members.map((id) => size.get(id)!.height));
+    const cols = Math.min(perRow, members.length);
+    const rows = Math.ceil(members.length / perRow);
+    const offsets = members.map((id, i) => ({
+      id,
+      x: (i % perRow) * (colW + nodeGap) + (colW - size.get(id)!.width) / 2,
+      y: Math.floor(i / perRow) * (rowH + nodeGap),
+    }));
+    return { offsets, w: cols * colW + (cols - 1) * nodeGap, h: rows * rowH + (rows - 1) * nodeGap };
+  };
+
+  const packed = cells.map(pack);
+  const cellPad = 56;
+  // A quadrant reads as a quadrant only with room around its items, and its
+  // label ("Big bets · high impact, high effort") needs the width.
+  const cellW = Math.max(360, Math.max(0, ...packed.map((p) => p.w)) + cellPad * 2);
+  const cellH = Math.max(220, Math.max(0, ...packed.map((p) => p.h)) + cellPad * 2);
+  const cols = cells.length === 4 ? 2 : cells.length <= 3 ? Math.max(1, cells.length) : Math.ceil(Math.sqrt(cells.length));
+  const gap = 36;
+  packed.forEach((p, i) => {
+    const cx = (i % cols) * (cellW + gap) + cellW / 2;
+    const cy = Math.floor(i / cols) * (cellH + gap) + cellH / 2;
+    for (const o of p.offsets) {
+      result[o.id] = {
+        position: { x: cx - p.w / 2 + o.x, y: cy - p.h / 2 + o.y },
+        size: size.get(o.id)!,
+      };
+    }
+  });
+  if (loose.length) {
+    const p = pack(loose);
+    const top = Math.ceil(cells.length / cols) * (cellH + gap) + gap;
+    for (const o of p.offsets) result[o.id] = { position: { x: o.x, y: top + o.y }, size: size.get(o.id)! };
+  }
+  return result;
+}
+
+/**
+ * Pseudo-states (docs/27 D1): a state machine's start/end and a BPMN board's
+ * start/end events are small circles, not cards. The layout places them like
+ * any node, then sizes them to the circle around the same centre — edges
+ * attach to what is drawn, and the card-sized box that made the canvas render
+ * big ellipses is gone.
+ */
+const PSEUDO_TYPES = new Set(["start", "entry", "initial", "end", "exit", "final"]);
+const PSEUDO_SIZE = 36;
+
+function shrinkPseudoStates(workspace: Workspace, kind: DiagramKind, layout: LayoutResult): LayoutResult {
+  if (kind !== "statemachine" && kind !== "bpmn") return layout;
+  let out: LayoutResult | null = null;
+  for (const [id, box] of Object.entries(layout)) {
+    const t = workspace.nodes[id]?.nodeType;
+    if (!t || !PSEUDO_TYPES.has(t)) continue;
+    out ??= { ...layout };
+    out[id] = {
+      position: {
+        x: box.position.x + box.size.width / 2 - PSEUDO_SIZE / 2,
+        y: box.position.y + box.size.height / 2 - PSEUDO_SIZE / 2,
+      },
+      size: { width: PSEUDO_SIZE, height: PSEUDO_SIZE },
+    };
+  }
+  return out ?? layout;
+}

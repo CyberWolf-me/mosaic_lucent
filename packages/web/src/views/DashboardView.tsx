@@ -90,6 +90,9 @@ const KIND_NAME: Record<DiagramKind, string> = {
   process: "Process map",
   orgchart: "Org chart",
   bpmn: "BPMN process",
+  timeline: "Timeline",
+  matrix: "Matrix",
+  statemachine: "State machine",
 };
 
 const SCOPE_BADGE: Record<Scope, { label: string; title: string }> = {

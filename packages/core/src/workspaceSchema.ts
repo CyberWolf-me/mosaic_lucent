@@ -255,6 +255,9 @@ export const workspaceSchema = z.object({
     "process",
     "orgchart",
     "bpmn",
+    "timeline",
+    "matrix",
+    "statemachine",
   ]),
   // Layout intent (Phase 5): optional and additive — every pre-intent board
   // parses unchanged. Ids are validated only as strings here; the op-level

@@ -76,6 +76,11 @@ const ROUTE_STYLE_FOR_KIND: Record<DiagramKind, RouteStyle> = {
   process: "ortho",
   orgchart: "polyline",
   bpmn: "ortho",
+  // docs/27 D1. Timelines and matrices draw few edges and no routes; a state
+  // machine is layered, and its transitions square off like a flowchart's.
+  timeline: "polyline",
+  matrix: "polyline",
+  statemachine: "ortho",
 };
 
 /**

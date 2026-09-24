@@ -159,8 +159,19 @@ export interface NodeCardProps {
    * with an X (exclusive) or + (parallel) marker, task → rounded rect.
    * Undefined renders the ordinary card; the LENS decides, never the model.
    */
-  bpmnShape?: "event" | "eventEnd" | "gateway" | "gatewayParallel" | "task";
+  bpmnShape?: "event" | "eventEnd" | "gateway" | "gatewayParallel" | "task" | "initial" | "final";
 }
+
+/** The lens shape's CSS class (BPMN, and the state machine's pseudo-states). */
+const LENS_CLASS: Record<NonNullable<NodeCardProps["bpmnShape"]>, string> = {
+  task: "bpmn-task",
+  event: "bpmn-event",
+  eventEnd: "bpmn-event-end",
+  gateway: "bpmn-gateway",
+  gatewayParallel: "bpmn-gateway-parallel",
+  initial: "sm-initial",
+  final: "sm-final",
+};
 
 export const NodeCard = memo(function NodeCard({
   x,
@@ -207,17 +218,7 @@ export const NodeCard = memo(function NodeCard({
     dimmed ? "dimmed" : "",
     draggable ? "draggable" : "",
     dragging ? "dragging" : "",
-    bpmnShape === "task"
-      ? "bpmn-task"
-      : bpmnShape === "event"
-        ? "bpmn-event"
-        : bpmnShape === "eventEnd"
-          ? "bpmn-event-end"
-          : bpmnShape === "gateway"
-            ? "bpmn-gateway"
-            : bpmnShape === "gatewayParallel"
-              ? "bpmn-gateway-parallel"
-              : "",
+    bpmnShape ? LENS_CLASS[bpmnShape] : "",
   ]
     .filter(Boolean)
     .join(" ");

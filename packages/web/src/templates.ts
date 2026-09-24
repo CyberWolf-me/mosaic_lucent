@@ -140,4 +140,99 @@ export const TEMPLATES: Template[] = [
       ];
     },
   },
+  // docs/27 D1: the new families as starters — semantic boards, so the AI
+  // can keep building on them ("add three more quick wins", "move launch a
+  // week later"), not shape arrangements.
+  {
+    id: "impact-effort",
+    name: "Impact × effort",
+    kind: "Business",
+    build: () => {
+      const run = runId();
+      const cells: Array<[string, string]> = [
+        ["Quick wins · high impact, low effort", "Do these first"],
+        ["Big bets · high impact, high effort", "Plan these"],
+        ["Fill-ins · low impact, low effort", "When there's time"],
+        ["Money pits · low impact, high effort", "Avoid"],
+      ];
+      return [
+        { op: "CREATE_DIAGRAM", kind: "matrix" },
+        ...cells.flatMap(([label, seed], i): Operation[] => [
+          { op: "CREATE_GROUP", id: `${run}-c${i}`, label, children: [] },
+          { op: "CREATE_NODE", id: `${run}-n${i}`, nodeType: "idea", label: seed, groupId: `${run}-c${i}` },
+        ]),
+      ];
+    },
+  },
+  {
+    id: "roadmap",
+    name: "Roadmap",
+    kind: "Product",
+    build: () => {
+      const run = runId();
+      const day = (offset: number) => {
+        const d = new Date();
+        d.setDate(d.getDate() + offset);
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      };
+      const items: Array<[string, string, string, number]> = [
+        ["product", "Discovery interviews", "task", 10],
+        ["product", "Beta launch", "milestone", 45],
+        ["eng", "Prototype", "task", 20],
+        ["eng", "Hardening", "task", 60],
+        ["eng", "General availability", "milestone", 90],
+      ];
+      return [
+        { op: "CREATE_DIAGRAM", kind: "timeline" },
+        { op: "CREATE_GROUP", id: `${run}-product`, label: "Product", children: [] },
+        { op: "CREATE_GROUP", id: `${run}-eng`, label: "Engineering", children: [] },
+        ...items.flatMap(([lane, label, type, offset], i): Operation[] => [
+          { op: "CREATE_NODE", id: `${run}-i${i}`, nodeType: type, label, groupId: `${run}-${lane}` },
+          {
+            op: "SET_ISSUE",
+            id: `${run}-i${i}`,
+            issue: { type: "task", status: "open", dueDate: day(offset) },
+          },
+        ]),
+      ];
+    },
+  },
+  {
+    id: "state-machine",
+    name: "State machine",
+    kind: "Engineering",
+    build: () => {
+      const run = runId();
+      const states: Array<[string, string, string]> = [
+        ["start", "start", "Start"],
+        ["draft", "state", "Draft"],
+        ["review", "state", "In review"],
+        ["published", "state", "Published"],
+        ["archived", "state", "Archived"],
+        ["end", "end", "End"],
+      ];
+      const moves: Array<[string, string, string]> = [
+        ["start", "draft", "create"],
+        ["draft", "review", "submit"],
+        ["review", "draft", "request changes"],
+        ["review", "published", "approve"],
+        ["published", "archived", "archive"],
+        ["archived", "end", "delete"],
+      ];
+      return [
+        { op: "CREATE_DIAGRAM", kind: "statemachine" },
+        ...states.map(
+          ([id, nodeType, label]): Operation => ({ op: "CREATE_NODE", id: `${run}-${id}`, nodeType, label }),
+        ),
+        ...moves.map(
+          ([a, b, event]): Operation => ({
+            op: "CONNECT_NODES",
+            source: `${run}-${a}`,
+            target: `${run}-${b}`,
+            relationship: event,
+          }),
+        ),
+      ];
+    },
+  },
 ];

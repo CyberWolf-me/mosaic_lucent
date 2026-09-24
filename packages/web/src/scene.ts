@@ -171,6 +171,9 @@ export const DIAGRAM_LABELS: Record<DiagramKind, string> = {
   process: "Process map",
   orgchart: "Org chart",
   bpmn: "BPMN process",
+  timeline: "Timeline",
+  matrix: "Matrix",
+  statemachine: "State machine",
 };
 
 /**
@@ -182,12 +185,27 @@ export const DIAGRAM_LABELS: Record<DiagramKind, string> = {
  * step/task→□ task, choice/gateway→◇X exclusive, parallel→◇+ parallel —
  * the model carries meaning; the lens chooses the convention.
  */
-export type BpmnLensShape = "event" | "eventEnd" | "gateway" | "gatewayParallel" | "task";
+export type BpmnLensShape =
+  | "event"
+  | "eventEnd"
+  | "gateway"
+  | "gatewayParallel"
+  | "task"
+  // docs/27 D1: a state machine's pseudo-states, in UML's convention.
+  | "initial"
+  | "final";
 
 export function bpmnShapeFor(
   nodeType: string,
   lens: DiagramKind | undefined,
 ): BpmnLensShape | undefined {
+  // A state machine's pseudo-states in UML's convention (docs/27 D1): a
+  // solid dot starts, a bullseye ends; every real state stays a card.
+  if (lens === "statemachine") {
+    if (nodeType === "start" || nodeType === "initial") return "initial";
+    if (nodeType === "end" || nodeType === "final") return "final";
+    return undefined;
+  }
   if (lens !== "bpmn") return undefined;
   switch (nodeType) {
     case "entry":

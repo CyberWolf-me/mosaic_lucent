@@ -62,6 +62,12 @@ const ALGORITHM_FOR_KIND: Record<DiagramKind, string> = {
   orgchart: "mrtree",
   process: "layered",
   bpmn: "layered",
+  // docs/27 D1. Timelines and matrices have their own geometry in the
+  // built-in engine (ELK has no time axis or cell grid); layered is only
+  // the fallback if ELK is ever forced onto one.
+  timeline: "layered",
+  matrix: "layered",
+  statemachine: "layered",
 };
 
 interface ElkNode {

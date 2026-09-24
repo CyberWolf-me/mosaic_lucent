@@ -35,6 +35,10 @@ const diagramKind = z.enum([
   "process",
   "orgchart",
   "bpmn",
+  // docs/27 D1: new families.
+  "timeline",
+  "matrix",
+  "statemachine",
 ]);
 
 /** Work-tracking (Jira-style) fields attached to a node. All optional so the

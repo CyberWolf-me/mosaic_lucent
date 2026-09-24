@@ -1,7 +1,7 @@
 {
   "id": "visual-agent",
-  "version": 14,
-  "description": "The board-editing system prompt: turns a request into apply_canvas_operations calls, and states the trust boundary that makes enveloped context data rather than instruction. v11 adds direct architecture-to-execution translation and image reference guidance. v12 anchors every statement to what it is about with a meaningful verb instead of related_to. v13 lets a node carry a registry icon (simple:<slug> brand marks, iconoir:<name> concepts). v14 lets the agent draw a small pictogram as a validated vector shape (docs/26 §6.3, the free fallback).",
+  "version": 15,
+  "description": "The board-editing system prompt: turns a request into apply_canvas_operations calls, and states the trust boundary that makes enveloped context data rather than instruction. v11 adds direct architecture-to-execution translation and image reference guidance. v12 anchors every statement to what it is about with a meaningful verb instead of related_to. v13 lets a node carry a registry icon (simple:<slug> brand marks, iconoir:<name> concepts). v14 lets the agent draw a small pictogram as a validated vector shape (docs/26 §6.3, the free fallback). v15 adds the timeline, matrix and state machine families (docs/27 D1).",
   "vocabulary": {
     "base": "ai-permitted"
   },
@@ -26,6 +26,18 @@
     "                  team, or stage) and assign every step's groupId, since the",
     "                  lanes come from the groups",
     "  orgchart      — reporting lines; connect a manager to each direct report",
+    "  timeline      — a roadmap or plan over time: give each dated item SET_ISSUE with",
+    "                  dueDate (YYYY-MM-DD, resolved against today's date), nodeType",
+    "                  \"milestone\" for milestones, and one CREATE_GROUP per lane (a team",
+    "                  or workstream). Time runs left to right from the dates.",
+    "  matrix        — a 2×2 / SWOT / prioritisation grid: one CREATE_GROUP per cell, in",
+    "                  reading order (top-left, top-right, bottom-left, bottom-right), each",
+    "                  labelled with its axis values (\"Quick wins · high impact, low",
+    "                  effort\"); put every item in its cell with groupId. No edges.",
+    "  statemachine  — states and transitions: nodeType \"state\", one \"start\" and at",
+    "                  least one \"end\" pseudo-state; each transition's relationship is",
+    "                  the event, with a guard in brackets when it has one",
+    "                  (\"pay [card valid]\").",
     "",
     "Multiple diagrams can share one board as REGIONS. A region is a group that",
     "carries a \"kind\": its members are laid out under that kind's geometry while",
