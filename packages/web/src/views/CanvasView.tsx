@@ -76,6 +76,16 @@ import {
 import { classifyCodeFile, codeToOps } from "../board/codeImport.js";
 import { downscaleImage } from "../board/images.js";
 import {
+  LUCENT_CLIP_MIME,
+  clipFromSelection,
+  clipText,
+  parseClip,
+  planPaste,
+  svgSize,
+  svgTextToDataUrl,
+  textPasteOp,
+} from "../board/clipboard.js";
+import {
   snapPosition,
   alignGuides,
   contentBounds,
@@ -398,9 +408,6 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
       : null;
   const spotlightId = mode === "present" ? presentSpotlightId : mode === "focus" ? selected : null;
 
-  // Clipboard for copy/paste of shapes (in-memory; docs/14 board parity).
-  const clipboardRef = useRef<import("@lucent/core").Shape[]>([]);
-
   // Keyboard: Delete removes selection; Ctrl/Cmd+C/V/D copy/paste/duplicate;
   // single letters arm tools like FigJam/Miro (V/H/R/O/D/T/S/A/P/F, Esc).
   useEffect(() => {
@@ -478,35 +485,9 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
         return;
       }
 
-      // Cut = copy + delete, shapes only (nodes have no clipboard representation).
-      if (mod && e.key.toLowerCase() === "x" && selectedShapes.size > 0) {
-        e.preventDefault();
-        clipboardRef.current = [...selectedShapes]
-          .map((id) => workspace.shapes[id])
-          .filter(Boolean) as import("@lucent/core").Shape[];
-        const deletable = [...selectedShapes].filter((id) => !workspace.shapes[id]?.locked);
-        if (deletable.length > 0) {
-          applyManual(
-            deletable.map((id) => ({ op: "DELETE_SHAPE" as const, id })),
-            `Cut ${deletable.length} shape${deletable.length > 1 ? "s" : ""}`,
-          );
-          setSelectedShapes(new Set());
-        }
-        return;
-      }
-
-      if (mod && e.key.toLowerCase() === "c" && selectedShapes.size > 0) {
-        clipboardRef.current = [...selectedShapes]
-          .map((id) => workspace.shapes[id])
-          .filter(Boolean) as import("@lucent/core").Shape[];
-        return;
-      }
-
-      if (mod && e.key.toLowerCase() === "v" && clipboardRef.current.length > 0) {
-        e.preventDefault();
-        pasteShapes(clipboardRef.current, 24);
-        return;
-      }
+      // ⌘C / ⌘X / ⌘V are deliberately not handled here: the browser's copy,
+      // cut and paste events carry the system clipboard (see the clipboard
+      // effect below), and a keydown preventDefault would suppress them.
 
       if (mod && e.key.toLowerCase() === "d" && selectedShapes.size > 0) {
         e.preventDefault();
@@ -1504,43 +1485,147 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
     [applyManual],
   );
 
-  // Paste an image from the clipboard as a manual image shape.
+  // The system clipboard (docs/26 §6.4). Copy and cut write a Lucent
+  // payload plus plain text; paste takes a Lucent payload, then an image, an
+  // SVG, a link or text — so selections move between boards and tabs, and
+  // anything copied from another app lands as the object it is. Text fields
+  // and a real text selection keep the browser's own behaviour.
   useEffect(() => {
+    const inField = (t: EventTarget | null) => {
+      const el = t as HTMLElement | null;
+      return Boolean(
+        el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable),
+      );
+    };
+    const selectingText = () => {
+      const s = window.getSelection();
+      return Boolean(s && !s.isCollapsed && s.toString().trim());
+    };
+    const pasteAt = () =>
+      viewportBox
+        ? { x: viewportBox.x + viewportBox.width / 2, y: viewportBox.y + viewportBox.height / 2 }
+        : { x: 400, y: 300 };
+    const topZ = () => nextZ(Object.values(workspace.shapes));
+
+    const copy = (e: ClipboardEvent, cut: boolean) => {
+      if (inField(e.target) || selectingText() || !e.clipboardData) return;
+      const payload = clipFromSelection(workspace, selectedShapes, selectedNodes);
+      if (!payload) return;
+      e.preventDefault();
+      e.clipboardData.setData(LUCENT_CLIP_MIME, JSON.stringify(payload));
+      e.clipboardData.setData("text/plain", clipText(payload));
+      if (!cut || readOnly) return;
+      const ops: import("@lucent/core").Operation[] = [
+        ...payload.shapes
+          .filter((s) => !s.locked)
+          .map((s) => ({ op: "DELETE_SHAPE" as const, id: s.id })),
+        ...payload.nodes.map((n) => ({ op: "DELETE_NODE" as const, id: n.id })),
+      ];
+      if (ops.length > 0 && applyManual(ops, `Cut ${ops.length} object${ops.length > 1 ? "s" : ""}`)) {
+        setSelectedShapes(new Set());
+        setSelectedNodes(new Set());
+      }
+    };
+    const onCopy = (e: ClipboardEvent) => copy(e, false);
+    const onCut = (e: ClipboardEvent) => copy(e, true);
+
     const onPaste = (e: ClipboardEvent) => {
-      const item = [...(e.clipboardData?.items ?? [])].find((i) => i.type.startsWith("image/"));
-      const file = item?.getAsFile();
-      if (!file) return;
-      // Downscale before it becomes a data URL (M0.5). A 12 MP screenshot is
-      // several megabytes; localStorage has a 5–10 MB budget for the whole
-      // origin, so pasting a few would silently break autosave.
-      void downscaleImage(file).then((scaled) => {
-        if (!scaled) {
-          notify("That image could not be read.");
+      if (readOnly || inField(e.target) || !e.clipboardData) return;
+      const dt = e.clipboardData;
+      const at = pasteAt();
+
+      const payload = parseClip(dt.getData(LUCENT_CLIP_MIME));
+      if (payload) {
+        e.preventDefault();
+        const plan = planPaste(workspace, payload, at);
+        if (!plan) {
+          notify("That clipboard content couldn't be pasted — it isn't a valid Lucent selection.");
           return;
         }
-        const displayScale = Math.min(1, 320 / scaled.width);
+        const count = plan.shapeIds.length + plan.nodeIds.length;
+        if (applyManual(plan.ops, `Paste ${count} object${count > 1 ? "s" : ""}`)) {
+          setSelectedShapes(new Set(plan.shapeIds));
+          setSelectedNodes(new Set(plan.nodeIds));
+          setSelected(plan.nodeIds.length === 1 ? plan.nodeIds[0]! : null);
+        }
+        return;
+      }
+
+      // An SVG as markup (from a design tool or a code editor): shown as an
+      // image until Vector Studio can import it as an editable vector.
+      const svgText = dt.getData("image/svg+xml") || dt.getData("text/plain");
+      const svg = svgTextToDataUrl(svgText);
+      if (svg) {
+        e.preventDefault();
+        const size = svgSize(svgText);
         applyManual(
           [
             {
               op: "CREATE_SHAPE",
               id: shapeId(),
               kind: "image",
-              position: { x: 300, y: 240 },
-              size: {
-                width: Math.round(scaled.width * displayScale),
-                height: Math.round(scaled.height * displayScale),
-              },
-              src: scaled.dataUrl,
-              z: nextZ(Object.values(workspace.shapes)),
+              position: { x: Math.round(at.x - size.width / 2), y: Math.round(at.y - size.height / 2) },
+              size,
+              src: svg,
+              z: topZ(),
             },
           ],
-          "Paste image",
+          "Paste SVG",
         );
-      });
+        return;
+      }
+
+      const file = [...dt.items]
+        .find((i) => i.kind === "file" && i.type.startsWith("image/"))
+        ?.getAsFile();
+      if (file) {
+        e.preventDefault();
+        // Downscale before it becomes a data URL (M0.5). A 12 MP screenshot is
+        // several megabytes; localStorage has a 5–10 MB budget for the whole
+        // origin, so pasting a few would silently break autosave.
+        void downscaleImage(file).then((scaled) => {
+          if (!scaled) {
+            notify("That image could not be read.");
+            return;
+          }
+          const k = Math.min(1, 320 / scaled.width);
+          const size = { width: Math.round(scaled.width * k), height: Math.round(scaled.height * k) };
+          applyManual(
+            [
+              {
+                op: "CREATE_SHAPE",
+                id: shapeId(),
+                kind: "image",
+                position: { x: Math.round(at.x - size.width / 2), y: Math.round(at.y - size.height / 2) },
+                size,
+                src: scaled.dataUrl,
+                z: topZ(),
+              },
+            ],
+            "Paste image",
+          );
+        });
+        return;
+      }
+
+      const op = textPasteOp(dt.getData("text/plain"), at, topZ());
+      if (op) {
+        e.preventDefault();
+        if (applyManual([op], op.kind === "embed" ? "Paste link" : "Paste text")) {
+          setSelectedShapes(new Set([op.id]));
+        }
+      }
     };
-    window.addEventListener("paste", onPaste);
-    return () => window.removeEventListener("paste", onPaste);
-  }, [applyManual, workspace.shapes, notify]);
+
+    document.addEventListener("copy", onCopy);
+    document.addEventListener("cut", onCut);
+    document.addEventListener("paste", onPaste);
+    return () => {
+      document.removeEventListener("copy", onCopy);
+      document.removeEventListener("cut", onCut);
+      document.removeEventListener("paste", onPaste);
+    };
+  }, [workspace, selectedShapes, selectedNodes, readOnly, viewportBox, applyManual, notify]);
 
   // Citation jump (Stage C1): a clicked citation chip with kind "node" sets
   // ?reveal=<id> and switches to the canvas (workspace.tsx onCitation). This
