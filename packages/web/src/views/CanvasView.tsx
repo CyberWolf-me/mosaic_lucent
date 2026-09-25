@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { resolveLocale, t } from "@lucent/i18n";
-import { applyLayout, applyRoutes, computeLayoutWithRoutes } from "@lucent/core";
+import { applyLayout, applyRoutes, computeLayoutWithRoutes, convertibleKinds, starterFor } from "@lucent/core";
 import { Ico } from "../ui/icons.js";
 import { AIPill } from "../ui/AIPill.js";
 import { TopBar, LeftRail, ZoomBadge, StatusBadge, type Crumb } from "../ui/Chrome.js";
@@ -34,7 +34,7 @@ import { PresentMode } from "./PresentMode.js";
 import { PenLayer } from "./PenLayer.js";
 import { onCanvasCommand, sendCanvasCommand, type CanvasCommand } from "../canvasCommands.js";
 import { preloadExportData } from "../board/exportData.js";
-import { placeImage } from "../assets.js";
+import { placeImage, uploadGeneratedImage } from "../assets.js";
 import {
   fitSize,
   replaceWithVectorOps,
@@ -272,6 +272,7 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
     setPillMode,
     onCitation,
     setRegionKind,
+    selectDiagram,
     layoutStatus,
     retryLayout,
     applyManual,
@@ -282,6 +283,7 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
     readOnly,
     setView,
     lens,
+    setLens,
     syncStatus,
     boardId,
     startSharing,
@@ -706,7 +708,11 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
       const prompt = enrichImagePromptWithContext(rawPrompt, workspace, chat, projectName);
       notify("Generating reference image with Lucent Imagine…");
       try {
-        const { src, explanation } = await generateImage(prompt, "landscape", boardId);
+        const { src: generatedSrc, explanation } = await generateImage(prompt, "landscape", boardId);
+        // Move the bytes into the asset store on a shared board, so a ~2.6 MB
+        // generated PNG rides a 20-byte `asset:` reference instead of the op
+        // log. Falls back to the data URL on a local board or an upload failure.
+        const src = await uploadGeneratedImage(generatedSrc, boardId);
         const posX = viewportBox
           ? Math.round(viewportBox.x + Math.max(0, (viewportBox.width - 400) / 2))
           : 320;
@@ -1448,6 +1454,43 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
         });
       }
       items.unshift(...kindItems);
+    } else if (canEdit) {
+      // No region in play: offer whole-board conversion — the manual
+      // counterpart of the AI's TRANSFORM_DIAGRAM, and the "Turn this into a
+      // roadmap / state machine / C4" path (docs/26 §6.1). Generated from the
+      // registry so a new convertible family appears with no edit here.
+      const convertItems: MenuItem[] = [
+        { label: "", onClick: () => {}, sep: true },
+        { label: "Convert board to…", onClick: () => {}, disabled: true },
+      ];
+      const boardEmpty =
+        Object.keys(workspace.nodes).length === 0 && Object.keys(workspace.shapes).length === 0;
+      for (const k of REGION_KIND_ORDER) {
+        const active = workspace.diagramKind === k;
+        convertItems.push({
+          label: `${active ? "● " : ""}${DIAGRAM_LABELS[k]}`,
+          // On a blank board, seed the family's starter example (docs/26 §6.1
+          // registry) so "turn this into a state machine" produces something to
+          // edit; on a board with content, just switch the representation.
+          // Sequence and ER are presented through their lens, so converting to
+          // one also switches the lens; converting to any other kind returns to
+          // the visual lens if we were on a sequence/ER lens.
+          onClick: () => {
+            if (boardEmpty) {
+              applyManual(
+                starterFor(k, Date.now().toString(36) + Math.random().toString(36).slice(2, 5)),
+                `Start a ${DIAGRAM_LABELS[k]}`,
+              );
+            } else {
+              selectDiagram(k);
+            }
+            if (k === "sequence" || k === "er") setLens(k);
+            else if (lens === "sequence" || lens === "er") setLens("visual");
+          },
+          disabled: active,
+        });
+      }
+      items.unshift(...convertItems);
     }
     return items;
   }, [
@@ -1469,6 +1512,12 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
     hiddenCount,
     deleteSelection,
     setRegionKind,
+    selectDiagram,
+    applyManual,
+    setLens,
+    lens,
+    workspace.diagramKind,
+    workspace.nodes,
   ]);
 
   const onShapePrimary = useCallback(
@@ -3335,15 +3384,11 @@ function EngagementAnchor({
 }
 
 /** The kinds a region may be set to, in the same order as the board picker. */
-const REGION_KIND_ORDER: import("@lucent/core").DiagramKind[] = [
-  "flowchart",
-  "architecture",
-  "mindmap",
-  "journey",
-  "decisiontree",
-  "process",
-  "orgchart",
-];
+// The region-kind picker's targets, generated from the representation registry
+// (docs/26 §6.1) so a new convertible family appears here with no edit — this
+// used to be a hand-kept subset of seven that lagged behind the families the
+// AI could already create.
+const REGION_KIND_ORDER: import("@lucent/core").DiagramKind[] = convertibleKinds();
 
 /** Mode switcher: edit / present / focus. The extension point where remote
  * collaboration modes (Follow, Spotlight) register later (docs/12). */

@@ -61,6 +61,11 @@ export function selectImageProvider(env: NodeJS.ProcessEnv = process.env): Image
   const primaryModel = modelList[0];
   const fallbackModels = modelList.slice(1);
 
+  // A stalled image gateway must not hang the request forever. Prefer a
+  // dedicated env, fall back to the shared AI timeout, else the provider default.
+  const rawTimeout = env.LUCENT_IMAGE_TIMEOUT_MS ?? env.LUCENT_AI_TIMEOUT_MS;
+  const timeoutMs = rawTimeout ? Number(rawTimeout) : undefined;
+
   if (apiKey && baseUrl) {
     return new OpenAIImageProvider({
       apiKey,
@@ -68,6 +73,7 @@ export function selectImageProvider(env: NodeJS.ProcessEnv = process.env): Image
       ...(primaryModel ? { model: primaryModel } : {}),
       ...(fallbackModels.length > 0 ? { fallbackModels } : {}),
       ...(env.LUCENT_IMAGE_NAME ? { name: env.LUCENT_IMAGE_NAME } : {}),
+      ...(timeoutMs !== undefined && Number.isFinite(timeoutMs) ? { timeoutMs } : {}),
     });
   }
   const isTest = env.NODE_ENV === "test" || process.env.VITEST !== undefined;

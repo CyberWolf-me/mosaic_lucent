@@ -1969,6 +1969,39 @@ html[data-theme="light"] .shape.diamond {
   border-radius: 8px;
 }
 
+/* Data table shape (docs/26 §6.1). Scrolls inside its box; header pinned. */
+.table-shape-scroll {
+  width: 100%;
+  height: 100%;
+  overflow: auto;
+  border: 1px solid var(--stroke-2);
+  border-radius: 6px;
+  background: var(--surface-1, #1b1b1e);
+}
+.table-shape {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 12px;
+  color: var(--ink-1, #ddd);
+}
+.table-shape th,
+.table-shape td {
+  border: 1px solid var(--stroke-2);
+  padding: 4px 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 240px;
+}
+.table-shape th {
+  position: sticky;
+  top: 0;
+  background: var(--surface-2, #2a2a30);
+  color: var(--ink-0, #fff);
+  font-weight: 600;
+  text-align: left;
+}
+
 /* ============================================================
    MOTION & EASE — makes the board feel alive, not static
    ============================================================ */

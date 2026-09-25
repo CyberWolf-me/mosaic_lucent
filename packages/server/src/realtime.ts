@@ -87,6 +87,13 @@ export interface RealtimeDeps {
    */
   observeConnectionDuration?: (seconds: number) => void;
   /**
+   * The largest message a socket may send, in bytes. A message larger than
+   * the whole stored board can't be a valid op batch, so the socket closes
+   * before the frame is buffered — without it `ws` accepts 100 MiB frames.
+   * Defaults to twice the workspace cap's default (16 MiB).
+   */
+  maxPayloadBytes?: number;
+  /**
    * The caller's role on an org (M2.2), so a socket join resolves the same
    * *effective* board role the HTTP guard does. Required, not optional: a room
    * hands the joiner's role to `Room.commit` once and every later op inherits
@@ -132,7 +139,10 @@ export class RealtimeServer {
 
   constructor(private readonly deps: RealtimeDeps) {
     // noServer: we handle the HTTP upgrade ourselves so auth runs first.
-    this.wss = new WebSocketServer({ noServer: true });
+    this.wss = new WebSocketServer({
+      noServer: true,
+      maxPayload: deps.maxPayloadBytes ?? 16 * 1024 * 1024,
+    });
   }
 
   /** Attach to an existing HTTP server, upgrading /ws requests. */

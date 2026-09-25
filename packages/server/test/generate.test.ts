@@ -44,6 +44,27 @@ describe("handleGenerate", () => {
     expect(result.status).toBe(400);
   });
 
+  it("accepts a summary on any V4 diagram kind (not just the original eight)", async () => {
+    // Regression: the request summary's diagramKind enum was hand-maintained at
+    // eight kinds while V4 made timeline/matrix/state machine/dependency/C4/
+    // network/sequence/ER creatable. A board on one of those 400'd here, so a
+    // prompt on it "didn't generate". The enum now derives from DIAGRAM_KINDS.
+    for (const kind of ["timeline", "dependency", "sequence", "er", "statemachine"] as const) {
+      const summary = summarizeWorkspace({ ...createWorkspace(), diagramKind: kind });
+      const result = await handleGenerate(provider, { message: "add a step", summary });
+      expect(result.status, `diagramKind ${kind} should be accepted`).toBe(200);
+    }
+  });
+
+  it("accepts a summary whose region carries a V4 kind", async () => {
+    const summary = {
+      ...emptySummary,
+      groups: [{ id: "g1", label: "Plan", children: [], kind: "timeline" as const }],
+    };
+    const result = await handleGenerate(provider, { message: "extend the plan", summary });
+    expect(result.status).toBe(200);
+  });
+
   it("rejects operations that fail validation with 422", async () => {
     const result = await handleGenerate(
       fixedProvider([

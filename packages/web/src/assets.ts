@@ -70,6 +70,31 @@ export async function placeImage(file: Blob, boardId: string | null): Promise<Pl
   return { src: scaled.dataUrl, width: scaled.width, height: scaled.height, uploaded: false };
 }
 
+/**
+ * Move an already-generated image (the data URL the AI image provider returns)
+ * into the asset store, so a ~2.6 MB PNG doesn't ride the op log — replayed to
+ * every peer and kept in every snapshot — the way generated images used to.
+ *
+ * Returns an `asset:` reference on success, or the original `src` unchanged: on
+ * a local board (no server to hold the bytes), when the upload fails (offline,
+ * quota), or when it isn't a data URL to begin with. Raw SVG data URLs (the
+ * offline mock) stay inline too — the asset store refuses SVG by design, so
+ * `uploadAsset` returns null and we fall back. Unlike `placeImage` this does
+ * NOT downscale: a generated image is already sized for the canvas.
+ */
+export async function uploadGeneratedImage(
+  src: string,
+  boardId: string | null,
+): Promise<string> {
+  if (!boardId || !src.startsWith("data:")) return src;
+  try {
+    const ref = await uploadAsset(await dataUrlToBlob(src), boardId);
+    return ref ?? src;
+  } catch {
+    return src;
+  }
+}
+
 // ---- export: a static file can't fetch, so referenced bytes are inlined ----
 
 const dataCache = new Map<string, string>();

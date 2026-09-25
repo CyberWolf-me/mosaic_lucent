@@ -45,6 +45,8 @@ import elkWorkerUrl from "elkjs/lib/elk-worker.min.js?url";
 import {
   measureNode,
   nodeCardExtraHeight,
+  DIAGRAM_KINDS,
+  layoutStrategyFor,
   type DiagramLayoutEngine,
   type DiagramLayoutRequest,
   type DiagramLayoutResult,
@@ -52,23 +54,24 @@ import {
   type Workspace,
 } from "@lucent/core";
 
-/** ELK algorithm per Lucent diagram kind, with the reasoning on record. */
-const ALGORITHM_FOR_KIND: Record<DiagramKind, string> = {
-  flowchart: "layered",
-  architecture: "layered",
-  journey: "layered",
-  mindmap: "force",
-  decisiontree: "mrtree",
-  orgchart: "mrtree",
-  process: "layered",
-  bpmn: "layered",
-  // docs/27 D1. Timelines and matrices have their own geometry in the
-  // built-in engine (ELK has no time axis or cell grid); layered is only
-  // the fallback if ELK is ever forced onto one.
-  timeline: "layered",
-  matrix: "layered",
-  statemachine: "layered",
-};
+/**
+ * ELK algorithm per Lucent diagram kind, DERIVED from each family's built-in
+ * layout strategy (the representation registry, docs/26 §6.1) so a new family
+ * gets a sensible ELK fallback with no edit here. The reasoning on record: a
+ * radial family (mind map) → elk.force; a tree family (decision tree, org
+ * chart) → elk.mrtree; everything else — including families whose built-in
+ * geometry ELK cannot reproduce (swimlane has no ELK equivalent; timeline and
+ * matrix have no time axis or cell grid) — falls back to elk.layered, the
+ * flagship and the point of the Phase 2 comparison. ELK never owns those
+ * special geometries; this is only what runs if ELK is forced onto one.
+ */
+const ALGORITHM_FOR_KIND: Record<DiagramKind, string> = Object.fromEntries(
+  DIAGRAM_KINDS.map((kind) => {
+    const strategy = layoutStrategyFor(kind);
+    const algorithm = strategy === "radial" ? "force" : strategy === "tree" ? "mrtree" : "layered";
+    return [kind, algorithm];
+  }),
+) as Record<DiagramKind, string>;
 
 interface ElkNode {
   id: string;

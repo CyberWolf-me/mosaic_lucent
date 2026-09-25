@@ -1,5 +1,5 @@
 import type { Shape, ShapeLink, Workspace } from "@lucent/core";
-import { routeStyleFor, routedVertices, vectorPathsMarkup } from "@lucent/core";
+import { chartGeometry, routeStyleFor, routedVertices, vectorPathsMarkup } from "@lucent/core";
 import { DIAGRAM_LABELS } from "../scene.js";
 import { glyphSvg, nodeGlyphNow } from "../icons/exportSvg.js";
 import { peekAssetData } from "../assets.js";
@@ -449,6 +449,72 @@ export function buildBoardSvg(workspace: Workspace, pad = 40): string {
       // Unfilled parts take the shape's ink (light, on the dark export).
       parts.push(
         `<svg x="${s.position.x}" y="${s.position.y}" width="${s.size.width}" height="${s.size.height}" viewBox="${s.vector.viewBox.join(" ")}" preserveAspectRatio="xMidYMid meet" overflow="visible" color="${escapeAttr(s.style?.color ?? "#eeeeee")}">${vectorPathsMarkup(s.vector)}</svg>`,
+      );
+    } else if (s.kind === "table" && s.table) {
+      // A data table exports as a drawn grid: a header band, row/column rules,
+      // and clipped text per cell. Plain strings, escaped into text nodes.
+      const t = s.table;
+      const { x, y } = s.position;
+      const { width: sw, height: sh } = s.size;
+      const cols = Math.max(1, t.columns.length);
+      const totalRows = 1 + t.rows.length;
+      const colW = sw / cols;
+      const rowH = sh / totalRows;
+      const cell = (text: string, ci: number, ri: number, header: boolean) => {
+        const cx = x + ci * colW + 6;
+        const cy = y + ri * rowH + rowH / 2;
+        const clip = text.length > Math.max(1, Math.floor(colW / 7))
+          ? text.slice(0, Math.max(1, Math.floor(colW / 7) - 1)) + "…"
+          : text;
+        return `<text x="${cx.toFixed(1)}" y="${cy.toFixed(1)}" fill="${header ? "#fff" : "#ddd"}" font-family="sans-serif" font-size="12" font-weight="${header ? 600 : 400}" dominant-baseline="middle">${escapeXml(clip)}</text>`;
+      };
+      const gridLines: string[] = [];
+      for (let c = 1; c < cols; c++) {
+        const gx = x + c * colW;
+        gridLines.push(`<line x1="${gx.toFixed(1)}" y1="${y}" x2="${gx.toFixed(1)}" y2="${y + sh}" stroke="#3a3a40"/>`);
+      }
+      for (let r = 1; r < totalRows; r++) {
+        const gy = y + r * rowH;
+        gridLines.push(`<line x1="${x}" y1="${gy.toFixed(1)}" x2="${x + sw}" y2="${gy.toFixed(1)}" stroke="#3a3a40"/>`);
+      }
+      const cells: string[] = [];
+      t.columns.forEach((c, ci) => cells.push(cell(c.header, ci, 0, true)));
+      t.rows.forEach((row, ri) => {
+        for (let ci = 0; ci < cols; ci++) cells.push(cell(row.cells[ci] ?? "", ci, ri + 1, false));
+      });
+      parts.push(
+        `<rect x="${x}" y="${y}" width="${sw}" height="${sh}" rx="6" fill="#1b1b1e" stroke="#555"/>` +
+          `<rect x="${x}" y="${y}" width="${sw}" height="${rowH.toFixed(1)}" fill="#2a2a30"/>` +
+          gridLines.join("") +
+          cells.join(""),
+      );
+    } else if (s.kind === "chart" && s.chart) {
+      // A chart exports from the same core geometry the canvas renders, in a
+      // group translated to the shape's box. Text is escaped into text nodes.
+      const { x, y } = s.position;
+      const { width: sw, height: sh } = s.size;
+      const r2 = (n: number) => Math.round(n * 100) / 100;
+      const prims = chartGeometry(s.chart, sw, sh)
+        .map((p) => {
+          switch (p.kind) {
+            case "rect":
+              return `<rect x="${r2(p.x)}" y="${r2(p.y)}" width="${r2(p.w)}" height="${r2(p.h)}" fill="${escapeAttr(p.fill)}"/>`;
+            case "line":
+              return `<line x1="${r2(p.x1)}" y1="${r2(p.y1)}" x2="${r2(p.x2)}" y2="${r2(p.y2)}" stroke="${escapeAttr(p.stroke)}" stroke-width="${p.width}"/>`;
+            case "polyline":
+              return `<polyline points="${p.points.map(([px, py]) => `${r2(px)},${r2(py)}`).join(" ")}" fill="none" stroke="${escapeAttr(p.stroke)}" stroke-width="${p.width}"/>`;
+            case "path":
+              return `<path d="${escapeAttr(p.d)}" fill="${escapeAttr(p.fill)}"/>`;
+            case "text":
+              return `<text x="${r2(p.x)}" y="${r2(p.y)}" text-anchor="${p.anchor}" fill="${escapeAttr(p.fill)}" font-size="${p.size}" font-weight="${p.weight ?? 400}" font-family="sans-serif">${escapeXml(p.text)}</text>`;
+            default:
+              return "";
+          }
+        })
+        .join("");
+      parts.push(
+        `<rect x="${x}" y="${y}" width="${sw}" height="${sh}" rx="6" fill="#1b1b1e" stroke="#555"/>` +
+          `<g transform="translate(${x},${y})">${prims}</g>`,
       );
     } else if (s.kind === "frame") {
       parts.push(

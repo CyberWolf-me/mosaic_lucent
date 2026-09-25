@@ -855,6 +855,42 @@ export const ToolIco = {
       <path d="M6 3v18M18 3v18M3 6h18M3 18h18" />
     </svg>
   ),
+  /** Data table (docs/26 §6.1): a bordered grid with a header row. */
+  Table: (p: P) => (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      {...p}
+    >
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <path d="M3 9h18M9 9v11M15 9v11" />
+    </svg>
+  ),
+  /** Data chart (docs/26 §6.1): bars rising from a baseline. */
+  Chart: (p: P) => (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      {...p}
+    >
+      <path d="M4 20V4M4 20h16" />
+      <rect x="7" y="12" width="3" height="5" />
+      <rect x="12" y="9" width="3" height="8" />
+      <rect x="17" y="6" width="3" height="11" />
+    </svg>
+  ),
   /** Icons & vectors (docs/26 §6.3): a circle, a square, a triangle, a curve. */
   Vectors: (p: P) => (
     <svg

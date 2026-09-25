@@ -1,4 +1,6 @@
 import type { VectorData } from "./vector.js";
+import type { TableData } from "./table.js";
+import type { ChartData } from "./chart.js";
 /**
  * Core semantic model for the Lucent workspace.
  *
@@ -11,19 +13,46 @@ import type { VectorData } from "./vector.js";
  * Representations the semantic model can render as. Each maps to a layout
  * strategy in layout.ts — the model is one graph, the kind chooses the geometry.
  */
-export type DiagramKind =
-  | "flowchart"
-  | "architecture"
-  | "mindmap"
-  | "journey"
-  | "decisiontree"
-  | "process"
-  | "orgchart"
-  | "bpmn"
+/**
+ * The diagram families Lucent understands. This tuple is the single source of
+ * truth for the set of kinds: the `DiagramKind` type is derived from it, the
+ * operation and workspace Zod enums are built from it (so the AI contract and
+ * the stored shape can never drift apart), and the representation registry
+ * (`representations.ts`) attaches each kind's layout, look, prompt text and
+ * convert-menu metadata. Adding a family starts here — one entry — then the
+ * registry entry beside it.
+ */
+export const DIAGRAM_KINDS = [
+  "flowchart",
+  "architecture",
+  "mindmap",
+  "journey",
+  "decisiontree",
+  "process",
+  "orgchart",
+  "bpmn",
   // docs/27 D1: new families.
-  | "timeline"
-  | "matrix"
-  | "statemachine";
+  "timeline",
+  "matrix",
+  "statemachine",
+  // docs/26 §6.1 V4: graph / architecture variants. Each lays out with an
+  // existing strategy and renders generically — no new geometry — so it is a
+  // pure registry addition.
+  "dependency",
+  "c4",
+  "network",
+  // docs/26 §6.1 V4: sequence and ER — created as kinds, presented through the
+  // existing derived lenses (board/sequence.ts, ErView).
+  "sequence",
+  "er",
+  // docs/26 §6.1 V4 + docs/27 D3: UML class diagrams (classes with attribute
+  // and operation compartments) and the user story map (activities as
+  // columns, releases as rows).
+  "class",
+  "storymap",
+] as const;
+
+export type DiagramKind = (typeof DIAGRAM_KINDS)[number];
 
 /** Coordinates are always assigned by the layout engine, never by the AI. */
 export interface Position {
@@ -610,7 +639,11 @@ export type ShapeKind =
   | "frame"
   | "embed"
   | "file"
-  | "vector";
+  | "vector"
+  // docs/26 §6.1 V4: a structured data table (see table.ts).
+  | "table"
+  // docs/26 §6.1 V4: a data-bound chart (see chart.ts).
+  | "chart";
 
 export interface ShapeStyle {
   fill?: string;
@@ -641,6 +674,10 @@ export interface Shape {
   src?: string;
   /** Kind "vector": structured paths (docs/26 §6.3, vector.ts). */
   vector?: VectorData;
+  /** Kind "table": a structured data grid (docs/26 §6.1, table.ts). */
+  table?: TableData;
+  /** Kind "chart": a data-bound chart (docs/26 §6.1, chart.ts). */
+  chart?: ChartData;
   style?: ShapeStyle;
   /** Explicit z-order; higher renders on top. */
   z?: number;

@@ -3,6 +3,7 @@ import { REQUEST_LIMITS, streamViaGenerate } from "@lucent/ai";
 import type { GenerateResult, LLMProvider, StreamCallbacks, TokenUsage } from "@lucent/ai";
 import {
   ASSISTANT_AUTHOR,
+  DIAGRAM_KINDS,
   validateOperations,
   createWorkspace,
   applyOperations,
@@ -46,16 +47,11 @@ const shortText = z.string().max(REQUEST_LIMITS.idChars);
 const lineText = z.string().max(REQUEST_LIMITS.textChars);
 
 const summarySchema = z.object({
-  diagramKind: z.enum([
-    "flowchart",
-    "architecture",
-    "mindmap",
-    "journey",
-    "decisiontree",
-    "process",
-    "orgchart",
-    "bpmn",
-  ]),
+  // Derived from the single source of truth (DIAGRAM_KINDS) so a board on any
+  // registered family — timeline, matrix, state machine, dependency, C4,
+  // network, sequence, ER, … — can be generated against. This enum was
+  // hand-maintained at the original eight and silently 400'd every newer kind.
+  diagramKind: z.enum(DIAGRAM_KINDS),
   nodes: z
     .array(
       z.object({
@@ -118,18 +114,9 @@ const summarySchema = z.object({
         id: shortText,
         label: lineText,
         children: z.array(shortText).max(REQUEST_LIMITS.groupChildren),
-        kind: z
-          .enum([
-            "flowchart",
-            "architecture",
-            "mindmap",
-            "journey",
-            "decisiontree",
-            "process",
-            "orgchart",
-            "bpmn",
-          ])
-          .optional(),
+        // Same source of truth as the board kind: a region can be any family
+        // (SET_GROUP_KIND accepts them all), so the summary echo must too.
+        kind: z.enum(DIAGRAM_KINDS).optional(),
       }),
     )
     .max(REQUEST_LIMITS.groups)

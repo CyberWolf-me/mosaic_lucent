@@ -36,6 +36,9 @@ export function validateOperations(workspace: Workspace, ops: Operation[]): Vali
   const edges = new Set(Object.keys(workspace.edges));
   const wireframes = new Set(Object.keys(workspace.wireframes));
   const shapes = new Set(Object.keys(workspace.shapes));
+  // Each shape's kind, including shapes created earlier in this batch: a
+  // vector/table/chart payload belongs only on the shape kind that renders it.
+  const shapeKinds = new Map(Object.values(workspace.shapes).map((s) => [s.id, s.kind]));
   // Locked shapes (M0.5): the validator refuses to mutate or remove them
   // unless the op is explicitly clearing `locked`. The previous behaviour
   // treated `locked` as advisory only, which let a model move, recolor or
@@ -328,10 +331,21 @@ export function validateOperations(workspace: Workspace, ops: Operation[]): Vali
         if (op.kind === "vector" && !op.vector) err(`vector shape "${op.id}" has no paths`);
         if (op.vector && op.kind !== "vector")
           err(`only a vector shape carries paths, not "${op.kind}"`);
+        // Same rule for the V4 data objects: a table shape IS its grid and a
+        // chart shape IS its data, and neither payload rides any other kind —
+        // otherwise a later edit could add one where the inverse has nothing
+        // to restore, and undo would silently keep it.
+        if (op.kind === "table" && !op.table) err(`table shape "${op.id}" has no table data`);
+        if (op.table && op.kind !== "table")
+          err(`only a table shape carries table data, not "${op.kind}"`);
+        if (op.kind === "chart" && !op.chart) err(`chart shape "${op.id}" has no chart data`);
+        if (op.chart && op.kind !== "chart")
+          err(`only a chart shape carries chart data, not "${op.kind}"`);
         if (op.src && op.kind !== "image" && isImageDataUrl(op.src)) {
           err(`a data URL src is only allowed on an image shape, not "${op.kind}"`);
         }
         shapes.add(op.id);
+        shapeKinds.set(op.id, op.kind);
         // A new shape may declare itself locked at creation. Treating that the
         // same as a post-creation update keeps the lock-state invariant
         // uniform across all paths that introduce a shape.
@@ -339,6 +353,14 @@ export function validateOperations(workspace: Workspace, ops: Operation[]): Vali
         break;
       case "UPDATE_SHAPE": {
         if (!shapes.has(op.id)) err(`shape "${op.id}" does not exist`);
+        const kind = shapeKinds.get(op.id);
+        if (kind !== undefined) {
+          if (op.vector && kind !== "vector") err(`only a vector shape carries paths, not "${kind}"`);
+          if (op.table && kind !== "table")
+            err(`only a table shape carries table data, not "${kind}"`);
+          if (op.chart && kind !== "chart")
+            err(`only a chart shape carries chart data, not "${kind}"`);
+        }
         // Locked shapes may only be updated to clear their own lock; anything
         // else is a move/recolour/relabel the AI should not perform.
         const isLocked = lockedShapes.has(op.id);
@@ -354,6 +376,7 @@ export function validateOperations(workspace: Workspace, ops: Operation[]): Vali
         if (!shapes.has(op.id)) err(`shape "${op.id}" does not exist`);
         if (lockedShapes.has(op.id)) err(`shape "${op.id}" is locked`);
         shapes.delete(op.id);
+        shapeKinds.delete(op.id);
         lockedShapes.delete(op.id);
         break;
       }

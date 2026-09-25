@@ -217,23 +217,99 @@ kind, allowed ops, layout engine, lens renderer, prompt section and starter
 template. The AI prompt's family list and the "convert to…" menu are
 generated from it, so a new family is an additive change.
 
+**Status (2026-09-25):** the registry itself is built —
+`core/src/representations.ts` (`REPRESENTATIONS`) is the single table over
+`DIAGRAM_KINDS` (now the one source of truth the operation and workspace Zod
+enums derive from). Each entry declares label, summary, category, layout
+strategy, route style, and the `aiCreatable`/`convertible` flags. Everything
+that used to keep its own per-kind copy now derives from it: `layout.ts`
+(`layoutStrategyFor` → `STRATEGY_FOR_KIND`), `routing.ts` (`routeStyleFor` →
+`ROUTE_STYLE_FOR_KIND`), the web canvas labels (`DIAGRAM_LABELS`) and the
+region-kind picker (`REGION_KIND_ORDER`, which had drifted to a hand-kept 7 of
+11 — the four newer families were unreachable and, worse, a region set to one
+wouldn't reload because `groupSchema.kind` refused it; both fixed by deriving
+from `convertibleKinds()` and widening the schema to the full set). The AI
+prompt injects a generated family catalog (`representationCatalogPrompt()`), and
+a whole-board **"Convert board to…"** menu (the manual counterpart of
+`TRANSFORM_DIAGRAM`, previously exposed as `selectDiagram` but wired to no UI)
+now lets "turn this into a roadmap / state machine" work from any board.
+Three graph/architecture variants were added as pure registry entries (2026-09-25):
+**dependency graph**, **C4 model** and **network / infrastructure** — each lays
+out `layered` and renders generically, and adding them touched only
+`DIAGRAM_KINDS` + one registry entry each (two lingering hand-kept
+`Record<DiagramKind,…>` maps — ELK's algorithm-per-kind and the dashboard's
+board-label map — were folded into the registry at the same time, so they can't
+fall behind again).
+**Still to add — larger than one entry, each needs new geometry or an object
+kind:** table (new object kind + renderer), data charts (CSV→chart data
+binding), and promoting sequence/ER from derived lenses to AI-creatable kinds
+(they need their own layout). BPMN is now wired into the prompt and picker.
+
+**Starter templates (2026-09-25):** the registry entry now carries the last of
+its four declared parts — a `starter(idPrefix)` that returns the operations
+seeding a minimal, still-editable example of the family (`starterFor(kind,
+prefix)`; core, framework-agnostic, id-prefixed so repeated inserts never
+collide). Each is a *semantic* seed — nodes, edges and groups, never fixed
+geometry — so the layout engine positions it and the AI can keep building on it.
+The "Convert board to…" menu uses it: on a blank board, picking a family now
+seeds its starter rather than switching an empty kind, so "turn this into a
+state machine / roadmap / C4" produces something to edit. Tests assert every
+family's starter validates against the op contract, reduces to a board of the
+right kind, and lays out.
+
+**Table object kind (2026-09-25):** the first of the two new object kinds is
+built — a `table` shape (core `table.ts`, mirroring how `vector` rides
+`shape.vector`). It carries `{ columns, rows }` as plain strings (never markup),
+with a delimited-text parser (`parseDelimited`, CSV/TSV with RFC-4180 quoting)
+that doubles as the "extract structured data" input, plus `createTable` and
+`tableToMarkdown`. The op contract (`CREATE_SHAPE`/`UPDATE_SHAPE.table`), the
+reducer, the workspace schema (tolerant `.catch(undefined)` like vector), and
+the inverse (undo) all carry it; `cloneShapeOp` now copies it (and `vector`,
+which it had also been dropping). The web renders it as an HTML table on the
+canvas and a drawn grid in the SVG/PNG/PDF export, with a toolbar tool that
+drops a starter 3×2 grid. Remaining new-geometry work: data charts (bind a
+table/CSV to a vector chart) and promoting sequence/ER to AI-creatable kinds.
+
+**Data charts (2026-09-25):** the second new object kind is built — a `chart`
+shape (core `chart.ts`) carrying `{ type, title?, labels, series }` for bar,
+line and pie. `chartFromTable` binds tabular data (first column → labels, each
+numeric column → a series), so "CSV/table → chart" works, and `parseNumericCell`
+tolerates currency/percent/thousands. The DRAWN TRUTH is one pure function,
+`chartGeometry(data, w, h)`, returning flat primitives (rects, lines, polylines,
+pie-slice paths, text); the canvas `ChartView` and the SVG export both build
+from it, so they can never diverge. Wired through the same points as `table`
+(op contract, reducer, tolerant schema, inverse, `cloneShapeOp`) with a toolbar
+tool that drops a sample bar chart. Only sequence/ER-as-creatable-kinds now
+remains of the V4 family list.
+
+**Sequence & ER as creatable kinds (2026-09-25):** the last family-list item.
+`sequence` and `er` are now registry kinds (with starters), so the AI's catalog
+names them, `CREATE_DIAGRAM`/`TRANSFORM_DIAGRAM` accept them, and the "Convert
+board to…" menu offers them. They keep their existing derived presentation —
+`board/sequence.ts` → `SequenceView`, and `ErView` — rather than a new core
+layout: converting a board to sequence/ER also switches the canvas lens to
+match (and converting away from one returns to the visual lens), so the choice
+shows the diagram immediately. **This closes the V4 family list; every row in
+the §6.1 table is now ✅ or a deliberate follow-up (expand/collapse ops, C4
+level nesting) beyond the "create/convert works" bar.**
+
 | Family                          | Today | Plan                                                             |
 | ------------------------------- | :---: | ---------------------------------------------------------------- |
 | Flowchart, process, swimlane    |  ✅   | —                                                                |
 | Architecture                    |  ✅   | + C4 levels (context/container/component) and icons              |
 | Mind map, org chart, tree       |  ✅   | + expand/collapse ops                                            |
 | Journey, decision tree          |  ✅   | —                                                                |
-| BPMN                            |  🟡   | Wire the existing XML import/export; add to prompt and picker    |
-| Sequence, ER                    |  🟡   | Derived lenses today → also AI-generatable directly              |
-| State machine                   |  ❌   | New: states, transitions, guards                                 |
-| Timeline / roadmap              |  ❌   | New: time axis layout; links to actions' due dates               |
-| Dependency graph                |  ❌   | New lens over `depends_on/blocks/drives`                          |
-| Matrix (2×2, SWOT, RACI)        |  🟡   | SWOT template → a real matrix layout                             |
-| Table                           |  ❌   | New object kind; also "extract structured data" target           |
-| Charts (bar/line/pie from data) |  ❌   | New: data-bound vector charts (CSV/table → chart)                |
+| BPMN                            |  ✅   | Wired into the AI prompt and the convert/region picker (registry) |
+| Sequence, ER                    |  ✅   | Creatable kinds (registry); presented through the sequence/ER lenses |
+| State machine                   |  ✅   | Registered: states, transitions, guards (layered)                |
+| Timeline / roadmap              |  ✅   | Registered: time-axis layout; links to actions' due dates        |
+| Dependency graph                |  ✅   | Registered family (layered) over `depends_on/blocks/drives`      |
+| Matrix (2×2, SWOT, RACI)        |  ✅   | Registered: grid layout                                          |
+| Table                           |  ✅   | New object kind (`table` shape, table.ts): CSV/TSV import, HTML + SVG render |
+| Charts (bar/line/pie from data) |  ✅   | New object kind (`chart` shape, chart.ts): table/CSV-bound bar/line/pie |
 | Wireframe                       |  ✅   | + icons, vector assets in elements                               |
 | Presentation layout             |  🟡   | Present mode exists → frame-ordered slides, export PDF           |
-| Network / infrastructure        |  ❌   | Architecture variant with zones and trust boundaries             |
+| Network / infrastructure        |  ✅   | Registered architecture variant (group nodes into zones)         |
 
 ### 6.2 Icons everywhere
 
@@ -290,6 +366,17 @@ of generating another company's logo (Recraft's terms forbid it); prompt v14
 lets the visual agent draw a small pictogram itself as the free fallback.
 Verified against the live API (one call, 80 units). Not yet: AI edit of an
 existing vector (image-to-image), QuiverAI.
+
+**Image-generation fixes (2026-09-25):** two defects noticed during testing,
+now closed. (1) A generated raster image is no longer inlined into the op log
+as a ~2.6 MB data URL: on a shared board `generateImageShape` runs the result
+through `uploadGeneratedImage` → `POST /api/assets`, so the shape carries a
+20-byte `asset:` reference (local boards and upload failures still fall back to
+the data URL, and the SVG mock stays inline since the asset store refuses SVG).
+(2) `OpenAIImageProvider` had no request timeout — a stalled gateway hung the
+call forever; it now uses `AbortSignal.timeout` (default 120 s, override via
+`LUCENT_IMAGE_TIMEOUT_MS`/`LUCENT_AI_TIMEOUT_MS`), matching every other outbound
+provider.
 
 **Five ways to make a vector:**
 
@@ -427,7 +514,7 @@ anything ships.
 | V1    | Icons & editor            | §6.2 icon registry + `node.icon`, §6.4 editor gaps, asset upload client, export fixes  | An architecture board shows real brand marks; shapes rotate and export |
 | V2    | Vector Studio, local      | `vector` kind, sanitizing importer, icon → vector, VTracer raster → vector, sketch → vector, editing | Paste a logo PNG → an editable, recolourable vector, no external calls |
 | V3    | Vector Studio, generative | `VectorProvider` seam: LLM baseline + QuiverAI and/or Recraft, variations, AI edit     | "Three icon directions for our four services" lands as editable vectors|
-| V4    | Representation registry   | §6.1 registry + state machine, timeline/roadmap, dependency, matrix, table, charts, C4, BPMN wired | "Turn this into a roadmap/state machine/C4" works from any board        |
+| V4    | Representation registry   | §6.1 registry ✅ + starters ✅; every family wired: state machine/timeline/matrix, dependency/C4/network, table + chart object kinds, BPMN, sequence/ER ✅ | "Turn this into a roadmap/state machine/C4" works from any board ✅       |
 | V5    | Semantic zoom ladder      | §6.5, measured on 80/150/300-object boards                                             | A 300-object board is readable at every zoom                           |
 
 **Locked order (2026-09-24, see §12):** the visual track leads the next

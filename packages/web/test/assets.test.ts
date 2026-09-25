@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { applyOperations, createWorkspace } from "@lucent/core";
-import { assetUrl, peekAssetData, preloadAssetData, uploadAsset } from "../src/assets.js";
+import { assetUrl, peekAssetData, preloadAssetData, uploadAsset, uploadGeneratedImage } from "../src/assets.js";
 import { buildBoardSvg } from "../src/board/geometry.js";
 import { isSafeImageSrc } from "../src/ui/ShapeToolbar.js";
 
@@ -79,6 +79,47 @@ describe("uploadAsset", () => {
       ),
     );
     expect(await uploadAsset(new Blob([PNG], { type: "image/png" }), "brd_1")).toBeNull();
+  });
+});
+
+describe("uploadGeneratedImage", () => {
+  const DATA_URL = `data:image/png;base64,${Buffer.from(PNG).toString("base64")}`;
+
+  it("uploads a generated data URL on a shared board and returns the reference", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) =>
+        url === "/api/auth/csrf"
+          ? Response.json({ token: "t" })
+          : url === DATA_URL
+            ? new Response(new Blob([PNG], { type: "image/png" }))
+            : Response.json({ ref: REF, id: "ast_abc123def" }, { status: 201 }),
+      ),
+    );
+    expect(await uploadGeneratedImage(DATA_URL, "brd_1")).toBe(REF);
+  });
+
+  it("keeps the data URL on a local board (no server to hold the bytes)", async () => {
+    expect(await uploadGeneratedImage(DATA_URL, null)).toBe(DATA_URL);
+  });
+
+  it("keeps a src that isn't a data URL untouched", async () => {
+    expect(await uploadGeneratedImage(REF, "brd_1")).toBe(REF);
+    expect(await uploadGeneratedImage("https://cdn/x.png", "brd_1")).toBe("https://cdn/x.png");
+  });
+
+  it("falls back to the data URL when the upload is refused", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) =>
+        url === "/api/auth/csrf"
+          ? Response.json({ token: "t" })
+          : url === DATA_URL
+            ? new Response(new Blob([PNG], { type: "image/png" }))
+            : Response.json({ error: "quota" }, { status: 413 }),
+      ),
+    );
+    expect(await uploadGeneratedImage(DATA_URL, "brd_1")).toBe(DATA_URL);
   });
 });
 

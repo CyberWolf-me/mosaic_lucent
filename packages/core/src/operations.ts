@@ -1,5 +1,8 @@
 import * as z from "zod/v4";
+import { DIAGRAM_KINDS } from "./model.js";
 import { vectorDataSchema } from "./vector.js";
+import { tableDataSchema } from "./table.js";
+import { chartDataSchema } from "./chart.js";
 import {
   iconRef,
   normalizeIconRef,
@@ -26,20 +29,10 @@ import {
  * validator accepts.
  */
 
-const diagramKind = z.enum([
-  "flowchart",
-  "architecture",
-  "mindmap",
-  "journey",
-  "decisiontree",
-  "process",
-  "orgchart",
-  "bpmn",
-  // docs/27 D1: new families.
-  "timeline",
-  "matrix",
-  "statemachine",
-]);
+// Built from the single source of truth in model.ts, so the operation contract,
+// the workspace schema and the representation registry can never disagree about
+// which families exist.
+const diagramKind = z.enum(DIAGRAM_KINDS);
 
 /** Work-tracking (Jira-style) fields attached to a node. All optional so the
  * model can set only what it knows; the reducer fills a default statusCategory. */
@@ -200,6 +193,10 @@ export const shapeKind = z.enum([
   "file",
   // docs/26 §6.3: an editable vector — structured paths in `vector`, never markup.
   "vector",
+  // docs/26 §6.1: a structured data table in `table` (table.ts).
+  "table",
+  // docs/26 §6.1: a data-bound chart in `chart` (chart.ts).
+  "chart",
 ]);
 
 const shapeStyleSchema = z.object({
@@ -432,6 +429,10 @@ const operationSchema = z.discriminatedUnion("op", [
     src: optionalImageSrc,
     /** Kind "vector" only: structured paths (vector.ts). */
     vector: vectorDataSchema.optional(),
+    /** Kind "table" only: a structured data grid (table.ts). */
+    table: tableDataSchema.optional(),
+    /** Kind "chart" only: a data-bound chart (chart.ts). */
+    chart: chartDataSchema.optional(),
     style: shapeStyleSchema.optional(),
     z: z.number().optional(),
     groupId: z.string().min(1).optional(),
@@ -447,6 +448,10 @@ const operationSchema = z.discriminatedUnion("op", [
     text: z.string().optional(),
     /** Replace a vector shape's paths (recolour, restroke, simplify, AI edit). */
     vector: vectorDataSchema.optional(),
+    /** Replace a table shape's data (edit cells, add rows/columns). */
+    table: tableDataSchema.optional(),
+    /** Replace a chart shape's data (change type, series, values). */
+    chart: chartDataSchema.optional(),
     style: shapeStyleSchema.optional(),
     z: z.number().optional(),
     groupId: z.string().min(1).nullable().optional(),

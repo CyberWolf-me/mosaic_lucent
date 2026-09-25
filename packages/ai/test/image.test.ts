@@ -116,6 +116,15 @@ describe("OpenAIImageProvider", () => {
     await expect(make(fetchImpl).generateImage({ prompt: "x" })).rejects.toThrow(/no image data/i);
   });
 
+  it("bounds the request with an abort signal so a stalled gateway can't hang", async () => {
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(jsonResponse(200, { data: [{ b64_json: OK_B64 }] }));
+    await make(fetchImpl).generateImage({ prompt: "a cat" });
+    const init = fetchImpl.mock.calls[0]?.[1] as RequestInit;
+    expect(init.signal).toBeInstanceOf(AbortSignal);
+  });
+
   it("requires a key and an endpoint", () => {
     expect(() => new OpenAIImageProvider({ apiKey: "", baseUrl: "https://x" })).toThrow(/apiKey/);
     expect(() => new OpenAIImageProvider({ apiKey: "k", baseUrl: "" })).toThrow(/baseUrl/);

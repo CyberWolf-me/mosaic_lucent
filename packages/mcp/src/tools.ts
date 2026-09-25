@@ -13,6 +13,7 @@ import {
   boardToMermaid,
   detectMermaid,
   mermaidToOps,
+  DIAGRAM_KINDS,
   type Operation,
   type Workspace,
 } from "@lucent/core";
@@ -99,15 +100,7 @@ export function listTools(): McpTool[] {
         properties: {
           diagramKind: {
             type: "string",
-            enum: [
-              "flowchart",
-              "architecture",
-              "mindmap",
-              "journey",
-              "decisiontree",
-              "process",
-              "orgchart",
-            ],
+            enum: [...DIAGRAM_KINDS],
           },
         },
         additionalProperties: false,

@@ -5,11 +5,11 @@ import {
   computeLayout,
   createWorkspace,
   statementNodes,
-  type DiagramKind,
   type StatementFields,
   type Workspace,
 } from "@lucent/core";
 import { Ico } from "../ui/icons.js";
+import { DIAGRAM_LABELS } from "../scene.js";
 import { Button, Card, EmptyState, FilterChips, Page, PageHeader, type FilterItem } from "../ui/kit.js";
 import { StatementGlyph } from "../ui/StatementGlyph.js";
 import { Dialog } from "../ui/primitives.js";
@@ -81,19 +81,7 @@ interface BoardEntry {
   tally?: StatementTally;
 }
 
-const KIND_NAME: Record<DiagramKind, string> = {
-  flowchart: "Flowchart",
-  architecture: "Architecture",
-  mindmap: "Mind map",
-  journey: "User journey",
-  decisiontree: "Decision tree",
-  process: "Process map",
-  orgchart: "Org chart",
-  bpmn: "BPMN process",
-  timeline: "Timeline",
-  matrix: "Matrix",
-  statemachine: "State machine",
-};
+const KIND_NAME = DIAGRAM_LABELS;
 
 const SCOPE_BADGE: Record<Scope, { label: string; title: string }> = {
   local: { label: "Local", title: "Saved in this browser only" },

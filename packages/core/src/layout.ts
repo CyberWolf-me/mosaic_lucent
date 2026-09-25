@@ -1,5 +1,6 @@
-import type { DiagramKind, Node, Position, Size, Workspace } from "./model.js";
+import { DIAGRAM_KINDS, type DiagramKind, type Node, type Position, type Size, type Workspace } from "./model.js";
 import { getLayoutOverride, type DiagramLayoutEngine } from "./layoutEngine.js";
+import { layoutStrategyFor, pseudoRoleFor } from "./representations.js";
 
 /**
  * Deterministic layout. The AI never sets coordinates (docs/25); this pass turns
@@ -68,21 +69,15 @@ function withIntentDefaults(
   return merged;
 }
 
-/** Which geometry suits each representation. */
-const STRATEGY_FOR_KIND: Record<DiagramKind, LayoutStrategy> = {
-  flowchart: "layered",
-  architecture: "layered",
-  journey: "layered",
-  mindmap: "radial",
-  decisiontree: "tree",
-  orgchart: "tree",
-  process: "swimlane",
-  bpmn: "layered",
-  // docs/27 D1
-  timeline: "timeline",
-  matrix: "grid",
-  statemachine: "layered",
-};
+/**
+ * Which geometry suits each representation. Derived from the representation
+ * registry (docs/26 §6.1) — the single table where each family declares its
+ * layout — so a new family's geometry is set by its registry entry, not a
+ * second map maintained here.
+ */
+const STRATEGY_FOR_KIND: Record<DiagramKind, LayoutStrategy> = Object.fromEntries(
+  DIAGRAM_KINDS.map((kind) => [kind, layoutStrategyFor(kind)]),
+) as Record<DiagramKind, LayoutStrategy>;
 
 export type LayoutResult = Record<string, { position: Position; size: Size }>;
 
@@ -1885,15 +1880,19 @@ function gridLayout(
  * attach to what is drawn, and the card-sized box that made the canvas render
  * big ellipses is gone.
  */
-const PSEUDO_TYPES = new Set(["start", "entry", "initial", "end", "exit", "final"]);
 const PSEUDO_SIZE = 36;
 
+/**
+ * Pseudo-nodes (a state machine's start dot, a BPMN event) are drawn small.
+ * Which node types are pseudo in which family comes from the registry
+ * (`pseudoRoleFor`), the same answer the canvas draws their shapes from — so a
+ * node the layout shrinks is always one the canvas draws as a dot.
+ */
 function shrinkPseudoStates(workspace: Workspace, kind: DiagramKind, layout: LayoutResult): LayoutResult {
-  if (kind !== "statemachine" && kind !== "bpmn") return layout;
   let out: LayoutResult | null = null;
   for (const [id, box] of Object.entries(layout)) {
     const t = workspace.nodes[id]?.nodeType;
-    if (!t || !PSEUDO_TYPES.has(t)) continue;
+    if (!t || !pseudoRoleFor(kind, t)) continue;
     out ??= { ...layout };
     out[id] = {
       position: {

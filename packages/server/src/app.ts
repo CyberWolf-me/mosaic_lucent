@@ -4550,6 +4550,9 @@ export function createApp(deps: AppDeps): App {
     // rather than imported so the realtime layer stays metric-shape-agnostic
     // (it names seconds, not a series) and tests construct none.
     observeConnectionDuration: (seconds) => wsDuration.observe(seconds),
+    // No op batch can be larger than the stored board it edits; twice the
+    // workspace cap leaves room for the envelope.
+    maxPayloadBytes: config.maxWorkspaceBytes * 2,
   });
   realtime.attach(server);
 

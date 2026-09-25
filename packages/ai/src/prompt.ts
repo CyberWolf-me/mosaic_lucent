@@ -2,6 +2,7 @@ import { NOTE_TEMPLATES, type NotesRequest } from "./notes.js";
 import { THEME_LIMITS, themeCap, type ThemesRequest } from "./themes.js";
 import { getPrompt } from "./registry.js";
 import { REQUEST_LIMITS } from "./provider.js";
+import { representationCatalogPrompt } from "@lucent/core";
 import type { GenerateRequest } from "./provider.js";
 import type { AnswerRequest } from "./answer.js";
 import type { ExternalPlanRequest } from "./externalPlan.js";
@@ -431,6 +432,9 @@ export function buildUserPrompt(request: GenerateRequest): string {
   const addBoard = (section: string) => board.push(escapeHarnessTags(section));
 
   addBoard(`Current diagram kind: ${summary.diagramKind}`);
+  // The family catalog, generated from core's representation registry (docs/26
+  // §6.1) so a newly-registered family reaches the model with no prompt edit.
+  addBoard(representationCatalogPrompt());
   addBoard(`Existing nodes:\n${nodes}`);
   addBoard(`Existing edges:\n${edges}`);
 

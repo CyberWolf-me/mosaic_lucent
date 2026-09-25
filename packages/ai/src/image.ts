@@ -140,7 +140,19 @@ export interface OpenAIImageOptions {
   fallbackModels?: string[];
   fetchImpl?: typeof fetch;
   name?: string;
+  /**
+   * Per-request timeout in ms. Without it a stalled gateway would leave the
+   * request hanging indefinitely — the same `AbortSignal.timeout` guard every
+   * other outbound provider (STT, TTS, integrations, Pollinations) already has.
+   */
+  timeoutMs?: number;
 }
+
+/**
+ * Default image timeout. Image models are slower than chat completions, so this
+ * is generous — it only exists to bound a truly stuck gateway.
+ */
+const DEFAULT_IMAGE_TIMEOUT_MS = 120_000;
 
 interface ImagesResponse {
   data?: Array<{ b64_json?: string; url?: string; revised_prompt?: string }>;
@@ -160,6 +172,7 @@ export class OpenAIImageProvider implements ImageProvider {
   private readonly apiKey: string;
   private readonly baseUrl: string;
   private readonly fetchImpl: typeof fetch;
+  private readonly timeoutMs: number;
 
   constructor(options: OpenAIImageOptions) {
     if (!options.apiKey) throw new Error("OpenAIImageProvider requires an apiKey");
@@ -170,6 +183,7 @@ export class OpenAIImageProvider implements ImageProvider {
     this.fallbackModels = options.fallbackModels ?? [];
     this.fetchImpl = options.fetchImpl ?? fetch;
     this.name = options.name ?? "openai-image";
+    this.timeoutMs = options.timeoutMs ?? DEFAULT_IMAGE_TIMEOUT_MS;
   }
 
   async generateImage(request: ImageRequest): Promise<ImageResult> {
@@ -203,6 +217,7 @@ export class OpenAIImageProvider implements ImageProvider {
         // Ask for bytes, not a URL, so the shape carries its own image.
         response_format: "b64_json",
       }),
+      signal: AbortSignal.timeout(this.timeoutMs),
     });
 
     if (!response.ok) {

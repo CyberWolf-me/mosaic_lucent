@@ -7,6 +7,8 @@ import { inkOn, normalizeZ, type DropKind } from "../shapes.js";
 import { DRAG_HYSTERESIS_PX, shapeLinkEnds, shapeLinkPath } from "../board/geometry.js";
 import { embedModeOf } from "../embed.js";
 import { VectorSvg } from "../vector/VectorSvg.js";
+import { TableView } from "./TableView.js";
+import { ChartView } from "./ChartView.js";
 
 export type { DropKind };
 
@@ -48,6 +50,8 @@ export type Tool =
   | "pen"
   | "eraser"
   | "frame"
+  | "table"
+  | "chart"
   | "comment";
 
 /** Tools that create a shape by drawing on the canvas (vs. select/hand/pen/etc.). */
@@ -60,6 +64,8 @@ export const SHAPE_KINDS = new Set<Tool>([
   "sticky",
   "text",
   "frame",
+  "table",
+  "chart",
 ]);
 
 export function ShapeToolbar({
@@ -145,6 +151,12 @@ export function ShapeToolbar({
       <div className="divider" />
       <T id="frame" tip="Frame · F">
         <ToolIco.Frame />
+      </T>
+      <T id="table" tip="Table">
+        <ToolIco.Table />
+      </T>
+      <T id="chart" tip="Chart">
+        <ToolIco.Chart />
       </T>
       <button
         className="tool"
@@ -812,6 +824,57 @@ export function ShapeElement({
           <VectorSvg vector={shape.vector} />
         ) : (
           <span className="vector-missing">Vector unavailable</span>
+        )}
+        {resizeHandle}
+      </div>
+    );
+  }
+
+  // A structured data table (docs/26 §6.1): rendered as an HTML table from
+  // `shape.table`. Plain-text cells, so nothing escapes into the DOM.
+  if (kind === "table") {
+    return (
+      <div
+        {...commonProps}
+        onDoubleClick={(e) => e.stopPropagation()}
+        style={{
+          ...style,
+          width: w,
+          height: h,
+          padding: 0,
+          overflow: "hidden",
+        }}
+      >
+        {shape.table ? (
+          <TableView table={shape.table} />
+        ) : (
+          <span className="vector-missing">Empty table</span>
+        )}
+        {resizeHandle}
+      </div>
+    );
+  }
+
+  // A data-bound chart (docs/26 §6.1): drawn from core's chartGeometry.
+  if (kind === "chart") {
+    return (
+      <div
+        {...commonProps}
+        onDoubleClick={(e) => e.stopPropagation()}
+        style={{
+          ...style,
+          width: w,
+          height: h,
+          padding: 0,
+          overflow: "hidden",
+          background: "var(--surface-1, #1b1b1e)",
+          borderRadius: 6,
+        }}
+      >
+        {shape.chart ? (
+          <ChartView chart={shape.chart} width={w} height={h} />
+        ) : (
+          <span className="vector-missing">Empty chart</span>
         )}
         {resizeHandle}
       </div>

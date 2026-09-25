@@ -387,6 +387,8 @@ export function applyOperation(workspace: Workspace, op: Operation): Workspace {
         ...(op.path !== undefined ? { path: op.path } : {}),
         ...(op.src !== undefined ? { src: op.src } : {}),
         ...(op.vector !== undefined ? { vector: op.vector } : {}),
+        ...(op.table !== undefined ? { table: op.table } : {}),
+        ...(op.chart !== undefined ? { chart: op.chart } : {}),
         ...(op.style ? { style: op.style } : {}),
         ...(op.z !== undefined ? { z: op.z } : {}),
         ...(op.groupId ? { groupId: op.groupId } : {}),
@@ -405,6 +407,8 @@ export function applyOperation(workspace: Workspace, op: Operation): Workspace {
         if (op.rotation !== undefined) updated.rotation = op.rotation;
         if (op.text !== undefined) updated.text = op.text;
         if (op.vector !== undefined) updated.vector = op.vector;
+        if (op.table !== undefined) updated.table = op.table;
+        if (op.chart !== undefined) updated.chart = op.chart;
         if (op.style) updated.style = { ...shape.style, ...op.style };
         if (op.z !== undefined) updated.z = op.z;
         // false is the default for these flags, so store it as absence — keeps

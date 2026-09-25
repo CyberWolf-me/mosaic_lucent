@@ -1,4 +1,4 @@
-import type { Operation, Shape } from "@lucent/core";
+import { chartFromTable, createTable, type Operation, type Shape } from "@lucent/core";
 
 /**
  * Default geometry/text for a freshly dropped shape kind. Centralizes the shape
@@ -14,7 +14,9 @@ export type DropKind =
   | "star"
   | "sticky"
   | "text"
-  | "frame";
+  | "frame"
+  | "table"
+  | "chart";
 
 const _STICKY_TEXT = [
   "Try one-click checkout",
@@ -41,6 +43,8 @@ const SIZES: Record<DropKind, { width: number; height: number }> = {
   sticky: { width: 160, height: 120 },
   text: { width: 180, height: 32 },
   frame: { width: 320, height: 220 },
+  table: { width: 320, height: 140 },
+  chart: { width: 320, height: 220 },
 };
 
 export function shapeId(): string {
@@ -186,6 +190,9 @@ export function cloneShapeOp(
     ...(s.text !== undefined ? { text: s.text } : {}),
     ...(s.path !== undefined ? { path: s.path } : {}),
     ...(s.src !== undefined ? { src: s.src } : {}),
+    ...(s.vector !== undefined ? { vector: s.vector } : {}),
+    ...(s.table !== undefined ? { table: s.table } : {}),
+    ...(s.chart !== undefined ? { chart: s.chart } : {}),
     ...(s.style ? { style: { ...s.style } } : {}),
     z: normalizeZ(z),
   };
@@ -218,6 +225,34 @@ export function createShapeOp(
   if (kind === "frame") {
     // Frames sit behind the shapes they contain.
     return { ...base, text: "Frame", z: 0 };
+  }
+  if (kind === "table") {
+    // A starter 3-column, 2-row grid the user fills in.
+    return {
+      ...base,
+      table: createTable(
+        ["Column 1", "Column 2", "Column 3"],
+        [
+          ["", "", ""],
+          ["", "", ""],
+        ],
+      ),
+    };
+  }
+  if (kind === "chart") {
+    // A starter bar chart bound to a small sample table, so it plots something
+    // immediately and can be re-bound or edited.
+    const sample = createTable(
+      ["Category", "Value"],
+      [
+        ["A", "8"],
+        ["B", "5"],
+        ["C", "12"],
+        ["D", "7"],
+      ],
+    );
+    const chart = chartFromTable(sample, { type: "bar", title: "Chart" });
+    return chart ? { ...base, chart } : base;
   }
   return base;
 }

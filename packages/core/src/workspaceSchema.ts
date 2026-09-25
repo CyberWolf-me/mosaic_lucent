@@ -1,6 +1,8 @@
 import * as z from "zod/v4";
-import { createWorkspace, type Workspace } from "./model.js";
+import { createWorkspace, DIAGRAM_KINDS, type Workspace } from "./model.js";
 import { vectorDataSchema } from "./vector.js";
+import { tableDataSchema } from "./table.js";
+import { chartDataSchema } from "./chart.js";
 import {
   iconRef,
   isImageDataUrl,
@@ -143,6 +145,8 @@ const shapeSchema = z
       "embed",
       "file",
       "vector",
+      "table",
+      "chart",
     ]),
     position: z.object({ x: z.number(), y: z.number() }),
     size: z.object({ width: z.number().positive(), height: z.number().positive() }),
@@ -153,6 +157,11 @@ const shapeSchema = z
     // docs/26 §6.3. Tolerant like `icon`: a stored vector that no longer parses
     // is dropped (the shape shows its placeholder), never a refused board.
     vector: vectorDataSchema.optional().catch(undefined),
+    // docs/26 §6.1. Tolerant the same way: a malformed table is dropped, not a
+    // refused board.
+    table: tableDataSchema.optional().catch(undefined),
+    // docs/26 §6.1. Same tolerance for a chart's data.
+    chart: chartDataSchema.optional().catch(undefined),
     style: shapeStyleSchema.optional(),
     z: z.number().optional(),
     groupId: z.string().min(1).optional(),
@@ -186,18 +195,12 @@ const groupSchema = z.object({
   id: z.string().min(1),
   label: z.string(),
   children: z.array(z.string().min(1)),
-  /** Diagram regions (per-group kind); absent on every pre-region board. */
-  kind: z
-    .enum([
-      "flowchart",
-      "architecture",
-      "mindmap",
-      "journey",
-      "decisiontree",
-      "process",
-      "orgchart",
-    ])
-    .optional(),
+  /**
+   * Diagram regions (per-group kind); absent on every pre-region board. The
+   * full family set (docs/26 §6.1 registry) so a region can be any kind the
+   * board can — matching SET_GROUP_KIND, which already accepts them all.
+   */
+  kind: z.enum(DIAGRAM_KINDS).optional(),
 });
 
 const commentSchema = z.object({
@@ -246,19 +249,7 @@ const wireframeSchema = z.object({
 export const workspaceSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
-  diagramKind: z.enum([
-    "flowchart",
-    "architecture",
-    "mindmap",
-    "journey",
-    "decisiontree",
-    "process",
-    "orgchart",
-    "bpmn",
-    "timeline",
-    "matrix",
-    "statemachine",
-  ]),
+  diagramKind: z.enum(DIAGRAM_KINDS),
   // Layout intent (Phase 5): optional and additive — every pre-intent board
   // parses unchanged. Ids are validated only as strings here; the op-level
   // validator checks node existence when the AI SETS an intent.

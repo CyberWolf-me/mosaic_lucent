@@ -1,5 +1,6 @@
 import {
   edgeTiers,
+  listRepresentations,
   routeStyleFor,
   type DiagramKind,
   type Node,
@@ -162,19 +163,14 @@ export function toScene(workspace: Workspace): {
   return { nodes, edges };
 }
 
-export const DIAGRAM_LABELS: Record<DiagramKind, string> = {
-  flowchart: "Flowchart",
-  architecture: "Architecture",
-  mindmap: "Mind map",
-  journey: "User journey",
-  decisiontree: "Decision tree",
-  process: "Process map",
-  orgchart: "Org chart",
-  bpmn: "BPMN process",
-  timeline: "Timeline",
-  matrix: "Matrix",
-  statemachine: "State machine",
-};
+/**
+ * Human labels for each diagram family, derived from the representation
+ * registry (docs/26 §6.1) — the single table — so a new family's label ships
+ * with its registry entry, not a second map maintained here.
+ */
+export const DIAGRAM_LABELS: Record<DiagramKind, string> = Object.fromEntries(
+  listRepresentations().map((r) => [r.kind, r.label]),
+) as Record<DiagramKind, string>;
 
 /**
  * BPMN lens shape for one node (docs/19 V1 core, rendered by Lucent — no

@@ -25,7 +25,8 @@
  *              longest corridors read as curves instead of sawtooth
  */
 
-import type { DiagramKind, Position } from "./model.js";
+import { DIAGRAM_KINDS, type DiagramKind, type Position } from "./model.js";
+import { getRepresentation } from "./representations.js";
 
 /** The drawn-path vocabulary for routed edges. */
 export type RouteStyle = "polyline" | "ortho" | "spline";
@@ -66,22 +67,15 @@ export function routeStyleFor(kind: DiagramKind): RouteStyle {
  * The never-routing families (mindmap, decisiontree, orgchart, process
  * boards under the swimlane strategy) hold polyline as the inert default —
  * their edges carry no route, so routeStyleFor is never consulted for them.
+ *
+ * The values themselves now live in the representation registry
+ * (`representations.ts`, docs/26 §6.1) — one table per family — and this map is
+ * derived from it, so the benchmark verdict recorded here is applied from the
+ * same place layout, labels and the convert menu read.
  */
-const ROUTE_STYLE_FOR_KIND: Record<DiagramKind, RouteStyle> = {
-  flowchart: "ortho",
-  architecture: "ortho",
-  journey: "ortho",
-  mindmap: "polyline",
-  decisiontree: "polyline",
-  process: "ortho",
-  orgchart: "polyline",
-  bpmn: "ortho",
-  // docs/27 D1. Timelines and matrices draw few edges and no routes; a state
-  // machine is layered, and its transitions square off like a flowchart's.
-  timeline: "polyline",
-  matrix: "polyline",
-  statemachine: "ortho",
-};
+const ROUTE_STYLE_FOR_KIND: Record<DiagramKind, RouteStyle> = Object.fromEntries(
+  DIAGRAM_KINDS.map((kind) => [kind, getRepresentation(kind).route]),
+) as Record<DiagramKind, RouteStyle>;
 
 /**
  * The vertices an edge actually draws between its two anchors, under

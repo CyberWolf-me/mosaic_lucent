@@ -12,6 +12,8 @@ const DEFAULT_SIZES: Record<DropKind, { width: number; height: number }> = {
   sticky: { width: 160, height: 120 },
   text: { width: 180, height: 32 },
   frame: { width: 320, height: 220 },
+  table: { width: 320, height: 140 },
+  chart: { width: 320, height: 220 },
 };
 
 /**
