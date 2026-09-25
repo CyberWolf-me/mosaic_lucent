@@ -83,6 +83,11 @@ export const hostedSttProvider: SttProvider = {
     }
 
     let stopped = false;
+    // `disposed` is the true teardown: only after the close flush completes do
+    // we ignore finals. `stopped` (below) suppresses NEW work and errors the
+    // moment the user stops, but the last chunk and the close-response finals
+    // must still surface — F3: gating emits on `stopped` dropped every one.
+    let disposed = false;
     let sessionId: string | null = null;
     let recorder: MediaRecorder | null = null;
     let stream: MediaStream | null = null;
@@ -99,7 +104,7 @@ export const hostedSttProvider: SttProvider = {
     };
 
     const emitFinals = (finals: AudioResponse["finals"]): void => {
-      if (stopped || !finals) return;
+      if (disposed || !finals) return;
       for (const f of finals) {
         if (typeof f.text !== "string" || f.text.trim() === "") continue;
         // Mixed-stream labels stay opaque speakerIds (never persons); the
@@ -118,10 +123,10 @@ export const hostedSttProvider: SttProvider = {
     };
 
     const postChunk = (bytes: Blob): void => {
-      if (stopped || sessionId === null || bytes.size === 0) return;
+      if (disposed || sessionId === null || bytes.size === 0) return;
       const id = sessionId;
       chain = chain.then(async () => {
-        if (stopped) return;
+        if (disposed) return;
         let res: Response;
         try {
           res = await apiFetch(`/api/stt/sessions/${encodeURIComponent(id)}/audio`, {
@@ -131,7 +136,7 @@ export const hostedSttProvider: SttProvider = {
         } catch {
           return;
         }
-        if (!res.ok || stopped) return;
+        if (!res.ok || disposed) return;
         const data = (await res.json().catch(() => null)) as AudioResponse | null;
         emitFinals(data?.finals);
       });
@@ -156,6 +161,8 @@ export const hostedSttProvider: SttProvider = {
         // Boundary flush first, stopped last: consumers must see every final
         // before the stream ends, or the last turn is silently losable.
         handlers.onEvent({ type: "speech_stopped", at: Date.now() });
+        // Only now is the stream truly done — any late chunk response is inert.
+        disposed = true;
       });
     };
 
@@ -215,6 +222,17 @@ export const hostedSttProvider: SttProvider = {
         if (!stopped) handlers.onError?.("Audio upload failed; transcription stopped.");
         void session?.stop();
       };
+      // Close only AFTER MediaRecorder has flushed its final chunk (onstop
+      // fires after the last ondataavailable). Closing eagerly in stop() raced
+      // the last chunk and dropped it — the recorder's own stop sequence is the
+      // ordering guarantee (F3).
+      recorder.onstop = () => {
+        if (stream) {
+          for (const track of stream.getTracks()) track.stop();
+          stream = null;
+        }
+        closeSession();
+      };
       try {
         recorder.start(CHUNK_MS);
       } catch {
@@ -233,18 +251,24 @@ export const hostedSttProvider: SttProvider = {
         if (stopped) return;
         stopped = true;
         handlers.onStatus?.("idle");
-        try {
-          recorder?.stop();
-        } catch {
-          // Already stopped — closing the session is what matters.
-        }
+        // Prefer the recorder's own stop: it flushes the final chunk and then
+        // fires onstop, which stops the tracks and closes the session — so the
+        // last chunk is uploaded before the close (F3). Only when there is no
+        // active recorder (stopped mid-setup) do we tear down directly.
+        const active = recorder;
         recorder = null;
+        if (active) {
+          try {
+            active.stop();
+            return;
+          } catch {
+            // Fall through to a direct teardown below.
+          }
+        }
         if (stream) {
           for (const track of stream.getTracks()) track.stop();
           stream = null;
         }
-        // The close flushes boundary finals through the same chain, so
-        // nothing recorded is lost to the stop itself.
         closeSession();
       },
     };

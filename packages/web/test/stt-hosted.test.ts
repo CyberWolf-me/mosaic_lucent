@@ -61,8 +61,11 @@ const recorders: FakeRecorder[] = [];
 class FakeRecorder {
   ondataavailable: ((event: { data: Blob }) => void) | null = null;
   onerror: (() => void) | null = null;
+  onstop: (() => void) | null = null;
   startedWith: number | undefined;
   stopped = false;
+  /** A chunk MediaRecorder flushes on stop() before firing onstop. */
+  pendingFinal: Blob | null = null;
   constructor(readonly stream: unknown) {
     recorders.push(this);
   }
@@ -71,6 +74,12 @@ class FakeRecorder {
   }
   stop() {
     this.stopped = true;
+    // Real MediaRecorder flushes its final buffered chunk, then fires onstop.
+    if (this.pendingFinal) {
+      this.emit(this.pendingFinal);
+      this.pendingFinal = null;
+    }
+    this.onstop?.();
   }
   emit(data: Blob) {
     this.ondataavailable?.({ data });
@@ -139,6 +148,40 @@ describe("hosted STT provider", () => {
     await flush();
     const urls = fetchMock.mock.calls.map((c) => c[0]);
     expect(urls).toContain("/api/stt/sessions/stt_1/close");
+    expect(h.errors).toEqual([]);
+  });
+
+  it("flushes the final chunk and the close-response finals on stop (F3)", async () => {
+    stubMic();
+    // The last chunk (flushed by stop) transcribes, and the close returns a
+    // trailing final too — both must reach the consumer before the stream ends.
+    const fetchMock = stubFetch((url) => {
+      if (url === "/api/stt/sessions") return jsonResponse(200, { sessionId: "stt_1" });
+      if (url === "/api/stt/sessions/stt_1/audio")
+        return jsonResponse(200, { finals: [{ text: "the last words", speaker: "spk_02" }] });
+      if (url === "/api/stt/sessions/stt_1/close")
+        return jsonResponse(200, { finals: [{ text: "a closing note" }], audioSeconds: 3 });
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+    const h = handlers();
+    const session = hostedSttProvider.start(h);
+    await flush();
+    const recorder = recorders[0]!;
+    // A chunk MediaRecorder will flush when stop() is called.
+    recorder.pendingFinal = new Blob([new Uint8Array([9, 9, 9])]);
+
+    session!.stop();
+    await flush();
+
+    const urls = fetchMock.mock.calls.map((c) => c[0]);
+    expect(urls).toContain("/api/stt/sessions/stt_1/audio");
+    expect(urls).toContain("/api/stt/sessions/stt_1/close");
+    // The final chunk's transcript AND the close-flush final both survived the
+    // stop, in order — the F3 regression dropped both.
+    expect(h.finals).toEqual([
+      { text: "the last words", speaker: "spk_02" },
+      { text: "a closing note", speaker: undefined },
+    ]);
     expect(h.errors).toEqual([]);
   });
 
