@@ -15,6 +15,7 @@ export * from "./layoutEngine.js";
 export * from "./visualBenchmark.js";
 export * from "./benchmarkBoards.js";
 export * from "./edgeTiers.js";
+export * from "./semanticZoom.js";
 export * from "./composition.js";
 export * from "./attention.js";
 export * from "./history.js";

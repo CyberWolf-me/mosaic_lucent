@@ -4,7 +4,11 @@ import {
   chartDataSchema,
   chartFromTable,
   chartGeometry,
+  chartScene,
+  chartTicks,
+  chartToMarkdown,
   createTable,
+  LEGEND_NAME_CHARS,
   createWorkspace,
   inverseOperations,
   parseNumericCell,
@@ -88,6 +92,188 @@ describe("chartGeometry", () => {
     const rects = chartGeometry(bar, 320, 220).filter((p) => p.kind === "rect");
     // Two bars; no legend rect for a single series.
     expect(rects.length).toBe(2);
+  });
+});
+
+type Prim = ReturnType<typeof chartGeometry>[number];
+const isRect = (p: Prim): p is Extract<Prim, { kind: "rect" }> => p.kind === "rect";
+const isText = (p: Prim): p is Extract<Prim, { kind: "text" }> => p.kind === "text";
+
+/** The vertical extent a primitive occupies (text: its cap height above the baseline). */
+function yRange(p: Prim): [number, number] {
+  if (p.kind === "rect") return [p.y, p.y + p.h];
+  if (p.kind === "text") return [p.y - p.size, p.y];
+  if (p.kind === "line") return [Math.min(p.y1, p.y2), Math.max(p.y1, p.y2)];
+  if (p.kind === "polyline") return [Math.min(...p.points.map((q) => q[1])), Math.max(...p.points.map((q) => q[1]))];
+  return [0, 0];
+}
+
+describe("chartGeometry: negative values", () => {
+  const data: ChartData = {
+    type: "bar",
+    labels: ["Q1", "Q2", "Q3"],
+    series: [{ name: "Profit", values: [40, -25, 10] }],
+  };
+
+  it("sits the category axis at zero and draws a negative bar down from it", () => {
+    const scene = chartScene(data, 320, 220);
+    const axes = scene.prims.filter((p) => p.kind === "line" && p.role === "axis");
+    const zero = axes.find((p) => p.kind === "line" && p.y1 === p.y2)!;
+    expect(zero).toBeDefined();
+    const zeroY = zero.kind === "line" ? zero.y1 : NaN;
+    // Zero is inside the plot, not on its bottom edge: there is room below it.
+    const { plot } = scene.layout;
+    expect(zeroY).toBeGreaterThan(plot.y);
+    expect(zeroY).toBeLessThan(plot.y + plot.h);
+
+    const bars = scene.prims.filter(isRect).filter((p) => p.role === "mark");
+    expect(bars).toHaveLength(3);
+    const [up, down, small] = bars as [(typeof bars)[0], (typeof bars)[0], (typeof bars)[0]];
+    // Positive bars end at the zero line; the negative one starts there.
+    expect(up.y + up.h).toBeCloseTo(zeroY);
+    expect(small.y + small.h).toBeCloseTo(zeroY);
+    expect(down.y).toBeCloseTo(zeroY);
+    expect(down.h).toBeGreaterThan(0);
+    // Magnitudes are to scale: |−25| is 2.5× 10.
+    expect(down.h / small.h).toBeCloseTo(2.5);
+    // Everything stays inside the plot.
+    for (const b of bars) {
+      expect(b.y).toBeGreaterThanOrEqual(plot.y - 0.01);
+      expect(b.y + b.h).toBeLessThanOrEqual(plot.y + plot.h + 0.01);
+    }
+    // The tick labels read a negative value.
+    expect(scene.prims.filter(isText).some((t) => t.role === "tick" && t.text.startsWith("-"))).toBe(true);
+  });
+
+  it("puts a line's negative points below the zero line", () => {
+    const scene = chartScene({ ...data, type: "line" }, 320, 220);
+    const zero = scene.prims.find((p) => p.kind === "line" && p.role === "axis" && p.y1 === p.y2);
+    const line = scene.prims.find((p) => p.kind === "polyline");
+    if (zero?.kind !== "line" || line?.kind !== "polyline") throw new Error("missing primitives");
+    expect(line.points[1]![1]).toBeGreaterThan(zero.y1);
+    expect(line.points[0]![1]).toBeLessThan(zero.y1);
+  });
+
+  it("ticks include zero when the range spans it", () => {
+    expect(chartTicks(-25, 40, 4)).toContain(0);
+    const t = chartTicks(0, 1, 5);
+    expect(t[0]).toBe(0);
+    expect(t[t.length - 1]).toBe(1);
+    expect(t).toContain(0.2);
+  });
+
+  it("leaves negative values out of a pie, and says so", () => {
+    const prims = chartGeometry({ ...data, type: "pie" }, 320, 220);
+    expect(prims.filter((p) => p.kind === "path")).toHaveLength(2);
+    expect(prims.filter(isText).some((t) => t.role === "note" && /negative/i.test(t.text))).toBe(true);
+    // All non-positive: nothing to slice, but still a message rather than a blank box.
+    const none = chartGeometry({ ...data, type: "pie", series: [{ name: "x", values: [-1, 0] }] }, 320, 220);
+    expect(none.filter((p) => p.kind === "path")).toHaveLength(0);
+    expect(none.filter(isText).some((t) => /no positive values/i.test(t.text))).toBe(true);
+  });
+});
+
+describe("chartGeometry: the legend keeps to its own band", () => {
+  const longName = (i: number) => `Series ${i} ${"with a very long descriptive name ".repeat(4)}`.slice(0, 120);
+  const many: ChartData = {
+    type: "bar",
+    title: "Quarterly revenue by region and channel",
+    labels: ["Q1", "Q2", "Q3", "Q4"],
+    series: Array.from({ length: 12 }, (_, i) => ({ name: longName(i), values: [1, 2, 3, 4] })),
+  };
+
+  const overlaps = (a: [number, number], b: [number, number]) => a[0] < b[1] - 0.01 && b[0] < a[1] - 0.01;
+
+  for (const [w, h] of [
+    [320, 220],
+    [640, 400],
+    [180, 140],
+  ] as const) {
+    it(`at ${w}×${h}: no overlap with the title or the plot, names capped with an ellipsis`, () => {
+      const { prims, layout } = chartScene(many, w, h);
+      const legend = layout.legend!;
+      const title = layout.title!;
+      expect(legend).toBeDefined();
+      // The reserved bands are disjoint, top to bottom.
+      expect(legend.y).toBeGreaterThanOrEqual(title.y + title.h);
+      expect(layout.plot.y).toBeGreaterThanOrEqual(legend.y + legend.h);
+      // The legend band is bounded, however many series there are.
+      expect(legend.h).toBeLessThanOrEqual(3 * 14);
+
+      const legendPrims = prims.filter((p) => p.role === "legend");
+      expect(legendPrims.length).toBeGreaterThan(0);
+      for (const p of legendPrims) {
+        const [top, bottom] = yRange(p);
+        expect(top).toBeGreaterThanOrEqual(legend.y - 0.01);
+        expect(bottom).toBeLessThanOrEqual(legend.y + legend.h + 0.01);
+        if (p.kind === "rect") {
+          expect(p.x).toBeGreaterThanOrEqual(legend.x);
+          expect(p.x + p.w).toBeLessThanOrEqual(legend.x + legend.w + 0.01);
+        }
+      }
+      for (const p of prims.filter((q) => q.role === "title" || q.role === "mark")) {
+        expect(overlaps(yRange(p), [legend.y, legend.y + legend.h])).toBe(false);
+      }
+
+      const names = legendPrims.filter(isText).filter((t) => !t.text.startsWith("+"));
+      for (const t of names) {
+        expect(Array.from(t.text).length).toBeLessThanOrEqual(LEGEND_NAME_CHARS);
+        expect(t.text.endsWith("…")).toBe(true);
+        expect(t.full).toMatch(/^Series \d+ with/);
+      }
+      // Whatever doesn't fit is counted, not drawn over the plot.
+      const swatches = legendPrims.filter((p) => p.kind === "rect").length;
+      const more = legendPrims.filter(isText).find((t) => t.text.startsWith("+"));
+      if (swatches < 12) expect(more?.text).toBe(`+${12 - swatches} more`);
+      else expect(more).toBeUndefined();
+      if (w <= 320) expect(swatches).toBeLessThan(12);
+    });
+  }
+
+  it("ellipsizes a title wider than the box and keeps the full text", () => {
+    const t = chartGeometry({ ...many, title: "T".repeat(200) }, 200, 160)
+      .filter(isText)
+      .find((p) => p.role === "title")!;
+    expect(t.text.endsWith("…")).toBe(true);
+    expect(t.text.length * 13 * 0.6).toBeLessThanOrEqual(200);
+    expect(t.full).toBe("T".repeat(200));
+  });
+
+  it("keeps a pie's legend column clear of the pie", () => {
+    const pie: ChartData = {
+      type: "pie",
+      title: "Share",
+      labels: Array.from({ length: 30 }, (_, i) => longName(i)),
+      series: [{ name: "v", values: Array.from({ length: 30 }, (_, i) => i + 1) }],
+    };
+    const { prims, layout } = chartScene(pie, 320, 220);
+    const legend = layout.legend!;
+    expect(legend.x).toBeGreaterThanOrEqual(layout.plot.x + layout.plot.w);
+    expect(legend.y + legend.h).toBeLessThanOrEqual(220);
+    for (const p of prims.filter((q) => q.role === "legend")) {
+      const [top, bottom] = yRange(p);
+      expect(top).toBeGreaterThanOrEqual(legend.y - 0.01);
+      expect(bottom).toBeLessThanOrEqual(legend.y + legend.h + 0.01);
+    }
+    expect(prims.filter(isText).some((t) => t.role === "legend" && /^\+\d+ more$/.test(t.text))).toBe(true);
+  });
+});
+
+describe("chartToMarkdown", () => {
+  it("renders the data as a titled Markdown table", () => {
+    const md = chartToMarkdown({
+      type: "line",
+      title: "Sales",
+      labels: ["Q1", "Q2"],
+      series: [
+        { name: "EU", values: [1, 2.5] },
+        { name: "US", values: [-3] },
+      ],
+    });
+    expect(md).toContain("**Sales** _(line chart)_");
+    expect(md).toContain("| Label | EU | US |");
+    expect(md).toContain("| Q1 | 1 | -3 |");
+    expect(md).toContain("| Q2 | 2.5 |  |");
   });
 });
 

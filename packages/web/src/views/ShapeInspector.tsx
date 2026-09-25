@@ -1,8 +1,20 @@
-import { useEffect, useState } from "react";
-import type { Operation, Shape } from "@lucent/core";
-import { cloneShapeOp, shapeId, zOrderOps, type ZMove } from "../shapes.js";
+import { useEffect, useMemo, useState } from "react";
+import {
+  CHART_LIMITS,
+  chartFromTable,
+  deleteTableColumn,
+  deleteTableRow,
+  insertTableColumn,
+  insertTableRow,
+  type ChartType,
+  type Operation,
+  type Shape,
+  type TableEdit,
+} from "@lucent/core";
+import { chartBesideTableOp, cloneShapeOp, nextZ, shapeId, zOrderOps, type ZMove } from "../shapes.js";
 import { VectorSection } from "../vector/VectorSection.js";
 import { alignPositions, distributePositions, type AlignMode } from "../board/geometry.js";
+import { setTableCursor, useTableCursor, type TableCell } from "../ui/TableView.js";
 
 /**
  * Floating inspector for the current shape selection (docs/13 Tier 2). Edits
@@ -108,6 +120,209 @@ function NumField({
 
 export type StructureAction = "themes" | "flowchart" | "mindmap" | "matrix";
 
+/** Shown under a section when an action was refused, or why it's unavailable. */
+function InspNote({ children }: { children: React.ReactNode }) {
+  return (
+    <span role="status" style={{ fontSize: 11, lineHeight: 1.35, color: "var(--ink-3)" }}>
+      {children}
+    </span>
+  );
+}
+
+const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
+
+/**
+ * Rows and columns of a selected table (docs/26 §6.1 V4), plus "Chart this
+ * table". Each control is one UPDATE_SHAPE { id, table } built by core's table
+ * edits, which refuse past TABLE_LIMITS with a reason — shown here — rather
+ * than emitting an operation the schema would reject.
+ *
+ * The controls act on the table cursor (the last cell clicked or edited on the
+ * canvas, see TableView): add a row below it, delete its row, add a column to
+ * its right, delete its column. With no cursor they act on the last row and
+ * column.
+ */
+function TableSection({
+  shape,
+  shapes,
+  onApply,
+  onSelect,
+}: {
+  shape: Shape;
+  shapes: Record<string, Shape>;
+  onApply: (ops: Operation[], label: string) => boolean | void;
+  onSelect: (ids: Set<string>) => void;
+}) {
+  const table = shape.table!;
+  const cursor = useTableCursor(shape.id);
+  const [note, setNote] = useState<string | null>(null);
+  // The cursor outlines a cell on the canvas; it goes when the table is no
+  // longer the one being inspected.
+  useEffect(() => () => setTableCursor(shape.id, null), [shape.id]);
+  useEffect(() => setNote(null), [shape.id]);
+  const chartable = useMemo(() => chartFromTable(table) !== null, [table]);
+
+  const rows = table.rows.length;
+  const cols = table.columns.length;
+  const locked = Boolean(shape.locked);
+  const rowTarget = cursor && cursor.row >= 0 && cursor.row < rows ? cursor.row : rows - 1;
+  const colTarget = cursor && cursor.col < cols ? cursor.col : cols - 1;
+  const colName = clip(table.columns[colTarget]?.header || `Column ${colTarget + 1}`, 14);
+
+  const apply = (edit: TableEdit, label: string, next: TableCell | null) => {
+    if (!edit.ok) {
+      setNote(edit.error);
+      return;
+    }
+    setNote(null);
+    if (onApply([{ op: "UPDATE_SHAPE", id: shape.id, table: edit.table }], label) === false) {
+      setNote("That change couldn't be applied.");
+      return;
+    }
+    setTableCursor(shape.id, next);
+  };
+
+  const addRow = () => {
+    // Below the cursor's row; from the header, that's the first body row.
+    const at = cursor ? Math.min(cursor.row + 1, rows) : rows;
+    apply(insertTableRow(table, at), "Add table row", { row: at, col: Math.max(0, colTarget) });
+  };
+  const deleteRow = () => {
+    const after = rows - 1;
+    apply(
+      deleteTableRow(table, rowTarget),
+      "Delete table row",
+      after > 0 ? { row: Math.min(rowTarget, after - 1), col: colTarget } : null,
+    );
+  };
+  const addColumn = () => {
+    const at = colTarget + 1;
+    apply(insertTableColumn(table, at), "Add table column", { row: cursor?.row ?? -1, col: at });
+  };
+  const deleteColumn = () =>
+    apply(deleteTableColumn(table, colTarget), "Delete table column", {
+      row: cursor?.row ?? -1,
+      col: Math.min(colTarget, cols - 2),
+    });
+
+  const chartIt = () => {
+    const op = chartBesideTableOp(shape, nextZ(Object.values(shapes)));
+    if (!op) {
+      setNote("Nothing to chart: no column holds numbers.");
+      return;
+    }
+    if (onApply([op], "Chart table") !== false) onSelect(new Set([op.id]));
+  };
+
+  const lockTitle = "Unlock the table to edit it";
+  return (
+    <div className="insp-group">
+      <span className="insp-cap">
+        Table · {rows} row{rows === 1 ? "" : "s"} × {cols} column{cols === 1 ? "" : "s"}
+      </span>
+      <div className="segmented">
+        <button
+          onClick={addRow}
+          disabled={locked}
+          title={locked ? lockTitle : cursor ? `Add a row below row ${cursor.row + 1}` : "Add a row at the end"}
+        >
+          + Row
+        </button>
+        <button
+          onClick={deleteRow}
+          disabled={locked || rows === 0}
+          title={locked ? lockTitle : rows === 0 ? "No rows to delete" : `Delete row ${rowTarget + 1}`}
+        >
+          − Row {rows > 0 ? rowTarget + 1 : ""}
+        </button>
+      </div>
+      <div className="segmented">
+        <button
+          onClick={addColumn}
+          disabled={locked}
+          title={locked ? lockTitle : `Add a column right of “${colName}”`}
+        >
+          + Column
+        </button>
+        <button
+          onClick={deleteColumn}
+          disabled={locked || cols <= 1}
+          title={locked ? lockTitle : cols <= 1 ? "A table keeps at least one column" : `Delete column “${colName}”`}
+        >
+          − {colName}
+        </button>
+      </div>
+      <button
+        className="insp-btn"
+        onClick={chartIt}
+        disabled={!chartable}
+        title={
+          !chartable
+            ? "Needs a column of numbers to chart"
+            : rows > CHART_LIMITS.labels
+              ? `Chart the first ${CHART_LIMITS.labels} rows: first column as labels, number columns as series`
+              : "A chart beside the table: first column as labels, number columns as series"
+        }
+      >
+        Chart this table
+      </button>
+      {note ? (
+        <InspNote>{note}</InspNote>
+      ) : !chartable ? (
+        <InspNote>To chart it, add a column of numbers.</InspNote>
+      ) : locked ? (
+        <InspNote>Locked — unlock to edit cells, rows and columns.</InspNote>
+      ) : (
+        <InspNote>Double-click a cell to edit. Tab moves to the next one.</InspNote>
+      )}
+    </div>
+  );
+}
+
+const CHART_TYPES: Array<{ type: ChartType; label: string }> = [
+  { type: "bar", label: "Bar" },
+  { type: "line", label: "Line" },
+  { type: "pie", label: "Pie" },
+];
+
+/** The type switch of a selected chart — one UPDATE_SHAPE { id, chart }, data unchanged. */
+function ChartSection({
+  shape,
+  onApply,
+}: {
+  shape: Shape;
+  onApply: (ops: Operation[], label: string) => boolean | void;
+}) {
+  const chart = shape.chart!;
+  const locked = Boolean(shape.locked);
+  const setType = (type: ChartType) => {
+    if (type === chart.type) return;
+    onApply([{ op: "UPDATE_SHAPE", id: shape.id, chart: { ...chart, type } }], `Chart as ${type}`);
+  };
+  return (
+    <div className="insp-group">
+      <span className="insp-cap">Chart type</span>
+      <div className="segmented" role="group" aria-label="Chart type">
+        {CHART_TYPES.map(({ type, label }) => (
+          <button
+            key={type}
+            onClick={() => setType(type)}
+            disabled={locked}
+            aria-pressed={chart.type === type}
+            className={chart.type === type ? "active" : undefined}
+            title={locked ? "Unlock the chart to change it" : `Show as a ${label.toLowerCase()} chart`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      {chart.type === "pie" && chart.series.length > 1 && (
+        <InspNote>A pie shows the first series, “{clip(chart.series[0]!.name, 24)}”.</InspNote>
+      )}
+    </div>
+  );
+}
+
 export function ShapeInspector({
   shapes,
   selectedIds,
@@ -118,7 +333,8 @@ export function ShapeInspector({
 }: {
   shapes: Record<string, Shape>;
   selectedIds: Set<string>;
-  onApply: (ops: Operation[], label: string) => void;
+  /** Apply manual ops; `false` means they were refused (validation, read-only). */
+  onApply: (ops: Operation[], label: string) => boolean | void;
   onSelect: (ids: Set<string>) => void;
   /** docs/27 D2: turn the selected stickies into structure (always a proposal). */
   onStructure?: (action: StructureAction) => void;
@@ -281,6 +497,10 @@ export function ShapeInspector({
     <div className="shape-inspector">
       <div className="insp-label">{ids.length > 1 ? `${ids.length} selected` : "Shape"}</div>
       <VectorSection shapes={selectedShapes} onApply={onApply} />
+      {one?.kind === "table" && one.table && (
+        <TableSection shape={one} shapes={shapes} onApply={onApply} onSelect={onSelect} />
+      )}
+      {one?.kind === "chart" && one.chart && <ChartSection shape={one} onApply={onApply} />}
       {/* A vector's paint lives in its paths (VectorSection); the box styling
           below would only draw a background and border around it. */}
       {!allVectors && (

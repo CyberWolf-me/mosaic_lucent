@@ -484,13 +484,41 @@ export const REPRESENTATIONS: Record<DiagramKind, RepresentationSpec> = {
     convertible: true,
     regionable: true,
     elk: true,
+    // C4 elements carry their technology (C4's bracketed line) and their
+    // responsibility in details, under the name — the notation's own layout.
     starter: (p) => [
       diag("c4"),
       grp(p, "boundary", "Online shop"),
-      nd(p, "person", "person", "Customer"),
-      nd(p, "web", "container", "Web application", "boundary"),
-      nd(p, "db", "database", "Orders database", "boundary"),
-      nd(p, "pay", "external_system", "Payment provider"),
+      {
+        op: "CREATE_NODE",
+        id: `${p}-person`,
+        nodeType: "person",
+        label: "Customer",
+        details: { sections: [{ items: ["Buys products online"] }] },
+      },
+      {
+        op: "CREATE_NODE",
+        id: `${p}-web`,
+        nodeType: "container",
+        label: "Web application",
+        groupId: `${p}-boundary`,
+        details: { sections: [{ items: ["[React, Node.js]", "Shows the catalogue, takes orders"] }] },
+      },
+      {
+        op: "CREATE_NODE",
+        id: `${p}-db`,
+        nodeType: "database",
+        label: "Orders database",
+        groupId: `${p}-boundary`,
+        details: { sections: [{ items: ["[PostgreSQL]", "Orders and payments"] }] },
+      },
+      {
+        op: "CREATE_NODE",
+        id: `${p}-pay`,
+        nodeType: "external_system",
+        label: "Payment provider",
+        details: { sections: [{ items: ["[Stripe API]", "Charges cards"] }] },
+      },
       ed(p, "person", "web", "places orders"),
       ed(p, "web", "db", "reads/writes"),
       ed(p, "web", "pay", "charges cards"),
@@ -573,11 +601,31 @@ export const REPRESENTATIONS: Record<DiagramKind, RepresentationSpec> = {
     convertible: true,
     regionable: false,
     elk: true,
+    // Each entity lists its columns in a "Columns" section — the section the
+    // ER lens reads as the table's attributes (web board/er.ts).
     starter: (p) => [
       diag("er"),
-      nd(p, "user", "entity", "User"),
-      nd(p, "order", "entity", "Order"),
-      nd(p, "product", "entity", "Product"),
+      {
+        op: "CREATE_NODE",
+        id: `${p}-user`,
+        nodeType: "entity",
+        label: "User",
+        details: { sections: [{ title: "Columns", items: ["id PK", "email", "name"] }] },
+      },
+      {
+        op: "CREATE_NODE",
+        id: `${p}-order`,
+        nodeType: "entity",
+        label: "Order",
+        details: { sections: [{ title: "Columns", items: ["id PK", "user_id FK", "placed_at"] }] },
+      },
+      {
+        op: "CREATE_NODE",
+        id: `${p}-product`,
+        nodeType: "entity",
+        label: "Product",
+        details: { sections: [{ title: "Columns", items: ["id PK", "name", "price"] }] },
+      },
       ed(p, "user", "order", "places"),
       ed(p, "order", "product", "contains"),
     ],
@@ -600,12 +648,54 @@ export const REPRESENTATIONS: Record<DiagramKind, RepresentationSpec> = {
     convertible: true,
     regionable: true,
     elk: true,
+    // UML compartments: attributes, then operations, in UML's own notation.
     starter: (p) => [
       diag("class"),
-      nd(p, "entity", "abstract", "Entity"),
-      nd(p, "user", "class", "User"),
-      nd(p, "order", "class", "Order"),
-      nd(p, "repo", "interface", "Repository"),
+      {
+        op: "CREATE_NODE",
+        id: `${p}-entity`,
+        nodeType: "abstract",
+        label: "Entity",
+        details: {
+          sections: [
+            { title: "Attributes", items: ["+id: UUID", "+createdAt: Date"] },
+            { title: "Operations", items: ["+equals(o): boolean"] },
+          ],
+        },
+      },
+      {
+        op: "CREATE_NODE",
+        id: `${p}-user`,
+        nodeType: "class",
+        label: "User",
+        details: {
+          sections: [
+            { title: "Attributes", items: ["+email: string", "-password: Hash"] },
+            { title: "Operations", items: ["+placeOrder(): Order"] },
+          ],
+        },
+      },
+      {
+        op: "CREATE_NODE",
+        id: `${p}-order`,
+        nodeType: "class",
+        label: "Order",
+        details: {
+          sections: [
+            { title: "Attributes", items: ["+total: Money", "+status: Status"] },
+            { title: "Operations", items: ["+pay(): void", "+cancel(): void"] },
+          ],
+        },
+      },
+      {
+        op: "CREATE_NODE",
+        id: `${p}-repo`,
+        nodeType: "interface",
+        label: "Repository",
+        details: {
+          sections: [{ title: "Operations", items: ["+findById(id): T", "+save(item: T): void"] }],
+        },
+      },
       ed(p, "user", "entity", "inherits"),
       ed(p, "order", "entity", "inherits"),
       ed(p, "user", "order", "association"),
@@ -624,9 +714,9 @@ export const REPRESENTATIONS: Record<DiagramKind, RepresentationSpec> = {
     ],
     nodeTypes: ["story"],
     category: "planning",
-    // docs/27 D3: the story-map geometry (activities × releases) replaces this
-    // grid packing when it lands.
-    layout: "grid",
+    // docs/27 D3: activities as columns, releases as rows — the canvas draws
+    // the backbone and the release slices from `storyMapGrid`.
+    layout: "storymap",
     route: "polyline",
     aiCreatable: true,
     convertible: true,

@@ -46,6 +46,7 @@ import {
   measureNode,
   nodeCardExtraHeight,
   DIAGRAM_KINDS,
+  elkKinds,
   layoutStrategyFor,
   type DiagramLayoutEngine,
   type DiagramLayoutRequest,
@@ -332,16 +333,14 @@ export class ElkLayoutEngine implements DiagramLayoutEngine {
   }
 }
 
-const ELK_ELIGIBLE_KINDS: ReadonlySet<DiagramKind> = new Set<DiagramKind>([
-  "flowchart",
-  "architecture",
-  "journey",
-  // The service's ELK_KINDS includes bpmn (a bpmn board is ELK-eligible,
-  // pinned by the bpmn lens tests); the region seam must agree or a bpmn
-  // region would silently fall to the built-in engine inside an otherwise
-  // ELK board.
-  "bpmn",
-]);
+/**
+ * The kinds this region seam re-lays out — the registry's `elk` flag, the same
+ * source the layout service routes by. It must agree with the service or an
+ * ELK-eligible region (a bpmn region, once) silently falls to the built-in
+ * engine inside an otherwise ELK board; deriving both from `elkKinds()` makes
+ * that disagreement impossible rather than something to remember.
+ */
+export const ELK_ELIGIBLE_KINDS: ReadonlySet<DiagramKind> = new Set<DiagramKind>(elkKinds());
 
 /** The Phase 2 candidate (ADR 0039: production for the flat graph families). */
 export const ELK_LAYOUT_ENGINE: DiagramLayoutEngine = new ElkLayoutEngine();

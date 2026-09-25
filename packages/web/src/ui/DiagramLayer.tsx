@@ -2,7 +2,9 @@ import { useMemo } from "react";
 import {
   densityBand,
   edgeDensity,
+  regionSummary,
   routedVertices,
+  showsSummaryCards,
   timelineTicks,
   type DensityBand,
   type Workspace,
@@ -12,6 +14,7 @@ import { autoIconFor } from "../icons/auto.js";
 import { KIND_TINT } from "../statementUi.js";
 import { DIAGRAM_LABELS, bpmnShapeFor, facesFor } from "../scene.js";
 import {
+  GROUP_PAD,
   boundsWithDrag,
   cullRect,
   diagramScene,
@@ -48,6 +51,8 @@ export function DiagramLayer({
   viewport,
   collapsedRegions,
   onToggleCollapse,
+  expandedRegions,
+  onToggleExpand,
 }: {
   workspace: Workspace;
   selected?: string | null;
@@ -88,6 +93,15 @@ export function DiagramLayer({
   collapsedRegions?: ReadonlySet<string>;
   /** Toggle a region's collapsed state (the summary card's button). */
   onToggleCollapse?: (groupId: string) => void;
+  /**
+   * V5 semantic zoom (docs/26 §6.5): at the summary-cards rung (a 300+ board,
+   * or any board zoomed far out) every region auto-collapses to a summary card.
+   * `expandedRegions` are the ones the reader has explicitly opened back up in
+   * that mode; `onToggleExpand` flips one. Kept separate from `collapsedRegions`
+   * so the two modes never reinterpret the same set.
+   */
+  expandedRegions?: ReadonlySet<string>;
+  onToggleExpand?: (groupId: string) => void;
 }) {
   // Derived once per workspace instead of once per render: on a large board the
   // scene mapping, the id index, the group boxes and the frame bounds were all
@@ -104,7 +118,11 @@ export function DiagramLayer({
     [workspace],
   );
   if (scene.nodes.length === 0) return null;
-  const { byId, edges } = scene;
+  const { byId, edges, storyMap } = scene;
+  // A story map's activity boxes ARE its backbone columns (scene.groups): the
+  // backbone card at the top of each one names the activity, so its pill
+  // would say the same thing twice.
+  const storyColumns = new Set(storyMap?.columns.map((c) => c.groupId) ?? []);
 
   // Semantic zoom (UX-4): the detail tier follows the viewport zoom so a
   // zoomed-out board stays readable — mid zoom drops secondary text, far zoom
@@ -136,17 +154,20 @@ export function DiagramLayer({
 
   // Group boxes are measured over all of a group's members, so only a drag can
   // change one — every other re-render reuses the memoised regions.
-  const regions = dragOverride ? groupRegions(workspace, nodeAt) : scene.groups;
+  const regions = dragOverride ? groupRegions(workspace, nodeAt, storyMap) : scene.groups;
 
   // The frame holds the regions too, not only the cards: a matrix cell or a
-  // swimlane is wider than the items in it (docs/27 D1).
+  // swimlane is wider than the items in it (docs/27 D1). A story map's
+  // release gutter and backbone band lie outside every card, so it holds
+  // those as well.
+  const framed: Box[] = storyMap ? [...regions, storyMap.bounds] : regions;
   const bounds =
-    nodeFrame && regions.length > 0
+    nodeFrame && framed.length > 0
       ? (() => {
-          const x = Math.min(nodeFrame.x, ...regions.map((r) => r.x));
-          const y = Math.min(nodeFrame.y, ...regions.map((r) => r.y));
-          const right = Math.max(nodeFrame.x + nodeFrame.width, ...regions.map((r) => r.x + r.width));
-          const bottom = Math.max(nodeFrame.y + nodeFrame.height, ...regions.map((r) => r.y + r.height));
+          const x = Math.min(nodeFrame.x, ...framed.map((r) => r.x));
+          const y = Math.min(nodeFrame.y, ...framed.map((r) => r.y));
+          const right = Math.max(nodeFrame.x + nodeFrame.width, ...framed.map((r) => r.x + r.width));
+          const bottom = Math.max(nodeFrame.y + nodeFrame.height, ...framed.map((r) => r.y + r.height));
           return { x, y, width: right - x, height: bottom - y };
         })()
       : nodeFrame;
@@ -198,6 +219,7 @@ export function DiagramLayer({
       placed.push({ x: bounds.x - pad + 14, y: bounds.y - pad + 8, w: label.length * 7 + 24 });
     }
     for (const g of groups) {
+      if (storyColumns.has(g.id)) continue; // no pill: its backbone card names it
       const text = [g.label.trim(), g.kind ? DIAGRAM_LABELS[g.kind] : ""]
         .filter((s) => s.length > 0)
         .join(" · ");
@@ -219,8 +241,20 @@ export function DiagramLayer({
   // restores the exact prior render. Edges fully inside a collapsed region
   // go; cross-region edges stay (they connect the collapsed region's card
   // to the rest of the board, and their far endpoint still draws).
-  const collapsedSet = collapsedRegions ?? new Set<string>();
+  //
+  // V5 semantic zoom (docs/26 §6.5): at the summary-cards rung — a 300+ board,
+  // or any board zoomed far out — every region with members auto-collapses to a
+  // summary card, except the ones the reader has explicitly expanded. Below
+  // that rung the manual `collapsedRegions` set decides.
   const regionOf = (id: string) => workspace.nodes[id]?.groupId;
+  const autoSummary = showsSummaryCards(scene.nodes.length, scale);
+  const groupsWithMembers = new Set(
+    groups.filter((g) => scene.nodes.some((n) => regionOf(n.id) === g.id)).map((g) => g.id),
+  );
+  const expandedSet = expandedRegions ?? new Set<string>();
+  const collapsedSet: ReadonlySet<string> = autoSummary
+    ? new Set([...groupsWithMembers].filter((id) => !expandedSet.has(id)))
+    : (collapsedRegions ?? new Set<string>());
   const isCollapsedMember = (id: string) => {
     const gid = regionOf(id);
     return gid !== undefined && collapsedSet.has(gid);
@@ -237,7 +271,9 @@ export function DiagramLayer({
       ? drawEdges.filter((e) => !(isCollapsedMember(e.source) && isCollapsedMember(e.target)))
       : drawEdges;
   // A collapsed group's summary card: its bounds plus the counts the card
-  // shows. Kept as a local type so the render branch reads cleanly.
+  // shows — members, internal edges, and the open decisions/risks/questions
+  // inside it (docs/26 §6.5 region summary). Kept as a local type so the
+  // render branch reads cleanly.
   type CollapsedGroup = {
     id: string;
     label: string;
@@ -249,22 +285,25 @@ export function DiagramLayer({
     collapsed: true;
     memberCount: number;
     edgeCount: number;
+    openDecisions: number;
+    openRisks: number;
+    openQuestions: number;
   };
   const finalGroups: Array<(typeof groups)[number] | CollapsedGroup> =
     collapsedSet.size > 0
-      ? groups.map((g) =>
-          collapsedSet.has(g.id)
-            ? ({
-                ...g,
-                collapsed: true,
-                memberCount: Object.values(workspace.nodes).filter((n) => n.groupId === g.id)
-                  .length,
-                edgeCount: Object.values(workspace.edges).filter(
-                  (e) => regionOf(e.source) === g.id && regionOf(e.target) === g.id,
-                ).length,
-              } satisfies CollapsedGroup)
-            : g,
-        )
+      ? groups.map((g) => {
+          if (!collapsedSet.has(g.id)) return g;
+          const summary = regionSummary(workspace, g.id);
+          return {
+            ...g,
+            collapsed: true,
+            memberCount: summary.nodeCount,
+            edgeCount: summary.edgeCount,
+            openDecisions: summary.openDecisions,
+            openRisks: summary.openRisks,
+            openQuestions: summary.openQuestions,
+          } satisfies CollapsedGroup;
+        })
       : groups;
 
   return (
@@ -300,10 +339,24 @@ export function DiagramLayer({
               {g.memberCount} node{g.memberCount === 1 ? "" : "s"} · {g.edgeCount} edge
               {g.edgeCount === 1 ? "" : "s"}
             </div>
+            {(g.openDecisions > 0 || g.openRisks > 0 || g.openQuestions > 0) && (
+              <div
+                className="mono"
+                style={{ fontSize: 11, color: "var(--ink-3)", marginTop: 4, opacity: 0.9 }}
+              >
+                {[
+                  g.openDecisions > 0 ? `${g.openDecisions} open decision${g.openDecisions === 1 ? "" : "s"}` : "",
+                  g.openRisks > 0 ? `${g.openRisks} risk${g.openRisks === 1 ? "" : "s"}` : "",
+                  g.openQuestions > 0 ? `${g.openQuestions} question${g.openQuestions === 1 ? "" : "s"}` : "",
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
+              </div>
+            )}
             <button
               className="icon-btn"
               style={{ marginTop: 10, height: 26, padding: "0 10px" }}
-              onClick={() => onToggleCollapse?.(g.id)}
+              onClick={() => (autoSummary ? onToggleExpand?.(g.id) : onToggleCollapse?.(g.id))}
             >
               Expand
             </button>
@@ -313,19 +366,29 @@ export function DiagramLayer({
             key={g.id}
             className="group-region"
             style={{ left: g.x, top: g.y, width: g.width, height: g.height }}
-            {...(onToggleCollapse && g.kind
+            {...(autoSummary && onToggleExpand
               ? {
+                  // In summary-cards mode this region was expanded by the reader;
+                  // double-click summarizes it back into its card.
                   onDoubleClick: (e: React.MouseEvent) => {
                     e.stopPropagation();
-                    onToggleCollapse(g.id);
+                    onToggleExpand(g.id);
                   },
-                  title: pill.length > 0 ? pill : "Double-click to collapse this region",
+                  title: pill.length > 0 ? `${pill} — double-click to summarize` : "Double-click to summarize",
                 }
-              : pill.length > 0
-                ? { title: pill }
-                : {})}
+              : onToggleCollapse && g.kind
+                ? {
+                    onDoubleClick: (e: React.MouseEvent) => {
+                      e.stopPropagation();
+                      onToggleCollapse(g.id);
+                    },
+                    title: pill.length > 0 ? pill : "Double-click to collapse this region",
+                  }
+                : pill.length > 0
+                  ? { title: pill }
+                  : {})}
           >
-            {pill.length > 0 && (
+            {pill.length > 0 && !storyColumns.has(g.id) && (
               <span
                 className="group-region-label"
                 style={{ top: (labelSlots.get(g.id) ?? 0) * LABEL_ROW - 9 }}
@@ -336,6 +399,57 @@ export function DiagramLayer({
           </div>
         );
       })}
+
+      {/* A story map's scaffold (docs/27 D3), from the same grid the layout
+          placed the stories by: a hairline slice above each release — under
+          the backbone for the first — with the release named in the left
+          gutter, and the backbone of activity cards across the top. Drawn
+          over the activity columns and behind the stories, never
+          interactive. */}
+      {storyMap && (
+        <div className="storymap-scaffold" aria-hidden>
+          {storyMap.rows.map((r, i) => {
+            const prev = storyMap.rows[i - 1];
+            const above = prev ? prev.y + prev.height : storyMap.header.y + storyMap.header.height;
+            // Past the last column's box, so the slice cuts the whole map.
+            const right = storyMap.bounds.x + storyMap.bounds.width + GROUP_PAD;
+            return (
+              <div
+                key={`slice-${r.release ?? "\u0000unscheduled"}`}
+                className="storymap-slice"
+                style={{
+                  left: storyMap.gutter.x,
+                  top: (above + r.y) / 2,
+                  width: right - storyMap.gutter.x,
+                }}
+              />
+            );
+          })}
+          {storyMap.rows.map((r) => (
+            <div
+              key={`release-${r.release ?? "\u0000unscheduled"}`}
+              className={r.release === null ? "storymap-release unscheduled" : "storymap-release"}
+              style={{ left: storyMap.gutter.x, top: r.y, width: storyMap.gutter.width }}
+            >
+              {r.label}
+            </div>
+          ))}
+          {storyMap.columns.map((c) => (
+            <div
+              key={c.groupId ?? "\u0000other"}
+              className={c.groupId === null ? "storymap-activity other" : "storymap-activity"}
+              style={{
+                left: c.x,
+                top: storyMap.header.y,
+                width: c.width,
+                height: storyMap.header.height,
+              }}
+            >
+              {c.label.trim() || "Untitled activity"}
+            </div>
+          ))}
+        </div>
+      )}
 
       {ticks.length > 0 && scene.bounds && (
         <div className="timeline-axis" aria-hidden>

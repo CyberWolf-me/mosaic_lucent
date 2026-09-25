@@ -1,5 +1,11 @@
-import type { Shape, ShapeLink, Workspace } from "@lucent/core";
-import { chartGeometry, routeStyleFor, routedVertices, vectorPathsMarkup } from "@lucent/core";
+import type { Node, Shape, ShapeLink, Workspace } from "@lucent/core";
+import {
+  chartGeometry,
+  nodeDetailsHeight,
+  routeStyleFor,
+  routedVertices,
+  vectorPathsMarkup,
+} from "@lucent/core";
 import { DIAGRAM_LABELS } from "../scene.js";
 import { glyphSvg, nodeGlyphNow } from "../icons/exportSvg.js";
 import { peekAssetData } from "../assets.js";
@@ -256,11 +262,21 @@ export function nextSelectable(
   return order[next]!;
 }
 
+/**
+ * Escape text for an SVG element body. XML 1.0 has no escape for most C0
+ * control characters — `&#7;` is as invalid as a raw BEL — so they are
+ * dropped outright (tab, newline and carriage return are legal and kept):
+ * one stray control character in a label or a pasted table cell used to make
+ * the whole SVG unparseable, and with it the PNG and PDF exports built on it.
+ */
 const escapeXml = (t: string) =>
-  t.replace(
-    /[<>&"']/g,
-    (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;", "'": "&apos;" })[c]!,
-  );
+  t
+    // eslint-disable-next-line no-control-regex
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, "")
+    .replace(
+      /[<>&"']/g,
+      (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;", "'": "&apos;" })[c]!,
+    );
 
 /**
  * Escape a string for inclusion inside an SVG attribute value (M0.5). The XML
@@ -423,10 +439,14 @@ export function buildBoardSvg(workspace: Workspace, pad = 40): string {
     const height = n.size?.height ?? 64;
     // The card's icon, top-left like the canvas meta row (docs/26 §6.2).
     const glyph = nodeGlyphNow(n);
+    // V4 details sit at the bottom of the card, in the height the layout
+    // reserved for them; the label centres in what is left above.
+    const detailsH = Math.min(height, nodeDetailsHeight(n.details, width));
     parts.push(
       `<rect x="${x}" y="${y}" width="${width}" height="${height}" rx="8" fill="#1b1b1e" stroke="#555"/>` +
         (glyph ? glyphSvg(glyph, x + 9, y + 8, 14, "#c8c8cc") : "") +
-        `<text x="${x + width / 2}" y="${y + height / 2}" fill="#eee" font-family="sans-serif" font-size="13" text-anchor="middle" dominant-baseline="middle">${escapeXml(n.label)}</text>`,
+        `<text x="${x + width / 2}" y="${y + (height - detailsH) / 2}" fill="#eee" font-family="sans-serif" font-size="13" text-anchor="middle" dominant-baseline="middle">${escapeXml(n.label)}</text>` +
+        (detailsH > 0 ? detailsSvg(n, x, y + height - detailsH, width) : ""),
     );
   }
   // Shapes in the canvas's stacking order, without the hidden ones, each
@@ -606,6 +626,68 @@ export function buildBoardSvg(workspace: Workspace, pad = 40): string {
     );
   }
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="${minX} ${minY} ${w} ${h}"><defs><marker id="export-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#8a8a90"/></marker></defs><rect x="${minX}" y="${minY}" width="${w}" height="${h}" fill="#141416"/>${parts.join("")}</svg>`;
+}
+
+/**
+ * A node's details compartments as SVG, starting at `top` — the same rows the
+ * card draws (styles/details.css) and the layout reserved (core
+ * nodeDetailsHeight): a 6px gap, then per section a full-width rule, 4px
+ * padding, an optional small caps title on a 14px row, and items on 15px
+ * lines, word-wrapped at the same character count the layout assumed.
+ */
+function detailsSvg(node: Node, x: number, top: number, width: number): string {
+  const sections = node.details?.sections ?? [];
+  const perLine = Math.max(1, Math.floor((width - 32) / 6.4));
+  const out: string[] = [];
+  let cursor = top + 6;
+  for (const section of sections) {
+    out.push(
+      `<line x1="${x}" y1="${cursor + 0.5}" x2="${x + width}" y2="${cursor + 0.5}" stroke="#3a3a40"/>`,
+    );
+    cursor += 1 + 4;
+    if (section.title) {
+      out.push(
+        `<text x="${x + 14}" y="${cursor + 7}" fill="#8a8a90" font-family="monospace" font-size="9" letter-spacing="0.5" dominant-baseline="middle">${escapeXml(section.title.toUpperCase())}</text>`,
+      );
+      cursor += 14;
+    }
+    for (const item of section.items) {
+      for (const line of wrapDetailLine(item, perLine)) {
+        out.push(
+          `<text x="${x + 14}" y="${cursor + 7.5}" fill="#d4d4d8" font-family="monospace" font-size="10.5" dominant-baseline="middle">${escapeXml(line)}</text>`,
+        );
+        cursor += 15;
+      }
+    }
+    cursor += 4;
+  }
+  return out.join("");
+}
+
+/**
+ * Greedy word wrap at `perLine` characters, breaking a word longer than a
+ * line anywhere — the rule the card's CSS and core's height estimate share,
+ * so an exported card holds exactly the lines its reserved height counted.
+ */
+export function wrapDetailLine(text: string, perLine: number): string[] {
+  const lines: string[] = [];
+  let line = "";
+  for (const word of text.split(/\s+/).filter(Boolean)) {
+    const candidate = line ? `${line} ${word}` : word;
+    if (candidate.length <= perLine) {
+      line = candidate;
+      continue;
+    }
+    if (line) lines.push(line);
+    let rest = word;
+    while (rest.length > perLine) {
+      lines.push(rest.slice(0, perLine));
+      rest = rest.slice(perLine);
+    }
+    line = rest;
+  }
+  lines.push(line);
+  return lines;
 }
 
 /**

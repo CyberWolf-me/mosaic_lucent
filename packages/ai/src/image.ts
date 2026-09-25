@@ -159,6 +159,34 @@ interface ImagesResponse {
   error?: { message?: string };
 }
 
+/**
+ * The image type a base64 payload really holds, read from its magic bytes:
+ * PNG, JPEG, WebP or GIF, or null for anything else.
+ *
+ * `b64_json` carries no type of its own, and "PNG" is only what OpenAI's
+ * endpoint returns by default: gpt-image models honour an `output_format` of
+ * jpeg or webp, and gateways that mirror the shape return whatever their
+ * backend drew. A data URL whose declared type disagrees with its bytes is the
+ * kind of mismatch a strict image decoder refuses and a lenient one guesses
+ * at, so the declared type comes from the bytes. Only the first 16 base64
+ * characters (12 bytes) are decoded — enough for RIFF…WEBP, the longest
+ * signature here.
+ */
+export function sniffImageMime(base64: string): string | null {
+  let head: string;
+  try {
+    head = atob(base64.replace(/\s+/g, "").slice(0, 16));
+  } catch {
+    return null;
+  }
+  const byte = (i: number) => head.charCodeAt(i);
+  if (head.startsWith("\x89PNG\r\n\x1a\n")) return "image/png";
+  if (byte(0) === 0xff && byte(1) === 0xd8 && byte(2) === 0xff) return "image/jpeg";
+  if (head.startsWith("GIF87a") || head.startsWith("GIF89a")) return "image/gif";
+  if (head.startsWith("RIFF") && head.slice(8, 12) === "WEBP") return "image/webp";
+  return null;
+}
+
 const SIZE_MAP: Record<NonNullable<ImageRequest["size"]>, string> = {
   square: "1024x1024",
   landscape: "1536x1024",
@@ -230,8 +258,11 @@ export class OpenAIImageProvider implements ImageProvider {
 
     const first = data.data?.[0];
     if (first?.b64_json) {
+      // Unrecognised bytes keep the old label: PNG is the endpoint's default,
+      // and refusing an image over a signature this list lacks would be worse.
+      const mime = sniffImageMime(first.b64_json) ?? "image/png";
       return {
-        src: `data:image/png;base64,${first.b64_json}`,
+        src: `data:${mime};base64,${first.b64_json}`,
         ...(first.revised_prompt ? { explanation: first.revised_prompt } : {}),
       };
     }

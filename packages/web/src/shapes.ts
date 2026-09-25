@@ -1,4 +1,11 @@
-import { chartFromTable, createTable, type Operation, type Shape } from "@lucent/core";
+import {
+  CHART_LIMITS,
+  chartFromTable,
+  createTable,
+  type ChartType,
+  type Operation,
+  type Shape,
+} from "@lucent/core";
 
 /**
  * Default geometry/text for a freshly dropped shape kind. Centralizes the shape
@@ -194,6 +201,37 @@ export function cloneShapeOp(
     ...(s.table !== undefined ? { table: s.table } : {}),
     ...(s.chart !== undefined ? { chart: s.chart } : {}),
     ...(s.style ? { style: { ...s.style } } : {}),
+    z: normalizeZ(z),
+  };
+}
+
+/** Space between a table and the chart made from it. */
+const CHART_GAP = 40;
+
+/**
+ * "Chart this table" (docs/26 §6.1): a chart shape bound to the table's data,
+ * placed to its right with the tops aligned. The first column is the labels
+ * and every mostly-numeric column a series (core's `chartFromTable`). A
+ * single-series chart has no legend, so it takes the series' header as its
+ * title — otherwise nothing on it says what the bars measure. Null when the
+ * table has no numeric column to plot.
+ */
+export function chartBesideTableOp(
+  table: Shape,
+  z: number,
+  type: ChartType = "bar",
+): Extract<Operation, { op: "CREATE_SHAPE" }> | null {
+  if (!table.table) return null;
+  const chart = chartFromTable(table.table, { type });
+  if (!chart) return null;
+  const only = chart.series.length === 1 ? chart.series[0]!.name.trim() : "";
+  return {
+    op: "CREATE_SHAPE",
+    id: shapeId(),
+    kind: "chart",
+    position: { x: table.position.x + table.size.width + CHART_GAP, y: table.position.y },
+    size: { width: 360, height: Math.min(360, Math.max(SIZES.chart.height, table.size.height)) },
+    chart: only ? { ...chart, title: only.slice(0, CHART_LIMITS.titleChars) } : chart,
     z: normalizeZ(z),
   };
 }

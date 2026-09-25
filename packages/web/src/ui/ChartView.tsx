@@ -4,7 +4,8 @@ import { chartGeometry, type ChartData } from "@lucent/core";
  * Renders a `chart` shape from its data (docs/26 §6.1). The drawn primitives
  * come from core's `chartGeometry` — the same source the SVG export uses — so
  * the canvas and the export never diverge. All text is set as SVG text nodes,
- * never markup.
+ * never markup. A label the geometry shortened with an ellipsis carries its
+ * full text as a hover title, so a capped legend name is still readable.
  */
 export function ChartView({
   chart,
@@ -58,6 +59,7 @@ export function ChartView({
                 fontWeight={p.weight ?? 400}
                 fontFamily="sans-serif"
               >
+                {p.full !== undefined && <title>{p.full}</title>}
                 {p.text}
               </text>
             );

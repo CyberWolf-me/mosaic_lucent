@@ -1,4 +1,11 @@
-import type { DiagramKind, Shape, Workspace } from "@lucent/core";
+import {
+  computeLayout,
+  storyMapGrid,
+  type DiagramKind,
+  type Shape,
+  type StoryMapGrid,
+  type Workspace,
+} from "@lucent/core";
 import { toScene, type PlacedEdge, type PlacedNode } from "../scene.js";
 import type { Box } from "./geometry.js";
 
@@ -45,7 +52,7 @@ export const CULL_MIN_OBJECTS = 300;
 export const CULL_MARGIN = 0.5;
 
 /** Padding between a semantic group's member cards and its drawn box. */
-const GROUP_PAD = 22;
+export const GROUP_PAD = 22;
 
 /** A drawn box around one semantic group's laid-out members. */
 export interface GroupRegion {
@@ -78,6 +85,11 @@ export interface DiagramScene {
   groups: GroupRegion[];
   /** Bounds over *all* nodes; null on an empty board. */
   bounds: Box | null;
+  /**
+   * A story-map board's scaffold — backbone columns and release rows — where
+   * its cards actually sit (`placedStoryMap`); null on every other board.
+   */
+  storyMap: StoryMapGrid | null;
 }
 
 /**
@@ -107,12 +119,24 @@ export function nodeBounds(nodes: readonly PlacedNode[]): Box | null {
  * Group boxes, measured over every member the lookup resolves. `lookup` exists
  * so a drag can feed shifted positions in without rebuilding the scene. Groups
  * whose members are not laid out yet are skipped rather than drawn at the origin.
+ *
+ * `storyMap` (a story-map board's placed scaffold) turns each activity's box
+ * into its whole column: from the backbone card down to the last release, as
+ * wide as the column. Every activity's band is then the same height whatever
+ * its stories — the bands read as the columns of one map, the matrix cells'
+ * reasoning — and an activity with no stories yet still shows its place. A
+ * box never shrinks below its own members, so a card dragged out of the grid
+ * stays inside its activity's box, as in every other family.
  */
 export function groupRegions(
   workspace: Workspace,
   lookup: (id: string) => PlacedNode | undefined,
+  storyMap?: StoryMapGrid | null,
 ): GroupRegion[] {
   const regions: GroupRegion[] = [];
+  const columnOf = new Map(
+    (storyMap?.columns ?? []).flatMap((c) => (c.groupId === null ? [] : [[c.groupId, c] as const])),
+  );
   for (const g of Object.values(workspace.groups)) {
     let minX = Infinity;
     let minY = Infinity;
@@ -130,7 +154,15 @@ export function groupRegions(
       if (l + n.w > maxX) maxX = l + n.w;
       if (t + n.h > maxY) maxY = t + n.h;
     }
-    if (members === 0) continue;
+    const column = storyMap ? columnOf.get(g.id) : undefined;
+    if (storyMap && column) {
+      minX = Math.min(minX, column.x);
+      maxX = Math.max(maxX, column.x + column.width);
+      minY = Math.min(minY, storyMap.header.y);
+      maxY = Math.max(maxY, storyMap.bounds.y + storyMap.bounds.height);
+    } else if (members === 0) {
+      continue;
+    }
     regions.push({
       id: g.id,
       label: g.label,
@@ -170,16 +202,53 @@ export function groupRegions(
   return regions;
 }
 
+/**
+ * A story-map board's scaffold (docs/27 D3) where its cards actually sit, or
+ * null when the board is not a story map. Board-level only, like the timeline
+ * axis: with a region on the board the map is laid out as one partition at an
+ * offset the scaffold would not share.
+ *
+ * `storyMapGrid` answers in the frame the layout places stories in. The drawn
+ * cards sit there give or take ONE translation — applyLayout slides the whole
+ * laid-out block clear of hand-placed cards — so the scaffold takes the same
+ * translation, read off the first story the engine placed and nobody pinned.
+ */
+export function placedStoryMap(workspace: Workspace): StoryMapGrid | null {
+  if (workspace.diagramKind !== "storymap") return null;
+  if (Object.values(workspace.groups).some((g) => g.kind)) return null;
+  const grid = storyMapGrid(workspace);
+  const layout = computeLayout(workspace);
+  let dx = 0;
+  let dy = 0;
+  for (const node of Object.values(workspace.nodes)) {
+    const placed = layout[node.id];
+    if (node.pinned || !node.position || !placed) continue;
+    dx = node.position.x - placed.position.x;
+    dy = node.position.y - placed.position.y;
+    break;
+  }
+  if (dx === 0 && dy === 0) return grid;
+  return {
+    columns: grid.columns.map((c) => ({ ...c, x: c.x + dx })),
+    rows: grid.rows.map((r) => ({ ...r, y: r.y + dy })),
+    header: { ...grid.header, y: grid.header.y + dy },
+    gutter: { ...grid.gutter, x: grid.gutter.x + dx },
+    bounds: { ...grid.bounds, x: grid.bounds.x + dx, y: grid.bounds.y + dy },
+  };
+}
+
 /** Derive the whole-workspace scene: placed nodes, edges, group boxes, bounds. */
 export function diagramScene(workspace: Workspace): DiagramScene {
   const { nodes, edges } = toScene(workspace);
   const byId = new Map(nodes.map((n) => [n.id, n]));
+  const storyMap = placedStoryMap(workspace);
   return {
     nodes,
     edges,
     byId,
-    groups: groupRegions(workspace, (id) => byId.get(id)),
+    groups: groupRegions(workspace, (id) => byId.get(id), storyMap),
     bounds: nodeBounds(nodes),
+    storyMap,
   };
 }
 

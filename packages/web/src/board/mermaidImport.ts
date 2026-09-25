@@ -20,6 +20,7 @@ const NAME: Record<MermaidFlavor, string> = {
   flowchart: "flowchart",
   state: "state diagram",
   mindmap: "mind map",
+  class: "class diagram",
 };
 
 export type MermaidImportPlan =

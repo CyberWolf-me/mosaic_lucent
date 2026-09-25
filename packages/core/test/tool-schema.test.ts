@@ -113,6 +113,11 @@ describe("schema still validates what the tool advertises", () => {
       CHANGE_TEXT: { op: "CHANGE_TEXT", id: "a", text: "B" },
       CHANGE_NODE_TYPE: { op: "CHANGE_NODE_TYPE", id: "a", nodeType: "database" },
       SET_NODE_ICON: { op: "SET_NODE_ICON", id: "a", icon: "simple:postgresql" },
+      SET_NODE_DETAILS: {
+        op: "SET_NODE_DETAILS",
+        id: "a",
+        details: { sections: [{ title: "Columns", items: ["id PK", "email"] }] },
+      },
       SET_ISSUE: { op: "SET_ISSUE", id: "a", issue: { type: "story", status: "To Do" } },
       UPDATE_ISSUE: { op: "UPDATE_ISSUE", id: "a", status: "Done" },
       SET_STATEMENT: {

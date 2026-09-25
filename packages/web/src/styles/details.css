@@ -1,0 +1,127 @@
+/* ---------------------------------------------------------------
+   Node details — UML-style compartments under a card's title (V4):
+   a class's attributes and operations, an entity's columns, a C4
+   element's technology and responsibility.
+
+   The geometry here is mirrored by core layout.ts `nodeDetailsHeight`,
+   which reserves the card's height before anything renders (connector
+   anchors, the minimap and the export all read node.size). Change a
+   size, a line-height or a padding here and change it there too.
+   --------------------------------------------------------------- */
+
+/* Compartments read top-down from the title; a centred stack would push
+   the name off the top of a tall card. */
+.node.has-details {
+  justify-content: flex-start;
+}
+
+/* Full-bleed: each compartment's rule runs edge to edge like a UML box,
+   cancelling the card's 14px side padding and restoring it inside. */
+.node .node-details {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  margin: 6px -14px 0;
+}
+.node.stmt .node-details {
+  margin-right: -12px;
+}
+
+.node .node-details-section {
+  min-width: 0;
+  padding: 4px 14px;
+  border-top: 1px solid oklch(from var(--paper-edge) l c h / 0.7);
+}
+
+.node .node-details-title {
+  margin-bottom: 1px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 500;
+  line-height: 13px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.node .node-details-item {
+  /* An empty line still holds its row — the layout counted it. */
+  min-height: 15px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 400;
+  line-height: 15px;
+  text-align: left;
+  color: var(--ink-1);
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+/* A proposed or ghost card is a preview: its compartments recede with it. */
+.node.ghost .node-details-item,
+.node.proposed .node-details-item {
+  color: var(--ink-2);
+}
+
+/* Dark paper is darker than the edge token's light-mode contrast assumes;
+   lift the rule so compartments stay visible without shouting. */
+html[data-theme="dark"] .node .node-details-section {
+  border-top-color: oklch(from var(--paper-edge) calc(l + 0.08) c h / 0.9);
+}
+
+/* ---------------------------------------------------------------
+   The inspector's details editor (NodeInspector DetailsSection):
+   one textarea, `## Title` starts a section, one item per line.
+   --------------------------------------------------------------- */
+.ni-details-input {
+  display: block;
+  width: 100%;
+  min-height: 64px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  resize: vertical;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ink-0);
+  background: var(--paper-0);
+  border: 1px solid oklch(from var(--paper-4) l c h / 0.8);
+}
+.ni-details-input::placeholder {
+  color: var(--ink-3);
+}
+.ni-details-input:focus-visible {
+  outline: none;
+  border-color: var(--bloom-2);
+  box-shadow: 0 0 0 3px var(--bloom-wash);
+}
+html[data-theme="dark"] .ni-details-input {
+  background: var(--paper-1);
+}
+.ni-details-hint {
+  margin: 6px 0 0;
+  font-size: 11px;
+  color: var(--ink-3);
+}
+.ni-details-hint .mono {
+  font-family: var(--font-mono);
+  color: var(--ink-2);
+}
+
+/* Read-only details, for a viewer who can't edit. */
+.ni-details-section + .ni-details-section {
+  margin-top: 8px;
+}
+.ni-details-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--ink-1);
+  overflow-wrap: anywhere;
+}

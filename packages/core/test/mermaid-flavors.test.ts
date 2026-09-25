@@ -29,6 +29,7 @@ describe("detectMermaid", () => {
     expect(detectMermaid("graph TD; A-->B")).toBe("flowchart");
     expect(detectMermaid("stateDiagram-v2\n [*] --> A")).toBe("state");
     expect(detectMermaid("mindmap\n  root((X))")).toBe("mindmap");
+    expect(detectMermaid("classDiagram\n  Animal <|-- Duck")).toBe("class");
     expect(detectMermaid("# Docs\n\n```mermaid\nflowchart TD\n A --> B\n```\n")).toBe("flowchart");
     expect(detectMermaid("---\ntitle: Checkout\n---\nflowchart TD\n A --> B")).toBe("flowchart");
   });
@@ -156,7 +157,27 @@ describe("state diagrams → statemachine", () => {
     expect(node("check")?.nodeType).toBe("decision");
     expect(g.edges).toContainEqual({ source: "Draft", target: "Review", relationship: "submit" });
     expect(g.edges).toContainEqual({ source: "Published", target: "check", relationship: "" });
-    expect(g.skipped).toBe(2); // the description and the note
+    // The description is kept now (as details, below); only the note is skipped.
+    expect(g.skipped).toBe(1);
+  });
+
+  it("a state's description lines become its details, in order", () => {
+    const g = parseMermaid(`stateDiagram-v2
+  [*] --> Draft
+  Draft : being written
+  Draft : autosaves every minute
+  state Active {
+    [*] --> Idle
+  }
+  Active : prose on a composite has nowhere to go`);
+    const node = (id: string) => g.nodes.find((n) => n.id === id);
+    expect(node("Draft")?.details).toEqual({
+      sections: [{ items: ["being written", "autosaves every minute"] }],
+    });
+    expect(node("Idle")).not.toHaveProperty("details");
+    expect(g.skipped).toBe(1);
+    const ws = lands(mermaidToOps(text));
+    expect(ws.nodes.Draft?.details).toEqual({ sections: [{ items: ["being written"] }] });
   });
 
   it("lands as a state machine the layout shrinks to pseudo-states", () => {
@@ -188,6 +209,110 @@ describe("state diagrams → statemachine", () => {
   }
   Idle --> Idle : tick`),
     );
+  });
+});
+
+describe("class diagrams → class", () => {
+  const text = `classDiagram
+  direction LR
+  class Animal {
+    <<abstract>>
+    +String name
+    +List~Toy~ toys
+    +makeSound() void
+  }
+  class Duck
+  Duck : +swim()
+  Duck : +int wings
+  class Flyer["Can fly"]
+  <<interface>> Flyer
+  Animal <|-- Duck
+  Duck ..|> Flyer
+  Pond "1" *-- "many" Duck : holds
+  Zoo o-- Animal
+  Duck --> Pond : swims in
+  Duck ..> Weather
+  Keeper <-- Zoo
+  class Status {
+    <<enumeration>>
+    ACTIVE
+    RETIRED
+  }
+  namespace Habitat {
+    class Pond
+  }
+  note for Duck "can fly"
+  style Duck fill:#f9f`;
+
+  it("reads classes, stereotypes and members as the class family's nodes and details", () => {
+    const g = parseMermaid(text);
+    expect(g.kind).toBe("class");
+    expect(g.direction).toBe("LR");
+    const node = (id: string) => g.nodes.find((n) => n.id === id);
+    expect(node("Animal")).toMatchObject({
+      nodeType: "abstract",
+      details: {
+        sections: [
+          { title: "Attributes", items: ["+String name", "+List<Toy> toys"] },
+          { title: "Operations", items: ["+makeSound() void"] },
+        ],
+      },
+    });
+    expect(node("Duck")?.details).toEqual({
+      sections: [
+        { title: "Attributes", items: ["+int wings"] },
+        { title: "Operations", items: ["+swim()"] },
+      ],
+    });
+    expect(node("Flyer")).toMatchObject({ nodeType: "interface", label: "Can fly" });
+    expect(node("Status")).toMatchObject({
+      nodeType: "enum",
+      details: { sections: [{ title: "Values", items: ["ACTIVE", "RETIRED"] }] },
+    });
+    expect(node("Weather")).not.toHaveProperty("details");
+    // A namespace is a group, like a flowchart subgraph.
+    expect(g.groups).toEqual([{ id: "Habitat", label: "Habitat" }]);
+    expect(node("Pond")?.groupId).toBe("Habitat");
+    expect(g.skipped).toBe(2); // the note and the style
+  });
+
+  it("reads each UML arrow as its relationship, pointing child → parent, whole → part", () => {
+    const g = parseMermaid(text);
+    const pairs = g.edges.map((e) => `${e.source}>${e.target}:${e.relationship}`);
+    expect(pairs).toEqual([
+      "Duck>Animal:inherits",
+      "Duck>Flyer:implements",
+      "Pond>Duck:composition",
+      "Zoo>Animal:aggregation",
+      // An association's name is what it is; the others keep their UML word.
+      "Duck>Pond:swims in",
+      "Duck>Weather:depends",
+      "Zoo>Keeper:association",
+    ]);
+  });
+
+  it("lands as a class board and round-trips as a class diagram", () => {
+    const ws = lands(mermaidToOps(text));
+    expect(ws.diagramKind).toBe("class");
+    expect(ws.nodes.Animal?.details?.sections[1]?.items).toEqual(["+makeSound() void"]);
+    const out = boardToMermaid(ws);
+    expect(out.startsWith("classDiagram\n")).toBe(true);
+    expect(out).toContain('  class Flyer["Can fly"] {\n    <<interface>>\n  }');
+    expect(out).toContain("  Animal <|-- Duck");
+    expect(out).toContain("  Flyer <|.. Duck");
+    expect(out).toContain("  Pond *-- Duck");
+    expect(out).toContain("  Duck --> Pond : swims in");
+    const again = parseMermaid(out);
+    const summary = (g: typeof again) => ({
+      nodes: g.nodes
+        .map((n) => `${n.id}:${n.nodeType}:${n.label}:${JSON.stringify(n.details?.sections.map((s) => s.items))}`)
+        .sort(),
+      edges: g.edges.map((e) => `${e.source}>${e.target}:${e.relationship}`).sort(),
+    });
+    const first = parseMermaid(text);
+    // Namespaces don't survive a class export (groups are not classes), so
+    // compare everything but group membership.
+    expect(summary(again)).toEqual(summary(first));
   });
 });
 
@@ -318,6 +443,27 @@ describe("export per kind", () => {
         .map((e) => e.relationship)
         .sort(),
     ).toEqual(["", "create", "publish"]);
+  });
+
+  it("a state's details export as its description lines and come back as details", () => {
+    const ws = applyOperations(createWorkspace({ diagramKind: "statemachine" }), [
+      {
+        op: "CREATE_NODE",
+        id: "draft",
+        nodeType: "state",
+        label: "Draft",
+        details: { sections: [{ title: "Notes", items: ["being written", "autosaves"] }] },
+      },
+      { op: "CREATE_NODE", id: "live", nodeType: "state", label: "Live" },
+      { op: "CONNECT_NODES", source: "draft", target: "live", relationship: "publish" },
+    ]);
+    const out = boardToMermaid(ws);
+    expect(out).toContain('  state "Draft" as draft\n  draft : being written\n  draft : autosaves\n');
+    const back = lands(mermaidToOps(out));
+    // Mermaid descriptions carry no heading, so the title stays behind.
+    expect(back.nodes.draft?.details).toEqual({
+      sections: [{ items: ["being written", "autosaves"] }],
+    });
   });
 
   it("a mind map that isn't a tree falls back to a flowchart", () => {

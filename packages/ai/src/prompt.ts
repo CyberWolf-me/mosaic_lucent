@@ -1,9 +1,8 @@
 import { NOTE_TEMPLATES, type NotesRequest } from "./notes.js";
 import { THEME_LIMITS, themeCap, type ThemesRequest } from "./themes.js";
 import { getPrompt } from "./registry.js";
-import { REQUEST_LIMITS } from "./provider.js";
-import { representationCatalogPrompt } from "@lucent/core";
-import type { GenerateRequest } from "./provider.js";
+import { capChartSummary, capTableSummary, REQUEST_LIMITS } from "./provider.js";
+import type { ChartSummary, GenerateRequest, TableSummary } from "./provider.js";
 import type { AnswerRequest } from "./answer.js";
 import type { ExternalPlanRequest } from "./externalPlan.js";
 
@@ -182,7 +181,10 @@ function attributeValue(raw: string, fallback: string): string {
  * Board *structure* (nodes, edges, shapes) is deliberately not re-capped here.
  * It is first-party data that `summarizeWorkspace` already sliced, and slicing
  * it a second time with a second set of numbers would mean the model is told
- * about a smaller board than the app believes it sent.
+ * about a smaller board than the app believes it sent. Table and chart content
+ * (V4) is the exception that proves the rule: it can be large by design, so it
+ * IS re-capped — but with the summariser's own `capTableSummary` /
+ * `capChartSummary`, one set of numbers, which leaves a real summary untouched.
  */
 const PAYLOAD_LIMITS = {
   document: REQUEST_LIMITS.documentChars,
@@ -388,6 +390,65 @@ export function todayLine(today: string | undefined): string | null {
   return `Today is ${WEEKDAY_NAMES[date.getUTCDay()]}, ${today} (the requester's local date). Resolve relative deadlines — "by Friday", "next Monday", "end of week", "the 15th" — to a YYYY-MM-DD dueDate against this date, always forward from it.`;
 }
 
+/**
+ * One piece of board data — a table cell, a chart label — as the model reads
+ * it. Whoever can edit the board typed it, so it passes through the same
+ * filter as a comment or a document, after the cap as everywhere else in this
+ * file (the cap bounds the filter's work). Whitespace is folded first because
+ * a table renders one row per line: a cell's own newline would otherwise start
+ * a line that reads as the next row, or as the next line of board context.
+ */
+function dataText(raw: string): string {
+  return stripInstructionLike(raw.replace(/\s+/g, " ").trim()).text;
+}
+
+/** A table cell additionally escapes the column separator it sits between. */
+function tableCell(raw: string): string {
+  return dataText(raw).replace(/\|/g, "\\|");
+}
+
+function plural(n: number, word: string): string {
+  return `${n} ${word}${n === 1 ? "" : "s"}`;
+}
+
+/**
+ * A table's content under its shape line: its size, then the header and the
+ * rows the summary carries as `| a | b |` lines. Re-capped with the
+ * summariser's own function, so the same numbers bound a hand-built request and
+ * a real summary passes through unchanged. Hidden rows are always declared:
+ * the system prompt tells the model not to rewrite a table it cannot see all
+ * of, and it can only follow that if the harness says so.
+ */
+function renderTableContent(table: TableSummary): string[] {
+  const capped = capTableSummary(table.headers, table.rows, {
+    rows: table.totalRows,
+    columns: table.totalColumns,
+  });
+  const hiddenRows = capped.totalRows - capped.rows.length;
+  const hiddenColumns = capped.totalColumns - capped.headers.length;
+  const hidden = [
+    hiddenRows > 0 ? `${plural(hiddenRows, "row")} hidden` : "",
+    hiddenColumns > 0 ? `${plural(hiddenColumns, "column")} hidden` : "",
+  ].filter(Boolean);
+  return [
+    `table: ${plural(capped.totalColumns, "column")} × ${plural(capped.totalRows, "row")}${
+      hidden.length ? `; ${hidden.join(", ")}` : ""
+    }`,
+    `| ${capped.headers.map(tableCell).join(" | ")} |`,
+    ...capped.rows.map((row) => `| ${row.map(tableCell).join(" | ")} |`),
+  ];
+}
+
+/** A chart's description on one line: type, title, labels, series names. */
+function renderChartContent(chart: ChartSummary): string {
+  const capped = capChartSummary(chart);
+  const hiddenLabels = capped.totalLabels - capped.labels.length;
+  const labels = capped.labels.map(dataText).join(", ") || "(none)";
+  return `chart: ${dataText(capped.type)}${capped.title ? ` "${dataText(capped.title)}"` : ""} — labels: ${labels}${
+    hiddenLabels > 0 ? ` (+${hiddenLabels} more)` : ""
+  }; series: ${capped.series.map(dataText).join(", ") || "(none)"}`;
+}
+
 /** Render the workspace + user message into a single user-turn string. */
 export function buildUserPrompt(request: GenerateRequest): string {
   const { message, summary, history, documents } = request;
@@ -431,10 +492,10 @@ export function buildUserPrompt(request: GenerateRequest): string {
   const board: string[] = [];
   const addBoard = (section: string) => board.push(escapeHarnessTags(section));
 
+  // The family catalog is NOT here: it is part of the system prompt (the
+  // `{{families}}` section, resolved once in registry.ts). This region is data,
+  // and a menu of what to build sitting inside it would read as instruction.
   addBoard(`Current diagram kind: ${summary.diagramKind}`);
-  // The family catalog, generated from core's representation registry (docs/26
-  // §6.1) so a newly-registered family reaches the model with no prompt edit.
-  addBoard(representationCatalogPrompt());
   addBoard(`Existing nodes:\n${nodes}`);
   addBoard(`Existing edges:\n${edges}`);
 
@@ -456,9 +517,13 @@ export function buildUserPrompt(request: GenerateRequest): string {
           const flags = [s.locked ? "locked" : "", s.hidden ? "hidden" : ""]
             .filter(Boolean)
             .join(", ");
+          const content = [
+            ...(s.table ? renderTableContent(s.table) : []),
+            ...(s.chart ? [renderChartContent(s.chart)] : []),
+          ];
           return `  ${s.id} (${s.kind})${s.text ? `: ${s.text}` : ""}${
             s.groupId ? ` [group: ${s.groupId}]` : ""
-          }${flags ? ` [${flags}]` : ""}`;
+          }${flags ? ` [${flags}]` : ""}${content.map((line) => `\n    ${line}`).join("")}`;
         })
         .join("\n")}`,
     );

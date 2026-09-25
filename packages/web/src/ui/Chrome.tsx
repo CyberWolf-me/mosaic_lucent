@@ -771,8 +771,8 @@ export function LeftRail({
                         aria-label={`${l.label} lens`}
                         aria-pressed={on}
                         onClick={() => {
-                          // setView first: setView("canvas") resets to the visual
-                          // lens, so the explicit lens applies after.
+                          // setView first: setView("canvas") resets to the board's
+                          // own lens, so the explicit lens applies after.
                           setView("canvas");
                           setLens(l.lens);
                         }}

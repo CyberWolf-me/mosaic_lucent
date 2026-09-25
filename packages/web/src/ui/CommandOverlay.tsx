@@ -9,6 +9,7 @@ import { listProjects } from "../persistence.js";
 import { frameEntries, sendCanvasCommand } from "../canvasCommands.js";
 import {
   buildResults,
+  convertPaletteItems,
   groupSearchHits,
   moveIndex,
   searchHitHint,
@@ -56,6 +57,8 @@ export function CommandOverlay({
     ask,
     setPillMode,
     onCitation,
+    convertBoard,
+    readOnly,
   } = useWorkspace() as unknown as {
     setView: WorkspaceState["setView"];
     send: WorkspaceState["send"];
@@ -68,6 +71,8 @@ export function CommandOverlay({
     ask: WorkspaceState["ask"];
     setPillMode: WorkspaceState["setPillMode"];
     onCitation: WorkspaceState["onCitation"];
+    convertBoard: WorkspaceState["convertBoard"];
+    readOnly: boolean;
   };
   const [q, setQ] = useState("");
   const [active, setActive] = useState(0);
@@ -147,6 +152,9 @@ export function CommandOverlay({
         group: "action",
         run: { kind: "export" },
       },
+      // "Convert board to <family>", one per convertible family in the
+      // registry; listed once the user types. A viewer cannot convert.
+      ...(readOnly ? [] : convertPaletteItems()),
       {
         id: "v-home",
         label: "Go to Home",
@@ -218,6 +226,27 @@ export function CommandOverlay({
         run: { kind: "view", view: "sequence" },
       },
       {
+        id: "v-er",
+        label: "Open ER lens",
+        hint: "Entities and their relationships",
+        group: "view",
+        run: { kind: "view", view: "er" },
+      },
+      {
+        id: "v-kanban",
+        label: "Open kanban lens",
+        hint: "Work items by status",
+        group: "view",
+        run: { kind: "view", view: "board" },
+      },
+      {
+        id: "v-document",
+        label: "Open document lens",
+        hint: "The board as a document to read",
+        group: "view",
+        run: { kind: "view", view: "document" },
+      },
+      {
         id: "v-admin",
         label: "Open workspace admin",
         hint: "Members · Audit · SSO & SCIM",
@@ -226,7 +255,7 @@ export function CommandOverlay({
       },
     ],
     // Frames come from the board, so the list follows it.
-    [workspace],
+    [workspace, readOnly],
   );
 
   // Local scan for local boards: nodes by label/type and shapes by text. On a
@@ -369,6 +398,12 @@ export function CommandOverlay({
         // The command waits for the canvas if this switches to it.
         setView("canvas");
         sendCanvasCommand(a.cmd);
+        break;
+      case "convert":
+        // To the canvas, then convert: the lens follows the new kind on its
+        // own, so a board converted to a sequence opens in the sequence lens.
+        setView("canvas");
+        convertBoard(a.to);
         break;
     }
     onClose();

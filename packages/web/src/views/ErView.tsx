@@ -6,7 +6,8 @@ import { useWorkspace } from "../workspace.js";
 import { toEr } from "../board/er.js";
 
 /** Entity-relationship view — derived from the semantic graph (docs/15 Phase D).
- * Each node becomes an entity table; edges become labelled relationships. */
+ * Each node becomes an entity table — its columns from the node's details
+ * when it has them (V4) — and edges become labelled relationships. */
 export function ErView({ onOpenSettings }: { onOpenSettings: (section?: string) => void }) {
   const { workspace, chat, send, setView , projectName } = useWorkspace();
   const [message, setMessage] = useState("");
@@ -65,8 +66,10 @@ export function ErView({ onOpenSettings }: { onOpenSettings: (section?: string) 
           {model.entities.map((e) => (
             <div key={e.id} className="er-entity">
               <div className="er-entity-head">{e.label}</div>
-              {e.attributes.map((a) => (
-                <div key={a.name} className={`er-attr ${a.key ? "key" : ""}`}>
+              {/* Columns come from the entity's details (board/er.ts), where a
+                  name can repeat — so rows are keyed by position, not name. */}
+              {e.attributes.map((a, i) => (
+                <div key={i} className={`er-attr ${a.key ? "key" : ""}`}>
                   {a.key ? "🔑 " : ""}
                   {a.name}
                 </div>

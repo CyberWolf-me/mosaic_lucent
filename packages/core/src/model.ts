@@ -99,8 +99,51 @@ export interface Node {
   statement?: StatementFields;
   /** Creation evidence — which meeting/turns produced this node (Stage C2). */
   provenance?: ProvenanceFields;
+  /**
+   * The node's compartments (V4): a UML class's attributes and operations, an
+   * ER entity's columns, a C4 element's technology and responsibility. Set by
+   * CREATE_NODE or SET_NODE_DETAILS; absent on a plain node. It makes the card
+   * taller, so the layout measures it (layout.ts nodeCardExtraHeight).
+   */
+  details?: NodeDetails;
   metadata?: Record<string, unknown>;
 }
+
+/**
+ * One compartment of a node's details: an optional small heading
+ * ("Attributes", "Columns") and its lines, in order. Plain strings, never
+ * markup — the card, the ER lens and the export all draw text from them, so
+ * nothing an item says can become an element.
+ */
+export interface NodeDetailsSection {
+  title?: string;
+  items: string[];
+}
+
+/**
+ * Structured text under a node's name, compartment by compartment — the UML
+ * box's middle and bottom thirds, generalised. Structure rather than one
+ * free-text blob so the ER lens can read a "Columns" section as columns and a
+ * class can keep attributes apart from operations.
+ */
+export interface NodeDetails {
+  sections: NodeDetailsSection[];
+}
+
+/**
+ * The size of a node's details, enforced by the operation schema
+ * (operations.ts nodeDetailsSchema). `items` is per section; `totalChars`
+ * counts every title and item together, and is the cap that actually bounds a
+ * card: details ride every CREATE_NODE / SET_NODE_DETAILS in the op log and
+ * are replayed to every peer, and a card is only legible at a few dozen lines.
+ */
+export const NODE_DETAILS_LIMITS = {
+  sections: 4,
+  items: 40,
+  itemChars: 160,
+  titleChars: 40,
+  totalChars: 4000,
+} as const;
 
 /** Work-item hierarchy, mirroring Jira's epic → story/task → subtask + bug. */
 export type IssueType = "epic" | "story" | "task" | "subtask" | "bug";

@@ -1,6 +1,7 @@
 import {
   edgeTiers,
   listRepresentations,
+  pseudoRoleFor,
   routeStyleFor,
   type DiagramKind,
   type Node,
@@ -180,6 +181,11 @@ export const DIAGRAM_LABELS: Record<DiagramKind, string> = Object.fromEntries(
  * else the board kind. Node semantics map: entry→○ start, exit→◎ end,
  * step/task→□ task, choice/gateway→◇X exclusive, parallel→◇+ parallel —
  * the model carries meaning; the lens chooses the convention.
+ *
+ * WHICH node types are the start/end pseudo-nodes is not decided here: it is
+ * the registry's `pseudoRoleFor` (V4), the same answer the layout reads when
+ * it shrinks those nodes. Keeping a second list here is how the canvas used
+ * to draw a full card in a slot the layout had sized for a dot.
  */
 export type BpmnLensShape =
   | "event"
@@ -195,21 +201,20 @@ export function bpmnShapeFor(
   nodeType: string,
   lens: DiagramKind | undefined,
 ): BpmnLensShape | undefined {
-  // A state machine's pseudo-states in UML's convention (docs/27 D1): a
-  // solid dot starts, a bullseye ends; every real state stays a card.
-  if (lens === "statemachine") {
-    if (nodeType === "start" || nodeType === "initial") return "initial";
-    if (nodeType === "end" || nodeType === "final") return "final";
+  if (lens === undefined) return undefined;
+  const role = pseudoRoleFor(lens, nodeType);
+  if (lens !== "bpmn") {
+    // Every other family with pseudo-nodes (the state machine today) draws
+    // them in UML's convention (docs/27 D1): a solid dot starts, a bullseye
+    // ends, and every real node stays a card. A family without pseudo types
+    // gets null from the registry, so its board renders untouched.
+    if (role === "start") return "initial";
+    if (role === "end") return "final";
     return undefined;
   }
-  if (lens !== "bpmn") return undefined;
+  if (role === "start") return "event";
+  if (role === "end") return "eventEnd";
   switch (nodeType) {
-    case "entry":
-    case "start":
-      return "event";
-    case "exit":
-    case "end":
-      return "eventEnd";
     case "parallel":
       return "gatewayParallel";
     case "choice":

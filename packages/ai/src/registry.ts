@@ -1,5 +1,5 @@
 import * as z from "zod/v4";
-import { AI_OPERATION_NAMES } from "@lucent/core";
+import { AI_OPERATION_NAMES, listRepresentations, representationCatalogPrompt } from "@lucent/core";
 import visualAgentFile from "./prompts/visual-agent.json" with { type: "json" };
 import boardHistorianFile from "./prompts/board-historian.json" with { type: "json" };
 import externalSelectorFile from "./prompts/external-selector.json" with { type: "json" };
@@ -39,6 +39,15 @@ import stickyThemesFile from "./prompts/sticky-themes.json" with { type: "json" 
  * `tsconfig.json` pins `rootDir` to `src`, so a JSON outside it cannot be part
  * of the program. A static import satisfies both, and `tsc` copies the JSON into
  * `dist/prompts/` so the production image needs no extra file to be shipped.
+ *
+ * Generated sections (V4). The diagram families are the same kind of fact as the
+ * vocabulary: core's representation registry already holds each family's
+ * summary and construction rules, and a hand-written copy in the prompt is a
+ * second list that drifts the first time a family is added. So a prompt may
+ * name them by placeholder too, and they are resolved the same way — once, here,
+ * at module load, into the SYSTEM prompt. Never per request: the user turn's
+ * <board-context> is data, and a catalog living there would teach the model
+ * that board data can carry instructions.
  */
 
 /**
@@ -90,6 +99,42 @@ const OPERATIONS_PLACEHOLDER = "{{operations}}";
 
 /** Anything that looks like a placeholder, so a typo cannot ship silently. */
 const ANY_PLACEHOLDER = /\{\{[^}\n]{1,40}\}\}/;
+
+/** The families the model is told about at all, in registry order. */
+const CREATABLE = listRepresentations().filter((r) => r.aiCreatable);
+
+/**
+ * Optional placeholders, each generated from core's representation registry.
+ * Unlike `{{operations}}` none is mandatory — the historian or the sticky
+ * sorter has no use for a diagram menu — but every one is fixed at load, so
+ * the rendered text a cache key hashes (cache.ts) is still one string per
+ * prompt version.
+ *
+ * - `{{families}}`: every creatable family's `- kind — summary` line with its
+ *   construction rules beneath (core's `representationCatalogPrompt`).
+ * - `{{region-kinds}}` / `{{whole-board-kinds}}`: which families may be a
+ *   REGION on a board of another kind, and which draw only as a whole board.
+ *   Generated for the same reason as the catalog: the region rule is a
+ *   registry flag (`regionable`), and a hand-kept list in prose is the one
+ *   that silently omits the next family added.
+ */
+const GENERATED_PLACEHOLDERS: Readonly<Record<string, string>> = Object.freeze({
+  "{{families}}": representationCatalogPrompt(),
+  "{{region-kinds}}": CREATABLE.filter((r) => r.regionable)
+    .map((r) => r.kind)
+    .join(", "),
+  "{{whole-board-kinds}}": CREATABLE.filter((r) => !r.regionable)
+    .map((r) => r.kind)
+    .join(", "),
+});
+
+/** Every placeholder `render` resolves, as one alternation. */
+const KNOWN_PLACEHOLDER = new RegExp(
+  [OPERATIONS_PLACEHOLDER, ...Object.keys(GENERATED_PLACEHOLDERS)]
+    .map((p) => p.replace(/[{}]/g, "\\$&"))
+    .join("|"),
+  "g",
+);
 
 /** A prompt as callers consume it: text already rendered, vocabulary resolved. */
 export interface PromptEntry {
@@ -147,9 +192,18 @@ function render(file: PromptFile, vocabulary: readonly string[]): string {
   if (!body.includes(OPERATIONS_PLACEHOLDER)) {
     throw new Error(`prompt "${file.id}": body never uses ${OPERATIONS_PLACEHOLDER}`);
   }
-  const rendered = body
-    .split(OPERATIONS_PLACEHOLDER)
-    .join(vocabulary.length ? vocabulary.join(", ") : "(none — this prompt emits no operations)");
+  const values: Record<string, string> = {
+    ...GENERATED_PLACEHOLDERS,
+    [OPERATIONS_PLACEHOLDER]: vocabulary.length
+      ? vocabulary.join(", ")
+      : "(none — this prompt emits no operations)",
+  };
+  // One pass over the body, so substituted text is never itself scanned for
+  // placeholders to substitute: the catalog is inserted, not re-interpreted.
+  // The leftover check below still reads the whole rendered text, generated
+  // sections included — a registry string that looked like a placeholder
+  // would reach the model as a literal `{{…}}`, and that should fail here too.
+  const rendered = body.replace(KNOWN_PLACEHOLDER, (placeholder) => values[placeholder]!);
   const leftover = ANY_PLACEHOLDER.exec(rendered);
   if (leftover) {
     throw new Error(`prompt "${file.id}": unresolved placeholder ${leftover[0]}`);

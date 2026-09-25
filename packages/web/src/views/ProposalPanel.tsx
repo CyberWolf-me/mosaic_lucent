@@ -1,7 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Ico } from "../ui/icons.js";
 import { useWorkspace } from "../workspace.js";
-import type { Operation } from "@lucent/core";
+import { DIAGRAM_KINDS, representationLabel, type DiagramKind, type Operation } from "@lucent/core";
+
+/**
+ * A diagram kind as the reviewer reads it ("State machine", not
+ * "statemachine"), from the representation registry. Guarded because a
+ * pending proposal is restored from localStorage — a record written by a build
+ * that knew a kind this one does not must still render, as its raw id.
+ */
+function kindLabel(kind: DiagramKind): string {
+  return (DIAGRAM_KINDS as readonly string[]).includes(kind)
+    ? representationLabel(kind)
+    : String(kind);
+}
 
 /**
  * Proposal review panel, styled in the Atelier design system and wired
@@ -300,15 +312,15 @@ function describe(op: Operation): { op: OpBadge; title: string; sub: string } {
     case "DELETE_GROUP":
       return { op: "del", title: op.id, sub: "Remove group" };
     case "CREATE_DIAGRAM":
-      return { op: "mod", title: op.kind, sub: "Set diagram kind" };
+      return { op: "mod", title: kindLabel(op.kind), sub: "Set diagram kind" };
     case "SET_GROUP_KIND":
       return {
         op: "mod",
         title: op.id,
-        sub: op.kind ? `Region kind → ${op.kind}` : "Clear region kind",
+        sub: op.kind ? `Region kind → ${kindLabel(op.kind)}` : "Clear region kind",
       };
     case "TRANSFORM_DIAGRAM":
-      return { op: "move", title: op.to, sub: "Transform representation" };
+      return { op: "move", title: kindLabel(op.to), sub: "Transform representation" };
     case "SET_LAYOUT_INTENT": {
       const parts: string[] = [];
       if (op.direction) parts.push(op.direction);
@@ -358,5 +370,16 @@ function describe(op: Operation): { op: OpBadge; title: string; sub: string } {
       return { op: "mod", title: op.id, sub: op.resolved ? "Resolve thread" : "Reopen thread" };
     case "DELETE_COMMENT":
       return { op: "del", title: op.id, sub: "Delete comment" };
+    default: {
+      // An operation this panel has no wording for yet (one newer than this
+      // list): still listed, by its target and name — the review must never
+      // hide a change it is asking the person to approve.
+      const other = op as { op: string; id?: unknown };
+      return {
+        op: "mod",
+        title: typeof other.id === "string" ? other.id : other.op,
+        sub: other.op,
+      };
+    }
   }
 }

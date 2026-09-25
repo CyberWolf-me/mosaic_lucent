@@ -1,5 +1,5 @@
 import * as z from "zod/v4";
-import { DIAGRAM_KINDS } from "./model.js";
+import { DIAGRAM_KINDS, NODE_DETAILS_LIMITS, type NodeDetails } from "./model.js";
 import { vectorDataSchema } from "./vector.js";
 import { tableDataSchema } from "./table.js";
 import { chartDataSchema } from "./chart.js";
@@ -161,6 +161,82 @@ const statementFieldsSchema = z.object({
   provenance: provenanceFieldsSchema.optional(),
 });
 
+/** Characters a node's details carry in titles and items — what `totalChars` caps. */
+export function nodeDetailsChars(details: NodeDetails): number {
+  let n = 0;
+  for (const s of details.sections) {
+    n += s.title?.length ?? 0;
+    for (const item of s.items) n += item.length;
+  }
+  return n;
+}
+
+/**
+ * One line of details text. A line is a line: no newline or other control
+ * character, so an item means the same row on the card, in the ER lens, in
+ * the inspector's one-item-per-line editor and in an SVG export (where a
+ * control character is not even valid XML).
+ */
+// eslint-disable-next-line no-control-regex
+const DETAILS_LINE = /^[^\u0000-\u001f\u007f]*$/;
+const detailsLine = (max: number) =>
+  z.string().max(max).regex(DETAILS_LINE, "a details line holds no line breaks or control characters");
+
+/**
+ * A node's compartments (V4: UML attributes/operations, ER columns, C4
+ * technology). Sized by NODE_DETAILS_LIMITS — the per-field caps bound a
+ * single line, the total bounds the card and the op-log entry. An empty
+ * `sections` list is accepted and means "no details" (the reducer stores it
+ * as absence), so a model that sends `{ sections: [] }` to clear is not
+ * refused for spelling it differently from `null`.
+ */
+export const nodeDetailsSchema = z
+  .object({
+    sections: z
+      .array(
+        z.object({
+          title: detailsLine(NODE_DETAILS_LIMITS.titleChars).optional(),
+          items: z.array(detailsLine(NODE_DETAILS_LIMITS.itemChars)).max(NODE_DETAILS_LIMITS.items),
+        }),
+      )
+      .max(NODE_DETAILS_LIMITS.sections),
+  })
+  .refine((d) => nodeDetailsChars(d) <= NODE_DETAILS_LIMITS.totalChars, {
+    message: `a node's details hold at most ${NODE_DETAILS_LIMITS.totalChars} characters in total`,
+  });
+
+/**
+ * Fit arbitrary sections inside NODE_DETAILS_LIMITS — for producers that read
+ * text they don't control (a Mermaid import, the inspector's textarea): lines
+ * are flattened to one line, clipped to the item/title caps, and the sections,
+ * items and total are truncated in order, so the result always validates.
+ * Returns null when nothing is left (no sections, or only empty ones), which
+ * is what SET_NODE_DETAILS spells "clear".
+ */
+export function clampNodeDetails(sections: readonly NodeDetails["sections"][number][]): NodeDetails | null {
+  const flat = (s: string, max: number) =>
+    // eslint-disable-next-line no-control-regex
+    s.replace(/[\u0000-\u001f\u007f]+/g, " ").trim().slice(0, max);
+  let budget: number = NODE_DETAILS_LIMITS.totalChars;
+  const out: NodeDetails["sections"] = [];
+  for (const section of sections.slice(0, NODE_DETAILS_LIMITS.sections)) {
+    const title = section.title !== undefined ? flat(section.title, NODE_DETAILS_LIMITS.titleChars) : "";
+    if (title.length > budget) break;
+    budget -= title.length;
+    const items: string[] = [];
+    for (const raw of section.items.slice(0, NODE_DETAILS_LIMITS.items)) {
+      const item = flat(raw, NODE_DETAILS_LIMITS.itemChars);
+      if (!item) continue;
+      if (item.length > budget) break;
+      budget -= item.length;
+      items.push(item);
+    }
+    if (!title && items.length === 0) continue;
+    out.push({ ...(title ? { title } : {}), items });
+  }
+  return out.length > 0 ? { sections: out } : null;
+}
+
 /**
  * Recursive wireframe element schema. The AI describes UI *structure* — nested
  * regions, rows, fields, buttons — and a flexbox renderer lays it out. No pixel
@@ -235,6 +311,12 @@ const operationSchema = z.discriminatedUnion("op", [
      * Omit it and the renderer derives one from the label.
      */
     icon: iconRef.optional(),
+    /**
+     * The node's compartments (V4), in the same batch as the node: a class's
+     * attributes and operations, an entity's columns, a C4 element's
+     * technology. Text only — the layout sizes the card to fit it.
+     */
+    details: nodeDetailsSchema.optional(),
   }),
   z.object({
     op: z.literal("DELETE_NODE"),
@@ -259,6 +341,19 @@ const operationSchema = z.discriminatedUnion("op", [
     op: z.literal("SET_NODE_ICON"),
     id: z.string().min(1),
     icon: iconRef.nullable(),
+  }),
+  /**
+   * Replace a node's details wholesale (V4): its compartments — UML
+   * attributes/operations, ER columns, C4 technology and responsibility.
+   * `null` clears them. Whole-value rather than a per-line patch so the
+   * inverse is exact (it restores the previous value, or null) and two edits
+   * never interleave into a list nobody wrote. It changes the card's height,
+   * so a client re-lays out after it.
+   */
+  z.object({
+    op: z.literal("SET_NODE_DETAILS"),
+    id: z.string().min(1),
+    details: nodeDetailsSchema.nullable(),
   }),
   /**
    * Attach or replace the work-tracking fields on a node, turning it into a
@@ -620,6 +715,37 @@ const OP_ALIASES: Record<string, string> = {
   DELETE: "DELETE_NODE",
 };
 
+/**
+ * Models write "id PK\nemail\nuser_id FK" as one item as often as three. A
+ * details line may not hold a line break (nodeDetailsSchema), so rather than
+ * refuse the whole batch over it, the tolerant model path splits such an item
+ * into the lines it plainly meant. Anything that isn't the expected shape is
+ * returned untouched for the schema to judge.
+ */
+function splitDetailLines(details: unknown): unknown {
+  if (typeof details !== "object" || details === null) return details;
+  const sections = (details as { sections?: unknown }).sections;
+  if (!Array.isArray(sections)) return details;
+  return {
+    ...details,
+    sections: sections.map((s: unknown) => {
+      const items = (s as { items?: unknown } | null)?.items;
+      if (!Array.isArray(items)) return s;
+      return {
+        ...(s as object),
+        items: items.flatMap((item: unknown) =>
+          typeof item === "string" && /[\r\n]/.test(item)
+            ? item
+                .split(/\r?\n|\r/)
+                .map((l) => l.trim())
+                .filter(Boolean)
+            : [item],
+        ),
+      };
+    }),
+  };
+}
+
 export function sanitizeRawOperations(raw: unknown): unknown {
   if (!Array.isArray(raw)) return raw;
   const knownOps = new Set(ALL_OPERATION_NAMES);
@@ -664,6 +790,9 @@ export function sanitizeRawOperations(raw: unknown): unknown {
     if (copy.op === "SET_NODE_ICON" && copy.icon !== null && copy.icon !== undefined) {
       // Unrepairable → a clear, which is what "no usable icon" means.
       copy.icon = normalizeIconRef(copy.icon) ?? null;
+    }
+    if ((copy.op === "CREATE_NODE" || copy.op === "SET_NODE_DETAILS") && copy.details) {
+      copy.details = splitDetailLines(copy.details);
     }
     if (copy.op === "CONNECT_NODES" || copy.op === "DISCONNECT_NODES") {
       if (copy.relationship === null || copy.relationship === undefined) {

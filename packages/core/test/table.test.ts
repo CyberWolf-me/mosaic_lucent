@@ -3,13 +3,24 @@ import {
   applyOperations,
   createTable,
   createWorkspace,
+  deleteTableColumn,
+  deleteTableRow,
+  insertTableColumn,
+  insertTableRow,
   inverseOperations,
   parseDelimited,
+  readDelimited,
+  setTableCell,
+  sniffDelimited,
+  TABLE_LIMITS,
+  tableChars,
   tableDataSchema,
   tableToMarkdown,
   validateOperations,
   workspaceSchema,
   type Operation,
+  type TableData,
+  type TableEdit,
 } from "../src/index.js";
 
 /**
@@ -56,6 +67,153 @@ describe("parseDelimited", () => {
 
   it("returns null for empty input", () => {
     expect(parseDelimited("   ")).toBeNull();
+  });
+});
+
+describe("readDelimited", () => {
+  it("reports nothing dropped for a table within the limits", () => {
+    const r = readDelimited("a,b\n1,2\r\n3,4\r\n");
+    expect(r?.truncated).toBe(false);
+    expect(r?.delimiter).toBe(",");
+    expect(r?.table.rows).toHaveLength(2);
+  });
+
+  it("drops rows past the row cap and says so", () => {
+    const csv = ["n", ...Array.from({ length: 600 }, (_, i) => String(i))].join("\n");
+    const r = readDelimited(csv)!;
+    expect(r.table.rows).toHaveLength(TABLE_LIMITS.rows);
+    expect(r.truncated).toBe(true);
+  });
+
+  it("fits the total-character cap by dropping trailing rows, so the schema accepts it", () => {
+    // 26 columns × 400 rows × 100 characters: 1 MB of cells, within the
+    // row/column/cell caps but five times the table-wide one.
+    const header = Array.from({ length: 26 }, (_, i) => `C${i}`).join(",");
+    const row = Array.from({ length: 26 }, () => "x".repeat(100)).join(",");
+    const r = readDelimited([header, ...Array.from({ length: 400 }, () => row)].join("\n"))!;
+    expect(r.truncated).toBe(true);
+    expect(tableChars(r.table)).toBeLessThanOrEqual(TABLE_LIMITS.totalChars);
+    expect(r.table.rows.length).toBeGreaterThan(0);
+    expect(tableDataSchema.safeParse(r.table).success).toBe(true);
+    // parseDelimited gives the same fitted table.
+    expect(parseDelimited([header, row].join("\n"))).toEqual(readDelimited([header, row].join("\n"))!.table);
+  });
+});
+
+describe("sniffDelimited (paste heuristic)", () => {
+  it("takes a spreadsheet copy (tab-separated) as a table", () => {
+    const r = sniffDelimited("Name\tQty\tOwner\nApples\t3\tAda\nPears\t5\t\n");
+    expect(r?.delimiter).toBe("\t");
+    expect(r?.table.columns.map((c) => c.header)).toEqual(["Name", "Qty", "Owner"]);
+    expect(r?.table.rows[1]).toEqual({ cells: ["Pears", "5", ""] });
+  });
+
+  it("takes a CSV grid as a table", () => {
+    expect(sniffDelimited("name,role\nAda,Engineer\nGrace,Admiral")?.delimiter).toBe(",");
+    expect(sniffDelimited('city,note\nParis,"big, old"\nOslo,cold')?.table.rows[0]).toEqual({
+      cells: ["Paris", "big, old"],
+    });
+    // Two spaced columns count when one of them is numeric.
+    expect(sniffDelimited("Apples, 3\nPears, 5")).not.toBeNull();
+    // Three columns with spaces after the commas still read as a grid.
+    expect(sniffDelimited("red, green, blue\ncyan, magenta, yellow")).not.toBeNull();
+  });
+
+  it("leaves prose, lists and code alone", () => {
+    const notTables = [
+      "Hi Bob, how are you?", // one line
+      "a,b,c", // one line
+      "Hi Bob, how are you?\nFine, thanks.", // sentences
+      "Hi Bob, how are you\nFine, thanks", // two spaced columns, no numbers
+      "Smith, John\nDoe, Jane",
+      "I went out, bought milk, and bread\nThen I went home, and slept", // ragged
+      "foo(a, b);\nbar(c, d);", // code
+      "if (a, b) {\n  go(c, d)\n}",
+      "\tfoo\n\tbar", // indentation, not a column
+      "apples,\npears,", // trailing punctuation, not a column
+      "One sentence.\nAnother, with a comma.\nA third, too.",
+      "first line\nsecond line",
+      "",
+    ];
+    for (const text of notTables) expect(sniffDelimited(text), JSON.stringify(text)).toBeNull();
+  });
+});
+
+describe("table edits", () => {
+  const base = createTable(["Name", "Owner"], [["Login", "Ada"], ["Billing"]]);
+  const ok = (e: TableEdit): TableData => {
+    if (!e.ok) throw new Error(e.error);
+    expect(tableDataSchema.safeParse(e.table).success).toBe(true);
+    return e.table;
+  };
+
+  it("sets a header or a cell without touching the original", () => {
+    expect(ok(setTableCell(base, -1, 1, "Lead")).columns[1]?.header).toBe("Lead");
+    // A ragged (short) row is padded to the grid before the edit.
+    expect(ok(setTableCell(base, 1, 1, "Grace")).rows[1]).toEqual({ cells: ["Billing", "Grace"] });
+    expect(base.rows[1]).toEqual({ cells: ["Billing"] });
+  });
+
+  it("clips a cell to its cap and refuses what breaks the table-wide cap", () => {
+    expect(ok(setTableCell(base, 0, 0, "x".repeat(5000))).rows[0]?.cells[0]).toHaveLength(
+      TABLE_LIMITS.cellChars,
+    );
+    expect(ok(setTableCell(base, -1, 0, "h".repeat(500))).columns[0]?.header).toHaveLength(
+      TABLE_LIMITS.headerChars,
+    );
+    const full = createTable(
+      Array.from({ length: 26 }, (_, i) => `C${i}`),
+      Array.from({ length: 80 }, () => Array.from({ length: 26 }, () => "x".repeat(96))),
+    );
+    expect(tableChars(full)).toBeLessThanOrEqual(TABLE_LIMITS.totalChars);
+    const refused = setTableCell(full, 0, 0, "y".repeat(2000));
+    expect(refused.ok).toBe(false);
+    expect(!refused.ok && refused.error).toMatch(/at most 200,000 characters/);
+  });
+
+  it("refuses a cell that no longer exists", () => {
+    expect(setTableCell(base, 5, 0, "x").ok).toBe(false);
+    expect(setTableCell(base, 0, 9, "x").ok).toBe(false);
+  });
+
+  it("inserts and deletes rows", () => {
+    const added = ok(insertTableRow(base, 1));
+    expect(added.rows).toHaveLength(3);
+    expect(added.rows[1]).toEqual({ cells: ["", ""] });
+    expect(ok(insertTableRow(base)).rows[2]).toEqual({ cells: ["", ""] });
+    expect(ok(deleteTableRow(base, 0)).rows).toEqual([{ cells: ["Billing"] }]);
+    // Every body row may go; the header stays.
+    expect(ok(deleteTableRow(ok(deleteTableRow(base, 0)), 0)).rows).toEqual([]);
+    expect(deleteTableRow(base, 7).ok).toBe(false);
+    const fullRows = createTable(["A"], Array.from({ length: TABLE_LIMITS.rows }, () => [""]));
+    expect(insertTableRow(fullRows).ok).toBe(false);
+  });
+
+  it("inserts and deletes columns, keeping every row aligned", () => {
+    const added = ok(insertTableColumn(base, 1));
+    expect(added.columns.map((c) => c.header)).toEqual(["Name", "Column 3", "Owner"]);
+    expect(added.rows).toEqual([{ cells: ["Login", "", "Ada"] }, { cells: ["Billing", "", ""] }]);
+    expect(ok(insertTableColumn(base)).columns[2]?.header).toBe("Column 3");
+    // The fresh name skips one already taken.
+    expect(ok(insertTableColumn(added)).columns[3]?.header).toBe("Column 4");
+    const removed = ok(deleteTableColumn(base, 0));
+    expect(removed.columns.map((c) => c.header)).toEqual(["Owner"]);
+    expect(removed.rows).toEqual([{ cells: ["Ada"] }, { cells: [] }]);
+    // The schema needs a column, so the last one can't go.
+    expect(deleteTableColumn(removed, 0).ok).toBe(false);
+    const wide = createTable(Array.from({ length: TABLE_LIMITS.columns }, (_, i) => `C${i}`));
+    expect(insertTableColumn(wide).ok).toBe(false);
+  });
+
+  it("lands as an UPDATE_SHAPE that undoes", () => {
+    const ws = applyOperations(createWorkspace(), [
+      { op: "CREATE_SHAPE", id: "t", kind: "table", position: { x: 0, y: 0 }, size: { width: 300, height: 120 }, table: base },
+    ]);
+    const edit: Operation[] = [{ op: "UPDATE_SHAPE", id: "t", table: ok(insertTableColumn(base)) }];
+    expect(validateOperations(ws, edit)).toEqual([]);
+    const next = applyOperations(ws, edit);
+    expect(next.shapes.t?.table?.columns).toHaveLength(3);
+    expect(applyOperations(next, inverseOperations(edit, ws)).shapes.t?.table).toEqual(base);
   });
 });
 

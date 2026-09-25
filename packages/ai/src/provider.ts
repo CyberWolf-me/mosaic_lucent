@@ -70,6 +70,13 @@ export interface WorkspaceSummary {
     groupId?: string;
     locked?: boolean;
     hidden?: boolean;
+    /**
+     * A table shape's content (V4), so "add a row to the pricing table" can see
+     * the columns it has to fill. Capped by `capTableSummary`.
+     */
+    table?: TableSummary;
+    /** A chart shape's shape (V4): what it plots, not the numbers. */
+    chart?: ChartSummary;
   }>;
   /** Manual connectors between shapes. */
   shapeLinks?: Array<{ id: string; source: string; target: string; label?: string }>;
@@ -110,6 +117,34 @@ export interface WorkspaceSummary {
    * reasoning about the partial view.
    */
   truncated?: { nodes?: number; edges?: number };
+}
+
+/**
+ * What the model sees of a table: its header row, then as many leading rows as
+ * fit the character budget, never a partial row (a row cut mid-way reads as a
+ * row with empty cells). The totals are the real size, so the prompt can say
+ * when rows are hidden — an UPDATE_SHAPE `table` replaces the whole grid, and
+ * a model rewriting a table it saw only the top of would delete the rest.
+ */
+export interface TableSummary {
+  headers: string[];
+  rows: string[][];
+  totalRows: number;
+  totalColumns: number;
+}
+
+/**
+ * What the model sees of a chart: enough to name it and to say what it plots
+ * ("the revenue chart", "add a 2027 series"). The values stay out — they are
+ * the bulk of a chart and a model has no use for them it could not get from
+ * the table the chart was built from.
+ */
+export interface ChartSummary {
+  type: string;
+  title?: string;
+  labels: string[];
+  series: string[];
+  totalLabels: number;
 }
 
 /** One prior turn of the conversation, so follow-ups resolve (docs/12 memory). */
@@ -275,6 +310,20 @@ export const SUMMARY_LIMITS = {
   historyChars: 600,
   comments: 40,
   commentChars: 300,
+  /**
+   * Table and chart content (V4). A table is the one shape whose text can be
+   * large by design (TABLE_LIMITS allows 200k characters), so it gets its own
+   * budget rather than `shapeTextChars`: the header row plus leading rows up to
+   * `tableChars`, each cell cut to `dataCellChars`. Enough to see the columns
+   * and the kind of values, which is what "add a row" and "chart this" need;
+   * 120 tables at the cap is still less than one attached document.
+   */
+  tableRows: 10,
+  tableColumns: 12,
+  tableChars: 800,
+  dataCellChars: 60,
+  chartLabels: 24,
+  chartSeries: 12,
 } as const;
 
 /**
@@ -325,6 +374,12 @@ export const REQUEST_LIMITS = {
   commentChars: SUMMARY_LIMITS.commentChars,
   historyTurns: SUMMARY_LIMITS.historyTurns,
   historyChars: SUMMARY_LIMITS.historyChars,
+  tableRows: SUMMARY_LIMITS.tableRows,
+  tableColumns: SUMMARY_LIMITS.tableColumns,
+  tableChars: SUMMARY_LIMITS.tableChars,
+  dataCellChars: SUMMARY_LIMITS.dataCellChars,
+  chartLabels: SUMMARY_LIMITS.chartLabels,
+  chartSeries: SUMMARY_LIMITS.chartSeries,
   ...DERIVED_LIMITS,
   /**
    * Free-text ceilings for the fields the summariser never truncates. Ids and
@@ -349,6 +404,67 @@ function truncate(text: string, max: number): string {
   return text.length > max ? `${text.slice(0, max - 1)}…` : text;
 }
 
+function totalLength(cells: readonly string[]): number {
+  return cells.reduce((n, cell) => n + cell.length, 0);
+}
+
+/**
+ * Cap a table to what the summary carries: at most `tableColumns` columns and
+ * `tableRows` rows, each cell cut to `dataCellChars`, and rows added only while
+ * the whole stays within `tableChars`. Rows are padded or clipped to the header
+ * width, as the renderer draws them.
+ *
+ * Exported because it runs twice: `summarizeWorkspace` applies it to the board,
+ * and `buildUserPrompt` applies it again to whatever summary it was handed. The
+ * same function with the same numbers makes the second pass a no-op for a
+ * summary this module produced — the model is never told about a smaller table
+ * than the app sent — while a hand-built request still cannot inflate the prompt.
+ * `totals` carries the real size when the input is already a slice.
+ */
+export function capTableSummary(
+  headers: readonly string[],
+  rows: readonly (readonly string[])[],
+  totals: { rows?: number; columns?: number } = {},
+): TableSummary {
+  const cell = (text: string | undefined) => truncate(text ?? "", SUMMARY_LIMITS.dataCellChars);
+  const width = Math.min(headers.length, SUMMARY_LIMITS.tableColumns);
+  const shownHeaders = headers.slice(0, width).map(cell);
+  let budget = SUMMARY_LIMITS.tableChars - totalLength(shownHeaders);
+  const shownRows: string[][] = [];
+  for (const row of rows.slice(0, SUMMARY_LIMITS.tableRows)) {
+    const cells = Array.from({ length: width }, (_, i) => cell(row[i]));
+    const cost = totalLength(cells);
+    if (cost > budget) break;
+    budget -= cost;
+    shownRows.push(cells);
+  }
+  return {
+    headers: shownHeaders,
+    rows: shownRows,
+    totalRows: Math.max(totals.rows ?? 0, rows.length),
+    totalColumns: Math.max(totals.columns ?? 0, headers.length),
+  };
+}
+
+/** Cap a chart's description the same way, and for the same two callers. */
+export function capChartSummary(chart: {
+  type: string;
+  title?: string;
+  labels: readonly string[];
+  series: readonly string[];
+  totalLabels?: number;
+}): ChartSummary {
+  const cell = (text: string) => truncate(text, SUMMARY_LIMITS.dataCellChars);
+  const title = chart.title ? cell(chart.title) : "";
+  return {
+    type: cell(chart.type),
+    ...(title ? { title } : {}),
+    labels: chart.labels.slice(0, SUMMARY_LIMITS.chartLabels).map(cell),
+    series: chart.series.slice(0, SUMMARY_LIMITS.chartSeries).map(cell),
+    totalLabels: Math.max(chart.totalLabels ?? 0, chart.labels.length),
+  };
+}
+
 /** Build the compact summary the AI needs from a full workspace. */
 export function summarizeWorkspace(workspace: Workspace, selection?: string[]): WorkspaceSummary {
   const groups = Object.values(workspace.groups)
@@ -369,6 +485,26 @@ export function summarizeWorkspace(workspace: Workspace, selection?: string[]): 
       ...(s.groupId ? { groupId: s.groupId } : {}),
       ...(s.locked ? { locked: true } : {}),
       ...(s.hidden ? { hidden: true } : {}),
+      // V4 data objects: their content is what the model edits or charts, and
+      // without it a table on the board was an opaque "(table)" line.
+      ...(s.table
+        ? {
+            table: capTableSummary(
+              s.table.columns.map((c) => c.header),
+              s.table.rows.map((r) => r.cells),
+            ),
+          }
+        : {}),
+      ...(s.chart
+        ? {
+            chart: capChartSummary({
+              type: s.chart.type,
+              ...(s.chart.title ? { title: s.chart.title } : {}),
+              labels: s.chart.labels,
+              series: s.chart.series.map((series) => series.name),
+            }),
+          }
+        : {}),
     }));
 
   const shapeLinks = Object.values(workspace.shapeLinks)

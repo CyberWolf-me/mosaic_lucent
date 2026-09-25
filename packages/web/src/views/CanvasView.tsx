@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { resolveLocale, t } from "@lucent/i18n";
-import { applyLayout, applyRoutes, computeLayoutWithRoutes, convertibleKinds, starterFor } from "@lucent/core";
+import { applyLayout, applyRoutes, computeLayoutWithRoutes } from "@lucent/core";
 import { Ico } from "../ui/icons.js";
 import { AIPill } from "../ui/AIPill.js";
 import { TopBar, LeftRail, ZoomBadge, StatusBadge, type Crumb } from "../ui/Chrome.js";
@@ -48,7 +48,7 @@ import { traceImage } from "../vector/trace.js";
 import { assetUrl } from "../assets.js";
 import { loadIcon } from "../icons/registry.js";
 import { MarqueeLayer } from "./MarqueeLayer.js";
-import { cullRect, visibleShapes } from "../board/culling.js";
+import { cullRect, diagramScene, visibleShapes } from "../board/culling.js";
 import { ShapeDrawLayer } from "./ShapeDrawLayer.js";
 import { ShapeInspector, Z_MOVE_LABEL, type StructureAction } from "./ShapeInspector.js";
 import { planThemeLayout, sortableStickies } from "../board/themeLayout.js";
@@ -58,12 +58,18 @@ import { Minimap } from "./Minimap.js";
 import { TemplatePicker } from "./TemplatePicker.js";
 import { TimerWidget } from "./TimerWidget.js";
 import { ContextMenu, type MenuItem } from "./ContextMenu.js";
+import {
+  canvasTargetAt,
+  clientToContent,
+  familyMenuItems,
+  type CanvasHitHint,
+} from "./familyMenu.js";
 import { EngagementBadges, EngagementBar, VotePanel } from "./Engagement.js";
 import { CommentInbox, CommentPanel, CommentPins, NotificationBell } from "./Comments.js";
 import { PresenceBar, PresenceCursors } from "./Presence.js";
 import { toggleVoteOps } from "../board/engagement.js";
 import { openThreadCount } from "../board/comments.js";
-import { useWorkspace } from "../workspace.js";
+import { boardIsBlank, useWorkspace } from "../workspace.js";
 import { useSettings } from "../settings.js";
 import { useToast } from "../ui/Toast.js";
 import { generateImage } from "../api.js";
@@ -78,15 +84,18 @@ import {
 } from "../stt/voiceAgentSession.js";
 import { cloneShapeOp, nextZ, normalizeZ, shapeId, zOrderOps, type ZMove } from "../shapes.js";
 import { resolveEmbed } from "../embed.js";
-import { boardToMarkdown, boardToCsv, csvToStickyOps } from "../board/serialize.js";
+import { boardToMarkdown, boardToCsv } from "../board/serialize.js";
 import { boardToMermaid, detectMermaid } from "@lucent/core";
 import { planMermaidImport } from "../board/mermaidImport.js";
 import {
   classifyImport,
   collectAttachments,
+  delimitedToTableOp,
   documentToOps,
+  pastedTableOp,
   pdfIsCompressed,
   pdfToOps,
+  TABLE_TRIM_NOTE,
 } from "../board/importers.js";
 import { classifyCodeFile, codeToOps } from "../board/codeImport.js";
 import {
@@ -272,7 +281,7 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
     setPillMode,
     onCitation,
     setRegionKind,
-    selectDiagram,
+    convertBoard,
     layoutStatus,
     retryLayout,
     applyManual,
@@ -283,7 +292,6 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
     readOnly,
     setView,
     lens,
-    setLens,
     syncStatus,
     boardId,
     startSharing,
@@ -335,6 +343,18 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
       return next;
     });
   }, []);
+  // V5 semantic zoom (docs/26 §6.5): at the summary-cards rung every region is
+  // a card by default; these are the ones the reader opened back up. Separate
+  // from collapsedRegions so the auto and manual modes never share meaning.
+  const [expandedRegions, setExpandedRegions] = useState<Set<string>>(new Set());
+  const toggleRegionExpand = useCallback((groupId: string) => {
+    setExpandedRegions((prev) => {
+      const next = new Set(prev);
+      if (next.has(groupId)) next.delete(groupId);
+      else next.add(groupId);
+      return next;
+    });
+  }, []);
   const [editShapeId, setEditShapeId] = useState<string | null>(null);
   /** Visible content region, pushed up by the viewport for the minimap. */
   const [viewportBox, setViewportBox] = useState<{
@@ -350,25 +370,41 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
   /** Object whose comment thread is open, if any. */
   const [commentTarget, setCommentTarget] = useState<string | null>(null);
   const [inboxOpen, setInboxOpen] = useState(false);
-  const [menu, setMenu] = useState<{ x: number; y: number; regionId?: string } | null>(null);
+  /**
+   * The open context menu. `regionId` is the semantic group it is about (a
+   * region, or a plain group that could become one); `canvas` marks a menu
+   * opened on the board itself — background, a node, a region — which carries
+   * only the diagram-family rows, not the shape-selection actions.
+   */
+  const [menu, setMenu] = useState<{
+    x: number;
+    y: number;
+    regionId?: string | undefined;
+    canvas?: boolean;
+  } | null>(null);
   /** UX-1: single Board-tools menu replaces the 4-button right pileup. */
   const [toolsOpen, setToolsOpen] = useState(false);
   /** UX-3: attention drawer (proposal/skipped/blocked/at-risk/inbound/sync). */
   const [attentionOpen, setAttentionOpen] = useState(false);
 
   /**
-   * The diagram region the current selection sits inside, if any: a region is a
-   * kind-bearing group, so the selected node's groupId tells us which region a
-   * right-click is about. Falls back through every selected node so a marquee
-   * inside one region still finds it.
+   * The semantic group the current selection sits inside, if any, so a
+   * right-click knows which region it is about. A kind-bearing group (a
+   * region) wins; failing that, a plain group — which the menu offers to make
+   * a region. Falls back through every selected node so a marquee inside one
+   * region still finds it.
    */
   const regionForSelection = useCallback((): string | undefined => {
     const ids = selected ? [selected, ...selectedNodes] : [...selectedNodes];
+    let plain: string | undefined;
     for (const id of ids) {
       const gid = workspace.nodes[id]?.groupId;
-      if (gid && workspace.groups[gid]?.kind) return gid;
+      const group = gid ? workspace.groups[gid] : undefined;
+      if (!gid || !group) continue;
+      if (group.kind) return gid;
+      plain ??= gid;
     }
-    return undefined;
+    return plain;
   }, [selected, selectedNodes, workspace.nodes, workspace.groups]);
   const controls = useRef<ViewportControls | null>(null);
   const voiceRef = useRef<VoiceSession | null>(null);
@@ -1370,6 +1406,21 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
   );
 
   const buildMenuItems = useCallback((): MenuItem[] => {
+    // The diagram-family rows (familyMenu.ts, generated from the registry):
+    // the region's kind picker or "Make … a region" for the group the menu is
+    // about, then "Convert board to…" — the manual counterparts of the AI's
+    // SET_GROUP_KIND and TRANSFORM_DIAGRAM. A menu opened on the board names
+    // its group at open time; a shape's menu falls back to the selection's.
+    const family: MenuItem[] = canEdit
+      ? familyMenuItems({
+          workspace,
+          groupId: menu?.canvas ? menu.regionId : (menu?.regionId ?? regionForSelection()),
+          blank: boardIsBlank(workspace),
+          onConvert: convertBoard,
+          onRegionKind: setRegionKind,
+        })
+      : [];
+    if (menu?.canvas) return family;
     const ids = [...selectedShapes].filter((id) => workspace.shapes[id]);
     const canGroup = ids.length >= 2;
     const canUngroup = ids.some((id) => workspace.shapes[id]?.groupId);
@@ -1425,81 +1476,17 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
       { label: "", onClick: () => {}, sep: true },
       { label: "Delete", onClick: deleteSelection, danger: true, disabled: ids.length === 0 },
     ];
-    // Diagram regions: when the current selection (or the canvas click) points
-    // inside a kind-bearing group, offer that region's kind picker — the manual
-    // counterpart of the AI's SET_GROUP_KIND.
-    const regionId = menu?.regionId ?? regionForSelection();
-    const region = regionId ? workspace.groups[regionId] : undefined;
-    if (region) {
-      const kindItems: MenuItem[] = [
-        { label: "", onClick: () => {}, sep: true },
-        {
-          label: `Region "${region.label}" — diagram kind`,
-          onClick: () => {},
-          disabled: true,
-        },
-      ];
-      for (const k of REGION_KIND_ORDER) {
-        const active = region.kind === k;
-        kindItems.push({
-          label: `${active ? "● " : ""}${DIAGRAM_LABELS[k]}`,
-          onClick: () => setRegionKind(region.id, k),
-          disabled: active,
-        });
-      }
-      if (region.kind) {
-        kindItems.push({
-          label: "Back to board layout",
-          onClick: () => setRegionKind(region.id, null),
-        });
-      }
-      items.unshift(...kindItems);
-    } else if (canEdit) {
-      // No region in play: offer whole-board conversion — the manual
-      // counterpart of the AI's TRANSFORM_DIAGRAM, and the "Turn this into a
-      // roadmap / state machine / C4" path (docs/26 §6.1). Generated from the
-      // registry so a new convertible family appears with no edit here.
-      const convertItems: MenuItem[] = [
-        { label: "", onClick: () => {}, sep: true },
-        { label: "Convert board to…", onClick: () => {}, disabled: true },
-      ];
-      const boardEmpty =
-        Object.keys(workspace.nodes).length === 0 && Object.keys(workspace.shapes).length === 0;
-      for (const k of REGION_KIND_ORDER) {
-        const active = workspace.diagramKind === k;
-        convertItems.push({
-          label: `${active ? "● " : ""}${DIAGRAM_LABELS[k]}`,
-          // On a blank board, seed the family's starter example (docs/26 §6.1
-          // registry) so "turn this into a state machine" produces something to
-          // edit; on a board with content, just switch the representation.
-          // Sequence and ER are presented through their lens, so converting to
-          // one also switches the lens; converting to any other kind returns to
-          // the visual lens if we were on a sequence/ER lens.
-          onClick: () => {
-            if (boardEmpty) {
-              applyManual(
-                starterFor(k, Date.now().toString(36) + Math.random().toString(36).slice(2, 5)),
-                `Start a ${DIAGRAM_LABELS[k]}`,
-              );
-            } else {
-              selectDiagram(k);
-            }
-            if (k === "sequence" || k === "er") setLens(k);
-            else if (lens === "sequence" || lens === "er") setLens("visual");
-          },
-          disabled: active,
-        });
-      }
-      items.unshift(...convertItems);
-    }
-    return items;
+    // The lens follows the kind on its own (workspace.tsx lensForKindChange),
+    // so converting to a sequence or ER board needs no lens switch here.
+    return family.length > 0
+      ? [...family, { label: "", onClick: () => {}, sep: true }, ...items]
+      : items;
   }, [
     canEdit,
     traceShape,
     sketchSelectionToVector,
     selectedShapes,
-    workspace.shapes,
-    workspace.groups,
+    workspace,
     menu,
     regionForSelection,
     pasteShapes,
@@ -1512,13 +1499,57 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
     hiddenCount,
     deleteSelection,
     setRegionKind,
-    selectDiagram,
-    applyManual,
-    setLens,
-    lens,
-    workspace.diagramKind,
-    workspace.nodes,
+    convertBoard,
   ]);
+
+  /**
+   * Right-click on the board itself — the empty canvas, a node, a region's
+   * box or label — opens the family menu (shapes open their own, and stop the
+   * event before it gets here). The DOM says WHAT was clicked (a `.node`, a
+   * `.group-region`, neither) but carries no ids, so the laid-out scene says
+   * WHICH (familyMenu.ts canvasTargetAt). A keyboard-opened menu (Shift+F10 /
+   * the Menu key on a focused card) reports no pointer position; the focused
+   * element's centre stands in for it. Text fields keep the browser's menu.
+   */
+  const onCanvasContextMenu = useCallback(
+    (e: React.MouseEvent) => {
+      if (e.defaultPrevented || !canEdit) return;
+      const el = e.target instanceof Element ? e.target : null;
+      if (!el || el.closest("input, textarea, [contenteditable='true']")) return;
+      const viewportEl = el.closest(".canvas-viewport");
+      if (!viewportEl) return;
+      const hit = el.closest(".node, .group-region");
+      const hint: CanvasHitHint = !hit
+        ? "background"
+        : hit.classList.contains("node")
+          ? "node"
+          : "region";
+      // A pointer right-click lands inside its own target; one that doesn't
+      // came from the keyboard, so the focused element anchors it. (Tested on
+      // the target itself, not the card or region box: a region's label pill
+      // pokes above its box, and a click there is still a pointer click.)
+      let client = { x: e.clientX, y: e.clientY };
+      const r = el.getBoundingClientRect();
+      if (client.x < r.left || client.x > r.right || client.y < r.top || client.y > r.bottom) {
+        client = { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+      }
+      const camera = controls.current?.getCamera();
+      let groupId: string | undefined;
+      if (camera && hint !== "background") {
+        const point = clientToContent(client, viewportEl.getBoundingClientRect(), camera);
+        const target = canvasTargetAt(diagramScene(workspace), point, hint);
+        groupId =
+          target.kind === "node"
+            ? workspace.nodes[target.id]?.groupId
+            : target.kind === "region"
+              ? target.id
+              : undefined;
+      }
+      e.preventDefault();
+      setMenu({ x: client.x, y: client.y, regionId: groupId, canvas: true });
+    },
+    [canEdit, workspace],
+  );
 
   const onShapePrimary = useCallback(
     (id: string, additive: boolean) => {
@@ -1806,6 +1837,19 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
         }
       }
 
+      // A spreadsheet copy or CSV snippet is a table (docs/26 §6.1), not a
+      // note full of tabs and commas. Only text that IS a grid qualifies — a
+      // pasted sentence with a comma still becomes a note (sniffDelimited).
+      const pastedTable = pastedTableOp(plain, at, topZ());
+      if (pastedTable) {
+        e.preventDefault();
+        if (applyManual([pastedTable.op], "Paste table")) {
+          setSelectedShapes(new Set([pastedTable.op.id]));
+          if (pastedTable.truncated) notify(`Pasted as a table — ${TABLE_TRIM_NOTE}.`);
+        }
+        return;
+      }
+
       const op = textPasteOp(plain, at, topZ());
       if (op) {
         e.preventDefault();
@@ -1934,12 +1978,27 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
               }
               return;
             }
-            const ops =
-              kind === "pdf"
-                ? pdfToOps(content, existing)
-                : kind === "csv"
-                  ? csvToStickyOps(content)
-                  : documentToOps(content, existing);
+            if (kind === "csv") {
+              // One table shape where it was dropped (docs/26 §6.1) — it used to
+              // scatter one sticky per cell. A .tsv is split on tabs; a .csv
+              // on whichever of tab/comma its header line uses.
+              const tsv = file.name.toLowerCase().endsWith(".tsv");
+              const r = delimitedToTableOp(content, { x: dropX, y: dropY }, nextZ(existing), tsv ? "\t" : undefined);
+              if (!r) {
+                notify(`Nothing importable found in ${file.name}.`);
+                return;
+              }
+              if (applyManual([r.op], `Import ${file.name}`)) {
+                setSelectedShapes(new Set([r.op.id]));
+                notify(
+                  r.truncated
+                    ? `Imported ${file.name} as a table — ${TABLE_TRIM_NOTE}.`
+                    : `Imported ${file.name} as a table.`,
+                );
+              }
+              return;
+            }
+            const ops = kind === "pdf" ? pdfToOps(content, existing) : documentToOps(content, existing);
             if (ops.length === 0) {
               notify(
                 kind === "pdf" && pdfIsCompressed(content)
@@ -2585,7 +2644,7 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
   }
 
   return (
-    <div style={{ position: "absolute", inset: 0 }}>
+    <div style={{ position: "absolute", inset: 0 }} onContextMenu={onCanvasContextMenu}>
       {showHero ? (
         <>
           <div style={{ position: "absolute", inset: 0 }}>
@@ -2672,6 +2731,8 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
               onRenameConsumed={() => setRenameNodeId(null)}
               collapsedRegions={collapsedRegions}
               onToggleCollapse={toggleRegionCollapse}
+              expandedRegions={expandedRegions}
+              onToggleExpand={toggleRegionExpand}
               {...(tool === "select" && canEdit
                 ? { onMoveNode: moveNode, onRenameNode: renameNode }
                 : {})}
@@ -2795,6 +2856,10 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
 
           {menu && (
             <ContextMenu
+              // Keyed by where it opened: a right-click while a menu is open
+              // mounts a fresh one, rather than reusing the old one mid-exit
+              // (whose close timer would then dismiss the new menu).
+              key={`${menu.x}:${menu.y}:${menu.canvas ? "board" : "shape"}`}
               x={menu.x}
               y={menu.y}
               onClose={() => setMenu(null)}
@@ -3382,13 +3447,6 @@ function EngagementAnchor({
     </div>
   );
 }
-
-/** The kinds a region may be set to, in the same order as the board picker. */
-// The region-kind picker's targets, generated from the representation registry
-// (docs/26 §6.1) so a new convertible family appears here with no edit — this
-// used to be a hand-kept subset of seven that lagged behind the families the
-// AI could already create.
-const REGION_KIND_ORDER: import("@lucent/core").DiagramKind[] = convertibleKinds();
 
 /** Mode switcher: edit / present / focus. The extension point where remote
  * collaboration modes (Follow, Spotlight) register later (docs/12). */

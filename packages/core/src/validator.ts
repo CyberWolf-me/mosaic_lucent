@@ -151,7 +151,11 @@ export function validateOperations(workspace: Workspace, ops: Operation[]): Vali
       case "CHANGE_TEXT":
       case "CHANGE_NODE_TYPE":
       case "SET_NODE_ICON":
+      case "SET_NODE_DETAILS":
       case "MOVE_NODE":
+        // SET_NODE_DETAILS (V4): the details' shape and size are the schema's
+        // (nodeDetailsSchema); the board's only rule is that the node exists —
+        // which, like every check here, counts one created earlier in the batch.
         if (!nodes.has(op.id)) err(`node "${op.id}" does not exist`);
         break;
       case "SET_ISSUE":

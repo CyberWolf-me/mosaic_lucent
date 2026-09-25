@@ -1,4 +1,4 @@
-import type { Workspace } from "./model.js";
+import type { NodeDetails, Workspace } from "./model.js";
 import { categorizeStatus, edgeId, parseMentions } from "./model.js";
 import type { Operation } from "./operations.js";
 import { UNKNOWN_AUTHOR } from "./authorship.js";
@@ -62,11 +62,29 @@ function dropAnnotations(next: Workspace, targetId: string): void {
   }
 }
 
+/**
+ * A node's details as stored: a fresh copy (the op object is shared with the
+ * op log and undo history, so the board must not alias it), with an empty
+ * section list stored as absence. One spelling of "no details" keeps the
+ * inverse exact — it restores the prior value or clears, and never has to
+ * tell `{ sections: [] }` from a node that had nothing.
+ */
+function storedDetails(details: NodeDetails | null | undefined): NodeDetails | undefined {
+  if (!details || details.sections.length === 0) return undefined;
+  return {
+    sections: details.sections.map((s) => ({
+      ...(s.title !== undefined ? { title: s.title } : {}),
+      items: [...s.items],
+    })),
+  };
+}
+
 export function applyOperation(workspace: Workspace, op: Operation): Workspace {
   const next = clone(workspace);
 
   switch (op.op) {
     case "CREATE_NODE": {
+      const details = storedDetails(op.details);
       next.nodes[op.id] = {
         id: op.id,
         nodeType: op.nodeType,
@@ -76,6 +94,7 @@ export function applyOperation(workspace: Workspace, op: Operation): Workspace {
         // op. A node's origin is not part of its mutable state.
         ...(op.provenance ? { provenance: op.provenance } : {}),
         ...(op.icon ? { icon: op.icon } : {}),
+        ...(details ? { details } : {}),
       };
       if (op.groupId) {
         const group = next.groups[op.groupId];
@@ -141,6 +160,16 @@ export function applyOperation(workspace: Workspace, op: Operation): Workspace {
       if (node) {
         const { icon: _prev, ...rest } = node;
         next.nodes[op.id] = op.icon === null ? rest : { ...rest, icon: op.icon };
+      }
+      break;
+    }
+
+    case "SET_NODE_DETAILS": {
+      const node = next.nodes[op.id];
+      if (node) {
+        const { details: _prev, ...rest } = node;
+        const details = storedDetails(op.details);
+        next.nodes[op.id] = details ? { ...rest, details } : rest;
       }
       break;
     }

@@ -4,8 +4,9 @@
  * blank the canvas.
  *
  * Routing (ADR 0039's hybrid selection):
- *  - flat graph families (flowchart / architecture / journey boards with no
- *    foreign-kind regions) → ELK, behind the Phase 1 boundary;
+ *  - flat graph families (the registry's `elk` families — flowchart,
+ *    architecture, journey, bpmn, … — on boards with no foreign-kind
+ *    regions) → ELK, behind the Phase 1 boundary;
  *  - everything else (mind maps, trees, swimlanes, mixed-region boards) →
  *    the built-in engines, which the Phase 2 comparison shows ELK cannot
  *    beat there;
@@ -25,13 +26,20 @@ import {
   applyLayout,
   applyRoutes,
   CURRENT_LAYOUT_ENGINE,
+  elkKinds,
   type DiagramLayoutEngine,
   type LayoutOptions,
   type Workspace,
 } from "@lucent/core";
 import { ELK_LAYOUT_ENGINE, WORKER_ELK_ENGINE } from "./elk/index.js";
 
-const ELK_KINDS: ReadonlySet<string> = new Set(["flowchart", "architecture", "journey", "bpmn"]);
+/**
+ * The families ELK may lay out — the registry's `elk` flag (V4), the one list
+ * this service and the ELK engine's region seam both read. They used to keep
+ * two hand lists that had to be edited together (a bpmn region fell to the
+ * built-in engine inside an ELK board until the second list caught up).
+ */
+export const ELK_KINDS: ReadonlySet<string> = new Set<string>(elkKinds());
 
 export interface LayoutOutcome {
   workspace: Workspace;

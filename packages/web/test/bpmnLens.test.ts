@@ -22,9 +22,9 @@ import { elkEligible } from "../src/diagram/layoutService.js";
 const onboarding: Array<Parameters<typeof applyOperations>[1][number]> = [
   { op: "CREATE_DIAGRAM", kind: "bpmn" },
   { op: "CREATE_NODE", id: "s0", nodeType: "entry", label: "Sign up" },
-  { op: "CREATE_NODE", id: "s1", nodeType: "step", label: "Verify email" },
+  { op: "CREATE_NODE", id: "s1", nodeType: "task", label: "Verify email" },
   { op: "CREATE_NODE", id: "s2", nodeType: "choice", label: "Verified?" },
-  { op: "CREATE_NODE", id: "s3", nodeType: "step", label: "Resend email" },
+  { op: "CREATE_NODE", id: "s3", nodeType: "task", label: "Resend email" },
   { op: "CREATE_NODE", id: "s4", nodeType: "parallel", label: "Provision" },
   { op: "CREATE_NODE", id: "s5", nodeType: "exit", label: "Active" },
   { op: "CONNECT_NODES", source: "s0", target: "s1", relationship: "then" },
@@ -93,9 +93,13 @@ describe("BPMN V1 core round-trip (incl. the parallel gateway)", () => {
     expect(warnings).toEqual([]);
     expect(xml).toContain("parallelGateway");
     const back = fromBpmnXml(xml);
-    expect(back.ignored).toEqual([]);
+    expect(back.ok).toBe(true);
+    if (!back.ok) return;
+    expect(back.graph.ignored).toEqual([]);
+    expect(back.workspace.diagramKind).toBe("bpmn");
     expect(back.workspace.nodes["s4"]!.nodeType).toBe("parallel");
     expect(back.workspace.nodes["s2"]!.nodeType).toBe("choice");
+    expect(back.workspace.nodes["s1"]!.nodeType).toBe("task");
     expect(back.workspace.nodes["s0"]!.nodeType).toBe("entry");
     expect(back.workspace.nodes["s5"]!.nodeType).toBe("exit");
     expect(Object.keys(back.workspace.edges).length).toBe(6);

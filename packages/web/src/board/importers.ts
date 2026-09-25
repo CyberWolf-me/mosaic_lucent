@@ -1,4 +1,11 @@
-import type { Operation } from "@lucent/core";
+import {
+  readDelimited,
+  sniffDelimited,
+  TABLE_LIMITS,
+  type DelimitedRead,
+  type Operation,
+  type TableData,
+} from "@lucent/core";
 import { svgToVectorOp } from "../vector/ops.js";
 import { nextZ, shapeId } from "../shapes.js";
 
@@ -155,6 +162,91 @@ export function svgToOps(
   const r = svgToVectorOp(svg, at, nextZ(existing));
   return r.ok ? [r.op] : [];
 }
+
+// ---- delimited text → ONE table shape (docs/26 §6.1 V4) ----
+//
+// A CSV used to land as a grid of stickies, one per cell: a 20 × 5 sheet was
+// 100 loose notes with no columns, and nothing a chart could bind to. It is a
+// table now — a single shape the inspector can edit and chart.
+
+/** Approximate glyph advance and cell padding of `.table-shape` (12 px text, 8 px side padding). */
+const TABLE_CHAR_PX = 7;
+const TABLE_CELL_PAD = 17;
+const TABLE_ROW_PX = 25;
+
+/**
+ * A table shape's box, sized to its content so an import reads without a
+ * resize: each column as wide as its longest text (within the renderer's
+ * 240 px cell cap), one line per row — but capped, so a 500-row import doesn't
+ * blanket the board. The shape scrolls inside.
+ */
+export function tableShapeSize(t: TableData): { width: number; height: number } {
+  // The first 50 rows are a fair sample; measuring 500 × 26 cells buys nothing.
+  const sample = t.rows.slice(0, 50);
+  const width = t.columns.reduce((sum, c, i) => {
+    const longest = Math.max(c.header.length, ...sample.map((r) => (r.cells[i] ?? "").length));
+    return sum + Math.min(240 + TABLE_CELL_PAD, Math.max(56, longest * TABLE_CHAR_PX + TABLE_CELL_PAD));
+  }, 0);
+  return {
+    width: Math.min(960, Math.max(200, Math.round(width))),
+    height: Math.min(480, Math.max(64, (t.rows.length + 1) * TABLE_ROW_PX + 2)),
+  };
+}
+
+export interface TableImport {
+  op: Extract<Operation, { op: "CREATE_SHAPE" }>;
+  /** Rows, columns or characters were dropped to fit the table limits. */
+  truncated: boolean;
+}
+
+function tableImportOp(
+  read: DelimitedRead,
+  at: { x: number; y: number },
+  z: number,
+  anchor: "center" | "top-left",
+): TableImport {
+  const size = tableShapeSize(read.table);
+  const position =
+    anchor === "center"
+      ? { x: Math.round(at.x - size.width / 2), y: Math.round(at.y - size.height / 2) }
+      : { x: Math.round(at.x), y: Math.round(at.y) };
+  return {
+    op: { op: "CREATE_SHAPE", id: shapeId(), kind: "table", position, size, table: read.table, z },
+    truncated: read.truncated,
+  };
+}
+
+/**
+ * A dropped .csv / .tsv file as one table shape, its top-left at `at`. The
+ * file said what it is, so there is no sniffing: any content is a table.
+ * Null when the file is empty.
+ */
+export function delimitedToTableOp(
+  text: string,
+  at: { x: number; y: number },
+  z: number,
+  delimiter?: string,
+): TableImport | null {
+  const read = readDelimited(text, delimiter);
+  return read ? tableImportOp(read, at, z, "top-left") : null;
+}
+
+/**
+ * Pasted text as a table shape centred on `at` — only when the text IS a grid
+ * (a spreadsheet copy, a CSV snippet), per core's `sniffDelimited`. Null for
+ * anything else, which then pastes as a note the way it always did.
+ */
+export function pastedTableOp(
+  text: string,
+  at: { x: number; y: number },
+  z: number,
+): TableImport | null {
+  const read = sniffDelimited(text);
+  return read ? tableImportOp(read, at, z, "center") : null;
+}
+
+/** What a truncated import says: the limits it was cut to. */
+export const TABLE_TRIM_NOTE = `tables hold up to ${TABLE_LIMITS.rows} rows, ${TABLE_LIMITS.columns} columns and ${TABLE_LIMITS.totalChars.toLocaleString("en-US")} characters, so the rest was left out`;
 
 export type ImportKind = "json" | "csv" | "svg" | "pdf" | "document" | "image" | "unknown";
 /** Classify a file by extension, falling back to its MIME type. */

@@ -1,4 +1,11 @@
-import { safeParseOperations, type Operation } from "@lucent/core";
+import {
+  getRepresentation,
+  listRepresentations,
+  safeParseOperations,
+  starterFor,
+  type DiagramKind,
+  type Operation,
+} from "@lucent/core";
 import type {
   GenerateRequest,
   GenerateResult,
@@ -111,10 +118,15 @@ function longestThenChain(summary: WorkspaceSummary): string[] {
   return ranked.slice(0, 2).map((n) => n.id);
 }
 
-/** A short region label from a request like "also add a mind map for pricing ideas". */
-function shortRegionLabel(message: string): string {
+/**
+ * A short region label from a request like "also add a mind map for pricing
+ * ideas" — the subject after "for", or the family's own label when the request
+ * names none ("add a C4 model" → "C4 model").
+ */
+function regionLabel(message: string, kind: DiagramKind): string {
   const m = message.match(/for ([a-z0-9][a-z0-9 -]{2,30})/i);
-  const raw = (m?.[1] ?? message).trim();
+  const raw = m?.[1]?.trim();
+  if (!raw) return getRepresentation(kind).label;
   return (raw.length > 30 ? `${raw.slice(0, 29)}…` : raw).replace(/^./, (c) => c.toUpperCase());
 }
 
@@ -124,6 +136,276 @@ function coreLabel(message: string): string {
   const raw = (m?.[1] ?? "Core idea").trim();
   const capped = raw.replace(/^./, (c) => c.toUpperCase());
   return capped.length > 26 ? `${capped.slice(0, 25)}…` : capped;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Naming a diagram family (V4)                                               */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The names a request uses for each family beyond its registry label. The
+ * label itself is always a name (see `familyPatterns`), so a family added to
+ * core's registry is recognised here with no edit; these are the everyday
+ * spellings the label does not cover. Regex source, matched case-insensitively
+ * between word boundaries.
+ */
+const FAMILY_ALIASES: Partial<Record<DiagramKind, readonly string[]>> = {
+  flowchart: ["flow[\\s-]chart"],
+  architecture: ["architecture diagram", "system architecture"],
+  journey: ["journey map", "customer journey", "journey"],
+  process: ["swim[\\s-]?lanes?"],
+  orgchart: ["organi[sz]ation(?:al)? chart"],
+  bpmn: ["bpmn"],
+  timeline: ["road[\\s-]?map", "gantt"],
+  matrix: ["2\\s?[x×]\\s?2", "swot", "raci"],
+  statemachine: ["state diagram", "state[\\s-]?chart"],
+  dependency: ["dependency map"],
+  c4: ["c4"],
+  network: ["network (?:diagram|map|topology)", "infrastructure"],
+  er: ["entity[\\s-]relationship", "erd"],
+  class: ["class diagram", "uml"],
+  storymap: ["story[\\s-]?map(?:ping)?"],
+};
+
+/**
+ * Registry labels too generic to mean their family when they stand alone —
+ * "add caching to the architecture" is an edit, not a request for a diagram.
+ * They still count after "change … to a" / "turn … into a", where the word
+ * can only be naming a family.
+ */
+const GENERIC_LABELS: ReadonlySet<DiagramKind> = new Set(["architecture"]);
+
+/**
+ * Words that name a family only in the retarget/convert position — "to a
+ * process", "into a network" — and are ordinary nouns anywhere else.
+ */
+const TARGET_ONLY_ALIASES: Partial<Record<DiagramKind, readonly string[]>> = {
+  process: ["process"],
+  network: ["network"],
+};
+
+/** "Mind map" → `mind[\s-]?map`: the label's words, run together or hyphenated. */
+function labelPattern(label: string): string {
+  return label
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean)
+    .join("[\\s-]?");
+}
+
+/** Every name (regex source) a family answers to, in a free or a target position. */
+function familyNames(kind: DiagramKind, targetPosition: boolean): string[] {
+  return [
+    ...(GENERIC_LABELS.has(kind) && !targetPosition
+      ? []
+      : [labelPattern(getRepresentation(kind).label)]),
+    ...(FAMILY_ALIASES[kind] ?? []),
+    ...(targetPosition ? (TARGET_ONLY_ALIASES[kind] ?? []) : []),
+  ];
+}
+
+function familyPatterns(targetPosition: boolean): Array<{ kind: DiagramKind; re: RegExp }> {
+  return listRepresentations().map(({ kind }) => ({
+    kind,
+    re: new RegExp(`\\b(?:${familyNames(kind, targetPosition).join("|")})\\b`, "i"),
+  }));
+}
+
+/** Built once: the matchers are pure functions of the registry. */
+const FAMILY_PATTERNS = familyPatterns(false);
+const TARGET_PATTERNS = familyPatterns(true);
+
+/**
+ * "also add a mind map for …", "put an org chart of the team next to …": an
+ * adding verb shortly before a REGIONABLE family's name — the legacy region
+ * phrasing, widened from four hand-listed kinds to the registry's regionable
+ * set.
+ */
+const REGION_ADD = new RegExp(
+  `(?:also|add|put|create).{0,24}\\b(?:${listRepresentations()
+    .filter((r) => r.regionable)
+    .flatMap((r) => familyNames(r.kind, false))
+    .join("|")})\\b`,
+  "i",
+);
+
+/**
+ * "change the pricing section to an org chart" / "turn this region into a
+ * state machine". Group 1 is what follows "to a", which must START with a
+ * family's name (`familyNamed` with `target`) — "change the section label to
+ * 'Q3 flow chart'" names no family in that position.
+ */
+const RETARGET =
+  /\b(?:change|turn|convert|switch)\s+(?:the\s+|this\s+)?.{0,32}?\b(?:section|region|diagram|part)\s+(?:in)?to\s+(?:(?:an?|the)\s+)?(.+)$/i;
+
+/** "turn this into a timeline", "convert the board to a C4 model". Group 1 as above. */
+const CONVERT =
+  /\b(?:convert|turn|transform|switch|change)\b(?:\s+.{0,40}?)?\s+(?:in)?to\s+(?:(?:an?|the)\s+)?(.+)$/i;
+
+/**
+ * The family a request names, or null. When several are named, the earliest
+ * mention wins ("a state machine for the checkout flowchart" is a state
+ * machine), the longer name breaking a tie. `target` reads the text after
+ * "to a"/"into a": generic names count there, but only at its very start.
+ * `only` narrows the candidates — the region script asks for a regionable one.
+ */
+function familyNamed(
+  text: string,
+  options: { target?: boolean; only?: (kind: DiagramKind) => boolean } = {},
+): DiagramKind | null {
+  let best: { kind: DiagramKind; index: number; length: number } | null = null;
+  for (const { kind, re } of options.target ? TARGET_PATTERNS : FAMILY_PATTERNS) {
+    if (options.only && !options.only(kind)) continue;
+    const m = re.exec(text);
+    if (!m || (options.target && m.index !== 0)) continue;
+    if (
+      !best ||
+      m.index < best.index ||
+      (m.index === best.index && m[0].length > best.length)
+    ) {
+      best = { kind, index: m.index, length: m[0].length };
+    }
+  }
+  return best?.kind ?? null;
+}
+
+const isRegionable = (kind: DiagramKind) => getRepresentation(kind).regionable;
+
+/** Every id a batch creates (nodes and groups), to test a prefix for collisions. */
+function createdIds(ops: readonly Operation[]): string[] {
+  return ops.flatMap((op) =>
+    op.op === "CREATE_NODE" || op.op === "CREATE_GROUP" ? [op.id] : [],
+  );
+}
+
+/**
+ * A fresh id prefix for one insert of `kind`: the kind itself ("statemachine-
+ * draft"), or "statemachine-2-…" when the board already holds an id the first
+ * choice would mint. The reducer rejects a duplicate id, and the starter
+ * contract is that the caller passes a prefix no earlier insert used.
+ */
+function freshPrefix(summary: WorkspaceSummary, kind: DiagramKind): string {
+  const taken = new Set([
+    ...summary.nodes.map((n) => n.id),
+    ...(summary.groups ?? []).map((g) => g.id),
+    ...(summary.shapes ?? []).map((s) => s.id),
+  ]);
+  for (let n = 1; n < 1_000; n += 1) {
+    const prefix = n === 1 ? kind : `${kind}-${n}`;
+    const ids = [`${prefix}-region`, ...createdIds(starterFor(kind, prefix))];
+    if (!ids.some((id) => taken.has(id))) return prefix;
+  }
+  // Unreachable on any board the summary caps allow; a unique fallback anyway.
+  return `${kind}-${taken.size + 1}`;
+}
+
+/**
+ * A regionable family as a REGION on a board that already has content: one
+ * kind-bearing group, then the family's starter inside it. Two parts of the
+ * starter are left out: its CREATE_DIAGRAM, because a region never re-kinds
+ * the board; and its own groups — swimlanes, a C4 boundary, network zones —
+ * because inside a region every member's group is the region itself, so those
+ * groups would stand empty.
+ *
+ * A mind map keeps the seed this script always built, labelled from the
+ * request's own subject: a hub and its branches IS the family, and the golden
+ * region case pins that shape (a "topic" hub, "branch" edges).
+ */
+function regionOps(request: GenerateRequest, kind: DiagramKind, prefix: string): Operation[] {
+  const region = `${prefix}-region`;
+  const group: Operation = {
+    op: "CREATE_GROUP",
+    id: region,
+    label: regionLabel(request.message, kind),
+    children: [],
+    kind,
+  };
+  if (kind === "mindmap") {
+    const node = (id: string, nodeType: string, label: string): Operation => ({
+      op: "CREATE_NODE",
+      id: `${prefix}-${id}`,
+      nodeType,
+      label,
+      groupId: region,
+    });
+    const branch = (target: string): Operation => ({
+      op: "CONNECT_NODES",
+      source: `${prefix}-core`,
+      target: `${prefix}-${target}`,
+      relationship: "branch",
+    });
+    return [
+      group,
+      node("core", "topic", coreLabel(request.message)),
+      node("one", "idea", "First branch"),
+      node("two", "idea", "Second branch"),
+      branch("one"),
+      branch("two"),
+    ];
+  }
+  const members = starterFor(kind, prefix).flatMap((op): Operation[] => {
+    if (op.op === "CREATE_DIAGRAM" || op.op === "CREATE_GROUP") return [];
+    if (op.op === "CREATE_NODE") return [{ ...op, groupId: region }];
+    return [op];
+  });
+  return [group, ...members];
+}
+
+/**
+ * Build the family a request named, the way the prompt tells a real model to:
+ *
+ *  - an empty board gets the family's registry starter, CREATE_DIAGRAM first;
+ *  - a board already of that kind grows the starter's content (never a second
+ *    CREATE_DIAGRAM over work that exists);
+ *  - a board with other content gets a region when the family can be one;
+ *  - otherwise nothing is built: a family that draws only as a whole board
+ *    (a timeline's axis, a matrix's cells, a sequence lens) cannot sit beside
+ *    another diagram, and the honest answer says so and offers the two ways
+ *    that work.
+ */
+function buildFamily(request: GenerateRequest, kind: DiagramKind): GenerateResult {
+  const summary = request.summary;
+  const prefix = freshPrefix(summary, kind);
+  const named = familyPhrase(kind);
+  if (summary.nodes.length === 0) {
+    return {
+      explanation: `Started ${named}: a small editable example to rename and extend.`,
+      operations: starterFor(kind, prefix),
+    };
+  }
+  if (summary.diagramKind === kind) {
+    return {
+      explanation: `Added the starter for ${named} to this board, alongside what is already here.`,
+      operations: starterFor(kind, prefix).filter((op) => op.op !== "CREATE_DIAGRAM"),
+    };
+  }
+  if (isRegionable(kind)) {
+    return {
+      explanation: `Added ${named} region for "${request.message.slice(0, 40)}" without touching the rest of the board.`,
+      operations: regionOps(request, kind, prefix),
+    };
+  }
+  return {
+    explanation: `${capitalize(named)} draws only as a whole board, so it can't sit as a region beside the diagram already here — it belongs on its own board. Use "New workspace" and ask for it there, or ask me to convert this whole board.`,
+    operations: [],
+  };
+}
+
+/**
+ * "an org chart", "a UML class diagram", "an ER diagram": the label with its
+ * article, lower-cased unless its first word is an acronym (UML, ER, C4, BPMN).
+ */
+function familyPhrase(kind: DiagramKind): string {
+  const label = getRepresentation(kind).label;
+  const noun = /^[A-Z0-9]{2,}\b/.test(label) ? label : label.replace(/^./, (c) => c.toLowerCase());
+  // "an" before a vowel sound: a vowel, or the letter name "ER". "user" and
+  // "UML" begin with a "you" sound and take "a".
+  const an = /^(?:[aeio]|u(?!ser|ml)|er\b)/i.test(noun);
+  return `${an ? "an" : "a"} ${noun}`;
+}
+
+function capitalize(text: string): string {
+  return text.replace(/^./, (c) => c.toUpperCase());
 }
 
 const scripts: Script[] = [
@@ -374,67 +656,67 @@ const scripts: Script[] = [
     },
   },
   {
-    // Diagram regions (docs/03): "also add a mind map for X on this board"
-    // builds a second diagram kind as a region group instead of transforming
-    // the whole board — the behaviour the prompt's region rule teaches.
-    match: (m) =>
-      /(also|add|put|create).{0,24}(mind ?map|org ?chart|flow ?chart|journey)\b/i.test(m),
+    // Region retarget: "change the X section to a Y" flips one region's kind.
+    // Ahead of the region and convert scripts because it is the most specific
+    // of the three: a section/region/part noun before "to a …". Any family can
+    // be NAMED here, so a whole-board-only one gets an honest answer instead of
+    // a SET_GROUP_KIND the layout cannot draw.
+    match: (m) => {
+      const tail = RETARGET.exec(m)?.[1];
+      return tail !== undefined && familyNamed(tail, { target: true }) !== null;
+    },
     build: (req) => {
-      const id = slug(req.message);
-      const mind = /mind ?map/i.test(req.message);
-      const kind = mind
-        ? "mindmap"
-        : /org ?chart/i.test(req.message)
-          ? "orgchart"
-          : /journey/i.test(req.message)
-            ? "journey"
-            : "flowchart";
+      const kind = familyNamed(RETARGET.exec(req.message)![1]!, { target: true })!;
+      // Target the most recently declared kind-bearing group when several
+      // exist; fall back to the only/first region the summary reports.
+      const region =
+        req.summary.groups?.filter((g) => g.kind).slice(-1)[0]?.id ?? req.summary.groups?.[0]?.id;
+      if (!region) {
+        return {
+          explanation:
+            "There is no region on this board to change yet — create the diagram first, then ask to change its kind.",
+          operations: [],
+        };
+      }
+      if (!isRegionable(kind)) {
+        return {
+          explanation: `${capitalize(familyPhrase(kind))} draws only as a whole board, so a region can't become one. Ask me to convert the whole board instead, or build it on its own board.`,
+          operations: [],
+        };
+      }
       return {
-        explanation: `Added a ${kind} region for "${req.message.slice(0, 40)}" without touching the rest of the board.`,
-        operations: [
-          {
-            op: "CREATE_GROUP",
-            id: `${id}-region`,
-            label: shortRegionLabel(req.message),
-            children: [],
-            kind,
-          },
-          {
-            op: "CREATE_NODE",
-            id: `${id}-core`,
-            nodeType: mind ? "topic" : "step",
-            label: coreLabel(req.message),
-            groupId: `${id}-region`,
-          },
-          {
-            op: "CREATE_NODE",
-            id: `${id}-one`,
-            nodeType: "idea",
-            label: "First branch",
-            groupId: `${id}-region`,
-          },
-          {
-            op: "CREATE_NODE",
-            id: `${id}-two`,
-            nodeType: "idea",
-            label: "Second branch",
-            groupId: `${id}-region`,
-          },
-          {
-            op: "CONNECT_NODES",
-            source: `${id}-core`,
-            target: `${id}-one`,
-            relationship: mind ? "branch" : "leads to",
-          },
-          {
-            op: "CONNECT_NODES",
-            source: `${id}-core`,
-            target: `${id}-two`,
-            relationship: mind ? "branch" : "leads to",
-          },
-        ],
+        explanation: `Changed region "${region}" to ${familyPhrase(kind)}.`,
+        operations: [{ op: "SET_GROUP_KIND", id: region, kind }],
       };
     },
+  },
+  {
+    // Whole-board conversion: "turn this into a state machine", "convert the
+    // board to a timeline". TRANSFORM_DIAGRAM keeps every node and re-renders
+    // the board under the new family; without this script the family script
+    // below would read the request as "build one" and add a second diagram.
+    match: (m) => {
+      const tail = CONVERT.exec(m)?.[1];
+      return tail !== undefined && familyNamed(tail, { target: true }) !== null;
+    },
+    build: (req) => {
+      const kind = familyNamed(CONVERT.exec(req.message)![1]!, { target: true })!;
+      // Nothing to convert on an empty board: build the family instead.
+      if (req.summary.nodes.length === 0) return buildFamily(req, kind);
+      return {
+        explanation: `Converted the whole board to ${familyPhrase(kind)}; every node and connection is kept, and the layout engine redraws it.`,
+        operations: [{ op: "TRANSFORM_DIAGRAM", to: kind }],
+      };
+    },
+  },
+  {
+    // Diagram regions (docs/03): "also add a mind map for X on this board"
+    // builds a second diagram kind as a region group instead of transforming
+    // the whole board — the behaviour the prompt's region rule teaches. Every
+    // regionable family in core's registry counts (their labels and aliases,
+    // see FAMILY_ALIASES); on an empty board the same words start the family.
+    match: (m) => REGION_ADD.test(m),
+    build: (req) => buildFamily(req, familyNamed(req.message, { only: isRegionable })!),
   },
   {
     // Phase 5 (doc 18): the layout-intent script — "read it left to right"
@@ -461,6 +743,16 @@ const scripts: Script[] = [
         ] as Operation[],
       };
     },
+  },
+  {
+    // V4: a request that names any family builds it — "a state machine for
+    // the order lifecycle", "ER diagram for a blog", "SWOT for the launch".
+    // After the layout-intent script on purpose: "read it left to right, like
+    // a timeline" names a family as a simile, and that script owns it. What
+    // gets built depends on the board (buildFamily): the registry starter, a
+    // region, or an honest "this needs its own board".
+    match: (m) => familyNamed(m) !== null,
+    build: (req) => buildFamily(req, familyNamed(req.message)!),
   },
   {
     // P0-3: statement-kind scripts (Stage C2: the doctrine as data now). A
@@ -727,44 +1019,6 @@ const scripts: Script[] = [
         "Lena said she'd think about it — a deferral, not a task. Nothing was committed, so nothing was added to the board.",
       operations: [],
     }),
-  },
-  {
-    // Region retarget: "change the X section to a Y" flips one region's kind.
-    match: (m) =>
-      /change (the |this )?.{0,32}(section|region|diagram|part) to (an? )?(mind ?map|org ?chart|flow ?chart|journey|process|architecture|decision tree)/i.test(
-        m,
-      ),
-    build: (req) => {
-      const m = req.message;
-      const kind = /mind ?map/i.test(m)
-        ? "mindmap"
-        : /org ?chart/i.test(m)
-          ? "orgchart"
-          : /journey/i.test(m)
-            ? "journey"
-            : /process/i.test(m)
-              ? "process"
-              : /architecture/i.test(m)
-                ? "architecture"
-                : /decision ?tree/i.test(m)
-                  ? "decisiontree"
-                  : "flowchart";
-      // Target the most recently declared kind-bearing group when several
-      // exist; fall back to the only/first region the summary reports.
-      const region =
-        req.summary.groups?.filter((g) => g.kind).slice(-1)[0]?.id ?? req.summary.groups?.[0]?.id;
-      if (!region) {
-        return {
-          explanation:
-            "There is no region on this board to change yet — create the diagram first, then ask to change its kind.",
-          operations: [],
-        };
-      }
-      return {
-        explanation: `Changed region "${region}" to a ${kind}.`,
-        operations: [{ op: "SET_GROUP_KIND", id: region, kind }],
-      };
-    },
   },
   {
     // "wireframe / mockup / UI" -> a derived checkout wireframe (docs/05, docs/07).

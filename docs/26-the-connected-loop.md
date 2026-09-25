@@ -96,7 +96,7 @@ notes; the headline status per area:
 | Collaboration                  |   🟡   | Presence, comments, mentions ✅; **viewers can't comment**; no follow/spotlight across users                            |
 | Templates                      |   🟡   | 4 board templates; no meeting templates; templates carry no extraction rules                                           |
 | Lenses                         |   🟡   | Diagram, Kanban, Document, Wireframe, Sequence, ER; no timeline, dependency, decision lens                             |
-| Semantic zoom                  |   🟡   | Three tiers + region collapse; no density ladder                                                                        |
+| Semantic zoom                  |   ✅   | Density ladder (§6.5): count+zoom presentation modes; regions auto-summarize into cards at scale                        |
 | Files / assets                 |   🟡   | Upload API exists but **no web client**; every image lives as a data URL in the op log                                 |
 | AI images / vectors            |   🟡   | Raster image generation ✅; **no vector/SVG creation**; SVG import is a naive regex                                     |
 | Notifications                  |   🟡   | 7 kinds (invites/mentions/replies); none for approvals, meetings, decisions, blocked work                               |
@@ -431,6 +431,20 @@ The spec's density ladder, on top of today's three tiers and region collapse:
 300+ semantic overview (each region as a summary card: kind, counts, open
 decisions and risks). Measured against the 40/80/150-node benchmark boards.
 
+**Status (2026-09-25, V5):** built. The ladder is one pure, tested function in
+core — `presentationMode(nodeCount, zoom)` (`semanticZoom.ts`) — returning the
+more-summarized of the count floor (the existing `densityBand` rungs:
+≤30 detail · ≤80 grouped · ≤150 regions · ≤300 overview · >300 summary cards)
+and the zoom rung, so a large board never shows full detail zoomed out and any
+board summarizes as it zooms out. At the summary-cards rung — a 300+ board, or
+any board zoomed far out — the canvas auto-collapses every region into a summary
+card carrying its kind, node/edge counts and **open decisions, risks and
+questions** (`regionSummary`); the reader expands a region (double-click, or the
+card's button) or simply zooms in to reveal its members, and zooming back out
+re-summarizes. Manual collapse still works below that rung. Auto and manual use
+separate render-local sets so neither reinterprets the other. Verified on the
+40/80/150/300-node benchmark boards (core tests) plus the full web suite.
+
 ## 7. Meetings and voice — the full lifecycle
 
 | Stage            | Plan                                                                                                                                             |
@@ -515,7 +529,7 @@ anything ships.
 | V2    | Vector Studio, local      | `vector` kind, sanitizing importer, icon → vector, VTracer raster → vector, sketch → vector, editing | Paste a logo PNG → an editable, recolourable vector, no external calls |
 | V3    | Vector Studio, generative | `VectorProvider` seam: LLM baseline + QuiverAI and/or Recraft, variations, AI edit     | "Three icon directions for our four services" lands as editable vectors|
 | V4    | Representation registry   | §6.1 registry ✅ + starters ✅; every family wired: state machine/timeline/matrix, dependency/C4/network, table + chart object kinds, BPMN, sequence/ER ✅ | "Turn this into a roadmap/state machine/C4" works from any board ✅       |
-| V5    | Semantic zoom ladder      | §6.5, measured on 80/150/300-object boards                                             | A 300-object board is readable at every zoom                           |
+| V5    | Semantic zoom ladder      | §6.5, measured on 80/150/300-object boards ✅                                          | A 300-object board is readable at every zoom ✅                         |
 
 **Locked order (2026-09-24, see §12):** the visual track leads the next
 milestone. Security defects F1–F2 and the colour contract F7 go first

@@ -3,6 +3,7 @@ import { createWorkspace, DIAGRAM_KINDS, type Workspace } from "./model.js";
 import { vectorDataSchema } from "./vector.js";
 import { tableDataSchema } from "./table.js";
 import { chartDataSchema } from "./chart.js";
+import { nodeDetailsSchema } from "./operations.js";
 import {
   iconRef,
   isImageDataUrl,
@@ -52,6 +53,11 @@ const nodeSchema = z.object({
   // stored board is dropped (the label's automatic icon renders), never a
   // reason to refuse the whole board.
   icon: iconRef.optional().catch(undefined),
+  // V4 compartments. The op schema itself, imported rather than restated: the
+  // limits are the contract and there is no older shape to stay loose for.
+  // Tolerant like `icon`: details that no longer parse are dropped (the card
+  // shows its name alone), never a reason to refuse the board.
+  details: nodeDetailsSchema.optional().catch(undefined),
   issue: z
     .object({
       type: z.enum(["epic", "story", "task", "subtask", "bug"]),

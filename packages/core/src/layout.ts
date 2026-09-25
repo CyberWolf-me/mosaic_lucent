@@ -19,7 +19,19 @@ import { layoutStrategyFor, pseudoRoleFor } from "./representations.js";
  * without touching the AI or reducer.
  */
 
-export type LayoutStrategy = "layered" | "radial" | "tree" | "swimlane" | "timeline" | "grid";
+/**
+ * The geometries above, plus the planning families' (docs/27): `timeline`
+ * (time runs left to right), `grid` (matrix cells) and `storymap` (activities
+ * as columns, releases as rows — see `storyMapLayout`).
+ */
+export type LayoutStrategy =
+  | "layered"
+  | "radial"
+  | "tree"
+  | "swimlane"
+  | "timeline"
+  | "grid"
+  | "storymap";
 
 export interface LayoutOptions {
   nodeSize?: Size;
@@ -106,12 +118,82 @@ const REGION_STRIP_GAP = 240;
  * and SVG export all read `node.size` — a CSS-only fix would leave them wrong.
  * Calibrated against styles.css `.node-sub` (11px + 2px margin ≈ 15px) and the
  * chip inline style (6px margin + ~11px line + 4px padding + 2px border ≈ 23px).
+ *
+ * V4 details (compartments) add their own rows — see nodeDetailsHeight. They
+ * wrap at the card's width, which the label decides; a caller that knows the
+ * width may pass it, otherwise it is estimated at the default size, the
+ * narrowest this label's card can be — so the estimate can only over-reserve
+ * (a little air under the last line), never clip one.
  */
-export function nodeCardExtraHeight(node: Pick<Node, "statement"> | undefined): number {
+export function nodeCardExtraHeight(
+  node: (Pick<Node, "statement"> & Partial<Pick<Node, "label" | "details">>) | undefined,
+  cardWidth?: number,
+): number {
   if (!node) return 0;
   const SUB_ROW = 15;
   const CHIP_ROW = 23;
-  return SUB_ROW + (node.statement ? CHIP_ROW : 0);
+  const base = SUB_ROW + (node.statement ? CHIP_ROW : 0);
+  if (!node.details || node.details.sections.length === 0) return base;
+  const width = cardWidth ?? measureNode(node.label ?? "", DEFAULTS.nodeSize).width;
+  return base + nodeDetailsHeight(node.details, width);
+}
+
+/**
+ * The pixels a node's details compartments take on its card (V4: UML
+ * attributes/operations, ER columns, C4 technology), for a card `cardWidth`
+ * wide. Deterministic like measureNode — no DOM — and calibrated against
+ * styles/details.css, which renders them: a 6px gap above the first
+ * compartment; per compartment a 1px rule and 4px padding above and below;
+ * a 9px mono title on a 13px line (+1px under it); 10.5px mono items on 15px
+ * lines, word-wrapped inside 14px side padding and the card's border (up to
+ * 1.5px a side — 32px of the width is never text). IBM Plex Mono's advance
+ * is 0.6em (6.3px at 10.5px); 6.4 leaves slack for rounding.
+ */
+export function nodeDetailsHeight(
+  details: Node["details"] | undefined,
+  cardWidth: number,
+): number {
+  if (!details || details.sections.length === 0) return 0;
+  const GAP = 6;
+  const SECTION_CHROME = 1 + 4 + 4;
+  const TITLE_ROW = 14;
+  const ITEM_LINE = 15;
+  const CHAR = 6.4;
+  const perLine = Math.max(1, Math.floor((cardWidth - 32) / CHAR));
+  let height = GAP;
+  for (const section of details.sections) {
+    height += SECTION_CHROME;
+    if (section.title) height += TITLE_ROW;
+    for (const item of section.items) height += wrappedLineCount(item, perLine) * ITEM_LINE;
+  }
+  return height;
+}
+
+/**
+ * Lines a text takes when word-wrapped at `perLine` characters, the way the
+ * card's CSS wraps (break at spaces; a word longer than a line breaks
+ * anywhere). Greedy, like the browser, so a long signature that spills one
+ * word onto the next line is counted as two lines, not 1.1.
+ */
+function wrappedLineCount(text: string, perLine: number): number {
+  let lines = 1;
+  let used = 0;
+  for (const word of text.split(/\s+/).filter(Boolean)) {
+    let w = word.length;
+    const need = used === 0 ? w : used + 1 + w;
+    if (need <= perLine) {
+      used = need;
+      continue;
+    }
+    if (used > 0) lines++;
+    // A word wider than a line fills whole lines, then leaves its remainder.
+    while (w > perLine) {
+      w -= perLine;
+      lines++;
+    }
+    used = w;
+  }
+  return lines;
 }
 
 export function measureNode(
@@ -204,6 +286,7 @@ function dispatchLayoutWithRoutes(
   if (strategy === "swimlane") return { layout: swimlaneLayout(workspace, merged), routes: {} };
   if (strategy === "timeline") return { layout: timelineLayout(workspace, merged), routes: {} };
   if (strategy === "grid") return { layout: gridLayout(workspace, merged), routes: {} };
+  if (strategy === "storymap") return { layout: storyMapLayout(workspace, merged), routes: {} };
   const layered = layeredLayoutWithRoutes(workspace, options);
   return { ...layered, layout: shrinkPseudoStates(workspace, workspace.diagramKind, layered.layout) };
 }
@@ -1296,6 +1379,7 @@ function layoutSingleRoutes(
   if (strategy === "swimlane") return { layout: swimlaneLayout(ws, opts), routes: {} };
   if (strategy === "timeline") return { layout: timelineLayout(ws, opts), routes: {} };
   if (strategy === "grid") return { layout: gridLayout(ws, opts), routes: {} };
+  if (strategy === "storymap") return { layout: storyMapLayout(ws, opts), routes: {} };
   const layered = layeredLayoutWithRoutes(ws, opts);
   return { ...layered, layout: shrinkPseudoStates(ws, kind, layered.layout) };
 }
@@ -1333,6 +1417,7 @@ function layoutSingle(
   if (strategy === "swimlane") return swimlaneLayout(ws, opts);
   if (strategy === "timeline") return timelineLayout(ws, opts);
   if (strategy === "grid") return gridLayout(ws, opts);
+  if (strategy === "storymap") return storyMapLayout(ws, opts);
   return shrinkPseudoStates(ws, kind, layeredLayout(ws, opts));
 }
 
@@ -1451,6 +1536,19 @@ export function applyRoutes(workspace: Workspace, routes: EdgeRoutes): Workspace
 }
 
 /**
+ * Whether `group` is an activity COLUMN of a story-map board rather than a
+ * region. A column's release rows are shared with every other activity, so
+ * re-laying it out alone would stack its stories against its own releases
+ * only and misalign them with their neighbours (a new "Release 2" story in one
+ * activity must open that row across the whole map). The region passes
+ * decline such a group with null, and every caller's contract for null is the
+ * full-board pass — the one pass that keeps the rows shared.
+ */
+function isStoryMapColumn(workspace: Workspace, group: Workspace["groups"][string]): boolean {
+  return !group.kind && STRATEGY_FOR_KIND[workspace.diagramKind] === "storymap";
+}
+
+/**
  * The routes-aware relayoutRegion: the group's members re-layout AND the
  * group's internal edge routes re-derive, shifted to the group's current
  * origin like the nodes. Returns null (no routes) when there is nothing to
@@ -1464,6 +1562,7 @@ export function relayoutRegionWithRoutes(
 ): { layout: LayoutResult; routes: EdgeRoutes } | null {
   const group = workspace.groups[groupId];
   if (!group) return null;
+  if (isStoryMapColumn(workspace, group)) return null;
   const memberIds = Object.values(workspace.nodes)
     .filter((n) => n.groupId === groupId)
     .map((n) => n.id);
@@ -1530,6 +1629,7 @@ export function relayoutRegion(
 ): LayoutResult | null {
   const group = workspace.groups[groupId];
   if (!group) return null;
+  if (isStoryMapColumn(workspace, group)) return null;
   // Members by the authoritative link (node.groupId), matching splitByRegions.
   const memberIds = Object.values(workspace.nodes)
     .filter((n) => n.groupId === groupId)
@@ -1871,6 +1971,260 @@ function gridLayout(
     for (const o of p.offsets) result[o.id] = { position: { x: o.x, y: top + o.y }, size: size.get(o.id)! };
   }
   return result;
+}
+
+// ---------------------------------------------------------------------------
+// docs/27 D3: the user story map — activities across, releases down
+// ---------------------------------------------------------------------------
+
+/** One activity column of a story map. */
+export interface StoryMapColumn {
+  /** The activity's group id; null for the trailing column of stories with no activity. */
+  groupId: string | null;
+  /** What the column's backbone card says: the activity's name, or "Other". */
+  label: string;
+  /** Left edge and width of the column — its stories and its backbone card. */
+  x: number;
+  width: number;
+}
+
+/** One release row — a slice — of a story map. */
+export interface StoryMapRow {
+  /** The release (a story's first issue label); null for the Unscheduled row. */
+  release: string | null;
+  /** What the release gutter says: the release, or "Unscheduled". */
+  label: string;
+  /** Top edge and height of the row: every cell in it shares its tallest cell's height. */
+  y: number;
+  height: number;
+}
+
+/**
+ * A story map's scaffold, in the same frame `computeLayout` places the stories
+ * in: the backbone band across the top, the release gutter down the left, and
+ * the column and row every story was placed by. The canvas draws the backbone
+ * cards and release slices from this rather than guessing from card positions,
+ * so a card and the slice it reads under can never disagree — the pattern
+ * `timelineScale` set for the time axis.
+ */
+export interface StoryMapGrid {
+  columns: StoryMapColumn[];
+  rows: StoryMapRow[];
+  /** The backbone band: one activity card per column, above the first row. */
+  header: { y: number; height: number };
+  /** The release-label gutter, left of the first column. */
+  gutter: { x: number; width: number };
+  /** The whole map: gutter, backbone and every cell. */
+  bounds: { x: number; y: number; width: number; height: number };
+}
+
+/** The trailing column's label: stories that belong to no activity. */
+export const STORY_MAP_OTHER = "Other";
+/** The last row's label: stories no release has claimed yet. */
+export const STORY_MAP_UNSCHEDULED = "Unscheduled";
+
+/**
+ * Between columns. More than twice the canvas's group padding (22px a side),
+ * so neighbouring activities' column boxes never touch.
+ */
+const SM_COL_GAP = 64;
+/** Between release rows; the canvas runs the slice line down its middle. */
+const SM_ROW_GAP = 56;
+/** Between stories stacked in one cell: a cell reads as one short list. */
+const SM_STACK_GAP = 16;
+/** Between the backbone band and the first release row. */
+const SM_HEADER_GAP = 48;
+/** Between the release gutter and the first column. */
+const SM_GUTTER_GAP = 48;
+/** A backbone card's base height: a single title line, quieter than a story card. */
+const SM_HEADER_BASE_HEIGHT = 44;
+/**
+ * The gutter's width per character of the longest release name — the canvas
+ * sets it in 10.5px mono caps with a little tracking — and its bounds: never so
+ * narrow that "MVP" crowds the first column, never so wide that one long name
+ * pushes the whole map right (a longer one wraps instead).
+ */
+const SM_GUTTER_CHAR = 7;
+const SM_GUTTER_MIN = 96;
+const SM_GUTTER_MAX = 200;
+
+/** A story's release: the first of its issue labels, trimmed; null when it has none. */
+function storyRelease(node: Node | undefined): string | null {
+  const first = node?.issue?.labels?.[0]?.trim();
+  return first ? first : null;
+}
+
+/**
+ * The one pass behind both `storyMapLayout` (the cards) and `storyMapGrid`
+ * (the scaffold the canvas draws), so the two cannot drift.
+ */
+function storyMapGeometry(
+  workspace: Workspace,
+  opts: Required<Omit<LayoutOptions, "strategy">>,
+): { layout: LayoutResult; grid: StoryMapGrid } {
+  const { nodeSize } = opts;
+  const ids = Object.keys(workspace.nodes);
+  const size = new Map(
+    ids.map((id) => [
+      id,
+      measureNode(workspace.nodes[id]?.label ?? "", nodeSize, {
+        extraHeight: nodeCardExtraHeight(workspace.nodes[id]),
+      }),
+    ]),
+  );
+
+  // Columns: every activity in creation order — one with no stories yet is
+  // still a step of the user's journey and keeps its place on the backbone —
+  // then "Other" for stories whose activity is missing, always last.
+  const columns: Array<{ groupId: string | null; label: string; stories: string[] }> =
+    Object.entries(workspace.groups).map(([gid, group]) => ({
+      groupId: gid,
+      label: group.label,
+      stories: [],
+    }));
+  const columnOf = new Map(columns.map((col, i) => [col.groupId, i]));
+  let other: (typeof columns)[number] | undefined;
+  for (const id of ids) {
+    const gid = workspace.nodes[id]?.groupId;
+    const col = gid === undefined ? undefined : columnOf.get(gid);
+    if (col !== undefined) columns[col]!.stories.push(id);
+    else (other ??= { groupId: null, label: STORY_MAP_OTHER, stories: [] }).stories.push(id);
+  }
+  if (other) columns.push(other);
+
+  // Rows: releases in order of first appearance, walking stories in creation
+  // order, so the release the model named first is the top slice. Unscheduled
+  // is always last: work nobody has scheduled sits below every release.
+  const releases: Array<string | null> = [];
+  const rowOf = new Map<string | null, number>();
+  let unscheduled = false;
+  for (const id of ids) {
+    const release = storyRelease(workspace.nodes[id]);
+    if (release === null) unscheduled = true;
+    else if (!rowOf.has(release)) {
+      rowOf.set(release, releases.length);
+      releases.push(release);
+    }
+  }
+  if (unscheduled) {
+    rowOf.set(null, releases.length);
+    releases.push(null);
+  }
+
+  // cells[c][r]: activity c's stories in release r, in creation order.
+  const cells = columns.map((col) => {
+    const byRow = releases.map((): string[] => []);
+    for (const id of col.stories) byRow[rowOf.get(storyRelease(workspace.nodes[id]))!]!.push(id);
+    return byRow;
+  });
+  const stackHeight = (stack: readonly string[]) =>
+    stack.reduce((sum, id) => sum + size.get(id)!.height, 0) +
+    Math.max(0, stack.length - 1) * SM_STACK_GAP;
+
+  // A column is as wide as its widest story or its backbone card, whichever
+  // is wider, so the activity's name is never clipped over narrow stories.
+  const headerSizes = columns.map((col) =>
+    measureNode(col.label, { width: nodeSize.width, height: SM_HEADER_BASE_HEIGHT }),
+  );
+  const widths = columns.map((col, c) =>
+    Math.max(headerSizes[c]!.width, ...col.stories.map((id) => size.get(id)!.width)),
+  );
+  // Every cell in a row shares the row's height — its tallest cell — so each
+  // release reads as one straight band across the map.
+  const heights = releases.map((_, r) =>
+    Math.max(nodeSize.height, ...cells.map((byRow) => stackHeight(byRow[r]!))),
+  );
+  const headerHeight = Math.max(SM_HEADER_BASE_HEIGHT, ...headerSizes.map((s) => s.height));
+  const gutterWidth = Math.min(
+    SM_GUTTER_MAX,
+    Math.max(
+      SM_GUTTER_MIN,
+      ...releases.map((r) => Math.ceil((r ?? STORY_MAP_UNSCHEDULED).length * SM_GUTTER_CHAR + 16)),
+    ),
+  );
+
+  // The gutter and the backbone band hold the map's top-left corner at the
+  // origin; the first cell starts right of the one and below the other.
+  let x = gutterWidth + SM_GUTTER_GAP;
+  const gridColumns: StoryMapColumn[] = columns.map((col, c) => {
+    const placed = { groupId: col.groupId, label: col.label, x, width: widths[c]! };
+    x += widths[c]! + SM_COL_GAP;
+    return placed;
+  });
+  let y = headerHeight + SM_HEADER_GAP;
+  const gridRows: StoryMapRow[] = releases.map((release, r) => {
+    const placed = { release, label: release ?? STORY_MAP_UNSCHEDULED, y, height: heights[r]! };
+    y += heights[r]! + SM_ROW_GAP;
+    return placed;
+  });
+
+  const layout: LayoutResult = {};
+  cells.forEach((byRow, c) => {
+    const col = gridColumns[c]!;
+    byRow.forEach((stack, r) => {
+      let top = gridRows[r]!.y;
+      for (const id of stack) {
+        const s = size.get(id)!;
+        // Centred in the column, so cards of different widths still hang as
+        // one column under their activity.
+        layout[id] = { position: { x: col.x + Math.round((col.width - s.width) / 2), y: top }, size: s };
+        top += s.height + SM_STACK_GAP;
+      }
+    });
+  });
+
+  const lastColumn = gridColumns.at(-1);
+  const lastRow = gridRows.at(-1);
+  return {
+    layout,
+    grid: {
+      columns: gridColumns,
+      rows: gridRows,
+      header: { y: 0, height: headerHeight },
+      gutter: { x: 0, width: gutterWidth },
+      bounds: {
+        x: 0,
+        y: 0,
+        width: lastColumn ? lastColumn.x + lastColumn.width : gutterWidth,
+        height: lastRow ? lastRow.y + lastRow.height : headerHeight,
+      },
+    },
+  };
+}
+
+/**
+ * User story map: the backbone of user activities runs left to right, each
+ * activity's stories hang beneath it, and horizontal slices cut the map into
+ * releases, earliest on top. The model supplies only meaning — each group is
+ * an activity, a story's first issue label names its release — and this pass
+ * turns it into the grid:
+ *  - one column per group, in creation order, as wide as its widest card;
+ *    stories with no activity share a trailing "Other" column;
+ *  - one row per release, in order of first appearance walking stories in
+ *    creation order; stories with no label share a last "Unscheduled" row;
+ *  - a cell's stories stack top-down in creation order.
+ * The backbone band above the first row and the release gutter left of the
+ * first column are left empty for the canvas to draw (`storyMapGrid`). Edges
+ * are drawn but never move a card: a story map's order is its backbone, not a
+ * flow. A pinned story still holds its slot, so dragging one card never
+ * reshuffles the map; `applyLayout` keeps the hand placement, as it does for
+ * every strategy.
+ */
+function storyMapLayout(
+  workspace: Workspace,
+  opts: Required<Omit<LayoutOptions, "strategy">>,
+): LayoutResult {
+  return storyMapGeometry(workspace, opts).layout;
+}
+
+/**
+ * The scaffold of a story-map board — backbone columns and release rows — in
+ * the frame `computeLayout` placed its stories in. For a whole story-map board
+ * (the family is not regionable, so there is no region form); the canvas
+ * draws it only when the board has no regions, as it does the timeline axis.
+ */
+export function storyMapGrid(workspace: Workspace, options: LayoutOptions = {}): StoryMapGrid {
+  return storyMapGeometry(workspace, withIntentDefaults(workspace, options)).grid;
 }
 
 /**

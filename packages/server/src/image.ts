@@ -29,6 +29,31 @@ export interface HandleResult {
   body: unknown;
 }
 
+/** A positive whole number of ms, or undefined — the rule config.ts's `optionalNum` applies. */
+const positiveMs = (value: string | undefined): number | undefined => {
+  const parsed = Number(value);
+  return value !== undefined && value.trim() !== "" && Number.isFinite(parsed) && parsed > 0
+    ? Math.floor(parsed)
+    : undefined;
+};
+
+/**
+ * The image request timeout: `LUCENT_IMAGE_TIMEOUT_MS`, else the shared
+ * `LUCENT_AI_TIMEOUT_MS`, else undefined (the provider's own default). A
+ * stalled image gateway must not hang the request forever.
+ *
+ * Only a positive integer counts; anything else is treated as unset and falls
+ * through. The raw `Number()` this replaced turned "0" into a 0 ms timeout
+ * that aborted every call, and a negative value into a RangeError from
+ * `AbortSignal.timeout` on every request.
+ *
+ * It bounds ONE attempt: the provider retries each fallback model with a
+ * fresh timeout, so the worst case is (1 + fallbacks) × this.
+ */
+export function imageTimeoutMs(env: NodeJS.ProcessEnv = process.env): number | undefined {
+  return positiveMs(env.LUCENT_IMAGE_TIMEOUT_MS) ?? positiveMs(env.LUCENT_AI_TIMEOUT_MS);
+}
+
 /**
  * Choose an image backend. A real one needs a key and an endpoint; without both
  * we use the placeholder generator so the canvas flow still works offline.
@@ -61,10 +86,7 @@ export function selectImageProvider(env: NodeJS.ProcessEnv = process.env): Image
   const primaryModel = modelList[0];
   const fallbackModels = modelList.slice(1);
 
-  // A stalled image gateway must not hang the request forever. Prefer a
-  // dedicated env, fall back to the shared AI timeout, else the provider default.
-  const rawTimeout = env.LUCENT_IMAGE_TIMEOUT_MS ?? env.LUCENT_AI_TIMEOUT_MS;
-  const timeoutMs = rawTimeout ? Number(rawTimeout) : undefined;
+  const timeoutMs = imageTimeoutMs(env);
 
   if (apiKey && baseUrl) {
     return new OpenAIImageProvider({
@@ -73,7 +95,7 @@ export function selectImageProvider(env: NodeJS.ProcessEnv = process.env): Image
       ...(primaryModel ? { model: primaryModel } : {}),
       ...(fallbackModels.length > 0 ? { fallbackModels } : {}),
       ...(env.LUCENT_IMAGE_NAME ? { name: env.LUCENT_IMAGE_NAME } : {}),
-      ...(timeoutMs !== undefined && Number.isFinite(timeoutMs) ? { timeoutMs } : {}),
+      ...(timeoutMs !== undefined ? { timeoutMs } : {}),
     });
   }
   const isTest = env.NODE_ENV === "test" || process.env.VITEST !== undefined;

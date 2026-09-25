@@ -82,6 +82,64 @@
   color: var(--ink-3);
 }
 
+/* A story map's scaffold (docs/27 D3): the backbone of activity cards across
+   the top, each release named in the left gutter, a hairline slice above each
+   release. Structure, not content — neutral inks only (the accent stays the
+   AI's), over the activity columns, behind the stories, never interactive.
+   The gutter's width is estimated in core (layout.ts SM_GUTTER_CHAR) against
+   the release type set here: 10.5px mono caps, 0.06em tracking. */
+.storymap-scaffold {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.storymap-activity {
+  position: absolute;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 12px;
+  overflow: hidden;
+  border: 1px solid var(--stroke-2);
+  border-radius: var(--r-sm);
+  background: linear-gradient(180deg, var(--canvas-3), var(--canvas-2));
+  box-shadow: var(--shadow-node);
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 18px;
+  text-align: center;
+  overflow-wrap: anywhere;
+  color: var(--ink-0);
+}
+/* Stories with no activity: a column, but not a step of the journey. */
+.storymap-activity.other {
+  border-style: dashed;
+  background: transparent;
+  box-shadow: none;
+  font-weight: 500;
+  color: var(--ink-3);
+}
+.storymap-slice {
+  position: absolute;
+  height: 0;
+  border-top: 1px solid var(--stroke-2);
+}
+.storymap-release {
+  position: absolute;
+  padding-top: 2px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  line-height: 14px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  overflow-wrap: anywhere;
+  color: var(--ink-2);
+}
+.storymap-release.unscheduled {
+  color: var(--ink-3);
+}
+
 /* Icons & vectors (docs/26 §6.3): the icon picker, placing editable vectors. */
 .vectors-pop {
   position: absolute;

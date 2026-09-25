@@ -28,9 +28,47 @@ export function assetUrl(ref: string): string | undefined {
   return id === undefined ? undefined : `/api/assets/${id}`;
 }
 
-async function dataUrlToBlob(dataUrl: string): Promise<Blob> {
-  const res = await fetch(dataUrl);
-  return res.blob();
+/**
+ * Decode a data URL to a Blob of its declared type, in-process.
+ *
+ * This used to be `fetch(dataUrl)`. The production CSP's `connect-src 'self'
+ * https: wss:` has no `data:`, so that fetch was refused in production — and
+ * the caller's catch swallowed it, so every generated or pasted image quietly
+ * stayed inline in the op log. Decoding here needs no network permission, so
+ * the CSP stays as tight as it is. Throws on a malformed URL.
+ */
+export function dataUrlToBlob(dataUrl: string): Blob {
+  const comma = dataUrl.indexOf(",");
+  const meta = dataUrl.slice(0, comma);
+  if (!meta.startsWith("data:") || comma === -1) throw new Error("not a data URL");
+  const params = meta.slice(5).split(";");
+  const type = params[0] || "text/plain";
+  const payload = dataUrl.slice(comma + 1);
+  if (params.includes("base64")) {
+    const bin = atob(payload.replace(/\s+/g, ""));
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return new Blob([bytes], { type });
+  }
+  return new Blob([decodeURIComponent(payload)], { type });
+}
+
+/** True for an inline SVG, which the asset store refuses by design (script-capable markup). */
+function isSvgDataUrl(src: string): boolean {
+  return /^data:image\/svg\+xml[;,]/i.test(src);
+}
+
+// An upload that fails leaves the image inline — it still lands — but that
+// fallback used to be silent, which is how a CSP refusal went unnoticed in
+// production. Each distinct reason is logged once, not on every image.
+const warned = new Set<string>();
+function warnInline(reason: string): void {
+  if (warned.has(reason)) return;
+  warned.add(reason);
+  console.warn(
+    `Lucent: an image stayed inline in the board instead of uploading (${reason}). ` +
+      "It still works, but it travels in the op log. Later failures for the same reason aren't logged.",
+  );
 }
 
 /** Upload image bytes for a board; the reference, or null on any failure. */
@@ -47,10 +85,16 @@ export async function uploadAsset(blob: Blob, boardId: string): Promise<string |
         "x-lucent-board-id": boardId,
       },
     });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      warnInline(`upload refused: HTTP ${res.status}`);
+      return null;
+    }
     const body = (await res.json()) as { ref?: unknown };
-    return typeof body.ref === "string" && isAssetRef(body.ref) ? body.ref : null;
-  } catch {
+    if (typeof body.ref === "string" && isAssetRef(body.ref)) return body.ref;
+    warnInline("the server answered without a valid asset reference");
+    return null;
+  } catch (err) {
+    warnInline(`upload failed: ${(err as Error).message || "network error"}`);
     return null;
   }
 }
@@ -64,10 +108,22 @@ export async function placeImage(file: Blob, boardId: string | null): Promise<Pl
   const scaled = await downscaleImage(file);
   if (!scaled) return null;
   if (boardId) {
-    const ref = await uploadAsset(await dataUrlToBlob(scaled.dataUrl), boardId);
+    const ref = await uploadDataUrl(scaled.dataUrl, boardId);
     if (ref) return { src: ref, width: scaled.width, height: scaled.height, uploaded: true };
   }
   return { src: scaled.dataUrl, width: scaled.width, height: scaled.height, uploaded: false };
+}
+
+/** Decode and upload a data URL; null (with the reason logged) when either step fails. */
+async function uploadDataUrl(dataUrl: string, boardId: string): Promise<string | null> {
+  let blob: Blob;
+  try {
+    blob = dataUrlToBlob(dataUrl);
+  } catch (err) {
+    warnInline(`the image couldn't be decoded: ${(err as Error).message}`);
+    return null;
+  }
+  return uploadAsset(blob, boardId);
 }
 
 /**
@@ -78,21 +134,17 @@ export async function placeImage(file: Blob, boardId: string | null): Promise<Pl
  * Returns an `asset:` reference on success, or the original `src` unchanged: on
  * a local board (no server to hold the bytes), when the upload fails (offline,
  * quota), or when it isn't a data URL to begin with. Raw SVG data URLs (the
- * offline mock) stay inline too — the asset store refuses SVG by design, so
- * `uploadAsset` returns null and we fall back. Unlike `placeImage` this does
- * NOT downscale: a generated image is already sized for the canvas.
+ * offline mock) stay inline without an attempt: the asset store refuses SVG
+ * by design, so posting one was a guaranteed refusal on every generation.
+ * Unlike `placeImage` this does NOT downscale: a generated image is already
+ * sized for the canvas.
  */
 export async function uploadGeneratedImage(
   src: string,
   boardId: string | null,
 ): Promise<string> {
-  if (!boardId || !src.startsWith("data:")) return src;
-  try {
-    const ref = await uploadAsset(await dataUrlToBlob(src), boardId);
-    return ref ?? src;
-  } catch {
-    return src;
-  }
+  if (!boardId || !src.startsWith("data:") || isSvgDataUrl(src)) return src;
+  return (await uploadDataUrl(src, boardId)) ?? src;
 }
 
 // ---- export: a static file can't fetch, so referenced bytes are inlined ----

@@ -1,5 +1,5 @@
-import type { DiagramKind, Workspace } from "./model.js";
-import type { Operation } from "./operations.js";
+import type { DiagramKind, NodeDetails, Workspace } from "./model.js";
+import { clampNodeDetails, type Operation } from "./operations.js";
 
 /**
  * Mermaid interop (docs/08 "basic integrations"; docs/27 D2).
@@ -10,11 +10,14 @@ import type { Operation } from "./operations.js";
  * a diagram already in a repo lands as real semantic nodes — never as a
  * picture.
  *
- * Three flavours, each onto the Lucent kind that means the same thing:
+ * Four flavours, each onto the Lucent kind that means the same thing:
  *
  *   flowchart / graph   → flowchart (top-down) or process (left-right)
- *   stateDiagram(-v2)   → statemachine, with [*] as start/end pseudo-states
+ *   stateDiagram(-v2)   → statemachine, with [*] as start/end pseudo-states and
+ *                         a state's `X : description` lines as its details
  *   mindmap             → mindmap, the indentation tree as branch edges
+ *   classDiagram        → class, members as Attributes/Operations details and
+ *                         the UML arrows as inherits/implements/composition/…
  *
  * Pure string <-> operation transforms: testable without a DOM, usable by the
  * web app and the MCP server alike, and landing through the same validated
@@ -22,7 +25,7 @@ import type { Operation } from "./operations.js";
  * handlers, notes) is skipped and counted, never guessed at.
  */
 
-export type MermaidFlavor = "flowchart" | "state" | "mindmap";
+export type MermaidFlavor = "flowchart" | "state" | "mindmap" | "class";
 
 export interface MermaidGraph {
   flavor: MermaidFlavor;
@@ -31,7 +34,14 @@ export interface MermaidGraph {
   /** From YAML front matter (`title: …`), when the source has one. */
   title?: string;
   direction: "TD" | "LR";
-  nodes: Array<{ id: string; label: string; nodeType: string; groupId?: string }>;
+  nodes: Array<{
+    id: string;
+    label: string;
+    nodeType: string;
+    groupId?: string;
+    /** A state's descriptions, a class's members — already within NODE_DETAILS_LIMITS. */
+    details?: NodeDetails;
+  }>;
   edges: Array<{ source: string; target: string; relationship: string }>;
   groups: Array<{ id: string; label: string }>;
   /** Recognised lines that carry no meaning Lucent keeps (styles, notes, clicks). */
@@ -44,6 +54,7 @@ const DEFAULT_TITLE: Record<MermaidFlavor, string> = {
   flowchart: "Imported flowchart",
   state: "Imported state machine",
   mindmap: "Imported mind map",
+  class: "Imported class diagram",
 };
 
 // ---------------------------------------------------------------------------
@@ -87,6 +98,7 @@ export function detectMermaid(text: string): MermaidFlavor | null {
   if (FLOW_HEADER.test(first)) return "flowchart";
   if (/^stateDiagram(-v2)?\s*$/.test(first)) return "state";
   if (/^mindmap\s*$/.test(first)) return "mindmap";
+  if (/^classDiagram(-v2)?\s*$/.test(first)) return "class";
   return null;
 }
 
@@ -428,10 +440,13 @@ const STATE_DESC = new RegExp(`^(${STATE_ID})\\s*:\\s*(.+)$`, "u");
 function parseState(lines: string[]): MermaidGraph {
   const nodes = new Map<
     string,
-    { id: string; label: string; nodeType: string; groupId?: string }
+    { id: string; label: string; nodeType: string; groupId?: string; details?: NodeDetails }
   >();
   const edges: MermaidGraph["edges"] = [];
   const composites = new Map<string, { id: string; label: string }>();
+  // `Draft : being written` — a state's description lines, in order. Mermaid
+  // stacks repeated ones under the name, which is exactly one details section.
+  const descriptions = new Map<string, string[]>();
   const stack: string[] = [];
   let direction: "TD" | "LR" = "TD";
   let skipped = 0;
@@ -517,11 +532,19 @@ function parseState(lines: string[]): MermaidGraph {
       else declare(id!);
       continue;
     }
-    if (STATE_DESC.test(line)) {
-      // A state's description: Lucent keeps the state, not the prose.
-      const id = STATE_DESC.exec(line)![1]!;
-      if (!composites.has(id)) declare(id);
-      skipped++;
+    const desc = STATE_DESC.exec(line);
+    if (desc) {
+      // A state's description is its details (V4) — the text Mermaid draws
+      // under the state's name, which is where the card draws details. A
+      // composite is a group, not a node, so its prose has nowhere to go.
+      const id = desc[1]!;
+      const text = clean(desc[2]!);
+      if (composites.has(id) || !text) {
+        skipped++;
+        continue;
+      }
+      declare(id);
+      descriptions.set(id, [...(descriptions.get(id) ?? []), text]);
       continue;
     }
     if (/^(--|classDef|class|style|click|accTitle|accDescr)\b/.test(line) || line.includes(":::")) {
@@ -560,6 +583,11 @@ function parseState(lines: string[]): MermaidGraph {
     if (members(c.id).length === 0 && !nodes.has(c.id)) {
       nodes.set(c.id, { id: c.id, label: c.label, nodeType: "state" });
     }
+  }
+  for (const [id, items] of descriptions) {
+    const node = nodes.get(id);
+    const details = clampNodeDetails([{ items }]);
+    if (node && details) node.details = details;
   }
   const groups = [...composites.values()].filter((c) => members(c.id).length > 0);
   return {
@@ -622,6 +650,210 @@ function parseMindmap(lines: string[]): MermaidGraph {
 }
 
 // ---------------------------------------------------------------------------
+// Class diagram
+// ---------------------------------------------------------------------------
+
+// A class name: a word, or `backticked words`; generics ride as ~T~.
+const CLASS_NAME = "(`[^`]+`|[\\p{L}\\p{N}_]+)(?:~([^~]+)~)?";
+// The UML arrows: an optional end marker, a solid (--) or dashed (..) line,
+// an optional end marker. Markers: <| |> triangle, * diamond, o hollow
+// diamond, < > plain head.
+const CLASS_ARROW = "((?:<\\||<|\\*|o)?(?:--|\\.\\.)(?:\\|>|>|\\*|o)?)";
+const CLASS_RELATION = new RegExp(
+  `^${CLASS_NAME}\\s*(?:"[^"]*"\\s*)?${CLASS_ARROW}\\s*(?:"[^"]*"\\s*)?${CLASS_NAME}\\s*(?::\\s*(.*))?$`,
+  "u",
+);
+const CLASS_DECL = new RegExp(
+  `^class\\s+${CLASS_NAME}(?:\\s*\\["([^"]*)"\\])?(?::::[\\w-]+)?\\s*(\\{)?\\s*$`,
+  "u",
+);
+const CLASS_MEMBER = new RegExp(`^${CLASS_NAME}\\s*:\\s*(.+)$`, "u");
+const CLASS_ANNOTATION = new RegExp(`^<<\\s*([\\w-]+)\\s*>>\\s*${CLASS_NAME}\\s*$`, "u");
+
+/**
+ * clean(), keeping Mermaid's ~T~ generics as <T>: clean() drops anything
+ * tag-shaped, which `List<int>` is, so the brackets travel as placeholders.
+ */
+const cleanGeneric = (s: string) =>
+  clean(s.replace(/~([^~]+)~/g, "‹$1›")).replace(/‹([^›]*)›/g, "<$1>");
+
+const CLASS_SKIP = /^(note|classDef|cssClass|style|click|callback|link|accTitle|accDescr|title)\b/;
+
+/** A stereotype onto the class family's node types; others stay "class". */
+function classTypeFor(stereotype: string): string | undefined {
+  const s = stereotype.toLowerCase();
+  if (s === "interface") return "interface";
+  if (s === "abstract") return "abstract";
+  if (s === "enumeration" || s === "enum") return "enum";
+  return undefined;
+}
+
+/**
+ * A UML arrow read as the class family's vocabulary (representations.ts:
+ * inherits, implements, composition, aggregation, association, depends) and
+ * the direction the Lucent edge runs: the child → its parent, the implementer
+ * → its interface, the whole → its part, the dependent → what it needs.
+ * `reverse` means the right-hand name is the edge's source.
+ */
+function classRelation(arrow: string): { relationship: string; reverse: boolean } {
+  const dashed = arrow.includes("..");
+  if (arrow.startsWith("<|")) return { relationship: dashed ? "implements" : "inherits", reverse: true };
+  if (arrow.endsWith("|>")) return { relationship: dashed ? "implements" : "inherits", reverse: false };
+  if (arrow.startsWith("*")) return { relationship: "composition", reverse: false };
+  if (arrow.endsWith("*")) return { relationship: "composition", reverse: true };
+  if (arrow.startsWith("o")) return { relationship: "aggregation", reverse: false };
+  if (arrow.endsWith("o")) return { relationship: "aggregation", reverse: true };
+  const relationship = dashed ? "depends" : "association";
+  return { relationship, reverse: arrow.startsWith("<") };
+}
+
+function parseClass(lines: string[]): MermaidGraph {
+  const nodes = new Map<
+    string,
+    { id: string; label: string; nodeType: string; groupId?: string; details?: NodeDetails }
+  >();
+  const members = new Map<string, string[]>();
+  const edges: MermaidGraph["edges"] = [];
+  const groups: MermaidGraph["groups"] = [];
+  // What each open `{` belongs to: a namespace (a group) or a class body.
+  const blocks: Array<{ type: "namespace" | "class"; id: string }> = [];
+  let direction: "TD" | "LR" = "TD";
+  let skipped = 0;
+
+  const nameOf = (raw: string, generic?: string) => {
+    const base = raw.replace(/^`|`$/g, "");
+    return { id: base, label: cleanGeneric(generic ? `${base}~${generic}~` : base) || base };
+  };
+  const namespace = () => [...blocks].reverse().find((b) => b.type === "namespace")?.id;
+  const declare = (raw: string, generic?: string, label?: string, standalone = false) => {
+    const name = nameOf(raw, generic);
+    const group = namespace();
+    const existing = nodes.get(name.id);
+    if (existing) {
+      if (label) existing.label = label;
+      else if (generic && existing.label === name.id) existing.label = name.label;
+      // A `class X` inside a namespace puts X there, wherever a relation
+      // first mentioned it (Mermaid's rule, as for flowchart subgraphs).
+      if (standalone && group) existing.groupId = group;
+      return existing;
+    }
+    const node = {
+      id: name.id,
+      label: label || name.label,
+      nodeType: "class",
+      ...(group ? { groupId: group } : {}),
+    };
+    nodes.set(name.id, node);
+    return node;
+  };
+  const stereotype = (id: string, s: string) => {
+    const type = classTypeFor(s);
+    const node = nodes.get(id);
+    if (type && node) node.nodeType = type;
+  };
+  // Members keep Mermaid's own UML notation ("+save(): void").
+  const addMember = (id: string, raw: string) => {
+    const text = cleanGeneric(raw);
+    if (text) members.set(id, [...(members.get(id) ?? []), text]);
+  };
+
+  for (const [n, raw] of lines.entries()) {
+    const line = raw.trim();
+    if (n === 0) continue;
+    const body = blocks[blocks.length - 1];
+    if (line === "}") {
+      blocks.pop();
+      continue;
+    }
+    if (body?.type === "class") {
+      const st = /^<<\s*([\w-]+)\s*>>$/.exec(line);
+      if (st) stereotype(body.id, st[1]!);
+      else addMember(body.id, line);
+      continue;
+    }
+    const dir = /^direction\s+(TD|TB|LR|RL|BT)$/i.exec(line);
+    if (dir) {
+      direction = /^(LR|RL)$/i.test(dir[1]!) ? "LR" : "TD";
+      continue;
+    }
+    if (CLASS_SKIP.test(line)) {
+      skipped++;
+      continue;
+    }
+    const ns =/^namespace\s+([\p{L}\p{N}_.-]+)\s*\{$/u.exec(line);
+    if (ns) {
+      const id = ns[1]!;
+      if (!groups.some((g) => g.id === id)) groups.push({ id, label: id });
+      blocks.push({ type: "namespace", id });
+      continue;
+    }
+    const decl = CLASS_DECL.exec(line);
+    if (decl) {
+      const [, raw, generic, label, open] = decl;
+      const node = declare(raw!, generic, label ? clean(label) : undefined, true);
+      if (open) blocks.push({ type: "class", id: node.id });
+      continue;
+    }
+    const rel = CLASS_RELATION.exec(line);
+    if (rel) {
+      const [, a, aGeneric, arrow, b, bGeneric, label] = rel;
+      const left = declare(a!, aGeneric).id;
+      const right = declare(b!, bGeneric).id;
+      const { relationship, reverse } = classRelation(arrow!);
+      // An association's name is what it is ("places"); the other kinds keep
+      // their UML word, which is what the class lens draws the arrowhead from.
+      const named = relationship === "association" && label ? clean(label) : "";
+      edges.push({
+        source: reverse ? right : left,
+        target: reverse ? left : right,
+        relationship: named || relationship,
+      });
+      continue;
+    }
+    const annotation = CLASS_ANNOTATION.exec(line);
+    if (annotation) {
+      const node = declare(annotation[2]!, annotation[3]);
+      stereotype(node.id, annotation[1]!);
+      continue;
+    }
+    const member = CLASS_MEMBER.exec(line);
+    if (member) {
+      const node = declare(member[1]!, member[2]);
+      addMember(node.id, member[3]!);
+      continue;
+    }
+    // Notes, styling, links and callbacks carry no class semantics.
+    skipped++;
+  }
+
+  // A member with a parameter list is an operation; anything else an
+  // attribute (an enum's are its values) — UML's two compartments.
+  for (const [id, items] of members) {
+    const node = nodes.get(id);
+    if (!node) continue;
+    const ops = items.filter((m) => m.includes("("));
+    const attrs = items.filter((m) => !m.includes("("));
+    const details = clampNodeDetails([
+      ...(attrs.length
+        ? [{ title: node.nodeType === "enum" ? "Values" : "Attributes", items: attrs }]
+        : []),
+      ...(ops.length ? [{ title: "Operations", items: ops }] : []),
+    ]);
+    if (details) node.details = details;
+  }
+  const used = new Set([...nodes.values()].map((x) => x.groupId).filter(Boolean));
+  return {
+    flavor: "class",
+    kind: "class",
+    direction,
+    nodes: [...nodes.values()],
+    edges,
+    groups: groups.filter((g) => used.has(g.id)),
+    skipped,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Public: parse and convert
 // ---------------------------------------------------------------------------
 
@@ -638,17 +870,19 @@ export function parseMermaid(text: string): MermaidGraph {
       ? parseState(lines)
       : flavor === "mindmap"
         ? parseMindmap(lines)
-        : flavor === "flowchart"
-          ? parseFlowchart(lines)
-          : {
-              flavor: "flowchart" as const,
-              kind: "flowchart" as const,
-              direction: "TD" as const,
-              nodes: [],
-              edges: [],
-              groups: [],
-              skipped: 0,
-            };
+        : flavor === "class"
+          ? parseClass(lines)
+          : flavor === "flowchart"
+            ? parseFlowchart(lines)
+            : {
+                flavor: "flowchart" as const,
+                kind: "flowchart" as const,
+                direction: "TD" as const,
+                nodes: [],
+                edges: [],
+                groups: [],
+                skipped: 0,
+              };
   // One edge per (source, target, relationship); no self-loops (the
   // validator refuses them — a state's self-transition is dropped, counted).
   const seen = new Set<string>();
@@ -728,6 +962,7 @@ export function mermaidToOps(text: string, options: MermaidImportOptions = {}): 
         nodeType: n.nodeType,
         label: n.label,
         groupId: region,
+        ...(n.details ? { details: n.details } : {}),
       });
   } else {
     ops.push({ op: "CREATE_DIAGRAM", kind: graph.kind });
@@ -747,6 +982,7 @@ export function mermaidToOps(text: string, options: MermaidImportOptions = {}): 
         nodeType: n.nodeType,
         label: n.label,
         ...(groupId ? { groupId } : {}),
+        ...(n.details ? { details: n.details } : {}),
       });
     }
   }
@@ -789,6 +1025,70 @@ function mermaidId(id: string): string {
 const START_TYPES = new Set(["start", "initial", "entry"]);
 const END_TYPES = new Set(["end", "final", "exit"]);
 
+/** Every details item, in order, flattened to one safe Mermaid line each. */
+function detailItems(details: NodeDetails | undefined): string[] {
+  return (details?.sections ?? [])
+    .flatMap((s) => s.items)
+    .map((item) => item.replace(/[{}]/g, " ").replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+}
+
+/** The Mermaid arrow for each class-family relationship, and which end leads. */
+const CLASS_ARROWS: Record<string, { arrow: string; reverse: boolean }> = {
+  inherits: { arrow: "<|--", reverse: true },
+  implements: { arrow: "<|..", reverse: true },
+  composition: { arrow: "*--", reverse: false },
+  aggregation: { arrow: "o--", reverse: false },
+  depends: { arrow: "..>", reverse: false },
+  association: { arrow: "-->", reverse: false },
+};
+
+/**
+ * A class diagram exports as one, compartments and all: members from the
+ * node's details (Mermaid sorts attributes from operations by the parameter
+ * list, as the import does), the stereotype from its node type, and the UML
+ * arrow from each edge's relationship — so the round trip is lossless for
+ * everything but compartment titles.
+ */
+function toClassDiagram(ws: Workspace): string {
+  const lines = ["classDiagram"];
+  const stereotypes: Record<string, string> = {
+    interface: "interface",
+    abstract: "abstract",
+    enum: "enumeration",
+  };
+  for (const n of Object.values(ws.nodes)) {
+    const id = mermaidId(n.id);
+    const label = n.label.replace(/["\n]/g, " ").trim();
+    const head = label && label !== id ? `  class ${id}["${label}"]` : `  class ${id}`;
+    const stereotype = stereotypes[n.nodeType];
+    const members = detailItems(n.details);
+    if (!stereotype && members.length === 0) {
+      lines.push(head);
+      continue;
+    }
+    lines.push(`${head} {`);
+    if (stereotype) lines.push(`    <<${stereotype}>>`);
+    // Mermaid spells generics ~T~ (an angle bracket would read as markup).
+    for (const m of members) lines.push(`    ${m.replace(/<([^<>]*)>/g, "~$1~")}`);
+    lines.push("  }");
+  }
+  for (const e of Object.values(ws.edges)) {
+    if (!ws.nodes[e.source] || !ws.nodes[e.target]) continue;
+    const known = CLASS_ARROWS[e.relationship];
+    const a = mermaidId(e.source);
+    const b = mermaidId(e.target);
+    if (known) {
+      lines.push(known.reverse ? `  ${b} ${known.arrow} ${a}` : `  ${a} ${known.arrow} ${b}`);
+    } else {
+      // Any other relationship is a named association.
+      const name = e.relationship.replace(/[\n:]/g, " ").trim();
+      lines.push(`  ${a} --> ${b}${name ? ` : ${name}` : ""}`);
+    }
+  }
+  return lines.join("\n") + "\n";
+}
+
 function toStateDiagram(ws: Workspace): string {
   const lines = ["stateDiagram-v2"];
   const pseudo = (id: string) => {
@@ -800,6 +1100,9 @@ function toStateDiagram(ws: Workspace): string {
     const id = mermaidId(n.id);
     const label = n.label.replace(/["\n]/g, " ").trim();
     lines.push(label && label !== id ? `  state "${label}" as ${id}` : `  ${id}`);
+    // Details are the state's description lines — what the import reads back
+    // as details. Mermaid descriptions have no headings, so titles stay home.
+    for (const item of detailItems(n.details)) lines.push(`  ${id} : ${item}`);
   }
   for (const e of Object.values(ws.edges)) {
     if (!ws.nodes[e.source] || !ws.nodes[e.target]) continue;
@@ -846,8 +1149,9 @@ function toMindmap(ws: Workspace): string | null {
 
 /**
  * Export the semantic graph as Mermaid. A state machine exports as a state
- * diagram and a tree-shaped mind map as a mind map, so both round-trip as
- * themselves; everything else is a flowchart with groups as subgraphs.
+ * diagram, a class diagram as a class diagram and a tree-shaped mind map as a
+ * mind map, so each round-trips as itself; everything else is a flowchart
+ * with groups as subgraphs.
  * Sticky notes and shapes are omitted: Mermaid has no equivalent, and
  * inventing nodes for them would make the round trip lossy in a confusing
  * way.
@@ -856,6 +1160,7 @@ export function boardToMermaid(ws: Workspace): string {
   const nodes = Object.values(ws.nodes);
   if (nodes.length === 0) return "flowchart TD\n  %% empty board\n";
   if (ws.diagramKind === "statemachine") return toStateDiagram(ws);
+  if (ws.diagramKind === "class") return toClassDiagram(ws);
   if (ws.diagramKind === "mindmap") {
     const tree = toMindmap(ws);
     if (tree) return tree;

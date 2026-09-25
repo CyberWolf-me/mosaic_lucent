@@ -70,7 +70,7 @@ describe("representation registry", () => {
       sequence: "layered",
       er: "layered",
       class: "layered",
-      storymap: "grid",
+      storymap: "storymap",
     };
     for (const kind of DIAGRAM_KINDS) {
       expect(layoutStrategyFor(kind)).toBe(expected[kind]);

@@ -28,6 +28,7 @@ import { autoIconFor } from "../icons/auto.js";
 import { NodeIcon } from "../icons/Icon.js";
 import { IconPicker } from "../icons/IconPicker.js";
 import { useIcon } from "../icons/registry.js";
+import { detailsEditOps, detailsPlaceholder, formatDetailsText } from "../nodeDetails.js";
 
 /**
  * The node inspector: what a node IS on this board, not how it looks.
@@ -71,7 +72,13 @@ export function NodeInspector({
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null;
-      if (e.key === "Escape" && t?.tagName !== "INPUT" && t?.tagName !== "SELECT") onClose();
+      if (
+        e.key === "Escape" &&
+        t?.tagName !== "INPUT" &&
+        t?.tagName !== "SELECT" &&
+        t?.tagName !== "TEXTAREA"
+      )
+        onClose();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -112,6 +119,11 @@ export function NodeInspector({
           onOpenMeeting={onOpenMeeting}
         />
         <Work node={node} workspace={workspace} onSelectNode={onSelectNode} />
+        {canEdit ? (
+          <DetailsSection node={node} onApply={onApply} />
+        ) : (
+          node.details && <DetailsReadOnly node={node} />
+        )}
         <Connections node={node} workspace={workspace} onSelectNode={onSelectNode} />
         {/* A statement card shows its statement glyph, not an icon. */}
         {canEdit && !st && <IconSection node={node} onApply={onApply} />}
@@ -215,6 +227,94 @@ function IconSection({
           onClose={() => setOpen(false)}
         />
       )}
+    </section>
+  );
+}
+
+/**
+ * The node's details (V4 compartments: a class's attributes and operations,
+ * an entity's columns, a C4 element's technology) as one plain-text editor:
+ * `## Title` starts a section, every other line is an item. Leaving the field
+ * commits one SET_NODE_DETAILS through the same validator the AI's ops run
+ * through — so it is shared and undoable like any edit — and clearing the
+ * text clears the details. Parsing lives in nodeDetails.ts.
+ */
+function DetailsSection({
+  node,
+  onApply,
+}: {
+  node: Node;
+  onApply: (ops: Operation[], label: string) => boolean;
+}) {
+  const current = formatDetailsText(node.details);
+  const [draft, setDraft] = useState(current);
+  const [refused, setRefused] = useState(false);
+
+  // A different node, or its details changed under us (a peer, an undo, the
+  // AI): the field shows what the board now says.
+  useEffect(() => {
+    setDraft(current);
+    setRefused(false);
+  }, [node.id, current]);
+
+  const commit = () => {
+    const ops = detailsEditOps(node.id, node.details, draft);
+    if (ops.length === 0) return;
+    const op = ops[0];
+    const clearing = op?.op === "SET_NODE_DETAILS" && op.details === null;
+    setRefused(!onApply(ops, clearing ? "Clear details" : "Edit details"));
+  };
+
+  const lines = draft.split("\n").length;
+  return (
+    <section className="ni-section" onMouseDown={(e) => e.stopPropagation()}>
+      <label className="ni-label" htmlFor={`ni-details-${node.id}`}>
+        Details
+      </label>
+      <textarea
+        id={`ni-details-${node.id}`}
+        className="ni-details-input"
+        value={draft}
+        rows={Math.min(14, Math.max(3, lines + 1))}
+        spellCheck={false}
+        placeholder={detailsPlaceholder(node.nodeType)}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          // Escape abandons the draft — the field goes back to the board's
+          // text, so the blur that follows commits nothing. Nothing typed
+          // here is a canvas shortcut.
+          if (e.key === "Escape") setDraft(current);
+          e.stopPropagation();
+        }}
+      />
+      <p className="ni-details-hint">
+        <span className="mono">## Title</span> starts a section · one item per line
+      </p>
+      {refused && (
+        <p className="ni-refused" role="alert">
+          Lucent refused that edit — the node may have been removed.
+        </p>
+      )}
+    </section>
+  );
+}
+
+/** Details for a viewer who can't edit: the compartments, as the card shows them. */
+function DetailsReadOnly({ node }: { node: Node }) {
+  return (
+    <section className="ni-section">
+      <div className="ni-label">Details</div>
+      {node.details!.sections.map((s, i) => (
+        <div key={i} className="ni-details-section">
+          {s.title && <div className="ni-sub">{s.title}</div>}
+          <ul className="ni-details-list">
+            {s.items.map((item, j) => (
+              <li key={j}>{item}</li>
+            ))}
+          </ul>
+        </div>
+      ))}
     </section>
   );
 }

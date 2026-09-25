@@ -1,5 +1,5 @@
 import type { Operation } from "./operations.js";
-import type { Workspace } from "./model.js";
+import type { NodeDetails, Workspace } from "./model.js";
 import { applyOperations } from "./reducer.js";
 
 /**
@@ -29,6 +29,15 @@ function captureNode(ws: Workspace, id: string) {
   return {
     node: ws.nodes[id],
     edges: Object.values(ws.edges).filter((e) => e.source === id || e.target === id),
+  };
+}
+
+function copyDetails(details: NodeDetails): NodeDetails {
+  return {
+    sections: details.sections.map((s) => ({
+      ...(s.title !== undefined ? { title: s.title } : {}),
+      items: [...s.items],
+    })),
   };
 }
 
@@ -69,6 +78,9 @@ export function inverseOperations(ops: readonly Operation[], before: Workspace):
             // node's origin is as much a fact to undo as its position.
             ...(captured.node.provenance ? { provenance: { ...captured.node.provenance } } : {}),
             ...(captured.node.icon ? { icon: captured.node.icon } : {}),
+            // A class's attributes, an entity's columns: the node's content,
+            // so undoing its delete brings them back with it (V4).
+            ...(captured.node.details ? { details: copyDetails(captured.node.details) } : {}),
           },
           // Restoring the node's position and pin state is what makes undo feel
           // exact: a node the user placed by hand would otherwise pop back at
@@ -133,6 +145,18 @@ export function inverseOperations(ops: readonly Operation[], before: Workspace):
         const node = walking.nodes[op.id];
         if (node && (node.icon ?? null) !== op.icon)
           inverses.unshift({ op: "SET_NODE_ICON", id: op.id, icon: node.icon ?? null });
+        break;
+      }
+      case "SET_NODE_DETAILS": {
+        // Whole-value restore: the details the node had (a copy, so a later
+        // edit can't reach back into history), or null when it had none.
+        const node = walking.nodes[op.id];
+        if (node)
+          inverses.unshift({
+            op: "SET_NODE_DETAILS",
+            id: op.id,
+            details: node.details ? copyDetails(node.details) : null,
+          });
         break;
       }
       case "SET_ISSUE": {

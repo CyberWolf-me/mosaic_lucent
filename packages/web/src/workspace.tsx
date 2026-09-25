@@ -21,12 +21,16 @@ import {
   createWorkspace,
   existingTopics,
   foldStatementTopics,
+  lensFor,
   parseWorkspace,
   parseWorkspaceOrDefault,
   relayoutRegionWithRoutes,
+  representationLabel,
+  starterFor,
   validateOperations,
   type DiagramKind,
   type Operation,
+  type RepresentationLens,
   type Workspace,
 } from "@lucent/core";
 import { streamGenerate, PlanRefusalError } from "./api.js";
@@ -111,8 +115,76 @@ const LEGACY_LENS_VIEWS: Partial<Record<View, CanvasLens>> = {
 /** Canvas sub-state is derived from the data, not stored separately. */
 export type CanvasPhase = "empty" | "generating" | "main" | "proposing" | "voice";
 
-/** Canvas lenses (UX-1): alternate renderings of the same board on the canvas. */
-export type CanvasLens = "visual" | "kanban" | "document" | "wireframe" | "sequence" | "er";
+/**
+ * Canvas lenses (UX-1): alternate renderings of the same board on the canvas.
+ * The registry's family lenses (sequence, ER) are part of the union by type,
+ * so a family that gains a lens in the registry is a lens here too.
+ */
+export type CanvasLens = "visual" | "kanban" | "document" | "wireframe" | RepresentationLens;
+
+/**
+ * The lens follows the kind (V4). A family whose registry entry names a lens
+ * (a sequence diagram, an ER diagram) is only readable through it, so when the
+ * board's kind changes — the user converts it, the AI creates one, a peer
+ * converts it, a board is opened — the lens moves with it:
+ *
+ *  - arriving at a kind with a lens presents that lens;
+ *  - leaving one returns to the visual canvas, but ONLY when the lens on
+ *    screen is the one the old kind implied — kanban, document or wireframe
+ *    is the person's own choice, and a conversion never overrides it;
+ *  - `prevKind` undefined is the board's first appearance (boot): its lens
+ *    replaces only the default visual lens, so a `?lens=` deep link wins.
+ *
+ * Pure so the rule is tested without a provider; the provider calls it once
+ * per kind change, during render, so the canvas never paints a frame of a
+ * sequence board as boxes-and-arrows before switching.
+ */
+export function lensForKindChange(
+  prevKind: DiagramKind | undefined,
+  nextKind: DiagramKind,
+  currentLens: CanvasLens,
+): CanvasLens {
+  if (prevKind === nextKind) return currentLens;
+  const nextLens = lensFor(nextKind);
+  if (nextLens) {
+    if (prevKind === undefined) return currentLens === "visual" ? nextLens : currentLens;
+    return nextLens;
+  }
+  const prevLens = prevKind === undefined ? undefined : lensFor(prevKind);
+  return prevLens !== undefined && currentLens === prevLens ? "visual" : currentLens;
+}
+
+/**
+ * Whether the board is blank for the purpose of "Convert board to…": no
+ * nodes, no groups (empty swimlanes or matrix cells are structure someone
+ * built) and no manual shapes (stickies are content too — seeding a starter
+ * among them would drop an example into someone's notes). Converting a blank
+ * board seeds the family's starter instead of switching the kind of nothing.
+ */
+export function boardIsBlank(ws: Workspace): boolean {
+  return (
+    Object.keys(ws.nodes).length === 0 &&
+    Object.keys(ws.groups).length === 0 &&
+    Object.keys(ws.shapes).length === 0
+  );
+}
+
+/**
+ * The operations "Convert board to <kind>" applies: on a blank board the
+ * family's registry starter (a minimal, editable example — so picking "State
+ * machine" on an empty board shows a state machine, including when that is
+ * already the board's kind), otherwise one TRANSFORM_DIAGRAM that keeps every
+ * node and edge and re-lays them out in the new geometry. `idPrefix`
+ * namespaces the starter's ids; the caller passes a fresh one per insert.
+ */
+export function convertBoardOps(
+  ws: Workspace,
+  kind: DiagramKind,
+  idPrefix: string,
+): { ops: Operation[]; seeded: boolean } {
+  if (boardIsBlank(ws)) return { ops: starterFor(kind, idPrefix), seeded: true };
+  return { ops: [{ op: "TRANSFORM_DIAGRAM", to: kind }], seeded: false };
+}
 
 /** Realtime link state. "offline" covers both signed-out and disconnected. */
 export type SyncStatus = "offline" | "connecting" | "online";
@@ -325,6 +397,12 @@ export interface WorkspaceState {
   redo: () => void;
   restoreVersion: (index: number) => void;
   selectDiagram: (kind: DiagramKind) => void;
+  /**
+   * "Convert board to <kind>" — the context menu's and ⌘K's one path. A blank
+   * board gets the family's starter; a board with content is transformed
+   * (`convertBoardOps`). The lens follows the new kind on its own.
+   */
+  convertBoard: (kind: DiagramKind) => void;
   /**
    * Change one region's diagram kind (a group with a kind), or clear it back
    * to the board-wide layout with `null`. The manual counterpart of the AI's
@@ -617,15 +695,29 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [view, setViewState] = useState<View>(() =>
     LEGACY_LENS_VIEWS[initialLocationRef.view] ? "canvas" : initialLocationRef.view,
   );
-  const [lens, setLens] = useState<CanvasLens>(
-    () => LEGACY_LENS_VIEWS[initialLocationRef.view] ?? initialLocationRef.lens,
+  // The restored board's own lens (a reloaded sequence board opens in the
+  // sequence lens) unless the address bar asked for another one.
+  const [lens, setLens] = useState<CanvasLens>(() =>
+    lensForKindChange(
+      undefined,
+      historyRef.current.current().diagramKind,
+      LEGACY_LENS_VIEWS[initialLocationRef.view] ?? initialLocationRef.lens,
+    ),
   );
+  /**
+   * The board's current kind, readable from `setView` (a stable callback
+   * declared before the workspace state). Assigned during render below.
+   */
+  const boardKindRef = useRef<DiagramKind>(historyRef.current.current().diagramKind);
   /**
    * UX-1: legacy board-like views are canvas lenses now. Keep the `View` type
    * unchanged for compat, but fold those cases into canvas+lens so one board
    * URL (`?view=canvas&lens=kanban`) covers them. Direct `"canvas"` resets to
-   * the visual lens; lens buttons do `setView("canvas")` then `setLens(...)`
-   * in that order so the reset does not wipe the lens.
+   * the board's own lens — the visual canvas, or the registry lens its kind is
+   * read through (V4: a sequence board opened from the rail, a link or a
+   * reload shows the sequence, not its actors as boxes); lens buttons do
+   * `setView("canvas")` then `setLens(...)` in that order so the reset does
+   * not wipe the lens.
    */
   const setView = useCallback((v: View) => {
     switch (v) {
@@ -650,7 +742,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         setViewState("canvas");
         return;
       case "canvas":
-        setLens("visual");
+        setLens(lensFor(boardKindRef.current) ?? "visual");
         setViewState("canvas");
         return;
       default:
@@ -664,6 +756,20 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   // and would invoke `current` detached from the instance — `this.workspace`
   // on undefined. The arrow keeps it bound and runs exactly once.
   const [workspace, setWorkspace] = useState<Workspace>(() => historyRef.current.current());
+  /**
+   * The lens follows the kind (`lensForKindChange`). Adjusted DURING render —
+   * React's "state from the previous render" pattern — not in an effect: an
+   * effect would paint one frame of the old lens over the new kind (a fresh
+   * sequence diagram flashing as boxes). Every path that changes the kind
+   * lands here — a conversion, the AI's CREATE_DIAGRAM, a peer's frame, undo,
+   * opening another project — so none of them has to remember the lens.
+   */
+  const [lensKind, setLensKind] = useState<DiagramKind>(workspace.diagramKind);
+  if (lensKind !== workspace.diagramKind) {
+    setLensKind(workspace.diagramKind);
+    setLens((current) => lensForKindChange(lensKind, workspace.diagramKind, current));
+  }
+  boardKindRef.current = workspace.diagramKind;
   const [chat, setChat] = useState<ChatEntry[]>(restored?.chat ?? []);
   const [busy, setBusy] = useState(false);
   /** M5/E1: characters of the streamed payload received so far (display only). */
@@ -1971,12 +2077,15 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       if (readOnly) return;
       const ops: Operation[] = [{ op: "TRANSFORM_DIAGRAM", to: kind }];
       const next = applyOperations(workspace, ops);
+      // The registry's human label: the chat and the history list are read by
+      // people, who know a "State machine", not a "statemachine".
+      const label = representationLabel(kind);
       const conversation: ChatEntry[] = [
         ...chat,
-        { role: "ai", text: `Switched to ${kind} view.` },
+        { role: "ai", text: `Switched to ${label} view.` },
       ];
       setChat(conversation);
-      commitAndShare(next, ops, `Transform to ${kind}`, conversation, projectName);
+      commitAndShare(next, ops, `Transform to ${label}`, conversation, projectName);
     },
     [workspace, chat, commitAndShare, projectName, readOnly],
   );
@@ -2003,10 +2112,23 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       // other op. Reuses applyManual so a viewer can't flip a region either.
       applyManual(
         [{ op: "SET_GROUP_KIND", id: groupId, kind }],
-        kind ? `Region → ${kind}` : "Region → board layout",
+        kind ? `Region → ${representationLabel(kind)}` : "Region → board layout",
       );
     },
     [applyManual],
+  );
+
+  const convertBoard = useCallback(
+    (kind: DiagramKind) => {
+      if (readOnly) return;
+      // A fresh prefix per insert: the reducer rejects duplicate ids, and a
+      // second "start a flowchart" after an undo must not collide with the first.
+      const prefix = Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+      const { ops, seeded } = convertBoardOps(workspace, kind, prefix);
+      if (seeded) applyManual(ops, `Start a ${representationLabel(kind)}`);
+      else selectDiagram(kind);
+    },
+    [workspace, readOnly, applyManual, selectDiagram],
   );
 
   const newProject = useCallback(() => {
@@ -2288,6 +2410,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     redo,
     restoreVersion,
     selectDiagram,
+    convertBoard,
     setRegionKind,
     layoutStatus,
     retryLayout,

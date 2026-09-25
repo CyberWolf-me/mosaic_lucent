@@ -1,3 +1,9 @@
+import {
+  convertibleKinds,
+  getRepresentation,
+  representationLabel,
+  type DiagramKind,
+} from "@lucent/core";
 import type { CanvasCommand } from "../canvasCommands.js";
 import type { View } from "../workspace.js";
 import type { BoardSearchHit } from "../boards.js";
@@ -14,8 +20,9 @@ import type { BoardSearchHit } from "../boards.js";
  *   2. views — the secondary surfaces, grouped under their header
  *   3. board hits — nodes and shapes on the open board, so the palette also
  *      doubles as jump-to-object search.
- * With no query at all, only actions + views show: a palette that dumps the
- * whole board on open is a list, not a palette.
+ * With no query at all, only actions + views show (less the query-only
+ * conversions): a palette that dumps the whole board on open is a list, not a
+ * palette.
  *
  * Stage C4: on a shared board, the board family becomes SERVER search results
  * (nodes, transcript turns, revisions — the corpus the local scan cannot
@@ -30,7 +37,9 @@ export type PaletteAction =
   | { kind: "export" }
   | { kind: "view"; view: View }
   /** A canvas command (canvasCommands.ts): fit, zoom to a frame, camera history. */
-  | { kind: "canvas"; cmd: CanvasCommand };
+  | { kind: "canvas"; cmd: CanvasCommand }
+  /** "Convert board to <family>" — the workspace's convertBoard (V4). */
+  | { kind: "convert"; to: DiagramKind };
 
 export interface PaletteItem {
   id: string;
@@ -38,6 +47,30 @@ export interface PaletteItem {
   hint: string;
   group: "action" | "view" | "board";
   run: PaletteAction;
+  /**
+   * Listed only once the user types. The eighteen conversions are commands
+   * you search for ("convert", "state machine", "roadmap"), not a menu to
+   * scroll past on every open — the same reason board hits wait for a query.
+   */
+  queryOnly?: boolean;
+}
+
+/**
+ * One "Convert board to <Label>" action per convertible family, from the
+ * representation registry, so a new family is reachable from ⌘K with no edit
+ * here. The hint is the family's summary: it says what the family is for, and
+ * because `filterItems` matches hints too, typing what you want to show
+ * ("lifecycle", "roadmap", "who does what") finds the family that shows it.
+ */
+export function convertPaletteItems(): PaletteItem[] {
+  return convertibleKinds().map((kind) => ({
+    id: `convert-${kind}`,
+    label: `Convert board to ${representationLabel(kind)}`,
+    hint: getRepresentation(kind).summary,
+    group: "action",
+    run: { kind: "convert", to: kind },
+    queryOnly: true,
+  }));
 }
 
 export interface PaletteBoardHit {
@@ -53,7 +86,7 @@ function matches(text: string, needle: string): boolean {
 
 export function filterItems(items: readonly PaletteItem[], query: string): PaletteItem[] {
   const q = query.trim().toLowerCase();
-  if (!q) return [...items];
+  if (!q) return items.filter((it) => !it.queryOnly);
   return items.filter(
     (it) => matches(it.label.toLowerCase(), q) || matches(it.hint.toLowerCase(), q),
   );

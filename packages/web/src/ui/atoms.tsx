@@ -7,7 +7,7 @@ import {
   type CSSProperties,
   type ReactNode,
 } from "react";
-import { routedVertices, type StatementFields } from "@lucent/core";
+import { routedVertices, type NodeDetails, type StatementFields } from "@lucent/core";
 import type { DotColor } from "../scene.js";
 import { KIND_LABEL, KIND_TINT, statusLabel } from "../statementUi.js";
 import { StatementGlyph } from "./StatementGlyph.js";
@@ -160,6 +160,15 @@ export interface NodeCardProps {
    * Undefined renders the ordinary card; the LENS decides, never the model.
    */
   bpmnShape?: "event" | "eventEnd" | "gateway" | "gatewayParallel" | "task" | "initial" | "final";
+  /**
+   * The node's details (V4): UML-style compartments under the title — a
+   * class's attributes and operations, an entity's columns, a C4 element's
+   * technology. The layout already reserved their height (core
+   * nodeDetailsHeight, calibrated to styles/details.css), so they render in
+   * the box the connectors are anchored to. Not drawn inside the small lens
+   * shapes (events, gateways, pseudo-states), which have no room for them.
+   */
+  details?: NodeDetails | undefined;
 }
 
 /** The lens shape's CSS class (BPMN, and the state machine's pseudo-states). */
@@ -202,6 +211,7 @@ export const NodeCard = memo(function NodeCard({
   statementDue,
   fromMeeting = false,
   bpmnShape,
+  details,
 }: NodeCardProps) {
   const drag = useRef<{ sx: number; sy: number; moved: boolean } | null>(null);
   const [dragging, setDragging] = useState(false);
@@ -210,8 +220,15 @@ export const NodeCard = memo(function NodeCard({
   // is the headline, not a chip under the label. The BPMN lens keeps its
   // own shapes, so only ordinary cards take the statement treatment.
   const stmt = statement && !bpmnShape ? (statement as StatementFields) : null;
+  // Compartments need a card: a BPMN task is one, the lens's round and
+  // diamond shapes are not.
+  const compartments =
+    details && details.sections.length > 0 && (!bpmnShape || bpmnShape === "task")
+      ? details.sections
+      : null;
   const cls = [
     "node",
+    compartments ? "has-details" : "",
     stmt ? `stmt stmt-${stmt.kind} is-${stmt.status}` : "",
     state,
     appear ? "appear" : "",
@@ -416,6 +433,23 @@ export const NodeCard = memo(function NodeCard({
         <div className="node-title">{title}</div>
       )}
       {!stmt && sub && <div className="node-sub">{sub}</div>}
+      {compartments && (
+        // UML compartments: each section under a hairline rule, its title
+        // small and its lines in mono. Text nodes only — an item is a string
+        // and renders as one, whatever it says.
+        <div className="node-details">
+          {compartments.map((section, i) => (
+            <div key={i} className="node-details-section">
+              {section.title && <div className="node-details-title">{section.title}</div>}
+              {section.items.map((item, j) => (
+                <div key={j} className="node-details-item">
+                  {item}
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
       {stmt && (statementOwner || statementDue || fromMeeting) && (
         <div className="stmt-foot">
           {statementOwner && (

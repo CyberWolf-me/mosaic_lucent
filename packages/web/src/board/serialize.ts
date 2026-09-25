@@ -1,17 +1,28 @@
-import type { Workspace, Operation } from "@lucent/core";
+import {
+  chartToMarkdown,
+  representationLabel,
+  tableToMarkdown,
+  type Operation,
+  type Workspace,
+} from "@lucent/core";
 
 /**
  * Board serializers for import/export (docs/15 Phase B). Pure string <-> data
  * transforms so they are unit-testable without a DOM.
  */
 
-/** Export the board as a Markdown outline: nodes, edges, and sticky/text notes. */
+/**
+ * Export the board as a Markdown outline: nodes, edges, sticky/text notes, and
+ * the V4 data objects — a table as a Markdown table, a chart as its data (a
+ * chart's meaning is its numbers, not its drawing).
+ */
 export function boardToMarkdown(ws: Workspace): string {
   const lines: string[] = [`# ${ws.name || "Lucent board"}`, ""];
 
   const nodes = Object.values(ws.nodes);
   if (nodes.length) {
-    lines.push(`## Diagram (${ws.diagramKind})`, "");
+    // The registry's human label ("Flowchart"), not the raw kind id.
+    lines.push(`## Diagram (${representationLabel(ws.diagramKind)})`, "");
     for (const n of nodes) lines.push(`- **${n.label}** _(${n.nodeType})_`);
     const edges = Object.values(ws.edges);
     if (edges.length) {
@@ -30,6 +41,21 @@ export function boardToMarkdown(ws: Workspace): string {
   if (notes.length) {
     lines.push("", "## Notes", "");
     for (const s of notes) lines.push(`- ${s.text!.replace(/\n/g, " ")}`);
+  }
+
+  const tables = Object.values(ws.shapes).filter((s) => s.kind === "table" && s.table);
+  if (tables.length) {
+    lines.push("", "## Tables");
+    tables.forEach((s, i) => {
+      if (tables.length > 1) lines.push("", `### Table ${i + 1}`);
+      lines.push("", tableToMarkdown(s.table!));
+    });
+  }
+
+  const charts = Object.values(ws.shapes).filter((s) => s.kind === "chart" && s.chart);
+  if (charts.length) {
+    lines.push("", "## Charts");
+    for (const s of charts) lines.push("", chartToMarkdown(s.chart!));
   }
   return lines.join("\n") + "\n";
 }
@@ -57,7 +83,12 @@ export function boardToCsv(ws: Workspace): string {
   return rows.join("\n") + "\n";
 }
 
-/** Parse CSV text into a grid of sticky-note CREATE_SHAPE operations. */
+/**
+ * Parse CSV text into a grid of sticky-note CREATE_SHAPE operations. The
+ * canvas imports a CSV as ONE table shape now (importers.ts
+ * `delimitedToTableOp`); this remains for the dashboard's "new board from a
+ * file", which still lays CSV out as notes.
+ */
 export function csvToStickyOps(csv: string, startX = 80, startY = 80): Operation[] {
   const rows = parseCsv(csv);
   const ops: Operation[] = [];

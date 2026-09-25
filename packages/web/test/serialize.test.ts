@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { createWorkspace, applyOperations } from "@lucent/core";
+import { createTable, createWorkspace, applyOperations, representationLabel } from "@lucent/core";
 import type { Operation } from "@lucent/core";
 import {
   boardToMarkdown,
@@ -33,6 +33,41 @@ describe("board serialize (Phase B)", () => {
     expect(md).toContain("**Customer**");
     expect(md).toContain("Customer → Checkout");
     expect(md).toContain("- Ship faster");
+  });
+
+  it("names the diagram kind by its registry label, not its raw id", () => {
+    const md = boardToMarkdown(ecommerce());
+    expect(md).toContain(`## Diagram (${representationLabel("flowchart")})`);
+    expect(md).not.toContain("## Diagram (flowchart)");
+  });
+
+  it("exports tables as Markdown tables and charts as their data", () => {
+    const ws = applyOperations(ecommerce(), [
+      {
+        op: "CREATE_SHAPE",
+        id: "t1",
+        kind: "table",
+        position: { x: 0, y: 0 },
+        size: { width: 300, height: 100 },
+        table: createTable(["Task", "Owner"], [["Design", "Alex | Sam"]]),
+      },
+      {
+        op: "CREATE_SHAPE",
+        id: "c1",
+        kind: "chart",
+        position: { x: 0, y: 200 },
+        size: { width: 300, height: 200 },
+        chart: { type: "bar", title: "Revenue", labels: ["Q1", "Q2"], series: [{ name: "EU", values: [3, -1] }] },
+      },
+    ]);
+    const md = boardToMarkdown(ws);
+    expect(md).toContain("## Tables");
+    expect(md).toContain("| Task | Owner |");
+    // A pipe inside a cell is escaped so it can't split the column.
+    expect(md).toContain("| Design | Alex \\| Sam |");
+    expect(md).toContain("## Charts");
+    expect(md).toContain("**Revenue** _(bar chart)_");
+    expect(md).toContain("| Q2 | -1 |");
   });
 
   it("exports CSV with node rows and outgoing edges", () => {

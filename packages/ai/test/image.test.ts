@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { isImageDataUrl } from "@lucent/core";
-import { MockImageProvider, OpenAIImageProvider } from "../src/image.js";
+import { MockImageProvider, OpenAIImageProvider, sniffImageMime } from "../src/image.js";
 
 /**
  * The mock emits base64 (the workspace schema refuses percent-encoded data
@@ -152,5 +152,65 @@ describe("OpenAIImageProvider", () => {
     const res = await provider.generateImage({ prompt: "a cat" });
     expect(res.src).toBe(`data:image/png;base64,${OK_B64}`);
     expect(modelsUsed).toEqual(["primary", "backup-1"]);
+  });
+
+  it("labels the data URL with the type the bytes really are", async () => {
+    // gpt-image models honour output_format jpeg/webp, and gateways return
+    // whatever their backend drew: the declared type has to follow the bytes.
+    const jpeg = bytes(0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46);
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(jsonResponse(200, { data: [{ b64_json: jpeg }] }));
+    const result = await make(fetchImpl).generateImage({ prompt: "a cat" });
+    expect(result.src).toBe(`data:image/jpeg;base64,${jpeg}`);
+    expect(isImageDataUrl(result.src)).toBe(true);
+  });
+
+  it("keeps the PNG label for bytes it cannot identify", async () => {
+    const unknown = bytes(0x00, 0x01, 0x02, 0x03, 0x04, 0x05);
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(jsonResponse(200, { data: [{ b64_json: unknown }] }));
+    const result = await make(fetchImpl).generateImage({ prompt: "a cat" });
+    expect(result.src).toBe(`data:image/png;base64,${unknown}`);
+  });
+});
+
+/** Base64 of raw bytes (Node test code, so Buffer is fine here). */
+function bytes(...values: number[]): string {
+  return Buffer.from(values).toString("base64");
+}
+
+/** Bytes of an ASCII signature followed by arbitrary data. */
+function ascii(text: string, ...rest: number[]): string {
+  return Buffer.concat([Buffer.from(text, "latin1"), Buffer.from(rest)]).toString("base64");
+}
+
+describe("sniffImageMime", () => {
+  it("recognises PNG, JPEG, GIF and WebP by their magic bytes", () => {
+    expect(sniffImageMime(bytes(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0))).toBe(
+      "image/png",
+    );
+    expect(sniffImageMime(bytes(0xff, 0xd8, 0xff, 0xdb, 0, 0x43))).toBe("image/jpeg");
+    expect(sniffImageMime(ascii("GIF89a", 1, 0, 1, 0))).toBe("image/gif");
+    expect(sniffImageMime(ascii("GIF87a", 1, 0, 1, 0))).toBe("image/gif");
+    expect(sniffImageMime(ascii("RIFF$\0\0\0WEBPVP8 "))).toBe("image/webp");
+  });
+
+  it("does not call every RIFF file WebP", () => {
+    // A WAV file is RIFF too; only the WEBP form type at byte 8 counts.
+    expect(sniffImageMime(ascii("RIFF$\0\0\0WAVEfmt "))).toBeNull();
+  });
+
+  it("returns null for unknown bytes, text, and malformed base64", () => {
+    expect(sniffImageMime(bytes(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11))).toBeNull();
+    expect(sniffImageMime(ascii("<svg xmlns="))).toBeNull();
+    expect(sniffImageMime("!!!not base64!!!")).toBeNull();
+    expect(sniffImageMime("")).toBeNull();
+  });
+
+  it("tolerates line-wrapped base64", () => {
+    const png = bytes(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0x0d);
+    expect(sniffImageMime(`${png.slice(0, 8)}\n${png.slice(8)}`)).toBe("image/png");
   });
 });
