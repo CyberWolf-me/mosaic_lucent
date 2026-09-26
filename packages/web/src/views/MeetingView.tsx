@@ -550,8 +550,11 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
           { ...card, ...("error" in result ? {} : { links: result.citations }) },
         ]);
 
-        // M6.2: read the answer aloud unless muted. Errors stay text.
-        if (!voiceMutedRef.current && !card.error && card.answer !== "") {
+        // M6.2: read the answer aloud unless muted. Errors stay text. A
+        // "Lucent, stop" while the answer was being fetched (docs/28 F20)
+        // dismissed the lease: the card still lands, nothing is spoken.
+        const dismissed = leaseManagerRef.current.getState() === "dormant";
+        if (!voiceMutedRef.current && !card.error && card.answer !== "" && !dismissed) {
           playbackRef.current?.stop();
           const spoken = await speakAnswer(card.answer);
           playbackRef.current = spoken.playback;

@@ -157,6 +157,47 @@ describe("Conversational Lease Engine — Edge Cases", () => {
     });
   });
 
+  // docs/28 F20: "Lucent, stop" used to open a lease and ask Ask "stop".
+  describe("Addressed stop phrases", () => {
+    it.each([
+      "Lucent, stop.",
+      "Lucent, stop",
+      "Hey Lucent, cancel",
+      "Lucent, never mind.",
+      "Lucent, nevermind",
+      "Lucent, wait!",
+      "Lucent, that's enough",
+      "Lucent, please stop",
+    ])("'%s' is silence, not a question", (text) => {
+      const res = manager.evaluateTurn({ speaker: "Alice", text }, T0);
+      expect(res.action).toBe("dismiss");
+      expect(manager.getState()).toBe("dormant");
+      expect(manager.getLease()).toBeNull();
+    });
+
+    it("a stop phrase ends a running lease too", () => {
+      manager.evaluateTurn({ speaker: "Alice", text: "Lucent, summarize the sprint goals" }, T0);
+      manager.onAiStartResponding();
+      manager.onTtsDone("The goal is the auth flow.", T0 + 3_000);
+      const res = manager.evaluateTurn({ speaker: "Alice", text: "Lucent, stop." }, T0 + 4_000);
+      expect(res.action).toBe("dismiss");
+      expect(manager.getState()).toBe("dormant");
+    });
+
+    it("a real request that starts with one of those words is still a request", () => {
+      const wait = manager.evaluateTurn(
+        { speaker: "Alice", text: "Lucent, wait, what about Redis?" },
+        T0,
+      );
+      expect(wait.action).toBe("direct_invoke");
+      const stopping = manager.evaluateTurn(
+        { speaker: "Bob", text: "Lucent, how do we stop the double charges?" },
+        T0 + 20_000,
+      );
+      expect(stopping.action).toBe("direct_invoke");
+    });
+  });
+
   // 4. Teammate Cross-Talk Detection (Negative Name Check)
   describe("Addressing other teammates", () => {
     beforeEach(() => {

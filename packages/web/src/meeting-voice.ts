@@ -90,6 +90,18 @@ export function detectDismissal(text: string): boolean {
 }
 
 /**
+ * "Lucent, stop." — an addressed request that is ONLY a stop word (docs/28
+ * F20). These used to open a lease and send "stop" to Ask as a question.
+ * The whole request must be the stop word: "Lucent, wait, what about
+ * Redis?" and "how do we stop the double charges?" stay requests.
+ */
+export function isStopRequest(query: string): boolean {
+  return /^\s*(?:please\s+)?(?:stop|cancel|wait|hold\s+on|never\s*mind|enough|that(?:'s|\s+is)\s+enough|hush|shush|quiet)(?:\s+(?:please|now|for\s+now))?[\s.!,]*$/i.test(
+    query,
+  );
+}
+
+/**
  * Check if the turn is addressing another teammate rather than Lucent.
  * e.g. "Bob, what do you think?", "Alice, can you check that?"
  */
@@ -378,7 +390,10 @@ export class ConversationalLeaseManager {
         // Bare "Lucent" with nothing asked
         return { action: "ignore", reason: "ambiguous" };
       }
-      if (/^(?:stay\s+quiet|be\s+quiet|stop\s+talking|mute)\b/i.test(address.query)) {
+      if (
+        /^(?:stay\s+quiet|be\s+quiet|stop\s+talking|mute)\b/i.test(address.query) ||
+        isStopRequest(address.query)
+      ) {
         this.dismissLease();
         return { action: "dismiss", reason: "user_requested_silence" };
       }
