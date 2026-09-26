@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { useMeetingSession, type MediaTile } from "./MeetingSessionContext.js";
 import { remotePeers, localSpeaking } from "./roomPeers.js";
+import { MediaNotice } from "./MediaNotice.js";
 
 /**
  * Zoom / Google Meet-Grade Native Video Room for Lucent.
@@ -223,6 +224,8 @@ export function NativeRoom({
     toggleMic,
     toggleCam,
     toggleScreen,
+    notice,
+    dismissNotice,
   } = useMeetingSession();
 
   // Remote tiles only — the local participant has its own dedicated tile, so
@@ -397,6 +400,11 @@ export function NativeRoom({
           )}
         </div>
       </div>
+      {notice && (
+        <div style={{ padding: "10px 20px 0", zIndex: 20 }}>
+          <MediaNotice text={notice} onDismiss={dismissNotice} />
+        </div>
+      )}
 
       {/* Main Video Stage Grid */}
       <div
@@ -420,7 +428,9 @@ export function NativeRoom({
         {camOn && videoTiles.some((t) => t.identity === "local") ? (
           videoTiles
             .filter((t) => t.identity === "local" && !t.screen)
-            .map((t) => <VideoTile key={t.key} tile={t} isSpeaking={selfSpeaking} micMuted={!micOn} />)
+            .map((t) => (
+              <VideoTile key={t.key} tile={t} isSpeaking={selfSpeaking} micMuted={!micOn} />
+            ))
         ) : (
           <AvatarTile name="You" isSpeaking={selfSpeaking} micMuted={!micOn} isLocal={true} />
         )}

@@ -2,6 +2,7 @@ import { useRef, useEffect, useState } from "react";
 import { useMeetingSession, type LiveCapture, type MediaTile } from "./MeetingSessionContext.js";
 import { useWorkspace } from "../workspace.js";
 import { Ico } from "../ui/icons.js";
+import { MediaNotice } from "./MediaNotice.js";
 
 function getInitials(name: string): string {
   if (!name) return "U";
@@ -141,6 +142,8 @@ export function MeetingHuddleDock() {
   const { view, setView } = useWorkspace();
   const {
     capture,
+    notice,
+    dismissNotice,
     status,
     peers,
     tiles,
@@ -237,6 +240,7 @@ export function MeetingHuddleDock() {
       </div>
 
       {capture && <CaptureRow capture={capture} onOpen={() => setView("meeting")} />}
+      {notice && <MediaNotice text={notice} onDismiss={dismissNotice} />}
 
       {/* Conversational Lease Follow-Up Indicator */}
       {activeLease && leaseRemainingSec > 0 && (

@@ -7,6 +7,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { describeMediaError, enableLocalMedia } from "./mediaErrors.js";
 import { apiFetch } from "../http.js";
 import { roomPeers, type RoomPeer } from "./roomPeers.js";
 import type { ConversationalLease } from "../meeting-voice.js";
@@ -79,6 +80,13 @@ export interface LiveCapture {
 interface MeetingSessionValue {
   status: RoomStatus;
   error: string | null;
+  /**
+   * A non-fatal media problem in a live call — a blocked mic, a busy camera
+   * (docs/28 F18). `error` is the fatal kind the lobby shows; this one the
+   * room and the dock show, and the call carries on.
+   */
+  notice: string | null;
+  dismissNotice: () => void;
   activeBoardId: string | null;
   peers: Map<string, RoomPeer>;
   tiles: MediaTile[];
@@ -103,6 +111,7 @@ const MeetingSessionContext = createContext<MeetingSessionValue | null>(null);
 export function MeetingSessionProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<RoomStatus>("idle");
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [activeBoardId, setActiveBoardId] = useState<string | null>(null);
   const [peers, setPeers] = useState<Map<string, RoomPeer>>(new Map());
   const [tiles, setTiles] = useState<MediaTile[]>([]);
@@ -149,6 +158,7 @@ export function MeetingSessionProvider({ children }: { children: ReactNode }) {
     setActiveBoardId(null);
     setStatus(keepError ? "error" : "idle");
     if (!keepError) setError(null);
+    setNotice(null);
   }, []);
 
   const publishLocal = useCallback(
@@ -284,18 +294,28 @@ export function MeetingSessionProvider({ children }: { children: ReactNode }) {
           });
         }) as (...args: never[]) => void);
 
+        // The browser's own "Stop sharing" ends the track without our button
+        // (docs/28 F24): follow it, or the control keeps saying "sharing".
+        room.on(sdk.RoomEvent.LocalTrackUnpublished ?? "localTrackUnpublished", ((
+          pub: LiveKitPublication,
+        ) => {
+          if (pub.source !== "screen_share") return;
+          setScreenOn(false);
+          setTiles((prev) => prev.filter((t) => !(t.identity === "local" && t.screen)));
+        }) as (...args: never[]) => void);
+
         room.on(sdk.RoomEvent.Disconnected ?? "disconnected", (() => {
           if (!deadRef.current) leave();
         }) as (...args: never[]) => void);
 
         await room.connect(data.url, data.token);
 
-        try {
-          await room.localParticipant.setMicrophoneEnabled(micOn);
-          await room.localParticipant.setCameraEnabled(camOn);
-        } catch (err) {
-          console.warn("[lucent] mic/cam enable error:", err);
-        }
+        // Mic and camera independently (docs/28 F18): each control shows what
+        // really came on, and the reason for anything that didn't is on screen.
+        const media = await enableLocalMedia(room.localParticipant, { mic: micOn, cam: camOn });
+        setMicOn(media.mic);
+        setCamOn(media.cam);
+        setNotice(media.notice);
 
         publishLocal(room, "local", "You");
         setStatus("live");
@@ -316,7 +336,7 @@ export function MeetingSessionProvider({ children }: { children: ReactNode }) {
       setMicOn(next);
       act({ type: "track", identity: "local", kind: "audio", on: next });
     } catch (err) {
-      setError(`Microphone error: ${(err as Error).message}`);
+      setNotice(describeMediaError("microphone", err));
     }
   }, [act, micOn]);
 
@@ -334,7 +354,7 @@ export function MeetingSessionProvider({ children }: { children: ReactNode }) {
         publishLocal(room, "local", "You");
       }
     } catch (err) {
-      setError(`Camera error: ${(err as Error).message}`);
+      setNotice(describeMediaError("camera", err));
     }
   }, [act, camOn, publishLocal]);
 
@@ -345,10 +365,15 @@ export function MeetingSessionProvider({ children }: { children: ReactNode }) {
     try {
       await room.localParticipant.setScreenShareEnabled(next);
       setScreenOn(next);
+      // The local screen tile used to be published only at join and on a
+      // camera toggle, so your own share never showed (docs/28 F24).
+      if (next) publishLocal(room, "local", "You");
+      else setTiles((prev) => prev.filter((t) => !(t.identity === "local" && t.screen)));
     } catch (err) {
-      setError(`Screen share error: ${(err as Error).message}`);
+      // Cancelling the browser's picker is a choice, not a failure: null.
+      setNotice(describeMediaError("screen", err));
     }
-  }, [screenOn]);
+  }, [publishLocal, screenOn]);
 
   // Clean up on app unmount
   useEffect(() => {
@@ -362,6 +387,8 @@ export function MeetingSessionProvider({ children }: { children: ReactNode }) {
       value={{
         status,
         error,
+        notice,
+        dismissNotice: () => setNotice(null),
         activeBoardId,
         peers,
         tiles,
