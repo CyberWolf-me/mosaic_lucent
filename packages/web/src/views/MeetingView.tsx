@@ -303,7 +303,7 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
   const turnsListRef = useRef<HTMLDivElement | null>(null);
 
   // M6.1–M6.3: Conversational Lease Platform
-  const { activeLease, setActiveLease, peers, leave, status: roomStatus } = useMeetingSession();
+  const { activeLease, setActiveLease, peers, status: roomStatus } = useMeetingSession();
   const leaseManagerRef = useRef<ConversationalLeaseManager>(
     new ConversationalLeaseManager({ leaseDurationMs: 15_000, maxFollowUpTurns: 3 }),
   );
@@ -414,18 +414,19 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
     }
   }, []);
 
-  const leaveRef = useRef(leave);
-  leaveRef.current = leave;
-
-  // A capture or meeting room still running when the view unmounts must stop cleanly —
-  // otherwise hardware microphone and camera streams stay locked in the background.
+  // When the meeting view unmounts, stop only the VIEW-LOCAL work — on-device
+  // speech capture and TTS playback — so their microphone stream is released
+  // and no answer keeps playing. The room session itself lives in
+  // MeetingSessionContext and deliberately OUTLIVES the view: navigating away
+  // keeps the call up so the huddle dock can appear, and the call ends only on
+  // an explicit Leave (which calls `leave()` directly). Tearing the call down
+  // here is what stopped the dock from ever showing (F5).
   useEffect(
     () => () => {
       voiceRef.current?.stop();
       voiceRef.current = null;
       playbackRef.current?.stop();
       playbackRef.current = null;
-      leaveRef.current?.();
     },
     [],
   );
