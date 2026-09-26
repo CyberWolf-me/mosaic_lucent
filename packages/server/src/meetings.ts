@@ -118,6 +118,21 @@ export interface MeetingStore {
    * route; the store trusts its caller.
    */
   end(boardId: string, id: string, endedAt: number): Promise<MeetingTranscript | undefined>;
+  /**
+   * End captures abandoned mid-meeting (docs/28 F14): a tab that closed,
+   * crashed or was left never sends its end, and the record would say "in
+   * progress" forever. Every still-open transcript whose last activity is
+   * before `idleBefore` — up to `limit` rows, longest-idle first — is ended
+   * AT that last activity, so the record says when the talking stopped, not
+   * when the sweep noticed. Returns how many it ended.
+   */
+  endIdle(idleBefore: number, limit: number): Promise<number>;
+}
+
+/** When a capture was last heard from: its last turn, or its start if silent. */
+export function lastActivity(meeting: Pick<MeetingTranscript, "startedAt" | "turns">): number {
+  const last = meeting.turns[meeting.turns.length - 1];
+  return Math.max(meeting.startedAt, last?.at ?? meeting.startedAt);
 }
 
 /** How many meetings `forBoard` returns when the caller does not say. */
@@ -245,5 +260,14 @@ export class InMemoryMeetingStore implements MeetingStore {
       row.endedAt = endedAt;
     }
     return { ...row, turns: [...row.turns] };
+  }
+
+  async endIdle(idleBefore: number, limit: number): Promise<number> {
+    const idle = [...this.rows.values()]
+      .filter((r) => r.endedAt === null && lastActivity(r) < idleBefore)
+      .sort((a, b) => lastActivity(a) - lastActivity(b))
+      .slice(0, Math.max(0, limit));
+    for (const row of idle) row.endedAt = lastActivity(row);
+    return idle.length;
   }
 }

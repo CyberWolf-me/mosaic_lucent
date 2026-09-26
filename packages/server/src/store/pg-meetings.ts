@@ -3,6 +3,7 @@ import type { Db } from "../db/client.js";
 import { meetingTranscripts } from "../db/schema.js";
 import {
   MEETING_LIST_LIMIT,
+  lastActivity,
   newMeetingId,
   type MeetingStore,
   type MeetingTranscript,
@@ -145,6 +146,37 @@ export class PostgresMeetingStore implements MeetingStore {
       ),
     );
     return stale.length;
+  }
+
+  /**
+   * docs/28 F14: end abandoned captures at their last activity. The last
+   * turn lives inside the JSONB, so idleness is judged in JS over the open
+   * rows that started before the cutoff (a capture that began after it
+   * cannot have been idle since) — live captures plus orphans, a handful.
+   * Each end carries the `isNull(endedAt)` precondition, so a capture that
+   * ends itself between the read and the write keeps its own end.
+   */
+  async endIdle(idleBefore: number, limit: number): Promise<number> {
+    if (limit <= 0) return 0;
+    const open = await this.target.db
+      .select()
+      .from(meetingTranscripts)
+      .where(and(isNull(meetingTranscripts.endedAt), lt(meetingTranscripts.startedAt, idleBefore)));
+    const idle = open
+      .map(toRow)
+      .filter((row) => lastActivity(row) < idleBefore)
+      .sort((a, b) => lastActivity(a) - lastActivity(b))
+      .slice(0, limit);
+    let ended = 0;
+    for (const row of idle) {
+      const rows = await this.target.db
+        .update(meetingTranscripts)
+        .set({ endedAt: lastActivity(row) })
+        .where(and(eq(meetingTranscripts.id, row.id), isNull(meetingTranscripts.endedAt)))
+        .returning({ id: meetingTranscripts.id });
+      ended += rows.length;
+    }
+    return ended;
   }
 }
 

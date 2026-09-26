@@ -23,7 +23,7 @@ import { NotificationsView } from "./views/NotificationsView.js";
 import { CommandOverlay } from "./ui/CommandOverlay.js";
 import { OPEN_PALETTE_EVENT, OPEN_SETTINGS_EVENT } from "./ui/Chrome.js";
 import { VALID_LENSES, VALID_VIEWS, landingView } from "./landing.js";
-import { MeetingSessionProvider } from "./meeting-room/MeetingSessionContext.js";
+import { MeetingSessionProvider, useMeetingSession } from "./meeting-room/MeetingSessionContext.js";
 import { MeetingHuddleDock } from "./meeting-room/MeetingHuddleDock.js";
 import { LegalView } from "./views/LegalView.js";
 import {
@@ -89,6 +89,36 @@ function Router({ onOpenSettings }: { onOpenSettings: (section?: string) => void
   // entries, so `window.history.back()` stepped out of the app entirely (to
   // the sign-in page or off the site), which is what users saw.
   const backFromOrgPage = () => setView("canvas");
+  // docs/28 F14: a running capture keeps the meeting view mounted, hidden,
+  // while the user works elsewhere — leaving the view used to stop the
+  // recording. It sits in a fixed first slot so switching views never
+  // remounts it; `display: contents` keeps its layout as if unwrapped.
+  const { capture } = useMeetingSession();
+  const keepMeeting = view === "meeting" || capture !== null;
+  return (
+    <>
+      {keepMeeting && (
+        <div style={{ display: view === "meeting" ? "contents" : "none" }}>
+          <MeetingView onOpenSettings={onOpenSettings} />
+        </div>
+      )}
+      {view !== "meeting" && (
+        <ViewFor view={view} onOpenSettings={onOpenSettings} onBack={backFromOrgPage} />
+      )}
+    </>
+  );
+}
+
+/** Every view except the meeting view, which `Router` keeps in its own slot. */
+function ViewFor({
+  view,
+  onOpenSettings,
+  onBack: backFromOrgPage,
+}: {
+  view: View;
+  onOpenSettings: (section?: string) => void;
+  onBack: () => void;
+}) {
   switch (view) {
     case "home":
       return <HomeView onOpenSettings={onOpenSettings} />;
@@ -98,8 +128,6 @@ function Router({ onOpenSettings }: { onOpenSettings: (section?: string) => void
       return <DashboardView onOpenSettings={onOpenSettings} />;
     case "history":
       return <HistoryView onOpenSettings={onOpenSettings} />;
-    case "meeting":
-      return <MeetingView onOpenSettings={onOpenSettings} />;
     case "intelligence":
       return <IntelligenceView onOpenSettings={onOpenSettings} />;
     case "execution":

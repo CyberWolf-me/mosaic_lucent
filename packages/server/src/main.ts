@@ -990,6 +990,13 @@ const jobRunner = runsJobs(role)
             logger.info("retention.swept-transcripts", { orgsChecked, transcriptsDeleted });
           }
         },
+        // docs/28 F14: end captures a closed or crashed tab left open.
+        "sweep-idle-captures": async () => {
+          if (!stores.meetings) return;
+          const { sweepIdleCaptures } = await import("./sweeps.js");
+          const ended = await sweepIdleCaptures({ meetings: stores.meetings });
+          if (ended > 0) logger.info("meetings.ended-idle", { ended });
+        },
       },
       ...(familiesFor(role, process.env.LUCENT_JOB_FAMILIES)
         ? { families: familiesFor(role, process.env.LUCENT_JOB_FAMILIES)! }

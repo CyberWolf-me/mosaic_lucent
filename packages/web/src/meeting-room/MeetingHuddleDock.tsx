@@ -1,5 +1,5 @@
 import { useRef, useEffect, useState } from "react";
-import { useMeetingSession, type MediaTile } from "./MeetingSessionContext.js";
+import { useMeetingSession, type LiveCapture, type MediaTile } from "./MeetingSessionContext.js";
 import { useWorkspace } from "../workspace.js";
 import { Ico } from "../ui/icons.js";
 
@@ -42,9 +42,105 @@ function MiniTrackPreview({ tile }: { tile: MediaTile }) {
   return <div ref={ref} style={{ width: "100%", height: "100%", overflow: "hidden" }} />;
 }
 
+const DOCK_STYLE: React.CSSProperties = {
+  position: "fixed",
+  bottom: 24,
+  right: 24,
+  zIndex: 1200,
+  display: "flex",
+  flexDirection: "column",
+  gap: 10,
+  padding: "12px 14px",
+  background: "rgba(16, 18, 24, 0.88)",
+  backdropFilter: "blur(20px)",
+  WebkitBackdropFilter: "blur(20px)",
+  borderRadius: 18,
+  border: "1px solid rgba(255, 255, 255, 0.12)",
+  boxShadow: "0 16px 36px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.05)",
+  maxWidth: 320,
+  minWidth: 260,
+};
+
+function elapsed(ms: number): string {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const ss = String(s % 60).padStart(2, "0");
+  return h > 0 ? `${h}:${String(m).padStart(2, "0")}:${ss}` : `${m}:${ss}`;
+}
+
+/**
+ * The running capture, visible wherever the user is (docs/28 F14 and rule 4:
+ * capture is never invisible). Stop runs the meeting view's own Stop.
+ */
+function CaptureRow({ capture, onOpen }: { capture: LiveCapture; onOpen: () => void }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const tick = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(tick);
+  }, []);
+  const small: React.CSSProperties = {
+    padding: "2px 8px",
+    fontSize: 11,
+    borderRadius: 6,
+    border: "none",
+    cursor: "pointer",
+    flexShrink: 0,
+  };
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 8,
+        padding: "6px 8px",
+        borderRadius: 8,
+        background: "rgba(239, 68, 68, 0.12)",
+        border: "1px solid rgba(239, 68, 68, 0.3)",
+        color: "var(--ink-0)",
+        fontSize: 11.5,
+      }}
+    >
+      <span
+        aria-hidden
+        style={{
+          width: 8,
+          height: 8,
+          borderRadius: "50%",
+          background: capture.listening ? "#ef4444" : "rgba(255, 255, 255, 0.35)",
+          boxShadow: capture.listening ? "0 0 8px #ef4444" : "none",
+          flexShrink: 0,
+        }}
+      />
+      <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        {capture.listening
+          ? `Recording · ${capture.lines} line${capture.lines === 1 ? "" : "s"} · ${elapsed(now - capture.startedAt)}`
+          : "Transcription stopped — open the meeting"}
+      </span>
+      <button
+        type="button"
+        onClick={onOpen}
+        aria-label="Open the meeting"
+        style={{ ...small, background: "rgba(255, 255, 255, 0.08)", color: "var(--ink-1)" }}
+      >
+        Open
+      </button>
+      <button
+        type="button"
+        onClick={capture.stop}
+        aria-label="Stop recording"
+        style={{ ...small, background: "rgba(239, 68, 68, 0.3)", color: "#fff" }}
+      >
+        Stop
+      </button>
+    </div>
+  );
+}
+
 export function MeetingHuddleDock() {
   const { view, setView } = useWorkspace();
   const {
+    capture,
     status,
     peers,
     tiles,
@@ -78,9 +174,15 @@ export function MeetingHuddleDock() {
     return () => clearInterval(interval);
   }, [activeLease, setActiveLease]);
 
-  // Only show the floating dock when in a live meeting AND NOT currently on the full meeting screen
-  if (status !== "live" || view === "meeting") {
-    return null;
+  // The dock shows away from the full meeting screen, for a live call, a
+  // running capture (docs/28 F14), or both.
+  if (view === "meeting") return null;
+  if (status !== "live") {
+    return capture ? (
+      <aside className="meeting-huddle-dock" aria-label="Meeting recording" style={DOCK_STYLE}>
+        <CaptureRow capture={capture} onOpen={() => setView("meeting")} />
+      </aside>
+    ) : null;
   }
 
   const peerList = [...peers.values()];
@@ -88,28 +190,7 @@ export function MeetingHuddleDock() {
   const videoTiles = tiles.filter((t) => t.kind === "video" && !t.screen);
 
   return (
-    <aside
-      className="meeting-huddle-dock"
-      aria-label="Active Meeting Huddle"
-      style={{
-        position: "fixed",
-        bottom: 24,
-        right: 24,
-        zIndex: 1200,
-        display: "flex",
-        flexDirection: "column",
-        gap: 10,
-        padding: "12px 14px",
-        background: "rgba(16, 18, 24, 0.88)",
-        backdropFilter: "blur(20px)",
-        WebkitBackdropFilter: "blur(20px)",
-        borderRadius: 18,
-        border: "1px solid rgba(255, 255, 255, 0.12)",
-        boxShadow: "0 16px 36px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.05)",
-        maxWidth: 320,
-        minWidth: 260,
-      }}
-    >
+    <aside className="meeting-huddle-dock" aria-label="Active Meeting Huddle" style={DOCK_STYLE}>
       {/* Header bar with live indicator */}
       <div
         style={{
@@ -154,6 +235,8 @@ export function MeetingHuddleDock() {
           ⛶ Expand
         </button>
       </div>
+
+      {capture && <CaptureRow capture={capture} onOpen={() => setView("meeting")} />}
 
       {/* Conversational Lease Follow-Up Indicator */}
       {activeLease && leaseRemainingSec > 0 && (

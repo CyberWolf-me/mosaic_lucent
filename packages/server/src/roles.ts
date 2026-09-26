@@ -123,6 +123,14 @@ export const RECURRING_JOBS: RecurringJob[] = [
     type: "sweep-retention",
     everyMs: 60 * 60_000,
   },
+  // docs/28 F14: an abandoned capture is ended once it has been silent for
+  // IDLE_CAPTURE_MS (12 h); a 15-minute tick is precise enough for that.
+  {
+    key: "sweep-idle-captures",
+    family: "maintenance",
+    type: "sweep-idle-captures",
+    everyMs: 15 * 60_000,
+  },
 ];
 
 /**

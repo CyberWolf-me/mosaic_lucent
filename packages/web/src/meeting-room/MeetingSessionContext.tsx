@@ -60,6 +60,22 @@ export interface LiveKitRoom {
 
 export type RoomStatus = "idle" | "joining" | "live" | "error";
 
+/**
+ * A running meeting capture, published by the meeting view (docs/28 F14).
+ * While one exists the app keeps the meeting view mounted — hidden when the
+ * user works elsewhere — so leaving the view no longer stops the recording,
+ * and the dock shows it with a Stop.
+ */
+export interface LiveCapture {
+  boardId: string | null;
+  startedAt: number;
+  lines: number;
+  /** False while transcription is stopped by an error; the capture stays open. */
+  listening: boolean;
+  /** Stop the capture exactly as the meeting view's Stop does. */
+  stop: () => void;
+}
+
 interface MeetingSessionValue {
   status: RoomStatus;
   error: string | null;
@@ -78,6 +94,8 @@ interface MeetingSessionValue {
   toggleMic: () => Promise<void>;
   toggleCam: () => Promise<void>;
   toggleScreen: () => Promise<void>;
+  capture: LiveCapture | null;
+  setCapture: React.Dispatch<React.SetStateAction<LiveCapture | null>>;
 }
 
 const MeetingSessionContext = createContext<MeetingSessionValue | null>(null);
@@ -92,6 +110,7 @@ export function MeetingSessionProvider({ children }: { children: ReactNode }) {
   const [camOn, setCamOn] = useState(true);
   const [screenOn, setScreenOn] = useState(false);
   const [activeLease, setActiveLease] = useState<ConversationalLease | null>(null);
+  const [capture, setCapture] = useState<LiveCapture | null>(null);
 
   const roomRef = useRef<LiveKitRoom | null>(null);
   const deadRef = useRef(false);
@@ -358,6 +377,8 @@ export function MeetingSessionProvider({ children }: { children: ReactNode }) {
         toggleMic,
         toggleCam,
         toggleScreen,
+        capture,
+        setCapture,
       }}
     >
       {children}

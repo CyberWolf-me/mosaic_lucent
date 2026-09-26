@@ -48,6 +48,7 @@ describe("buildSweepHandlers", () => {
       "sweep-execution",
       "sweep-webhooks",
       "sweep-retention",
+      "sweep-idle-captures",
       "prune-jobs",
       "prune-outbox",
       "prune-usage",

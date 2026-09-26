@@ -161,6 +161,46 @@ check(
   `meetings=${list?.length} second=${texts(second).join(" | ")}`,
 );
 
+// --- capture 3 (F14): leaving the meeting view keeps recording ---
+await page.goto(`${base}/?view=meeting&board=${boardId}`, { waitUntil: "networkidle" });
+await page
+  .getByRole("button", { name: /start recording|new recording/i })
+  .first()
+  .click();
+await page.waitForFunction(
+  () => !!window.__recognizer?.onresult && window.__recognizer.results.length === 0,
+  {
+    timeout: 10000,
+  },
+);
+await say("Said in the meeting view.");
+// In-app navigation to the canvas: the Router's popstate path, no reload.
+await page.evaluate((id) => {
+  window.history.pushState(null, "", `/?view=canvas&board=${id}`);
+  window.dispatchEvent(new PopStateEvent("popstate"));
+}, boardId);
+await page.waitForTimeout(600);
+const stopInDock = page.getByRole("button", { name: "Stop recording" });
+check("away from the meeting view, the dock shows the recording", await stopInDock.isVisible());
+await say("Said while on the canvas.");
+list = await meetings();
+const third = list?.find((m) => m.endedAt === null && texts(m)[0] === "Said in the meeting view.");
+check(
+  "a line spoken on the canvas still reaches the open transcript",
+  texts(third).join(" | ") === "Said in the meeting view. | Said while on the canvas.",
+  texts(third).join(" | "),
+);
+await stopInDock.click();
+await page.waitForTimeout(1200);
+list = await meetings();
+const thirdEnded = list?.find((m) => m.id === third?.id);
+check(
+  "Stop in the dock ends that transcript with every line",
+  thirdEnded?.endedAt !== null && thirdEnded?.turns.length === 2,
+  `endedAt=${thirdEnded?.endedAt} turns=${thirdEnded?.turns.length}`,
+);
+check("the dock goes away once the recording stops", !(await stopInDock.isVisible()));
+
 if (headed) {
   console.log("\n(headed) leaving the window open 5s…");
   await page.waitForTimeout(5000);

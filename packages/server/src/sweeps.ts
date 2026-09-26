@@ -55,6 +55,10 @@ export interface SweepContext {
   retention?: {
     sweepTranscripts: () => Promise<{ orgsChecked: number; transcriptsDeleted: number }>;
   };
+  /** Abandoned captures (docs/28 F14): end transcripts left open. */
+  captures?: {
+    endIdle: () => Promise<number>;
+  };
 }
 
 /** Terminal-row retention: 30 days, the window the prune arms already used. */
@@ -123,7 +127,32 @@ export function buildSweepHandlers(ctx: SweepContext): Record<string, (job: Job)
         ctx.logger.info("retention.swept-transcripts", { orgsChecked, transcriptsDeleted });
       }
     },
+
+    async "sweep-idle-captures"(): Promise<void> {
+      if (!ctx.captures) return;
+      const ended = await ctx.captures.endIdle();
+      if (ended > 0) ctx.logger.info("meetings.ended-idle", { ended });
+    },
   };
+}
+
+/**
+ * How long a capture may go unheard before the sweep ends it (docs/28 F14).
+ * Long enough that no real meeting's silence trips it — a capture ended
+ * under a live tab would refuse that tab's next line — and short enough
+ * that "in progress" stops meaning "someone closed the tab yesterday".
+ */
+export const IDLE_CAPTURE_MS = 12 * 60 * 60 * 1000;
+
+/** End every capture unheard for `idleMs` (default {@link IDLE_CAPTURE_MS}). */
+export async function sweepIdleCaptures(deps: {
+  meetings: MeetingStore;
+  now?: () => number;
+  idleMs?: number;
+  batch?: number;
+}): Promise<number> {
+  const now = deps.now ?? Date.now;
+  return deps.meetings.endIdle(now() - (deps.idleMs ?? IDLE_CAPTURE_MS), deps.batch ?? 100);
 }
 
 /**

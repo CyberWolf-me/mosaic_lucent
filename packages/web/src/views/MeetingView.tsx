@@ -334,7 +334,13 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
   const turnsListRef = useRef<HTMLDivElement | null>(null);
 
   // M6.1–M6.3: Conversational Lease Platform
-  const { activeLease, setActiveLease, peers, status: roomStatus } = useMeetingSession();
+  const {
+    activeLease,
+    setActiveLease,
+    peers,
+    status: roomStatus,
+    setCapture: publishCapture,
+  } = useMeetingSession();
   const leaseManagerRef = useRef<ConversationalLeaseManager>(
     new ConversationalLeaseManager({ leaseDurationMs: 15_000, maxFollowUpTurns: 3 }),
   );
@@ -452,13 +458,25 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
   // keeps the call up so the huddle dock can appear, and the call ends only on
   // an explicit Leave (which calls `leave()` directly). Tearing the call down
   // here is what stopped the dock from ever showing (F5).
+  //
+  // A running capture keeps this view mounted (docs/28 F14, App's Router), so
+  // an unmount mid-capture means the app itself is going (sign-out, a new
+  // workspace): finish the capture — flush and end — rather than leave the
+  // transcript open for the idle sweep.
   useEffect(
     () => () => {
       voiceRef.current?.stop();
       voiceRef.current = null;
       playbackRef.current?.stop();
       playbackRef.current = null;
+      const capture = captureRef.current;
+      if (capture) {
+        captureRef.current = null;
+        void capture.finish(turnsRef.current);
+      }
+      publishCapture(null);
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
   );
 
@@ -725,6 +743,27 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
     }
     setLiveMeetingId(null);
   };
+
+  // docs/28 F14: publish the running capture. While it exists the app keeps
+  // this view mounted when the user goes elsewhere, and the dock shows it with
+  // a Stop that runs this view's own stopRecording (through a ref, so the dock
+  // never holds a stale one). Re-published as lines land or listening flips.
+  const stopRecordingRef = useRef(stopRecording);
+  stopRecordingRef.current = stopRecording;
+  useEffect(() => {
+    const capture = captureRef.current;
+    publishCapture(
+      capture
+        ? {
+            boardId: capture.boardId ?? boardId,
+            startedAt: startedAt ?? Date.now(),
+            lines: turns.length,
+            listening: recording,
+            stop: () => stopRecordingRef.current(),
+          }
+        : null,
+    );
+  }, [recording, turns.length, startedAt, boardId, publishCapture]);
 
   // ---- The live extraction loop (M2), driven by the meeting engine -----
   // While recording, new finals accumulate. On the hybrid trigger (enough new
