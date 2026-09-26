@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { browserTtsProvider, hostedTtsProvider, speakAnswer } from "../src/tts.js";
+import { browserTtsProvider, hostedTtsProvider, isTtsSpeaking, speakAnswer } from "../src/tts.js";
 
 /**
  * docs/25 V7 (M6.2): the TTS seam.
@@ -127,6 +127,25 @@ describe("browser TTS provider", () => {
     vi.unstubAllGlobals();
     expect(browserTtsProvider.isSupported()).toBe(false);
     expect(browserTtsProvider.unavailableReason()).toContain("speech synthesis");
+  });
+
+  it("releases the STT gate via a watchdog when onend never fires (Chrome quirk)", async () => {
+    // Regression: Chrome's SpeechSynthesisUtterance.onend often never fires,
+    // which left isTtsSpeaking() stuck true and gated STT forever — the mic
+    // went deaf after Lucent's first answer and the transcript "reset".
+    vi.useFakeTimers();
+    try {
+      stubSpeechSynthesis();
+      const playback = await browserTtsProvider.speak("hello there world");
+      expect(isTtsSpeaking()).toBe(true);
+      // Never call spoken[].done() — simulate the missing onend. The watchdog
+      // must still release the gate after a bounded time.
+      await vi.advanceTimersByTimeAsync(200_000);
+      expect(isTtsSpeaking()).toBe(false);
+      await playback.done;
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

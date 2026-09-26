@@ -34,6 +34,22 @@ function essentials(text: string): string | null {
   return clean === "" ? null : clean;
 }
 
+/**
+ * A generous safety cap (ms) for how long one utterance may hold the
+ * "TTS speaking" flag. Chrome's `SpeechSynthesisUtterance.onend` is notoriously
+ * unreliable — it frequently never fires — which would leave `_activeTtsCount`
+ * stuck above zero, `isTtsSpeaking()` permanently true, and STT gated forever:
+ * the mic goes deaf after Lucent's first answer and the transcript appears to
+ * "reset" after a few words. The watchdog force-releases the flag well AFTER
+ * any real speech would have finished (deliberately an over-estimate, so it
+ * only fires when the real end event was missed — never mid-speech, which would
+ * reopen the mic into Lucent's own voice).
+ */
+function ttsWatchdogMs(text: string): number {
+  const words = text.trim().split(/\s+/).filter(Boolean).length;
+  return Math.min(180_000, Math.max(5000, words * 500 + 5000));
+}
+
 let _activeTtsCount = 0;
 
 /**
@@ -79,9 +95,11 @@ export const browserTtsProvider: TtsProvider = {
     });
     notifyTtsStart();
     let finished = false;
+    let watchdog: ReturnType<typeof setTimeout> | undefined;
     const cleanup = () => {
       if (finished) return;
       finished = true;
+      if (watchdog !== undefined) clearTimeout(watchdog);
       notifyTtsEnd();
       resolveDone();
     };
@@ -89,6 +107,8 @@ export const browserTtsProvider: TtsProvider = {
     utterance.onerror = () => cleanup();
     synth.cancel();
     synth.speak(utterance);
+    // Chrome often never fires onend; release the STT gate anyway (see ttsWatchdogMs).
+    watchdog = setTimeout(cleanup, ttsWatchdogMs(clean));
     let stopped = false;
     return {
       stop() {
@@ -140,15 +160,19 @@ export const hostedTtsProvider: TtsProvider = {
     });
     notifyTtsStart();
     let finished = false;
+    let watchdog: ReturnType<typeof setTimeout> | undefined;
     const cleanup = () => {
       if (finished) return;
       finished = true;
+      if (watchdog !== undefined) clearTimeout(watchdog);
       notifyTtsEnd();
       URL.revokeObjectURL(url);
       resolveDone();
     };
     audio.onended = () => cleanup();
     audio.onerror = () => cleanup();
+    // Backstop for a stalled/GC'd audio element that never fires 'ended'.
+    watchdog = setTimeout(cleanup, ttsWatchdogMs(text));
     let stopped = false;
     try {
       await audio.play();
