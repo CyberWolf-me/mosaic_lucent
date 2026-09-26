@@ -1,0 +1,527 @@
+# 28 — Meeting screens: the A3 state map
+
+- Status: **Proposed 2026-09-27** — the screen-level specification for
+  docs/26 phase A3 (meeting lifecycle); §9 lists the decisions it needs
+- Date: 2026-09-27 · branch `lucent/atelier`
+- Inputs: the founder's user-flow specification (the same 139 flows docs/26
+  took in; here §§16–27, 57, 64–65, 80–82, 116–122 and 130); docs/26 §7, J1
+  and J5; docs/25 §5 (response policy); docs/27 §2 (notes); a code audit of
+  this branch (2026-09-27, three passes: the call room, the meeting view and
+  voice loop, and meetings as data plus what happens after one ends).
+
+docs/26 §7 lists the meeting lifecycle as stages. This document turns those
+stages into **screens**. For each screen it gives how you get there, every
+state the screen can be in, what each action does and where it leads, and
+what exists in the code today. It is written to build against one slice at a
+time (§8).
+
+Today all of it is one view: `MeetingView` on one board. That view has four
+phases (`none | live | unsaved | saved`, `web/src/views/MeetingView.tsx:1159`)
+and a call drawer (`web/src/meeting-room/NativeRoom.tsx`). The target splits
+it into twelve screens around a meeting object (J1). The audit also found
+defects in what already exists, and they come first (§2), because two of them
+lose transcripts.
+
+Legend: ✅ exists · 🟡 partial · ❌ missing. Paths are relative to `packages/`.
+
+## 1. Rules every meeting screen follows
+
+1. **The meeting outlives the AI** (spec §116). Media and the transcript keep
+   going when the model, the allowance, or a provider fails. An AI panel that
+   cannot work says so ("Lucent is unavailable — the transcript is still
+   recording"). It is never blank.
+2. **Leaving the call is not ending the meeting, and closing the tab is not
+   losing the transcript** (§21). Durable meeting state never depends on the
+   media connection or on one browser tab.
+3. **Interim is never durable** (§22). Captions may show interim text; only
+   finals become turns. This is already law in `web/src/stt/events.ts`.
+4. **Capture is visible to everyone** (docs/27 §2.9). Every participant sees
+   "Transcribing · Lucent in Assistant mode" while capture runs.
+5. **Nothing extracted becomes trusted without a person** (docs/26 decision
+   5). Extraction lands as a candidate on every path: live, manual and end of
+   meeting.
+6. **A refusal explains itself** (§52). A control the user cannot use is
+   visible and disabled with the reason, known from the user's role before
+   any request is made ("Viewers can listen and take notes; only editors
+   record this meeting"). A board the caller cannot see still answers 404, so
+   a refusal never reveals what exists.
+7. **Honest capabilities** (docs/26 rule 3). A control that is not built is
+   absent, not a dead button: no chat button, raise hand or captions toggle
+   until each one works.
+
+Every screen below uses the same state words: **loading**, **empty**,
+**ready**, **busy**, **degraded** (working with less, e.g. no speaker names),
+**refused** (role or policy), **failed** (recoverable, with Retry) and
+**gone** (ended, cancelled or deleted).
+
+## 2. Defects found by the audit
+
+This continues docs/26 §4's numbering. Every row was found by reading the
+code; none was reproduced at runtime. F13–F17, F20 and F23 were re-checked
+against every file their row cites.
+
+| #   | Defect                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | Where                                                                                                                            | Fix                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| F13 | **Live capture never opens a server transcript.** The view opens one with `turns: []`, the server refuses an empty array ("turns must not be empty"), and `saveMeeting` returns null without a message. With no live id nothing is appended during the meeting; the transcript is written once, at Stop. Separately, `checkpointTurns` reads `liveMeetingId` from the render in which capture started, so it would skip even with an open transcript. A reload or a closed tab mid-meeting loses every turn | `web/src/views/MeetingView.tsx:679`, `:263–266`, `:586`; `server/src/meetings.ts:145`                                            | **Done:** the transcript opens with the first captured turns (the contract the route tests already use), so the server's no-empty rule stands and a silent capture leaves no record. Persistence moved to `web/src/meetingCapture.ts`, one instance per capture, reading no render state. Stop ends the transcript only once every line is saved, and Save meeting resumes that transcript instead of writing a second. Tests: `web/test/meeting-capture.test.ts`; end to end, `scripts/meeting-capture-check.mjs` (2/6 on the old code, 6/6 now). **Still open:** the voice command path's `send` is also captured at Start |
+| F14 | **Leaving the meeting view mid-capture discards it.** Unmount stops speech capture and playback but neither flushes nor ends, so a record that did open shows "No end recorded"                                                                                                                                                                                                                                                                                                                             | `MeetingView.tsx:484–492`                                                                                                        | Move capture into the session that already outlives the view (`MeetingSessionContext`, F5), so leaving keeps recording and the dock shows it. Stop flushes and ends. An idle sweep ends orphaned captures                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| F15 | **Manual extraction skips review.** "Extract to board" and "Re-extract from here" send without `propose`, so the approval threshold decides: five operations or fewer apply directly, and on an empty board any number do. This breaks decision 5 and Home's promise "You approve what lands on the board"                                                                                                                                                                                                  | `MeetingView.tsx:904–919`, `:1036`; `web/src/workspace.tsx:1646–1649`; `web/src/views/HomeView.tsx:939`                          | Send `propose: true` on every meeting-sourced extraction                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| F16 | **Live extraction batches replace each other unseen.** Each batch opens a new proposal; the server keeps one pending proposal per board and supersedes the last. The proposal panel renders only on the canvas, so someone in the meeting view never sees a batch before the next one replaces it. The Brief reads only applied statements, so it stays empty                                                                                                                                               | `web/src/workspace.tsx:1396`; `server/src/proposals.ts:193–202`; `web/src/views/CanvasView.tsx:3173`; `web/src/meetingBrief.ts`  | Now: merge a pending proposal from the same meeting with the new batch instead of superseding it, and show it in the meeting view. Later: per-item candidates (S9, J5)                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| F17 | **Meeting write routes skip the CSRF check.** `routes/meetings.ts` never calls `requireCsrf`, though its header says the guard runs first; every other file with mutating routes calls it. `SameSite=Lax` limits exposure, so this is lost defence in depth, not an open door                                                                                                                                                                                                                               | `server/src/routes/meetings.ts:16–18`                                                                                            | Call `requireCsrf` on the four POSTs; regression test                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| F18 | **Mic and camera failures are invisible.** If enabling the mic fails at join, the error goes to `console.warn`, the camera is never attempted, the status still becomes live and both controls show on. In-call toggle errors set `error`, which neither the stage nor the dock renders                                                                                                                                                                                                                     | `web/src/meeting-room/MeetingSessionContext.tsx:274–279`, `:300`, `:318`, `:330`                                                 | The lobby's permission states (S4); render `error` in the room and the dock                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| F19 | **A viewer can start a capture that cannot be saved.** The meeting view checks no role: for a viewer the open fails, capture stays in the tab, extraction reports "read-only", and Stop ends in "Couldn't save the meeting"                                                                                                                                                                                                                                                                                 | `MeetingView.tsx` (no role reads)                                                                                                | Gate Start by role before any request (rule 6); §6 decides what a viewer may do                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| F20 | **"Lucent, stop" is sent as a question.** During playback it cannot be heard (F4). Outside playback, "stop", "cancel" and "never mind" after the wake word are not silence phrases, so they open a lease and go to Ask                                                                                                                                                                                                                                                                                      | `web/src/meeting-voice.ts:380`                                                                                                   | Add stop / cancel / wait / never mind to the addressed silence phrases                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| F21 | **Clarifying questions never reach the meeting.** When the canvas AI asks instead of guessing, the question lands in the canvas chat: it is not spoken, not shown as a card, and the lease never enters `waiting_for_user_response`                                                                                                                                                                                                                                                                         | `web/src/workspace.tsx:1676–1688`                                                                                                | Return the clarification to the voice caller; speak it and hold the lease (§4.5)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| F22 | **Transcription degrades silently.** An unsupported provider falls back to another without notice; failed hosted chunk uploads are skipped; LiveKit and Whisper produce text only at Stop, so the voice loop and live extraction do nothing with them, and the view doesn't say so                                                                                                                                                                                                                          | `web/src/stt/index.ts:20–33`; `web/src/stt/hosted.ts:136–139`; `web/src/stt/livekit.ts:125–128`; `web/src/stt/whisper.ts:94–119` | A `degraded` capture state with its reason (§4.3)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| F23 | **The LiveKit speech provider's token call sends no CSRF header.** Pointed at Lucent's own `/api/livekit/token` with a cookie session, it gets 403                                                                                                                                                                                                                                                                                                                                                          | `web/src/stt/livekit.ts:34–39`                                                                                                   | Use `apiFetch`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| F24 | **Screen-share state goes stale.** Nothing listens for the browser's own "Stop sharing", and the local screen tile is published only at join and on camera toggle                                                                                                                                                                                                                                                                                                                                           | `web/src/meeting-room/MeetingSessionContext.tsx`, `NativeRoom.tsx`                                                               | Listen for the track's `ended`; publish on share                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| F25 | **The dock's Expand opens the wrong board.** It opens the meeting view of the current board, not the call's; `activeBoardId` is never read                                                                                                                                                                                                                                                                                                                                                                  | `web/src/meeting-room/MeetingHuddleDock.tsx`                                                                                     | Navigate to the call's board                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+
+## 3. The screens and how they connect
+
+```text
+ entry: board top bar · ⌘K · Home · Intelligence · email invite · notification
+        · citation link (?meeting=<id>&turn=<n>)
+                                    │
+                                    ▼
+ S1 Meetings ──► S2 Schedule ──► S3 Meeting page (upcoming)
+   │    │                              │ Join
+   │    └──── Start now ───────────────┤
+   │                                   ▼
+   │                             S4 Lobby ──► S5 Room (live) ◄──► S6 Dock
+   │                                            │  side panel: S7 Capture
+   │                                            │  (transcript · notes · Lucent · brief)
+   │                                            │ End
+   │                                            ▼
+   │                                      S8 Ending ──► S9 Review ──► S11 Follow-up
+   │                                                        │
+   └──────────── open a past meeting ──────────────────► S10 Past meeting
+ S12 Import transcript ──► S8
+```
+
+| Screen                             | Spec        |           Today            |
+| ---------------------------------- | ----------- | :------------------------: |
+| S1 Meetings (workspace list)       | §65, §121   |  ❌ per-board lists only   |
+| S2 Schedule                        | §16         |             ❌             |
+| S3 Meeting page (upcoming)         | §16, §122   |             ❌             |
+| S4 Lobby                           | §17         |       🟡 two toggles       |
+| S5 Room                            | §18–21      |             🟡             |
+| S6 Dock (call outside the meeting) | —           |        ✅ with F25         |
+| S7 Capture panel                   | §22–25      |  🟡 today's `MeetingView`  |
+| S8 Ending                          | §120        |        🟡 Stop only        |
+| S9 Review                          | §26–27, §57 |             ❌             |
+| S10 Past meeting                   | §121        |        🟡 per board        |
+| S11 Follow-up                      | §57         |    🟡 pieces elsewhere     |
+| S12 Import transcript              | §64         | 🟡 route, mock only, no UI |
+
+## 4. State machines every screen shares
+
+### 4.1 Meeting lifecycle (J1)
+
+| From         | Event                                          | To                             | Who          |
+| ------------ | ---------------------------------------------- | ------------------------------ | ------------ |
+| —            | Schedule                                       | `scheduled`                    | any editor   |
+| —            | Start now                                      | `live`                         | any editor   |
+| `scheduled`  | first person joins                             | `live`                         | participant  |
+| `scheduled`  | Cancel                                         | `cancelled`                    | host         |
+| `live`       | End for everyone                               | `ended`                        | host         |
+| `live`       | last person leaves, then a grace period (§9.1) | `ended`                        | system       |
+| `live`       | no turn and no participant for N hours         | `ended`                        | idle sweep   |
+| `ended`      | end-of-meeting pass finishes                   | `summarized`                   | system (job) |
+| `ended`      | Record mode                                    | `summarized` (transcript only) | system       |
+| `summarized` | every candidate decided                        | `reviewed`                     | editors      |
+
+**Today:** `open` (`endedAt` null) and `ended` only
+(`server/src/meetings.ts:28–43`). `MeetingEnded` is declared in the outbox
+vocabulary but no code emits it, and the dispatcher has no consumers
+(`server/src/outbox.ts:47–48`, `server/src/main.ts:495–505`).
+
+### 4.2 A participant's connection
+
+`idle → prejoin → joining → connected ⇄ reconnecting → left | failed | removed`
+
+| State          | The user sees                                                                       |                                        Today                                        |
+| -------------- | ----------------------------------------------------------------------------------- | :---------------------------------------------------------------------------------: |
+| `joining`      | "Connecting…" with Cancel                                                           |                         ✅ "Connecting to room…", no Cancel                         |
+| `connected`    | the room                                                                            |                                      ✅ `live`                                      |
+| `reconnecting` | a banner, "Reconnecting — your transcript is safe"; media frozen, capture continues | ❌ a disconnect silently returns to the lobby (`MeetingSessionContext.tsx:268–270`) |
+| `failed`       | "Lost the connection" with Rejoin (→ S4)                                            |                               ❌ folded into `error`                                |
+| `removed`      | "The host removed you from this meeting"                                            |                                  ❌ no host powers                                  |
+| `left`         | the dock disappears; the meeting goes on without you                                |                                         ✅                                          |
+
+The call token lasts 600 s (`server/src/livekit.ts:61`) and is minted only at
+join. A reconnect after expiry needs a fresh token, so `reconnecting` refreshes
+it.
+
+### 4.3 Capture (transcription), per participant
+
+`off → starting → live ⇄ degraded → stopped`, plus `muted` (the person asked
+not to be transcribed, docs/27 §2.9) and `refused` (org policy).
+
+| State      | The user sees                                                                                                                                                                 |                        Today                        |
+| ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :-------------------------------------------------: |
+| `starting` | "Starting transcription…"                                                                                                                                                     | ✅ toasts: "Transcribing on device…", "Connecting…" |
+| `live`     | REC with the provider named                                                                                                                                                   |                         ✅                          |
+| `degraded` | the reason: "On-device transcription — every line shows as You", "Hosted transcription dropped a chunk", "This provider transcribes when you stop — Lucent can't answer live" |                       ❌ F22                        |
+| `muted`    | "You're not being transcribed" (to you); a mark on your tile (to others)                                                                                                      |                         ❌                          |
+| `refused`  | "Your organization has turned off meeting capture. The call still works."                                                                                                     | 🟡 server 403 with `recordingDisabled`; no UI copy  |
+| `failed`   | "Transcription stopped: <reason>" with Restart; turns so far are kept                                                                                                         |    🟡 toast; the server transcript is left open     |
+
+### 4.4 Lucent's availability in this meeting
+
+| State         | Cause                                    | Effect                                                    | Copy                                                                                                                 |
+| ------------- | ---------------------------------------- | --------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `ready`       | —                                        | answers, extraction, voice per mode                       | —                                                                                                                    |
+| `off by mode` | Record mode                              | no extraction, no answers                                 | "Record mode keeps the transcript only" ✅                                                                           |
+| `refused`     | board AI boundary or org provider policy | no model calls; notes use the offline enhancer (labelled) | "This board's AI boundary keeps Lucent out of this meeting"                                                          |
+| `limited`     | the monthly allowance is used up         | no model calls until reset                                | "This month's AI allowance is used up. The meeting continues without Lucent." (today: only the server's 402 message) |
+| `unavailable` | provider error or timeout                | extraction re-queues; answers fail with Retry             | "Lucent is unavailable — the transcript is still recording"                                                          |
+
+Answers have no timeout today (audit); a 30 s limit turns a hang into
+`unavailable`.
+
+### 4.5 Voice conversation
+
+This exists (`web/src/meeting-voice.ts:166–473`, lease 15 s, three follow-up
+turns); the table records it so the screens can show it, with the two changes
+F20 and F21 need.
+
+| State                       | Entered by                                                                                                          | Left by                                                                                                            |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `dormant`                   | start; lease expiry; dismissal ("thanks", "that's all"); another speaker; a teammate's name first; three follow-ups | wake phrase ("Lucent, …", "hey Lucent", "I think, Lucent, …")                                                      |
+| `invoked`                   | wake phrase with a request                                                                                          | question → `ai_responding`; command → applied through `send` (proposal above the threshold)                        |
+| `ai_responding`             | a question is being answered                                                                                        | answer spoken → `waiting_for_followup`; answer ends in "?" → `waiting_for_user_response`                           |
+| `waiting_for_followup`      | answer finished                                                                                                     | same speaker continues → `ai_responding`; else → `dormant`                                                         |
+| `waiting_for_user_response` | Lucent asked something                                                                                              | short answer from the same speaker → `ai_responding`; **new: a canvas clarification also enters this state (F21)** |
+
+"Esc" ends the lease today. "Lucent, stop" ends any state and stops playback
+once F20 is fixed. Barge-in while Lucent speaks waits for the V8 transport
+(F4). Where it shows: the lease chip in
+S5 and S6 ("Continuing with Alice · 12 s", Esc); the `?voicehud` debug panel
+stays a developer tool.
+
+## 5. Screens
+
+Each screen gives its states (what the user sees, and where each leads) and
+its actions. "Today" names what exists.
+
+### S1 Meetings — the workspace list
+
+Every meeting the user can see, across boards and projects (J1).
+**Today ❌:** lists are per board: the meeting view's Meetings tab and Home's
+"Recent meetings" (three rows, current board only,
+`web/src/views/HomeView.tsx:145–164`).
+
+Sections: **Live now · Upcoming · Needs review · Past.** Filters: project,
+board, participant, mode. A row shows title, time, status, linked boards,
+participants and the count of candidates awaiting review.
+
+| State            | Shows                                         | Leads to                                                                                        |
+| ---------------- | --------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| loading          | skeleton rows                                 | ready / failed                                                                                  |
+| empty            | "No meetings yet" with Start now and Schedule | S4 / S2                                                                                         |
+| empty (filtered) | "No meetings match" with Clear filters        | ready                                                                                           |
+| ready            | sections                                      | a row: `scheduled` → S3, `live` → S4 (S5 if already in it), `summarized` → S9, `reviewed` → S10 |
+| failed           | "Couldn't load meetings" with Retry           | loading                                                                                         |
+
+Actions: **Start now** → creates a `live` meeting on the current board → S4.
+**Schedule** → S2. **Import transcript** → S12, shown only when a real
+connector is configured (rule 7). Rows appear only for boards the user can
+read; a restricted meeting shows only to its invitees (§80).
+
+### S2 Schedule
+
+**Today ❌.** A sheet: title (required), when (date, time, duration),
+participants (org members; guests wait for A6), boards and/or project,
+template (the six from docs/27: general, 1:1, standup, design review, customer
+call, retro), AI mode (default Assistant). Classification is the strictest
+of the linked boards and is shown, not chosen.
+
+| State                           | Shows                                                                | Leads to         |
+| ------------------------------- | -------------------------------------------------------------------- | ---------------- |
+| editing                         | the form; inline errors ("Add a title", "Pick a time in the future") | submitting       |
+| submitting                      | disabled form                                                        | created / failed |
+| created                         | toast "Invites sent to 4 people"                                     | S3               |
+| failed                          | "Couldn't create the meeting" with Retry; fields kept                | editing          |
+| refused (capture off by policy) | the mode picker offers only "No capture" with the policy's reason    | created          |
+
+Invites go by email with an `.ics` (decision 6). Reminders and calendar sync
+come later.
+
+### S3 Meeting page (upcoming)
+
+**Today ❌.** Title, time, participants, linked boards, template agenda, and
+the **context brief** (§122): earlier decisions, open actions, unresolved
+questions and risks from the linked boards (the J3 index widens this to the
+project later). Its empty state is "No earlier meetings on these boards".
+
+| State            | Shows                                                       | Leads to  |
+| ---------------- | ----------------------------------------------------------- | --------- |
+| loading          | skeleton                                                    | ready     |
+| ready            | page with Join                                              | S4        |
+| early            | "Starts in 2 h"; Join still allowed (§9.6)                  | S4        |
+| gone (cancelled) | "Cancelled by Alice on 3 Oct"                               | S1        |
+| gone (ended)     | redirect                                                    | S9 or S10 |
+| refused          | "You're not invited to this meeting. Ask Alice for access." | —         |
+
+Actions: **Join** → S4. **Edit** and **Cancel** (host) → S2 / confirm →
+`cancelled`. **Copy link**.
+
+### S4 Lobby
+
+**Today 🟡:** "Lucent Video Meeting" with Mic On/Off and Camera On/Off toggles
+that set the starting state only (`NativeRoom.tsx:236–328`). There is no
+preview, level meter, device picker, or permission handling (F18).
+
+Shows: camera preview, mic level meter, device pickers (mic, camera, speaker
+with a test sound), the capture line ("Lucent is transcribing · Assistant
+mode"; the host can change the mode here), and Join.
+
+| State                  | Shows                                                                                           | Leads to          |
+| ---------------------- | ----------------------------------------------------------------------------------------------- | ----------------- |
+| asking permission      | "Allow camera and microphone to preview"                                                        | ready / denied    |
+| ready                  | preview, meter, Join                                                                            | joining           |
+| mic denied             | "Microphone blocked. Allow it in the address bar, then Retry." Join as listener stays available | ready / joining   |
+| camera denied or none  | camera tile off, no error                                                                       | joining           |
+| no microphone          | "No microphone found" with Join as listener                                                     | joining           |
+| device busy            | "Another app is using your camera"                                                              | ready             |
+| joining                | "Connecting…" with Cancel                                                                       | S5 / failed       |
+| failed                 | "Couldn't connect" with Retry                                                                   | joining           |
+| refused                | "You don't have access to this meeting's call." (today: `Token request failed (404): …`)        | —                 |
+| calls not set up (503) | "Video calls aren't set up on this server. You can still transcribe on this device."            | S7 without a call |
+| gone                   | "This meeting has ended"                                                                        | S10               |
+
+### S5 Room
+
+**Today 🟡:** `NativeRoom.tsx:455–674` — the stage, "N participants", speaking
+rings, mic, camera, screen share, Leave.
+
+| Control                                                       | Who                          |                            Today                             |
+| ------------------------------------------------------------- | ---------------------------- | :----------------------------------------------------------: |
+| Mic, camera                                                   | everyone                     |                              ✅                              |
+| Switch device in the call                                     | everyone                     |                              ❌                              |
+| Share screen, stop sharing                                    | everyone (host may restrict) |                            🟡 F24                            |
+| Roster with speaking, muted, sharing, hand                    | everyone                     |                        ❌ count only                         |
+| Raise hand, reactions                                         | everyone                     |                              ❌                              |
+| Chat                                                          | everyone                     |      ❌ absent (`meeting-capabilities.ts` `chat:false`)      |
+| Live captions (interim, never stored)                         | everyone                     |                   ❌ interim is discarded                    |
+| Capture indicator (rule 4)                                    | everyone sees it             |                              ❌                              |
+| Stop transcribing me                                          | everyone                     |                              ❌                              |
+| Board beside the call; follow, spotlight, bring everyone here | everyone / presenter         |                ❌ (`focusOn` exists, unused)                 |
+| Leave                                                         | everyone                     |                        ✅ no confirm                         |
+| End for everyone                                              | host                         |                              ❌                              |
+| Mute, remove, allow sharing, make co-host                     | host                         | ❌ needs a LiveKit admin grant and RoomService on the server |
+
+States follow §4.2. Two more: **ended by host** ("Alice ended the meeting" →
+S8 for the host, S10 for others) and **removed** (→ S1).
+
+### S6 Dock — the call while you work elsewhere
+
+**Today ✅:** shows while the call is live and the meeting view isn't open
+(`MeetingHuddleDock.tsx:82`): peers, presenter, the lease chip, mic, camera,
+screen, Leave, Expand.
+
+Add: the `reconnecting` banner (§4.2), the capture state (§4.3), Expand to
+the call's board (F25). A reload ends the call today; the target keeps a
+per-tab marker and offers "You left the meeting when the page reloaded —
+Rejoin?".
+
+### S7 Capture panel — transcript, notes, Lucent, brief
+
+**Today 🟡:** this is today's `MeetingView`: a left column (header, actions,
+mode picker, status, Brief, answer cards, Ask bar) and a right panel with
+Transcript, Notes and Meetings tabs.
+
+**Transcript.** Finals with speaker, time, `#n` and kind; search, kind
+filters, jump to a turn, topic breaks, links to the board objects a turn
+produced (all ✅). Missing: speaker → person mapping (per-participant
+capture, §8), confidence, and correction.
+
+| State                                      | Shows                                                           |
+| ------------------------------------------ | --------------------------------------------------------------- |
+| not capturing (editor)                     | "Transcription is off" with Start                               |
+| not capturing (viewer)                     | "Only editors record this meeting" (F19)                        |
+| listening                                  | "Listening for the first line" ✅                               |
+| live / degraded / muted / refused / failed | per §4.3                                                        |
+| no provider                                | "This browser offers no speech-to-text…" with Start disabled ✅ |
+
+**Correction (§23), new.** Edit a final turn → stored as an overlay
+`{turnIndex, text, originalText, editorId, at}`, so the turn log stays
+append-only and an ended transcript stays immutable. The line shows "edited
+by Bob"; extraction and Ask read the corrected text. Who may correct: §9.4.
+
+**Notes.** As shipped in docs/27 N1 ✅: empty, saving ("Saving…"), saved
+("Private to you"), failed ("Couldn't save — your text is still here"),
+enhancing ("Writing the note…"), enhanced (cited), offline-enhanced
+(labelled).
+
+**Lucent.** Answer cards with citations ✅.
+
+| State                           | Shows                                                                         |
+| ------------------------------- | ----------------------------------------------------------------------------- |
+| answering                       | "Lucent is answering…" ✅                                                     |
+| answered                        | the answer with citation chips ✅                                             |
+| no evidence                     | "Nothing in this meeting or board answers that"                               |
+| clarifying                      | the question as a card, spoken, with the lease held (F21)                     |
+| unavailable / limited / refused | per §4.4                                                                      |
+| failed                          | "Couldn't answer: <reason>" with Retry 🟡 (the message exists; Retry doesn't) |
+
+**Brief.** Today it lists only statements already on the board, so it is empty
+until someone approves a proposal on the canvas (F16). Target: pending
+candidates show here as **suggested**, with Approve and Reject inline, and
+the Brief switches to "on the board" as they are approved.
+
+### S8 Ending
+
+**Today 🟡:** Stop flushes, ends, and switches to the saved record ("Ended
+at X after N min"). There is no summary step, and closing the tab first loses
+the transcript (F13).
+
+Triggers: host **End for everyone** (confirm: "End the meeting for all 4
+people? Transcription stops and Lucent writes the summary."); the last person
+leaves plus a grace period; Stop on an ad-hoc capture.
+
+| State           | Shows                                                           | Leads to                   |
+| --------------- | --------------------------------------------------------------- | -------------------------- |
+| finalizing      | "Saving the last lines…"                                        | extracting                 |
+| extracting      | "Finding decisions, actions, questions and risks"               | summarizing                |
+| summarizing     | "Writing the summary"                                           | S9                         |
+| transcript only | Record mode, or Lucent off (§4.4): "Transcript saved"           | S10                        |
+| partly failed   | "Transcript saved. The summary couldn't be written." with Retry | S10 (retry later from S10) |
+
+The end-of-meeting pass runs server-side as a job on `MeetingEnded` (retries
+and the poison state come from `server/src/jobs.ts`), so closing the tab does
+not stop it.
+
+### S9 Review
+
+**Today ❌.** The Brief is the nearest thing, and the canvas proposal panel
+is all-or-nothing ("Apply all" / "Cancel").
+
+Shows: the summary, where every sentence cites turns (the notes rule, docs/27
+§4); candidates grouped as decisions, actions, questions, risks, requirements
+and assumptions, each with its quote, turn link, speaker, confidence (as
+evidence coverage, docs/26 rule 2) and any duplicate or contradiction with an
+existing statement (§103–104).
+
+Per candidate: **Approve · Edit · Reject · Merge with existing · Assign**
+(owner and due date, for actions). Per group: Approve all.
+
+| State                       | Shows                                                          | Leads to  |
+| --------------------------- | -------------------------------------------------------------- | --------- |
+| loading                     | skeleton                                                       | ready     |
+| empty                       | "Lucent found no decisions or actions in this meeting"         | S10       |
+| ready                       | "4 of 9 reviewed"                                              | reviewed  |
+| reviewed                    | "All reviewed" with the follow-up offers                       | S11 / S10 |
+| stale                       | "This no longer fits the board — edit or reject" (today's 422) | ready     |
+| changed by another reviewer | "Bob approved this a moment ago"                               | ready     |
+| viewer                      | read-only: "Only editors approve candidates"                   | —         |
+
+Approved candidates land through the one mutation path as ordinary operations
+with trust `human-approved` (J5). A3 ships the summary and the candidate
+list; per-item review with the trust field is A2 (docs/26 §11's order), and
+until then the list approves through today's proposal.
+
+### S10 Past meeting
+
+**Today 🟡:** the saved-record mode of the meeting view, per board:
+transcript, Brief, notes, "Ended at X after Y", and the `?meeting=&turn=`
+deep link.
+
+Shows: title, time, participants, summary, statements with their **current**
+status (a superseded decision shows as superseded, §59), transcript, your
+notes, linked boards and project, follow-ups created.
+
+| State                | Shows                                                                                                                             |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| never ended          | today: "This capture never recorded an end…"; target: the idle sweep ends it and the page says so                                 |
+| deleted by retention | "Deleted under your organization's 90-day retention policy" (a tombstone, not a 404; the sweep is `server/src/sweeps.ts:138–160`) |
+| refused / not found  | as S3                                                                                                                             |
+
+Deep links: today `?meeting=<id>&turn=<n>` (the index is 0-based and `turn`
+is dropped after it's read); the target is a stable path with a time offset
+(§128).
+
+### S11 Follow-up
+
+**Today 🟡:** each piece exists elsewhere: external tasks through the human
+gate (Linear, GitHub, Jira; ADRs 0031–0034), plans from decisions (ADR 0028),
+and notes as "Copy as Markdown".
+
+Offers after review: **Create tasks** from approved actions (external gate
+preview → confirm); **Schedule the next meeting** (S2 prefilled with open
+questions and actions); **Notify owners** (a new notification kind — none of
+the seven today is about meetings, `server/src/notifications.ts:125–133`);
+**Add a board section** summarizing the meeting (a proposal).
+
+Each offer: preview → confirm → sending → done (with a link) | failed (Retry)
+| not connected ("Connect Linear in Integrations").
+
+### S12 Import transcript
+
+**Today 🟡:** `POST /api/boards/:id/meetings/import` (editor), mock source
+only, no UI. It stays out of the UI until a real connector exists (rule 7).
+When it does: choose source → pick meeting → preview turns → import → S8, with
+"Imported from Zoom — speakers as Zoom labelled them".
+
+## 6. Who may do what
+
+Board role governs what lands on the board. Meeting role (new) governs the
+call. Org policy caps both.
+
+| Action                         |   Board viewer   | Board editor |  Meeting host  | Today                                           |
+| ------------------------------ | :--------------: | :----------: | :------------: | ----------------------------------------------- |
+| See the meeting and transcript |        ✅        |      ✅      |       ✅       | viewer floor ✅                                 |
+| Join the call, speak, share    |    ✅ (§9.3)     |      ✅      |       ✅       | ✅ every token can publish (`livekit.ts:87–96`) |
+| Be transcribed                 | ✅ unless muted  |      ✅      |       ✅       | only the recorder's mic                         |
+| Start or stop capture          |        ❌        |      ✅      |       ✅       | editor floor; the UI doesn't check (F19)        |
+| Private notes, enhance, Ask    |        ✅        |      ✅      |       ✅       | ✅ viewer floor                                 |
+| Correct a turn                 | own turns (§9.4) |      ✅      |       ✅       | ❌                                              |
+| Approve candidates             |        ❌        |      ✅      | only as editor | editor ✅                                       |
+| End for everyone, host powers  |        ❌        |      ❌      |       ✅       | ❌                                              |
+| Import                         |        ❌        |      ✅      |       —        | editor ✅                                       |
+
+Org `recordingDisabled` blocks save, append and import, but never end or reads
+(`server/src/routes/meetings.ts`) ✅. The UI must say so (§4.3 `refused`).
+
+## 7. Failures and what keeps working
+
+| Failure                                  | Keeps working                              | The user sees                                                      | Today                                                         |
+| ---------------------------------------- | ------------------------------------------ | ------------------------------------------------------------------ | ------------------------------------------------------------- |
+| Client network drops                     | local capture, queued turns                | `reconnecting` banner; turns flush on return                       | silent return to the lobby; turns persist only at Stop (F13)  |
+| Call service down or unset               | on-device capture, notes, Ask              | "Video unavailable — transcribing on this device"                  | lobby banner ✅; capture is separate ✅                       |
+| Speech provider fails                    | the call                                   | "Transcription stopped" with Restart; no invented text (§117)      | toast; server transcript left open                            |
+| Speech output fails                      | the answer as text                         | "Voice: <reason>"                                                  | ✅ `web/src/tts.ts:209–238`                                   |
+| Model fails, times out or hits the limit | call, transcript, notes (offline enhancer) | §4.4 copy; extraction re-queues; end pass retries                  | re-queue ✅; no timeout; limit copy is the raw server message |
+| Tab closed or reloaded                   | the meeting, for everyone else             | Rejoin offer; the transcript is intact up to the last flushed turn | the call ends; every unsaved turn is lost (F13)               |
+| Capture turned off by policy mid-meeting | the call; end and reads                    | "Your organization turned off capture — transcription stopped"     | server ✅, no UI                                              |
+
+## 8. Build order inside A3
+
+Each slice ends in something a person can do, measured against golden steps
+7–21 (docs/26 §10).
+
+| Slice | Scope                                                                                          | Ends when                                                                        |
+| ----- | ---------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| A3.0  | F13–F17: capture durability and the review rule                                                | A reload mid-meeting loses nothing; no meeting extraction applies without review |
+| A3.1  | J1 meeting objects (ADR first, migration with backfill); S1 and S10 on them                    | Every meeting in the workspace is listed and reopens                             |
+| A3.2  | S4 lobby, S5 states and roster, host basics, F18, F24, F25, S6 rejoin                          | Two people join with chosen devices, and every failure explains itself           |
+| A3.3  | `MeetingEnded` emitted and consumed; end-of-meeting pass; S8; S9's summary and candidate list  | A meeting ends into a cited summary with candidates                              |
+| A3.4  | S2, S3, email and `.ics`, the context brief                                                    | A scheduled meeting opens with last time's open items                            |
+| A3.5  | Per-participant capture with real speaker names; confidence and `startMs` on turns; correction | A two-person transcript names both people, and a wrong line can be fixed         |
+| A3.6  | F20, F21, F22                                                                                  | "Lucent, stop" stops; a clarification is spoken and answered by voice            |
+
+A3.0 comes first and is small (no schema). A3.1 gates A3.3, A3.4 and A3.5,
+since all three need a meeting object. A3.2 and A3.6 can run beside them.
+Per-item review with trust is A2 (J5), and captions and barge-in wait for the
+V8 transport (F4).
+
+## 9. Decisions needed
+
+| #   | Question                                                                                | Recommendation                                                                                                                         |
+| --- | --------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | When does a live meeting end?                                                           | Host "End for everyone", **and** 2 minutes after the last person leaves, **and** an idle sweep for orphaned captures                   |
+| 2   | Who records? Today one tab captures its own mic, so everyone else is "Speaker" or "You" | Per participant when in the call (docs/26 §7); one-device capture stays for in-person meetings with no call                            |
+| 3   | May a board viewer speak and be transcribed? (Today: yes, every token publishes)        | Yes. Speaking in a meeting is not editing the board. The meeting role governs the call; the board role governs what lands on the board |
+| 4   | Who may correct a transcript line?                                                      | The speaker, plus board editors; every correction shows who made it                                                                    |
+| 5   | May the host change the AI mode mid-meeting? (Today the picker hides while recording)   | Yes, announced to everyone ("Alice switched Lucent to Record mode")                                                                    |
+| 6   | May people join before the scheduled time?                                              | Yes; the meeting goes `live` on the first join                                                                                         |
