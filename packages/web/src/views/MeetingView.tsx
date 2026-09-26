@@ -315,6 +315,48 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
     const t = setInterval(() => setHudTick((n) => n + 1), 500);
     return () => clearInterval(t);
   }, [voiceHud]);
+  // Debug-only voice-loop driver (docs/26 §7 headed verification). Behind
+  // ?voicehud=1 it exposes the REAL conversational-lease manager on window so a
+  // headed Playwright run can step cases A–E (invocation, follow-up, barge-in,
+  // expiry, cross-talk) and watch the HUD transition — no mic, no AI call, and
+  // never present in the ordinary product surface.
+  useEffect(() => {
+    if (!voiceHud || typeof window === "undefined") return;
+    const mgr = leaseManagerRef.current;
+    const bump = () => setHudTick((n) => n + 1);
+    const hook = {
+      setRecording: (on: boolean) => setRecording(on),
+      evaluate: (speaker: string, text: string, now?: number) => {
+        setLastSpeaker(speaker);
+        setTurns((t) => [...t, { speaker, at: now ?? Date.now(), text }]);
+        const res = mgr.evaluateTurn({ speaker, text }, now);
+        bump();
+        return res;
+      },
+      bargeIn: (speaker: string, text: string, now?: number) => {
+        const res = mgr.onBargeIn(speaker, text, now);
+        bump();
+        return res;
+      },
+      aiStart: () => {
+        mgr.onAiStartResponding();
+        bump();
+      },
+      aiDone: (answer: string, now?: number) => {
+        mgr.onTtsDone(answer, now);
+        bump();
+      },
+      dismiss: () => {
+        mgr.dismissLease();
+        bump();
+      },
+      state: () => mgr.getState(),
+    };
+    (window as unknown as { __lucentVoiceDebug?: typeof hook }).__lucentVoiceDebug = hook;
+    return () => {
+      delete (window as unknown as { __lucentVoiceDebug?: typeof hook }).__lucentVoiceDebug;
+    };
+  }, [voiceHud]);
   const [callOpen, setCallOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [turnFilter, setTurnFilter] = useState<TurnFilter>("all");
