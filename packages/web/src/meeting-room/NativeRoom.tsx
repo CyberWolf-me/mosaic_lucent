@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { useMeetingSession, type MediaTile } from "./MeetingSessionContext.js";
+import { remotePeers, localSpeaking } from "./roomPeers.js";
 
 /**
  * Zoom / Google Meet-Grade Native Video Room for Lucent.
@@ -224,7 +225,11 @@ export function NativeRoom({
     toggleScreen,
   } = useMeetingSession();
 
-  const peerList = [...peers.values()];
+  // Remote tiles only — the local participant has its own dedicated tile, so
+  // including it here drew "You" twice (F6). Its speaking state drives the
+  // local tile's ring, wired from the same peer map the room updates.
+  const peerList = remotePeers(peers);
+  const selfSpeaking = localSpeaking(peers);
   const videoTiles = tiles.filter((t) => t.kind === "video");
 
   // If status is idle or error, render Zoom/Meet style Pre-Join Lobby
@@ -415,9 +420,9 @@ export function NativeRoom({
         {camOn && videoTiles.some((t) => t.identity === "local") ? (
           videoTiles
             .filter((t) => t.identity === "local" && !t.screen)
-            .map((t) => <VideoTile key={t.key} tile={t} isSpeaking={false} micMuted={!micOn} />)
+            .map((t) => <VideoTile key={t.key} tile={t} isSpeaking={selfSpeaking} micMuted={!micOn} />)
         ) : (
-          <AvatarTile name="You" isSpeaking={false} micMuted={!micOn} isLocal={true} />
+          <AvatarTile name="You" isSpeaking={selfSpeaking} micMuted={!micOn} isLocal={true} />
         )}
 
         {/* Local Screen Share Tile if sharing */}

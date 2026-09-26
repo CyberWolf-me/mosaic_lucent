@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { roomPeers } from "../src/meeting-room/roomPeers.js";
+import { roomPeers, remotePeers, localSpeaking, LOCAL_IDENTITY } from "../src/meeting-room/roomPeers.js";
 import {
   EXTERNAL_MEETING_CAPABILITIES,
   MOCK_MEETING_CAPABILITIES,
@@ -34,6 +34,21 @@ describe("roomPeers", () => {
       on: true,
     });
     expect(peers.get("ghost")).toMatchObject({ screenOn: true, name: "ghost" });
+  });
+
+  it("excludes the local participant from remote tiles and reports its own speaking (F6)", () => {
+    let peers = roomPeers(new Map(), { type: "peer-joined", identity: LOCAL_IDENTITY, name: "You" });
+    peers = roomPeers(peers, { type: "peer-joined", identity: "alice", name: "Alice" });
+    // Remote list never contains "local", so the local person isn't drawn twice.
+    expect(remotePeers(peers).map((p) => p.identity)).toEqual(["alice"]);
+    // Before anyone speaks, the local ring is off.
+    expect(localSpeaking(peers)).toBe(false);
+    // The session maps the local participant's real identity to "local"; once
+    // it lands, the local tile's ring lights.
+    peers = roomPeers(peers, { type: "speakers", identities: [LOCAL_IDENTITY] });
+    expect(localSpeaking(peers)).toBe(true);
+    // ...and remote-only filtering still holds.
+    expect(remotePeers(peers).some((p) => p.identity === LOCAL_IDENTITY)).toBe(false);
   });
 });
 

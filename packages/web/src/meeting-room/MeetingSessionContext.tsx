@@ -253,7 +253,16 @@ export function MeetingSessionProvider({ children }: { children: ReactNode }) {
         room.on(sdk.RoomEvent.ActiveSpeakersChanged ?? "activeSpeakersChanged", ((
           speakers: LiveKitParticipant[],
         ) => {
-          act({ type: "speakers", identities: speakers.map((s) => s.identity) });
+          // Speakers arrive by real identity; the local participant is stored
+          // under "local" (its publish + tiles use that), so translate it or
+          // the local speaking ring never lights (F6).
+          const localId = room.localParticipant?.identity;
+          act({
+            type: "speakers",
+            identities: speakers.map((s) =>
+              s.isLocal || (localId !== undefined && s.identity === localId) ? "local" : s.identity,
+            ),
+          });
         }) as (...args: never[]) => void);
 
         room.on(sdk.RoomEvent.Disconnected ?? "disconnected", (() => {

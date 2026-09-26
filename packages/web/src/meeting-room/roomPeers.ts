@@ -36,6 +36,28 @@ const blank = (identity: string, name: string): RoomPeer => ({
   speaking: false,
 });
 
+/**
+ * The synthetic identity the local participant is stored under (the session
+ * publishes it as "local", and its media tiles use the same id). Speaker events
+ * carry the participant's REAL identity, so the session maps the local one to
+ * this before dispatching — see MeetingSessionContext.
+ */
+export const LOCAL_IDENTITY = "local";
+
+/**
+ * Peers to render as remote tiles: everyone except the local participant. The
+ * local person has their own dedicated tile, so including them here drew them
+ * twice (F6).
+ */
+export function remotePeers(peers: ReadonlyMap<string, RoomPeer>): RoomPeer[] {
+  return [...peers.values()].filter((p) => p.identity !== LOCAL_IDENTITY);
+}
+
+/** Whether the local participant is currently speaking (for their own tile's ring). */
+export function localSpeaking(peers: ReadonlyMap<string, RoomPeer>): boolean {
+  return peers.get(LOCAL_IDENTITY)?.speaking ?? false;
+}
+
 export function roomPeers(
   peers: ReadonlyMap<string, RoomPeer>,
   action: RoomPeerAction,
