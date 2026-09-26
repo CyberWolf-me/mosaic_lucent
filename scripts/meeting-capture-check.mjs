@@ -201,6 +201,84 @@ check(
 );
 check("the dock goes away once the recording stops", !(await stopInDock.isVisible()));
 
+// --- capture 4 (F16): a pending proposal holds the next batch ---
+// Extraction fires on 3 new lines + a pause (meeting-extract.ts). The
+// server keeps one pending proposal per board; a second batch used to
+// supersede the first before anyone saw it.
+const proposals = async () => {
+  const res = await page.request.get(`${base}/api/boards/${boardId}/proposals`);
+  return res.ok() ? (await res.json()).proposals : [];
+};
+const until = async (fn, ms) => {
+  const end = Date.now() + ms;
+  for (;;) {
+    const v = await fn();
+    if (v || Date.now() > end) return v;
+    await page.waitForTimeout(500);
+  }
+};
+const statusText = () => page.locator("body").innerText();
+
+await page.goto(`${base}/?view=meeting&board=${boardId}`, { waitUntil: "networkidle" });
+await page
+  .getByRole("button", { name: /start recording|new recording/i })
+  .first()
+  .click();
+await page.waitForFunction(
+  () => !!window.__recognizer?.onresult && window.__recognizer.results.length === 0,
+  { timeout: 10000 },
+);
+for (const line of [
+  "We agreed to move billing to Stripe.",
+  "Priya owns the migration.",
+  "Risk: webhooks may double-fire.",
+])
+  await say(line);
+const firstPending = await until(
+  async () => (await proposals()).find((p) => p.status === "pending"),
+  15000,
+);
+check("a batch of meeting lines becomes a pending proposal", !!firstPending, firstPending?.id);
+check(
+  "the proposal is reviewable in the meeting view",
+  await page.getByRole("dialog", { name: "Proposed changes" }).isVisible(),
+);
+
+for (const line of [
+  "Also, the invoices move next quarter.",
+  "Sam checks the tax rules.",
+  "Open question: which regions first?",
+])
+  await say(line);
+await page.waitForTimeout(22000); // past the engine's 15 s minimum gap and its triggers
+const after = await proposals();
+check(
+  "the next batch waits instead of replacing the pending proposal",
+  after.filter((p) => p.status === "pending").length === 1 &&
+    after.find((p) => p.status === "pending")?.id === firstPending?.id &&
+    !after.some((p) => p.status === "superseded"),
+  after.map((p) => `${p.id}:${p.status}`).join(", "),
+);
+check(
+  "the meeting view says the lines are waiting for review",
+  (await statusText()).includes("Waiting for your review"),
+);
+
+await page.getByRole("button", { name: /apply all/i }).click();
+const released = await until(
+  async () => !(await statusText()).includes("Waiting for your review"),
+  30000,
+);
+const decided = (await proposals()).find((p) => p.id === firstPending?.id);
+check(
+  "applying the proposal records the decision",
+  decided?.status === "approved",
+  decided?.status,
+);
+check("once it is decided, the held lines go out", released);
+await page.getByRole("button", { name: /^stop$/i }).click();
+await page.waitForTimeout(1000);
+
 if (headed) {
   console.log("\n(headed) leaving the window open 5s…");
   await page.waitForTimeout(5000);

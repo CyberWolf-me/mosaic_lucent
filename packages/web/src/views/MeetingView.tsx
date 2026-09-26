@@ -55,6 +55,7 @@ import {
 } from "../meeting-engine.js";
 import { isLiveProvenance, objectsByTurn, pointsAtLive } from "../meetingTimeline.js";
 import { MeetingNotes } from "./MeetingNotes.js";
+import { ProposalPanel } from "./ProposalPanel.js";
 import { VoiceStateHud, type VoiceHudSnapshot } from "../meeting-room/VoiceStateHud.js";
 import {
   TOPIC_BREAK_LINE,
@@ -200,8 +201,25 @@ function prefersReducedMotion(): boolean {
 }
 
 export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: string) => void }) {
-  const { setView, send, boardId, projectName, workspace, onCitation, startSharing } =
-    useWorkspace();
+  const {
+    view,
+    setView,
+    send,
+    boardId,
+    projectName,
+    workspace,
+    onCitation,
+    startSharing,
+    proposal,
+  } = useWorkspace();
+  // docs/28 F16: the server keeps ONE pending proposal per board, and a new one
+  // supersedes it. A batch sent while a proposal awaits review would silently
+  // replace it — the last batch's candidates, or the user's own canvas
+  // request. So the live loop holds: turns stay queued and go out together
+  // once the proposal is decided, against the board as the decision left it.
+  // A ref, because the trigger's timer is armed per capture.
+  const proposalPendingRef = useRef(false);
+  proposalPendingRef.current = proposal !== null;
   const { notify } = useToast();
   const [settings, setSettings] = useSettings();
   const [recording, setRecording] = useState(false);
@@ -838,17 +856,19 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
   // Trigger check: on every new final and on a timer (the silence + overdue
   // arms need time to fire even when no more speech arrives). The engine
   // owns the timing decision; the view only asks.
+  // Held while a proposal awaits review (F16); deciding it re-runs the check.
   useEffect(() => {
-    if (!recording) return;
+    if (!recording || proposalPendingRef.current) return;
     if (engineRef.current.shouldFire(pendingTurns.length)) {
       void runExtraction();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [turns, recording]);
+  }, [turns, recording, proposal]);
 
   useEffect(() => {
     if (!recording) return;
     const tick = setInterval(() => {
+      if (proposalPendingRef.current) return;
       if (engineRef.current.shouldFire(pendingTurns.length)) {
         void runExtraction();
       }
@@ -1208,8 +1228,10 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
   const statusLine = recording
     ? !extracts
       ? "Recording the transcript only — Record mode extracts nothing."
-      : (lastExtractStatus ??
-        (extractQueued > 0 ? `${plural(extractQueued, "turn")} pending` : "Listening…"))
+      : proposal !== null && extractQueued > 0
+        ? `Waiting for your review — ${plural(extractQueued, "turn")} queued behind the proposed changes.`
+        : (lastExtractStatus ??
+          (extractQueued > 0 ? `${plural(extractQueued, "turn")} pending` : "Listening…"))
     : null;
 
   const renderCitations = (item: BriefItem): ReactNode => {
@@ -1480,6 +1502,11 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
       onOpenSettings={onOpenSettings}
       width="wide"
     >
+      {/* docs/28 F16: the pending proposal is reviewed here too, not only on
+          the canvas. Only while this view is on screen: the panel binds
+          Esc / Ctrl+Enter globally, and a hidden kept-alive copy (F14) must
+          not apply a proposal the user can't see. */}
+      {view === "meeting" && <ProposalPanel />}
       {voiceHud && (
         <VoiceStateHud
           snapshot={
