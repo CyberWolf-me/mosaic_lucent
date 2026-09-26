@@ -200,6 +200,15 @@ function prefersReducedMotion(): boolean {
   return window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
 }
 
+/**
+ * What a board viewer may do in a meeting (docs/28 §6 and F19), said once
+ * wherever a control is withheld: speaking in the call is not editing the
+ * board, so a viewer joins and takes notes; recording, saving and
+ * extracting are board writes.
+ */
+const VIEWER_CAPTURE_REASON =
+  "You can view this board: you can join the call, read the transcript and take private notes, but only editors record, save or extract meetings.";
+
 export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: string) => void }) {
   const {
     view,
@@ -211,6 +220,7 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
     onCitation,
     startSharing,
     proposal,
+    readOnly,
   } = useWorkspace();
   // docs/28 F16: the server keeps ONE pending proposal per board, and a new one
   // supersedes it. A batch sent while a proposal awaits review would silently
@@ -499,6 +509,12 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
   );
 
   const startRecording = (): void => {
+    // docs/28 F19: a viewer's capture could never be saved (the server
+    // refuses it), so it never starts; the controls say why up front.
+    if (readOnly) {
+      notify(VIEWER_CAPTURE_REASON);
+      return;
+    }
     if (!voiceSupported) {
       notify("Voice is not supported in this browser.");
       return;
@@ -1368,7 +1384,8 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
                 variant="primary"
                 size="sm"
                 onClick={() => onExtract(shown)}
-                disabled={!boardId || shown.turns.length === 0}
+                disabled={!boardId || shown.turns.length === 0 || readOnly}
+                title={readOnly ? VIEWER_CAPTURE_REASON : undefined}
               >
                 Extract to board <Ico.Arrow />
               </Button>
@@ -1467,6 +1484,7 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
 
   const voiceHints = (
     <>
+      {readOnly && <p className="meet-note">{VIEWER_CAPTURE_REASON}</p>}
       {!voiceSupported && (
         <p className="meet-note">
           This browser offers no speech-to-text Lucent can use, so recording is unavailable.{" "}
@@ -1579,7 +1597,8 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
                     variant="primary"
                     size="sm"
                     onClick={startRecording}
-                    disabled={!voiceSupported}
+                    disabled={!voiceSupported || readOnly}
+                    title={readOnly ? VIEWER_CAPTURE_REASON : undefined}
                   >
                     <Ico.Mic /> New recording
                   </Button>
@@ -1594,7 +1613,13 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
                   </Button>
                 )}
                 {!shown && !recording && turns.length > 0 && (
-                  <Button variant="ghost" size="sm" onClick={() => void onSave()} disabled={saving}>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => void onSave()}
+                    disabled={saving || readOnly}
+                    title={readOnly ? VIEWER_CAPTURE_REASON : undefined}
+                  >
                     {saving ? "Saving…" : "Save meeting"}
                   </Button>
                 )}
@@ -1603,7 +1628,8 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
                     variant="ghost"
                     size="sm"
                     onClick={() => onExtract(shown)}
-                    disabled={!boardId}
+                    disabled={!boardId || readOnly}
+                    title={readOnly ? VIEWER_CAPTURE_REASON : undefined}
                   >
                     Extract to board <Ico.Arrow />
                   </Button>
@@ -1700,10 +1726,14 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
               <NativeRoom
                 boardId={boardId}
                 isRecording={recording}
-                onToggleRecording={() => {
-                  if (recording) stopRecording();
-                  else startRecording();
-                }}
+                onToggleRecording={
+                  readOnly
+                    ? undefined
+                    : () => {
+                        if (recording) stopRecording();
+                        else startRecording();
+                      }
+                }
                 panelOpen={panelOpen}
                 onTogglePanel={onRoomPanel}
                 activePanel={activePanel}
@@ -1734,7 +1764,12 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
                 }
                 action={
                   <>
-                    <Button variant="primary" onClick={startRecording} disabled={!voiceSupported}>
+                    <Button
+                      variant="primary"
+                      onClick={startRecording}
+                      disabled={!voiceSupported || readOnly}
+                      title={readOnly ? VIEWER_CAPTURE_REASON : undefined}
+                    >
                       <Ico.Mic /> Start recording
                     </Button>
                     <Button
@@ -2027,14 +2062,16 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
                                   </button>
                                 </span>
                               ))}
-                              <button
-                                type="button"
-                                className="meet-reextract"
-                                title="Re-extract the board from this turn onward"
-                                onClick={() => onReextractFrom(i)}
-                              >
-                                Re-extract from here
-                              </button>
+                              {!readOnly && (
+                                <button
+                                  type="button"
+                                  className="meet-reextract"
+                                  title="Re-extract the board from this turn onward"
+                                  onClick={() => onReextractFrom(i)}
+                                >
+                                  Re-extract from here
+                                </button>
+                              )}
                             </div>
                           </div>
                         </div>
