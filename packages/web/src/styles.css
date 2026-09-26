@@ -2104,6 +2104,18 @@ html[data-theme="light"] .shape.diamond {
 }
 
 /* Tap target hit area expansion (Apple HIG 44px minimum) */
+/* The ::before halo is `position: absolute; inset: -6px`, so each button it
+   sits on MUST establish a containing block — otherwise the halo anchors to the
+   nearest positioned ancestor (the full-width top bar) and becomes a ~viewport-
+   wide invisible click-catcher that swallows every other control's clicks
+   (Share, Notifications, the profile menu). Anchoring it here confines each
+   halo to its own 6px surround. */
+.shape-toolbar .tool,
+.top-bar .icon-btn,
+.settings-nav button,
+.screen-switcher button {
+  position: relative;
+}
 .shape-toolbar .tool::before,
 .top-bar .icon-btn::before,
 .settings-nav button::before,
