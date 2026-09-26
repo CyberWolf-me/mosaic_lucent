@@ -54,6 +54,7 @@ import {
 } from "../meeting-engine.js";
 import { isLiveProvenance, objectsByTurn, pointsAtLive } from "../meetingTimeline.js";
 import { MeetingNotes } from "./MeetingNotes.js";
+import { VoiceStateHud, type VoiceHudSnapshot } from "../meeting-room/VoiceStateHud.js";
 import {
   TOPIC_BREAK_LINE,
   citationTurns,
@@ -297,6 +298,23 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
   // the brief into view instead (see onRoomPanel).
   const [panelOpen, setPanelOpen] = useState(true);
   const [activePanel, setActivePanel] = useState<"transcript" | "notes" | "saved">("transcript");
+  // Debug voice-state HUD (docs/26 §7): opt-in via ?voicehud=1. `sttStatus` and
+  // `lastSpeaker` feed it; `hudTick` refreshes the live reads (isTtsSpeaking,
+  // lease FSM) a few times a second while it is shown.
+  const voiceHud = useMemo(
+    () =>
+      typeof window !== "undefined" &&
+      new URLSearchParams(window.location.search).has("voicehud"),
+    [],
+  );
+  const [sttStatus, setSttStatus] = useState("idle");
+  const [lastSpeaker, setLastSpeaker] = useState<string | undefined>(undefined);
+  const [, setHudTick] = useState(0);
+  useEffect(() => {
+    if (!voiceHud) return;
+    const t = setInterval(() => setHudTick((n) => n + 1), 500);
+    return () => clearInterval(t);
+  }, [voiceHud]);
   const [callOpen, setCallOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [turnFilter, setTurnFilter] = useState<TurnFilter>("all");
@@ -510,6 +528,7 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
         const speaker =
           meta?.speaker ??
           (provider.id === "livekit" || provider.id === "hosted" ? "Speaker" : "You");
+        setLastSpeaker(speaker);
 
         appendTurn({
           speaker,
@@ -559,6 +578,7 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
         }
       },
       onStatus: (s) => {
+        setSttStatus(s);
         if (s === "transcribing") notify("Transcribing on device…");
         if (s === "connecting") notify("Connecting…");
       },
@@ -1418,6 +1438,22 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
       onOpenSettings={onOpenSettings}
       width="wide"
     >
+      {voiceHud && (
+        <VoiceStateHud
+          snapshot={
+            {
+              recording,
+              sttStatus,
+              ttsSpeaking: isTtsSpeaking(),
+              conversation: leaseManagerRef.current.getState(),
+              leaseRemainingSec,
+              leaseSpeaker: activeLease?.speakerName ?? activeLease?.speakerId,
+              lastSpeaker,
+              turnCount: turns.length,
+            } satisfies VoiceHudSnapshot
+          }
+        />
+      )}
       <div className={`meet-layout ${panelOpen ? "" : "panel-closed"}`}>
         <div className="meet-doc">
           {phase !== "none" && (
