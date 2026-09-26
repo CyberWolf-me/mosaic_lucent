@@ -365,7 +365,7 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
   // Phase D: the behavior profile. Sanitized at the use site (stored
   // settings predate the field and may hold anything); the capture loop
   // reads only the effective behavior, the UI shows the selected mode.
-  const selectedMode = isMeetingMode(settings.meetingMode) ? settings.meetingMode : "intelligence";
+  const selectedMode = isMeetingMode(settings.meetingMode) ? settings.meetingMode : "assistant";
   const extracts = modeAllowsExtraction(selectedMode);
 
   const voiceSupported = isAnyVoiceSupported();
@@ -745,6 +745,12 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
       // + per-turn kinds — the range survives transcript normalization and
       // is what a future board→transcript→object link keys on.
       const result = await send(prompt, undefined, {
+        // Locked AI philosophy: Lucent captures and understands everything in a
+        // meeting, but NEVER silently edits the canvas from ordinary
+        // conversation — extraction always lands as a proposal to review, never
+        // auto-applied, regardless of the approval threshold that governs
+        // explicit canvas commands.
+        propose: true,
         provenance: {
           meetingId: liveMeetingIdRef.current ?? "live-session",
           turns: batch.map((t) => t.text),

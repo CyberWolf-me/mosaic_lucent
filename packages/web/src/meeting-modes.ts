@@ -7,12 +7,15 @@
  * - `record` — transcript only. No extraction call, no generation spend, no
  *   board writes. A Record meeting that burns a generation is a clause-4
  *   defect (shipped behavior wrong), not a missing feature.
- * - `intelligence` — today's default: the differential extraction loop runs
- *   over captured turns exactly as before.
- * - `assistant` / `participant` — reserved for the M6 voice work. They
- *   behave as Intelligence today, disclosed in the UI rather than refused:
- *   refusing a selected mode strands the user's meeting, while a disclosed
- *   degradation keeps capture and intelligence working.
+ * - `intelligence` — captures and classifies (decisions, actions, questions,
+ *   risks) as you talk. Lucent stays silent; board changes are always proposed
+ *   for review, never applied silently.
+ * - `assistant` — the normal Lucent meeting mode (the default). Everything
+ *   Intelligence does, plus: answers aloud when explicitly invoked ("Lucent,
+ *   …") through the conversational lease, and performs canvas actions on an
+ *   explicit command (small ones directly, large ones as a reviewed proposal).
+ * - `participant` — future: proactive intervention under an explicit policy.
+ *   Behaves as Assistant for now.
  *
  * `effectiveMode` is the only thing the capture loop reads; the selected
  * mode is what the UI shows and the transcript records.
@@ -36,9 +39,13 @@ export function modeAllowsExtraction(mode: MeetingMode): boolean {
   return effectiveMode(mode) === "intelligence";
 }
 
-/** True when the selected mode degrades to Intelligence (voice responses unbuilt). */
+/**
+ * True when the selected mode is not yet the full experience. Assistant's voice
+ * loop is built (the conversational lease speaks on explicit invocation), so it
+ * is no longer degraded; only Participant (proactive intervention) is future.
+ */
 export function modeDegraded(mode: MeetingMode): boolean {
-  return mode === "assistant" || mode === "participant";
+  return mode === "participant";
 }
 
 export const MODE_LABELS: Record<MeetingMode, string> = {
@@ -50,10 +57,11 @@ export const MODE_LABELS: Record<MeetingMode, string> = {
 
 /** One-line disclosure per mode, rendered under the picker. */
 export const MODE_NOTES: Record<MeetingMode, string> = {
-  record: "Transcript only — no AI extraction, no board changes, no generation spend.",
-  intelligence: "Live transcript plus decisions, actions, and board updates as you talk.",
+  record: "Transcript only — no AI extraction, no spoken answers, no board changes.",
+  intelligence:
+    "Captures and classifies decisions, actions, questions and risks as you talk. Lucent stays silent; any board change is proposed for your approval, never applied silently.",
   assistant:
-    "Answers when you say “Lucent…” out loud (spoken when a voice is available; mute anytime).",
+    "The normal meeting mode. Captures and understands everything, but only answers aloud when you say “Lucent…”, and only changes the board on an explicit command or an approved proposal.",
   participant:
-    "Behaves as Assistant for now — proactive participation arrives after M6 is reliable.",
+    "Future: proactive participation under an explicit policy. Behaves as Assistant for now.",
 };

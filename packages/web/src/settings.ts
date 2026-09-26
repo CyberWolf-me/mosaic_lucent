@@ -65,7 +65,7 @@ export const DEFAULT_SETTINGS: Settings = {
   autosave: true,
   activityIndicators: true,
   sttProvider: "browser",
-  meetingMode: "intelligence",
+  meetingMode: "assistant",
   livekitUrl: "wss://lucent-bjeymvze.livekit.cloud",
   livekitTokenUrl: "/api/livekit/token",
   livekitRoom: "lucent-voice",

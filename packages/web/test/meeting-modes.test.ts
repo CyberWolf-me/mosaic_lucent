@@ -35,13 +35,18 @@ describe("meeting modes", () => {
     expect(effectiveMode("participant")).toBe("intelligence");
   });
 
-  it("assistant and participant degrade disclosed, never silently", () => {
-    expect(modeDegraded("assistant")).toBe(true);
+  it("discloses each mode's behavior; only Participant is still future", () => {
+    // Assistant's voice loop is built now, so it is no longer degraded — only
+    // Participant (proactive intervention) is future.
+    expect(modeDegraded("assistant")).toBe(false);
     expect(modeDegraded("participant")).toBe(true);
     expect(modeDegraded("record")).toBe(false);
     expect(modeDegraded("intelligence")).toBe(false);
-    expect(MODE_NOTES.assistant).toContain("mute");
-    expect(MODE_NOTES.participant).toContain("M6");
+    // Assistant discloses explicit invocation; Intelligence discloses that
+    // board changes are proposed, never silent; Participant discloses it's future.
+    expect(MODE_NOTES.assistant).toContain("Lucent");
+    expect(MODE_NOTES.intelligence).toMatch(/propos/i);
+    expect(MODE_NOTES.participant).toMatch(/future|proactive/i);
     for (const mode of MEETING_MODES) {
       expect(MODE_LABELS[mode].length).toBeGreaterThan(0);
       expect(MODE_NOTES[mode].length).toBeGreaterThan(0);
