@@ -18,10 +18,12 @@ import type { RegisterRoutes } from "./context.js";
  * through it by design, as everywhere else.
  */
 export const registerMeetingRoutes: RegisterRoutes = (router, s) => {
-  const { send, requireBoardRole, readBody, meetings, orgPolicy, meetingConnectors } = s;
+  const { send, requireBoardRole, requireCsrf, readBody, meetings, orgPolicy, meetingConnectors } =
+    s;
 
   router.post("/api/boards/:id/meetings", async (ctx) => {
     const { req, res } = ctx;
+    if (!requireCsrf(req, res, "/api/boards/:id/meetings")) return;
     const boardId = ctx.param("id");
     // Guard before store check: a 503 for an unconfigured store must not
     // become an oracle over which boards exist.
@@ -108,6 +110,7 @@ export const registerMeetingRoutes: RegisterRoutes = (router, s) => {
   // (their minutes are immutable — "editing the minutes" is a new save).
   router.post("/api/boards/:id/meetings/:mid/turns", async (ctx) => {
     const { req, res } = ctx;
+    if (!requireCsrf(req, res, "/api/boards/:id/meetings/:mid/turns")) return;
     const boardId = ctx.param("id");
     const mid = ctx.param("mid");
     const guard = await requireBoardRole(
@@ -162,6 +165,7 @@ export const registerMeetingRoutes: RegisterRoutes = (router, s) => {
   // the row, not a second effect.
   router.post("/api/boards/:id/meetings/:mid/end", async (ctx) => {
     const { req, res } = ctx;
+    if (!requireCsrf(req, res, "/api/boards/:id/meetings/:mid/end")) return;
     const boardId = ctx.param("id");
     const mid = ctx.param("mid");
     const guard = await requireBoardRole(
@@ -231,6 +235,7 @@ export const registerMeetingRoutes: RegisterRoutes = (router, s) => {
   // mode (imported, not captured under a profile).
   router.post("/api/boards/:id/meetings/import", async (ctx) => {
     const { req, res } = ctx;
+    if (!requireCsrf(req, res, "/api/boards/:id/meetings/import")) return;
     const boardId = ctx.param("id");
     const guard = await requireBoardRole(
       req,

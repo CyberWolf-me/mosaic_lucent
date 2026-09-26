@@ -38,6 +38,8 @@ export const registerProposalRoutes: RegisterRoutes = (router, s) => {
 
   router.post("/api/boards/:id/proposals", async (ctx) => {
     const { req, res } = ctx;
+    // docs/28 F17: the decide routes checked CSRF; creating did not.
+    if (!requireCsrf(req, res, "/api/boards/:id/proposals")) return;
     const boardId = ctx.param("id");
     // Guard before the store check: a 503 for an unconfigured store must not
     // become an oracle over which boards exist.
