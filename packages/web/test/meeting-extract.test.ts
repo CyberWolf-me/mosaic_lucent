@@ -1,8 +1,11 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, it, expect } from "vitest";
 import {
   gateMeetingOps,
   shouldExtract,
   differentialPrompt,
+  meetingExtractRequest,
   DEFAULT_TRIGGER,
 } from "../src/meeting-extract.js";
 import type { Operation } from "@lucent/core";
@@ -165,5 +168,46 @@ describe("differentialPrompt — add, never rebuild", () => {
     const prompt = differentialPrompt([{ text: "New topic." }]);
     expect(prompt).toContain("mindmap");
     expect(prompt).toContain("orgchart");
+  });
+});
+
+describe("meetingExtractRequest — every meeting extraction is a proposal (docs/28 F15)", () => {
+  it("proposes a one-line batch just like a large one", () => {
+    const one = meetingExtractRequest({
+      meetingId: "mtg_1",
+      quoted: [{ text: "We ship Friday." }],
+      turnRange: [4, 4],
+      kinds: ["decision"],
+    });
+    expect(one.propose).toBe(true);
+    expect(one.provenance).toEqual({
+      meetingId: "mtg_1",
+      turns: ["We ship Friday."],
+      turnRange: [4, 4],
+      turnKinds: ["decision"],
+    });
+  });
+
+  it("drops unclassified kinds and omits provenance when nothing is quoted", () => {
+    const req = meetingExtractRequest({
+      meetingId: "live-session",
+      quoted: [{ text: "a" }, { text: "b" }],
+      turnRange: [0, 1],
+      kinds: [undefined, "action"],
+    });
+    expect(req.provenance?.turnKinds).toEqual(["action"]);
+    expect(
+      meetingExtractRequest({ meetingId: "m", quoted: [], turnRange: [0, -1], kinds: [] }),
+    ).toEqual({
+      propose: true,
+    });
+  });
+
+  it("the meeting view builds no meeting provenance by hand — every path goes through the helper", () => {
+    // A hand-built `provenance: {` in the meeting view is how the manual
+    // paths once skipped review; the helper is the one place it is built.
+    const source = readFileSync(join(__dirname, "../src/views/MeetingView.tsx"), "utf8");
+    expect(source).not.toMatch(/provenance:\s*\{/);
+    expect(source.match(/meetingExtractRequest\(/g)?.length).toBe(3);
   });
 });

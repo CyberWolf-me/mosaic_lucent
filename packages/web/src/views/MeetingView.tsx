@@ -44,7 +44,7 @@ import {
   type MeetingTranscript,
   type MeetingTurn,
 } from "../meetings.js";
-import { differentialPrompt } from "../meeting-extract.js";
+import { differentialPrompt, meetingExtractRequest } from "../meeting-extract.js";
 import { createCaptureDurability, type CaptureDurability } from "../meetingCapture.js";
 import { NativeRoom } from "../meeting-room/NativeRoom.js";
 import {
@@ -804,22 +804,19 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
       // the meeting id, the turns' own words, AND the stable index range
       // + per-turn kinds — the range survives transcript normalization and
       // is what a future board→transcript→object link keys on.
-      const result = await send(prompt, undefined, {
-        // Locked AI philosophy: Lucent captures and understands everything in a
-        // meeting, but NEVER silently edits the canvas from ordinary
-        // conversation — extraction always lands as a proposal to review, never
-        // auto-applied, regardless of the approval threshold that governs
-        // explicit canvas commands.
-        propose: true,
-        provenance: {
+      // Locked AI philosophy: extraction always lands as a proposal to review
+      // (meetingExtractRequest), never auto-applied, regardless of the
+      // approval threshold that governs explicit canvas commands.
+      const result = await send(
+        prompt,
+        undefined,
+        meetingExtractRequest({
           meetingId: liveMeetingIdRef.current ?? "live-session",
-          turns: batch.map((t) => t.text),
+          quoted: batch,
           turnRange: [batchStart, batchStart + batch.length - 1],
-          turnKinds: batch
-            .map((t) => t.kind)
-            .filter((k): k is NonNullable<MeetingTurn["kind"]> => Boolean(k)),
-        },
-      });
+          kinds: batch.map((t) => t.kind),
+        }),
+      );
       const n = batch.length;
       setExtractQueued((q) => applyExtractOutcome(q, n, result.outcome));
       setLastExtractStatus(
@@ -905,22 +902,16 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
     // Stamped with the meeting's provenance (whole-transcript range), the
     // same shape "Re-extract from here" sends: without it the statements this
     // creates could not be traced back to the meeting, and its brief would
-    // stay empty after a successful extraction.
+    // stay empty after a successful extraction. Always a proposal (F15).
     void send(
       prompt,
       undefined,
-      meeting.turns.length > 0
-        ? {
-            provenance: {
-              meetingId: meeting.id,
-              turns: spliced.map((t) => t.text),
-              turnRange: [0, meeting.turns.length - 1],
-              turnKinds: meeting.turns
-                .map((t) => t.kind)
-                .filter((k): k is NonNullable<MeetingTurn["kind"]> => Boolean(k)),
-            },
-          }
-        : undefined,
+      meetingExtractRequest({
+        meetingId: meeting.id,
+        quoted: meeting.turns.length > 0 ? spliced : [],
+        turnRange: [0, meeting.turns.length - 1],
+        kinds: meeting.turns.map((t) => t.kind),
+      }),
     );
   };
 
@@ -1038,17 +1029,21 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
     const meetingId = shown ? shown.id : (liveMeetingId ?? "live-session");
     const prompt = differentialPrompt(slice);
     if (shown) setView("canvas");
-    void send(prompt, undefined, {
-      provenance: {
+    void send(
+      prompt,
+      undefined,
+      meetingExtractRequest({
         meetingId,
-        turns: slice.map((t) => t.text),
+        quoted: slice,
         turnRange: [startIndex, displayTurns.length - 1],
-        turnKinds: slice
-          .map((t) => t.kind)
-          .filter((k): k is NonNullable<MeetingTurn["kind"]> => Boolean(k)),
-      },
-    });
-    notify(shown ? "Re-extracting from that turn on the canvas." : "Re-extracting from that turn.");
+        kinds: slice.map((t) => t.kind),
+      }),
+    );
+    notify(
+      shown
+        ? "Re-extracting from that turn — the result waits on the canvas for your review."
+        : "Re-extracting from that turn — the result waits for your review.",
+    );
   };
 
   // Per-object correction (UX-5): provenance is append-only on the board — no

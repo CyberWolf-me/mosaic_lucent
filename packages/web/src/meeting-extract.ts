@@ -133,6 +133,49 @@ export function gateMeetingOps(ops: readonly Operation[]): MeetingGateDecision {
   return { autoApply: true };
 }
 
+/** What `send` needs for a meeting-sourced extraction (a `SendAttachments`). */
+export interface MeetingExtractRequest {
+  propose: true;
+  provenance?: {
+    meetingId: string;
+    turns: string[];
+    turnRange: [number, number];
+    turnKinds: string[];
+  };
+}
+
+/**
+ * The request options for EVERY meeting-sourced extraction — the live loop,
+ * "Extract to board" and "Re-extract from here" (docs/28 F15). Decision 5
+ * (docs/26): Lucent captures and understands everything said in a meeting,
+ * but nothing extracted becomes board state without a person, so the result
+ * is always a proposal to review, whatever its size and however empty the
+ * board. The two manual paths used to leave `propose` off and fell under the
+ * approval threshold, which applied five operations or fewer directly — and
+ * any number on an empty board.
+ *
+ * The provenance stamps what the extraction creates with the meeting, the
+ * quoted words, their index range in the transcript and their kinds. It is
+ * left off when nothing is quoted.
+ */
+export function meetingExtractRequest(input: {
+  meetingId: string;
+  quoted: ReadonlyArray<{ text: string }>;
+  turnRange: [number, number];
+  kinds: ReadonlyArray<string | undefined>;
+}): MeetingExtractRequest {
+  if (input.quoted.length === 0) return { propose: true };
+  return {
+    propose: true,
+    provenance: {
+      meetingId: input.meetingId,
+      turns: input.quoted.map((t) => t.text),
+      turnRange: input.turnRange,
+      turnKinds: input.kinds.filter((k): k is string => Boolean(k)),
+    },
+  };
+}
+
 /**
  * The differential prompt: only the NEW turns, plus an explicit statement of
  * what the board already holds, so the model adds rather than rebuilds.
