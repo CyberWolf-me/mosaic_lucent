@@ -45,6 +45,7 @@ import {
   type MeetingTurn,
 } from "../meetings.js";
 import { differentialPrompt } from "../meeting-extract.js";
+import { createCaptureDurability, type CaptureDurability } from "../meetingCapture.js";
 import { NativeRoom } from "../meeting-room/NativeRoom.js";
 import {
   applyExtractOutcome,
@@ -241,54 +242,25 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
   // callback, so the mute flag is mirrored into a ref read at answer time.
   const voiceMutedRef = useRef(false);
   voiceMutedRef.current = voiceMuted;
-  // The server-side transcript for the RUNNING meeting: created at recording
-  // start, appended-to at each extraction checkpoint, ended on stop.
+  // The server-side transcript for the RUNNING meeting: opened with the first
+  // captured turns, appended-to as each final lands, ended on stop.
   const [liveMeetingId, setLiveMeetingId] = useState<string | null>(null);
-  // Durable turn count after the last checkpoint — a ref, because the count
-  // surfaces through the transcript list itself; only the extraction loop
-  // needs to read it.
-  const liveMeetingTurnCountRef = useRef(0);
-  const setLiveMeetingTurnCount = (n: number): void => {
-    liveMeetingTurnCountRef.current = n;
-  };
-  // P1-MT-001: capture durability independent of extraction. Turns appended to
-  // the server transcript the moment they are captured (not only when an
-  // extraction checkpoint rides along), and stopRecording flushes what a
-  // still-in-flight append hadn't reached BEFORE the end route makes the
-  // transcript immutable. `persistedCount` counts the local turns the server
-  // definitely holds; an append in flight (or that failed) leaves the gap that
-  // the flush closes.
-  const persistedCountRef = useRef(0);
-  const appendInFlightRef = useRef<Promise<MeetingTranscript | null> | null>(null);
-  const checkpointTurns = async (): Promise<void> => {
-    const board = boardId;
-    const meetingId = liveMeetingId;
-    if (!board || !meetingId) return;
-    // Serialize appends: a checkpoint behind an in-flight one would double-send
-    // the same span when both read the same persistedCount.
-    const previous = appendInFlightRef.current;
-    if (previous) await previous.catch(() => {});
-    if (persistedCountRef.current >= turnsRef.current.length) return;
-    const batch = turnsRef.current.slice(persistedCountRef.current);
-    const from = persistedCountRef.current;
-    appendInFlightRef.current = appendMeetingTurns(board, meetingId, batch)
-      .then((stored) => {
-        if (stored) {
-          // The server holds the full list; trust its length over our slice
-          // arithmetic so a dedup/normalization on the server still converges.
-          persistedCountRef.current = Math.max(from + batch.length, stored.turns.length);
-          liveMeetingTurnCountRef.current = stored.turns.length;
-        }
-        return stored;
-      })
-      .finally(() => {
-        appendInFlightRef.current = null;
-      });
-    await appendInFlightRef.current;
-  };
   // The live transcript id lives in state (renders) and in a ref (the capture
   // callbacks below read it without re-arming the STT provider).
   const liveMeetingIdRef = useRef<string | null>(null);
+  // P1-MT-001 / docs/28 F13: capture durability independent of extraction.
+  // One per capture, built at Start; it reads refs, never this render's state,
+  // because the STT callbacks that feed it are armed once. The board is read
+  // through a ref for the same reason.
+  const captureRef = useRef<CaptureDurability | null>(null);
+  const boardIdRef = useRef(boardId);
+  boardIdRef.current = boardId;
+  // A stopped capture whose flush or end failed (offline): Save meeting
+  // resumes ITS transcript rather than writing the meeting a second time.
+  const unsavedCaptureRef = useRef<{
+    capture: CaptureDurability;
+    turns: MeetingTurn[];
+  } | null>(null);
   // Topic breaks (UX-5): separator indices into the displayed transcript.
   // Render-local — the saved transcript is never rewritten — and spliced
   // into extraction prompts as "── topic break ──" lines.
@@ -303,8 +275,7 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
   // lease FSM) a few times a second while it is shown.
   const voiceHud = useMemo(
     () =>
-      typeof window !== "undefined" &&
-      new URLSearchParams(window.location.search).has("voicehud"),
+      typeof window !== "undefined" && new URLSearchParams(window.location.search).has("voicehud"),
     [],
   );
   const [sttStatus, setSttStatus] = useState("idle");
@@ -582,8 +553,8 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
         // Queue the turn for the live extraction loop
         if (extracts) setExtractQueued((q) => q + 1);
 
-        // Checkpoint the captured turn immediately
-        void checkpointTurns();
+        // Persist the captured turn immediately
+        void captureRef.current?.persist(turnsRef.current);
 
         // Conversational Lease Engine in Assistant / Participant modes
         if (selectedMode === "assistant" || selectedMode === "participant") {
@@ -655,14 +626,32 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
       : provider.start(voiceCallbacks);
     if (session) {
       voiceRef.current = session;
-      setStartedAt(Date.now());
+      const capturedFrom = Date.now();
+      setStartedAt(capturedFrom);
       // A fresh capture starts a fresh transcript; the saved list keeps the
-      // prior meetings. The document follows the capture.
+      // prior meetings. The document follows the capture. The server
+      // transcript opens with the first turn that lands (meetingCapture.ts):
+      // no board → capture still works locally and nothing is sent.
       turnsRef.current = [];
       setTurns([]);
       setSelectedMeeting(null);
       setVoiceAnswers([]);
-      persistedCountRef.current = 0;
+      unsavedCaptureRef.current = null;
+      liveMeetingIdRef.current = null;
+      setLiveMeetingId(null);
+      const capture = createCaptureDurability({
+        startedAt: capturedFrom,
+        mode: selectedMode,
+        board: () => boardIdRef.current,
+        store: { open: saveMeeting, append: appendMeetingTurns, end: endMeeting },
+        onOpened: (stored) => {
+          // A capture started since owns the live id now.
+          if (captureRef.current !== capture) return;
+          liveMeetingIdRef.current = stored.id;
+          setLiveMeetingId(stored.id);
+        },
+      });
+      captureRef.current = capture;
       setExtractQueued(0);
       setLastExtractStatus(null);
       // Fresh capture resets the engine clock — including a stuck in-flight
@@ -670,23 +659,6 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
       // loop with. Reset-on-start recovers by construction.
       engineRef.current.reset();
       setRecording(true);
-      // Open the server-side transcript NOW with an empty turn list: every
-      // captured final checkpoints into it the moment it lands, so everything
-      // said during the meeting is durable even before it ends. No board / no
-      // store → capture still works locally; checkpoints are just skipped.
-      if (boardId) {
-        void (async () => {
-          const stored = await saveMeeting(boardId, {
-            turns: [],
-            startedAt: Date.now(),
-            mode: selectedMode,
-          });
-          if (stored) {
-            liveMeetingIdRef.current = stored.id;
-            setLiveMeetingId(stored.id);
-          }
-        })();
-      }
     }
   };
 
@@ -719,52 +691,39 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
     playbackRef.current = null;
     setRecording(false);
     // End the running transcript (Stage C3 + P1-MT-001): flush every captured
-    // turn the checkpoint pipeline hasn't confirmed BEFORE the end route makes
-    // the record immutable — the end used to race the last in-flight append,
-    // and an ended transcript refuses appends, so the meeting's final words
-    // could vanish. Idempotent, so a retry is a read.
-    const ending = liveMeetingIdRef.current;
+    // turn the server doesn't hold yet BEFORE the end route makes the record
+    // immutable — an ended transcript refuses appends, so ending first would
+    // drop the meeting's final words. The flush also opens the transcript if
+    // nothing reached it during the meeting (offline the whole time).
+    const capture = captureRef.current;
+    captureRef.current = null;
     const captured = turnsRef.current;
-    const unflushed = captured.length - persistedCountRef.current;
-    if (ending && boardId) {
+    const unflushed = captured.length - (capture?.persisted ?? 0);
+    const board = capture?.boardId ?? boardId;
+    if (capture && captured.length > 0) {
       void (async () => {
-        await checkpointTurns().catch(() => {});
-        const ended = await endMeeting(boardId, ending);
-        // The ended record joins the saved list (it was never added at
-        // start, so the old in-place update left it missing until reload).
-        if (ended) openStoredCapture(ended, captured);
-        // A capture started while this end was in flight owns these refs now.
-        if (voiceRef.current === null) {
-          persistedCountRef.current = 0;
-          liveMeetingIdRef.current = null;
-        }
-      })();
-    } else if (captured.length > 0 && boardId) {
-      // Fallback save when capture ran without the server transcript (local
-      // board, or the open call failed): persist what was said in one piece.
-      void (async () => {
-        const stored = await saveMeeting(boardId, {
-          turns: captured,
-          startedAt: startedAt ?? Date.now(),
-          endedAt: Date.now(),
-          mode: selectedMode,
-        });
-        if (stored) {
-          openStoredCapture(stored, captured);
-          notify("Meeting saved.");
-        } else {
+        const ended = await capture.finish(captured);
+        // A capture started while this end was in flight owns the live id now.
+        if (captureRef.current === null) liveMeetingIdRef.current = null;
+        if (ended) {
+          // The ended record joins the saved list (it was never added at
+          // start, so the old in-place update left it missing until reload).
+          openStoredCapture(ended, captured);
+        } else if (capture.boardId ?? boardIdRef.current) {
+          // Offline or refused: the lines stay on screen, and Save meeting
+          // retries into this same transcript.
+          unsavedCaptureRef.current = { capture, turns: captured };
           notify("Couldn't save the meeting — use Save meeting to retry.");
         }
       })();
     }
-    if (unflushed > 0) {
+    if (unflushed > 0 && board) {
       // The flush above runs async; if it fails (offline, server down) the
       // turns are still on screen and Save meeting can retry. Say so rather
       // than claiming an all-clear the transcript may not have.
       notify(`Flushing ${unflushed} captured turn${unflushed === 1 ? "" : "s"} to the transcript…`);
     }
     setLiveMeetingId(null);
-    setLiveMeetingTurnCount(0);
   };
 
   // ---- The live extraction loop (M2), driven by the meeting engine -----
@@ -872,17 +831,24 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
       return;
     }
     setSaving(true);
-    const stored = await saveMeeting(boardId, {
-      turns,
-      startedAt: startedAt ?? Date.now(),
-      endedAt: Date.now(),
-      mode: selectedMode,
-    });
+    // A capture Stop couldn't finish may already be partly on the server:
+    // finish THAT transcript, so a retry never writes the meeting twice.
+    const pending = unsavedCaptureRef.current;
+    const stored =
+      pending && pending.turns === turnsRef.current
+        ? await pending.capture.finish(pending.turns)
+        : await saveMeeting(boardId, {
+            turns,
+            startedAt: startedAt ?? Date.now(),
+            endedAt: Date.now(),
+            mode: selectedMode,
+          });
     setSaving(false);
     if (!stored) {
       notify("Couldn't save the meeting.");
       return;
     }
+    unsavedCaptureRef.current = null;
     setSaved((prev) => [stored, ...prev]);
     turnsRef.current = [];
     setTurns([]);
