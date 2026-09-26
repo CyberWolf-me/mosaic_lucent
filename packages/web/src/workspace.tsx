@@ -1673,6 +1673,19 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           // the review-gate reply are durable from this moment on.
           persist(workspace, conversation, projectName);
           return { outcome: "proposed", ops: result.operations.length };
+        } else if (foldedOps.length === 0) {
+          // A clarifying reply (docs/26 locked philosophy): faced with an
+          // ambiguous request the model asked a question instead of guessing,
+          // so it returned no operations. Surface its question as a
+          // conversational answer and commit nothing — no empty history entry,
+          // no room broadcast, no canvas change.
+          const conversation: ChatEntry[] = [
+            ...withUser,
+            { role: "ai", text: explanation, ...skippedNote },
+          ];
+          setChat(conversation);
+          persist(workspace, conversation, projectName);
+          return { outcome: "answered" };
         } else {
           const next = applyStamped();
           const conversation: ChatEntry[] = [

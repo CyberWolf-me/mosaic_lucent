@@ -77,11 +77,19 @@ describe("the system prompt carries the registry's family catalog", () => {
     expect(SYSTEM_PROMPT).toContain("when it says rows are hidden");
   });
 
-  it("is version 16 and leaves no placeholder unresolved", () => {
-    expect(SYSTEM_PROMPT_VERSION).toBe(16);
+  it("is version 17 and leaves no placeholder unresolved", () => {
+    expect(SYSTEM_PROMPT_VERSION).toBe(17);
     expect(SYSTEM_PROMPT).not.toMatch(/\{\{[^}\n]{1,40}\}\}/);
     // The hand-written list it replaced is gone, not duplicated.
     expect(SYSTEM_PROMPT).not.toContain("Diagram kinds and what each is for");
+  });
+
+  it("carries the edit-first-but-clarify rule (v17, docs/26 locked philosophy)", () => {
+    // Explicit → act; ambiguous → ask instead of guessing (no ops).
+    expect(SYSTEM_PROMPT).toMatch(/WHEN TO ACT vs WHEN TO CLARIFY/i);
+    expect(SYSTEM_PROMPT).toMatch(/fix the architecture/i);
+    expect(SYSTEM_PROMPT).toMatch(/emit no operations/i);
+    expect(SYSTEM_PROMPT).toMatch(/clarifying question/i);
   });
 });
 

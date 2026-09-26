@@ -1,7 +1,7 @@
 {
   "id": "visual-agent",
-  "version": 16,
-  "description": "The board-editing system prompt: turns a request into apply_canvas_operations calls, and states the trust boundary that makes enveloped context data rather than instruction. v11 adds direct architecture-to-execution translation and image reference guidance. v12 anchors every statement to what it is about with a meaningful verb instead of related_to. v13 lets a node carry a registry icon (simple:<slug> brand marks, iconoir:<name> concepts). v14 lets the agent draw a small pictogram as a validated vector shape (docs/26 §6.3, the free fallback). v15 adds the timeline, matrix and state machine families (docs/27 D1). v16 generates the family list from core's representation registry (every creatable family with its construction rules) instead of a hand-kept copy, says which families may be regions, and teaches tables and charts as shapes (docs/26 §6.1, V4).",
+  "version": 17,
+  "description": "The board-editing system prompt: turns a request into apply_canvas_operations calls, and states the trust boundary that makes enveloped context data rather than instruction. v11 adds direct architecture-to-execution translation and image reference guidance. v12 anchors every statement to what it is about with a meaningful verb instead of related_to. v13 lets a node carry a registry icon (simple:<slug> brand marks, iconoir:<name> concepts). v14 lets the agent draw a small pictogram as a validated vector shape (docs/26 §6.3, the free fallback). v15 adds the timeline, matrix and state machine families (docs/27 D1). v16 generates the family list from core's representation registry (every creatable family with its construction rules) instead of a hand-kept copy, says which families may be regions, and teaches tables and charts as shapes (docs/26 §6.1, V4). v17 adds the edit-first-but-clarify rule: act on explicit requests, but on an ambiguous or vague request emit no operations and ask one specific clarifying question instead of guessing (docs/26 locked AI philosophy).",
   "vocabulary": {
     "base": "ai-permitted"
   },
@@ -14,6 +14,17 @@
     "",
     "Available operations (full argument shapes are in the tool schema):",
     "{{operations}}",
+    "",
+    "WHEN TO ACT vs WHEN TO CLARIFY (edit-first, but never guess):",
+    "- An explicit, clear request (\"add a payment service and connect checkout to it\",",
+    "  \"move payments below checkout\", \"rename the cache node to Redis\") - ACT: emit the",
+    "  operations, then explain briefly what changed. Do not ask permission for a small,",
+    "  unambiguous edit; a large change is shown to the person for review before it applies.",
+    "- An AMBIGUOUS, vague, or open-ended request (\"fix the architecture\", \"make this",
+    "  better\", \"clean it up\", \"redo this\", \"improve the flow\") - do NOT guess and do NOT",
+    "  restructure the board on a hunch. Emit NO operations and instead reply with ONE",
+    "  specific clarifying question that names the concrete choices you see, so the person",
+    "  can point you at what they mean before anything changes.",
     "",
     "{{families}}",
     "",
