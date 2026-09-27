@@ -74,6 +74,17 @@ export const registerOrgSettingsRoutes: RegisterRoutes = (router, s) => {
     }
     const org = await orgStore.get(id);
     if (!org) return send(res, 404, { error: "org not found" });
+    // docs/26 A6: requiring two-step verification keeps out everyone without
+    // it — the owner turning it on included, so they need it first.
+    if (
+      parsed.settings.requireTwoFactor === true &&
+      !(await s.access.hasTwoFactor(guard.user.id))
+    ) {
+      return send(res, 409, {
+        error:
+          "Turn on two-step verification for your own account first — requiring it would lock you out.",
+      });
+    }
 
     const before = org.settings ?? {};
     const merged: OrgSettings = { ...before, ...parsed.settings };
@@ -116,6 +127,7 @@ export const registerOrgSettingsRoutes: RegisterRoutes = (router, s) => {
       else merged.automation = sub as import("../classification.js").OrgAutomation;
     }
     await orgStore.setSettings(id, merged);
+    s.access.forgetOrg(id);
 
     // Audit names the CHANGED KEYS with from→to (docs/24 §4 acceptance):
     // "who moved what, and to what" must be answerable from the trail alone

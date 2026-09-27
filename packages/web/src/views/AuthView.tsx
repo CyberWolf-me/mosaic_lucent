@@ -314,6 +314,15 @@ function LoginForm(props: { onMode: (m: Mode) => void; onDone: () => void }) {
   const [busy, setBusy] = useState(false);
   // The OAuth callback lands back here on failure (`?oauth_error=…`).
   const oauthError = useOauthError();
+  // ...and, for an account with two-step verification on, with the code step
+  // still to do: `#twofactor=<loginToken>` (docs/26 A6). Read once, then
+  // cleared, so a reload or a shared URL doesn't carry it.
+  useEffect(() => {
+    const match = /^#twofactor=([A-Za-z0-9_-]+)$/.exec(window.location.hash);
+    if (!match?.[1]) return;
+    window.history.replaceState(null, "", window.location.pathname + window.location.search);
+    setLoginToken(match[1]);
+  }, []);
 
   async function submitPassword(e: React.FormEvent) {
     e.preventDefault();
@@ -354,8 +363,8 @@ function LoginForm(props: { onMode: (m: Mode) => void; onDone: () => void }) {
       <form onSubmit={submitCode} className="auth-form">
         <h1>Two-factor code</h1>
         <p className="auth-help">
-          Enter the 6-digit code from your authenticator app for {email}, or one of your recovery
-          codes.
+          Enter the 6-digit code from your authenticator app{email ? ` for ${email}` : ""}, or one
+          of your recovery codes.
         </p>
         <Field
           label="Code"

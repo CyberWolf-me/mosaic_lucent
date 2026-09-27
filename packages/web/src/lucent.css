@@ -917,3 +917,102 @@ button.prov-chip:hover {
 .team-pending {
   margin-top: 16px;
 }
+
+/* A workspace closed to you until two-step verification is on (docs/26 A6) */
+.access-notice {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0 0 20px;
+  padding: 12px 14px;
+  font-size: 13px;
+  color: var(--ink-1);
+  background: oklch(from var(--saffron) l c h / 0.1);
+  border: 1px solid oklch(from var(--saffron) l c h / 0.35);
+  border-radius: 10px;
+}
+.access-notice p {
+  flex: 1;
+  margin: 0;
+}
+.access-notice strong {
+  color: var(--ink-0);
+  font-weight: 600;
+}
+.access-notice-glyph {
+  flex-shrink: 0;
+  color: var(--saffron);
+}
+@media (max-width: 560px) {
+  .access-notice {
+    flex-wrap: wrap;
+  }
+}
+
+/* Settings → Security (docs/26 A6) */
+.security-state {
+  margin-left: 6px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  vertical-align: 1px;
+}
+.security-state.on {
+  color: var(--moss);
+  background: oklch(from var(--moss) l c h / 0.12);
+}
+.security-state.off {
+  color: var(--ink-2);
+  background: var(--paper-2);
+}
+.security-setup ol {
+  display: grid;
+  gap: 14px;
+  margin: 4px 0 0;
+  padding-left: 18px;
+  font-size: 13px;
+  color: var(--ink-1);
+}
+.security-setup li > .team-invite {
+  margin-top: 8px;
+  max-width: 420px;
+}
+.security-secret {
+  margin: 8px 0 6px;
+  padding: 10px 12px;
+  width: fit-content;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  font-size: 14px;
+  letter-spacing: 0.08em;
+  color: var(--ink-0);
+  background: var(--paper-2);
+  border-radius: 8px;
+  user-select: all;
+}
+.security-link {
+  font-size: 12px;
+  color: var(--bloom-2);
+}
+.security-codes {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  gap: 6px 16px;
+  margin: 10px 0 14px;
+  padding: 12px 14px;
+  list-style: none;
+  font-size: 13px;
+  color: var(--ink-0);
+  background: var(--paper-2);
+  border-radius: 8px;
+}
+.security-actions {
+  display: flex;
+  gap: 8px;
+}
+.security-actions .btn.primary {
+  flex: 0 0 auto;
+}

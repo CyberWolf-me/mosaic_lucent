@@ -43,6 +43,7 @@ import {
   handleUpdateProfile,
   handleVerifyEmail,
   handleVerifyTwoFactorLogin,
+  recordPendingTwoFactor,
   mintSession,
   SESSION_COOKIE_HEADER,
   type AuthContext,
@@ -136,6 +137,7 @@ import { registerMeRoutes } from "./routes/me.js";
 import { InMemoryFavoriteStore } from "./favorites.js";
 import { InMemoryTrashStore, withMeetingTrash, withProjectTrash } from "./trash.js";
 import { InMemoryTeamStore, withTeamGrants } from "./teams.js";
+import { AccessPolicy, withAccessPolicy } from "./accessPolicy.js";
 import { registerSsoRoutes } from "./routes/sso.js";
 import { registerHistoryRoutes } from "./routes/history.js";
 import { registerAskRoutes } from "./routes/ask.js";
@@ -625,7 +627,18 @@ export function createApp(deps: AppDeps): App {
   // docs/26 A6: a board's effective roles include team grants. Wrapped once,
   // here, so every guard, the realtime room and every workspace read agree.
   const teamStore = deps.teams ?? new InMemoryTeamStore();
-  const boardStore = withTeamGrants(intelligence.observe(rawBoardStore), teamStore);
+  // docs/26 A6: a workspace that requires two-step verification is closed to
+  // anyone without it. Applied to the board role here (outermost, after team
+  // grants) and to the org role in `orgRoleFor` — the two places access is
+  // decided.
+  const access = new AccessPolicy({
+    org: async (orgId) => (orgStore ? await orgStore.get(orgId) : undefined),
+    hasTwoFactor: async (userId) => Boolean(await totpStore?.getCredential(userId)),
+  });
+  const boardStore = withAccessPolicy(
+    withTeamGrants(intelligence.observe(rawBoardStore), teamStore),
+    access,
+  );
 
   // docs/26 J6 (ADR 0047): a record of every AI run. Writing one never fails
   // the request it describes — governance is kept, not enforced, here.
@@ -919,6 +932,19 @@ export function createApp(deps: AppDeps): App {
     }
 
     const user = resolution.user;
+    // docs/26 A6: an account with two-step verification on is asked for its
+    // code after OAuth too, exactly as after a password — the provider proved
+    // the first factor, not the second. The one-shot login token rides the
+    // fragment, so it never reaches a server log or a Referer.
+    if (totpStore && (await totpStore.getCredential(user.id))) {
+      const loginToken = await recordPendingTwoFactor(authCtx, user.id, now);
+      res.writeHead(302, {
+        location: `${config.webOrigin}/login#twofactor=${loginToken}`,
+        "set-cookie": serializeCookie(stateCookie, "", { path: "/", maxAgeMs: -1 }),
+      });
+      res.end();
+      return;
+    }
     const session = await mintSession(authCtx, user, {
       userAgent: req.headers["user-agent"] ?? null,
       ip: clientIp(req),
@@ -1151,6 +1177,39 @@ export function createApp(deps: AppDeps): App {
    * is small and called on every state-changing route.
    */
   async function orgRoleFor(userId: string, orgId: string): Promise<Role | undefined> {
+    return access.allow(userId, orgId, await storedOrgRole(userId, orgId));
+  }
+
+  /**
+   * Every workspace this person is in, with their stored role, oldest first.
+   * `listOrgsForUser` alone misses, in memory, the workspaces created through
+   * the org store (every non-personal one) — Postgres keeps one table, the
+   * in-memory twins two — so memberships it didn't name are read from there.
+   */
+  async function orgsOf(
+    userId: string,
+  ): Promise<Array<{ org: { id: string; name: string; createdAt: number }; role: Role }>> {
+    const listed: Array<{ org: { id: string; name: string; createdAt: number }; role: Role }> = [
+      ...(await userStore.listOrgsForUser(userId)),
+    ];
+    const seen = new Set(listed.map((o) => o.org.id));
+    for (const m of await userStore.membershipsFor(userId)) {
+      if (seen.has(m.orgId)) continue;
+      const org = await orgStore?.get(m.orgId);
+      if (!org) continue;
+      seen.add(org.id);
+      listed.push({ org: { id: org.id, name: org.name, createdAt: org.createdAt }, role: m.role });
+    }
+    return listed.sort((a, b) => a.org.createdAt - b.org.createdAt);
+  }
+
+  /**
+   * The membership as stored, the access policy aside (docs/26 A6). For
+   * questions about the membership itself — is this person in the org, a
+   * teammate or a guest, whom may an owner remove — never for access: a
+   * member a two-step requirement keeps out is still a member.
+   */
+  async function storedOrgRole(userId: string, orgId: string): Promise<Role | undefined> {
     const memberships = await userStore.membershipsFor(userId);
     return memberships.find((m) => m.orgId === orgId)?.role;
   }
@@ -2379,7 +2438,11 @@ export function createApp(deps: AppDeps): App {
     recordRun,
     threads: deps.threads ?? new InMemoryThreadStore(),
     teams: teamStore,
+    storedOrgRole,
+    access,
     readableBoards: async (userId, orgId, req) => {
+      // docs/26 A6: a workspace this person can't reach right now reads empty.
+      if (await access.blocked(userId, orgId)) return { member: false, boards: [] };
       // The two scopes of GET /api/boards (ADR 0045, 0046): an org member
       // reads every board in the org; an outside collaborator only the
       // boards shared with them.
@@ -2626,7 +2689,15 @@ export function createApp(deps: AppDeps): App {
     ? registerAssetRoutes({
         assetService: deps.assetService,
         requireUser,
-        membershipsFor: (userId: string) => userStore.membershipsFor(userId),
+        // docs/26 A6: an asset in a workspace this person can't reach is out
+        // of reach too.
+        membershipsFor: async (userId: string) => {
+          const out = [];
+          for (const m of await userStore.membershipsFor(userId)) {
+            if (!(await access.blocked(userId, m.orgId))) out.push(m);
+          }
+          return out;
+        },
         requireOrgRole,
         requireCsrf,
         send,
@@ -2669,7 +2740,7 @@ export function createApp(deps: AppDeps): App {
                   orgId: deps.scim.config.orgId,
                   teams: teamStore,
                   ensureMember: async (userId: string) => {
-                    if (!(await orgRoleFor(userId, deps.scim!.config.orgId!))) {
+                    if (!(await storedOrgRole(userId, deps.scim!.config.orgId!))) {
                       await memberships.set({
                         userId,
                         orgId: deps.scim!.config.orgId!,
@@ -2818,16 +2889,22 @@ export function createApp(deps: AppDeps): App {
     if (req.method === "GET" && (req.url === "/api/orgs" || req.url === "/api/orgs/")) {
       const user = await requireUser(req, res);
       if (!user) return;
-      const list = await userStore.listOrgsForUser(user.id);
-      send(res, 200, {
-        orgs: list.map(({ org, role }) => ({
+      const list = await orgsOf(user.id);
+      const orgs = [];
+      for (const { org, role } of list) {
+        // docs/26 A6: a workspace that's closed to this person right now
+        // still lists, saying why, so the app can explain instead of 404ing.
+        const blocked = await access.blocked(user.id, org.id);
+        orgs.push({
           id: org.id,
           name: org.name,
           role,
           createdAt: org.createdAt,
           isPersonal: org.id === `org_personal_${user.id}`,
-        })),
-      });
+          ...(blocked ? { blocked } : {}),
+        });
+      }
+      send(res, 200, { orgs });
       return;
     }
     // M2.3: create a new (non-personal) org. The caller becomes its owner.
@@ -2893,13 +2970,18 @@ export function createApp(deps: AppDeps): App {
       // Members joined to users via `membersOf`. The route mirrors the
       // board-members shape so the admin console can render the same way.
       const rawMembers = await orgStore.membersOf(id);
-      const members = rawMembers.map((m) => ({
-        userId: m.userId,
-        role: m.role,
-        email: m.email,
-        name: m.name,
-      }));
       const callerRole = guard.role;
+      // docs/26 A6: an owner sees who has two-step verification on — who a
+      // requirement would keep out.
+      const members = await Promise.all(
+        rawMembers.map(async (m) => ({
+          userId: m.userId,
+          role: m.role,
+          email: m.email,
+          name: m.name,
+          ...(callerRole === "owner" ? { twoFactor: await access.hasTwoFactor(m.userId) } : {}),
+        })),
+      );
       send(res, 200, {
         id: org.id,
         name: org.name,
@@ -3679,6 +3761,26 @@ export function createApp(deps: AppDeps): App {
     }
     if (req.method === "POST" && req.url === "/api/auth/2fa/disable") {
       if (!requireCsrf(req, res, "/api/auth/2fa/disable")) return;
+      // docs/26 A6: a workspace that requires two-step verification can't be
+      // left behind by turning it off — the person would lock themselves out.
+      const caller = await authenticate(
+        authCtx,
+        req.headers.cookie ?? null,
+        bearerToken(req.headers.authorization),
+      );
+      if (caller) {
+        const requiring = [];
+        for (const { org } of await orgsOf(caller.id)) {
+          if (await access.requiresTwoFactor(org.id)) requiring.push(org.name);
+        }
+        if (requiring.length > 0) {
+          send(res, 409, {
+            error: `${requiring.join(", ")} ${requiring.length === 1 ? "requires" : "require"} two-step verification, so it can't be turned off while you're a member.`,
+            requiredBy: requiring,
+          });
+          return;
+        }
+      }
       try {
         const raw = await readBody(req);
         const parsed = raw ? JSON.parse(raw) : {};
@@ -3692,6 +3794,20 @@ export function createApp(deps: AppDeps): App {
       } catch (err) {
         send(res, 400, { error: "bad request", detail: (err as Error).message });
       }
+      return;
+    }
+    // docs/26 A6: whether two-step verification is on, for the Security pane.
+    if (req.method === "GET" && req.url === "/api/auth/2fa") {
+      const user = await requireUser(req, res);
+      if (!user) return;
+      const cred = await totpStore?.getCredential(user.id);
+      const codes = cred && totpStore ? await totpStore.listRecoveryCodes(user.id) : [];
+      send(res, 200, {
+        available: Boolean(totpStore),
+        enabled: Boolean(cred),
+        enrolledAt: cred?.enrolledAt ?? null,
+        recoveryCodesLeft: codes.filter((c) => c.consumedAt === null).length,
+      });
       return;
     }
     if (req.method === "GET" && req.url === "/api/auth/me") {
@@ -4066,7 +4182,7 @@ export function createApp(deps: AppDeps): App {
           send(res, 500, { error: "no personal org on file" });
           return;
         }
-        if (requestedOrgId && !memberships.some((m) => m.orgId === requestedOrgId)) {
+        if (requestedOrgId && !(await orgRoleFor(user.id, requestedOrgId))) {
           send(res, 404, { error: "org not found" });
           return;
         }
@@ -4215,15 +4331,14 @@ export function createApp(deps: AppDeps): App {
         return;
       }
       const scope = requestedScope ?? "org";
-      if (scope === "org") {
-        const memberships = await userStore.membershipsFor(user.id);
-        if (!memberships.some((m) => m.orgId === orgId)) {
-          send(res, 404, { error: "org not found" });
-          return;
-        }
+      if (scope === "org" && !(await orgRoleFor(user.id, orgId))) {
+        send(res, 404, { error: "org not found" });
+        return;
       }
-      const boards =
-        scope === "shared"
+      // docs/26 A6: a workspace closed to this person right now lists nothing.
+      const boards = (await access.blocked(user.id, orgId))
+        ? []
+        : scope === "shared"
           ? await boardStore.listForUser(orgId, user.id)
           : await boardStore.listForOrg(orgId);
       send(res, 200, {
@@ -4475,7 +4590,7 @@ export function createApp(deps: AppDeps): App {
             name: u?.name ?? "(removed)",
             email: u?.email ?? "",
             // docs/26 A6: someone outside the workspace, here on this board only.
-            guest: !(await orgRoleFor(m.userId, guard.board.orgId)),
+            guest: !(await storedOrgRole(m.userId, guard.board.orgId)),
           });
         }
         send(res, 200, { members: out, role: callerRole });
@@ -4563,7 +4678,7 @@ export function createApp(deps: AppDeps): App {
           }
           const email = body.email.toLowerCase().trim();
           const target = await userStore.findByEmail(email);
-          const inOrg = target ? await orgRoleFor(target.id, board.orgId) : undefined;
+          const inOrg = target ? await storedOrgRole(target.id, board.orgId) : undefined;
           if (!target || !inOrg) {
             // docs/26 A6: someone outside the workspace comes in as a GUEST —
             // this board only — unless its tier or the org keeps boards

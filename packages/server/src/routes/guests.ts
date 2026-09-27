@@ -16,7 +16,7 @@ export const registerGuestRoutes: RegisterRoutes = (router, s) => {
 
   /** Is this person a member of the org (as opposed to a guest in it)? */
   const isMember = async (userId: string, orgId: string) =>
-    (await s.orgRoleFor(userId, orgId)) !== undefined;
+    (await s.storedOrgRole(userId, orgId)) !== undefined;
 
   router.get("/api/boards/shared-with-me", async (ctx) => {
     const { req, res } = ctx;
@@ -28,6 +28,8 @@ export const registerGuestRoutes: RegisterRoutes = (router, s) => {
     for (const { board, role } of granted) {
       // A board in your own workspace is in your workspace, not "shared".
       if (await isMember(user.id, board.orgId)) continue;
+      // A workspace that's closed to you right now (docs/26 A6) lists nothing.
+      if (await s.access.blocked(user.id, board.orgId)) continue;
       if (!orgNames.has(board.orgId)) {
         orgNames.set(
           board.orgId,

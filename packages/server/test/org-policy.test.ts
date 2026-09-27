@@ -76,6 +76,8 @@ describe("org settings policy (unit)", () => {
         overdueNotify: true,
         externalClose: false,
       },
+      // docs/26 A6: two-step verification isn't required until an owner says so.
+      requireTwoFactor: false,
     });
     expect(effectiveSettings({}).classificationFloor).toBe("internal");
   });

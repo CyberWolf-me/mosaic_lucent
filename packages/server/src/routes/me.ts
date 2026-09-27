@@ -104,6 +104,27 @@ export const registerMeRoutes: RegisterRoutes = (router, s) => {
   router.put(favoriteRoute, star(true));
   router.delete(favoriteRoute, star(false));
 
+  // The workspaces closed to you right now, and why (docs/26 A6) — as a
+  // member or as a guest on one of their boards — so the app can say so.
+  router.get("/api/me/access", async (ctx) => {
+    const { req, res } = ctx;
+    const user = await requireUser(req, res);
+    if (!user) return;
+    const orgs = new Map<string, boolean>();
+    for (const m of await s.userStore.membershipsFor(user.id)) orgs.set(m.orgId, false);
+    for (const { board } of await s.boardStore.listGrantedTo(user.id, 200)) {
+      if (!orgs.has(board.orgId)) orgs.set(board.orgId, true);
+    }
+    const blocked = [];
+    for (const [orgId, asGuest] of orgs) {
+      const reason = await s.access.blocked(user.id, orgId);
+      if (!reason) continue;
+      const org = await s.orgStore?.get(orgId);
+      blocked.push({ orgId, orgName: org?.name ?? "A workspace", reason, asGuest });
+    }
+    send(res, 200, { twoFactor: await s.access.hasTwoFactor(user.id), blocked });
+  });
+
   router.get("/api/me/activity", async (ctx) => {
     const { req, res } = ctx;
     const user = await requireUser(req, res);
@@ -123,9 +144,10 @@ export const registerMeRoutes: RegisterRoutes = (router, s) => {
       }
     }
     for (const { board } of await s.boardStore.listGrantedTo(user.id, 50)) {
-      boards.set(board.id, board);
+      if (!(await s.access.blocked(user.id, board.orgId))) boards.set(board.id, board);
     }
     for (const membership of await s.userStore.membershipsFor(user.id)) {
+      if (await s.access.blocked(user.id, membership.orgId)) continue;
       for (const board of (await s.boardStore.listForOrg(membership.orgId)).slice(0, 10)) {
         boards.set(board.id, board);
       }

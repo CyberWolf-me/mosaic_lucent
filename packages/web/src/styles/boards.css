@@ -447,6 +447,23 @@ html[data-theme="dark"] .boards-sk-shape {
   gap: 10px;
   font-weight: 500;
 }
+.admin-2fa {
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  font-weight: 500;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.admin-2fa.on {
+  color: var(--moss);
+  background: oklch(from var(--moss) l c h / 0.12);
+}
+.admin-2fa.off {
+  color: var(--ink-3);
+  background: var(--paper-2);
+}
 .boards-admin-table td.boards-admin-email {
   font-size: 11.5px;
   color: var(--ink-2);

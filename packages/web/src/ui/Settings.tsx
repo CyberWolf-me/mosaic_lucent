@@ -29,6 +29,14 @@ import type {
   OrgSummary,
 } from "../billing.js";
 import { buildSupportReport, formatSupportReport } from "../support.js";
+import {
+  beginEnrollment,
+  confirmEnrollment,
+  disableTwoFactor,
+  groupedSecret,
+  twoFactorStatus,
+  type TwoFactorStatus,
+} from "../security.js";
 import { useWorkspaceOptional } from "../workspace.js";
 import {
   fetchOrg,
@@ -419,6 +427,7 @@ export function SettingsModal({
 
   const sections: { id: string; label: string; icon: React.ReactNode }[] = [
     { id: "account", label: "Account", icon: <ToolIco.User /> },
+    { id: "security", label: "Security", icon: <Ico.Lock /> },
     { id: "appearance", label: "Appearance", icon: <ToolIco.Palette /> },
     { id: "canvas", label: "Canvas", icon: <ToolIco.Rect /> },
     { id: "ai", label: "AI & voice", icon: <ToolIco.Settings /> },
@@ -1046,6 +1055,7 @@ export function SettingsModal({
           )}
 
           {section === "team" && <TeamPane />}
+          {section === "security" && <SecurityPane />}
 
           {section === "billing" && <BillingPane />}
 
@@ -1062,6 +1072,252 @@ export function SettingsModal({
  * revoke. It replaced a pane that said "4 people in Personal" to everyone and
  * whose Send invite button did nothing.
  */
+/**
+ * Two-step verification (docs/26 A6): set it up with any authenticator app,
+ * see how many recovery codes are left, turn it off with a code. A workspace
+ * can require it; the server refuses turning it off while one does.
+ */
+function SecurityPane() {
+  const [status, setStatus] = useState<TwoFactorStatus | "loading" | "signed-out" | "failed">(
+    () => (getSessionUser() ? "loading" : "signed-out"),
+  );
+  const [setup, setSetup] = useState<{ secret: string; otpauthUri: string } | null>(null);
+  const [recovery, setRecovery] = useState<string[] | null>(null);
+  const [turningOff, setTurningOff] = useState(false);
+  const [code, setCode] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  const refresh = async () => {
+    const next = await twoFactorStatus();
+    setStatus(next ?? "failed");
+  };
+  useEffect(() => {
+    if (getSessionUser()) void refresh();
+  }, []);
+
+  const start = async () => {
+    setBusy(true);
+    setError(null);
+    const r = await beginEnrollment();
+    setBusy(false);
+    if (!r.ok) return setError(r.error);
+    setSetup({ secret: r.secret, otpauthUri: r.otpauthUri });
+    setCode("");
+  };
+  const finish = async () => {
+    if (!setup) return;
+    setBusy(true);
+    setError(null);
+    const r = await confirmEnrollment(setup.secret, code);
+    setBusy(false);
+    if (!r.ok) {
+      return setError(
+        r.error === "code did not match"
+          ? "That code didn't match — check the app's clock and try the newest code."
+          : r.error,
+      );
+    }
+    setSetup(null);
+    setCode("");
+    setRecovery(r.recoveryCodes);
+    await refresh();
+  };
+  const turnOff = async () => {
+    setBusy(true);
+    setError(null);
+    const r = await disableTwoFactor(code);
+    setBusy(false);
+    if (!r.ok) {
+      return setError(
+        r.error === "code did not match" ? "That code didn't match." : r.error,
+      );
+    }
+    setTurningOff(false);
+    setCode("");
+    await refresh();
+  };
+  const copyCodes = async () => {
+    if (!recovery) return;
+    try {
+      await navigator.clipboard.writeText(recovery.join("\n"));
+      setCopied(true);
+    } catch {
+      /* the codes stay on screen to copy by hand */
+    }
+  };
+
+  return (
+    <>
+      <h2>Security</h2>
+      <div className="subtitle">Two-step verification for your account.</div>
+      {status === "signed-out" && (
+        <div className="setting-row">
+          <div className="desc">Sign in to protect your account with two-step verification.</div>
+        </div>
+      )}
+      {status === "loading" && <div className="subtitle">Loading…</div>}
+      {status === "failed" && (
+        <div className="subtitle" role="alert">
+          Couldn&apos;t read your security settings. Check your connection and reopen this pane.
+        </div>
+      )}
+      {typeof status === "object" && !status.available && (
+        <div className="setting-row">
+          <div className="desc">This Lucent server doesn&apos;t offer two-step verification.</div>
+        </div>
+      )}
+
+      {recovery && (
+        <div className="setting-row security-recovery">
+          <div className="label">Save your recovery codes</div>
+          <div className="desc">
+            Each one signs you in once if you lose your phone. They won&apos;t be shown again — keep
+            them somewhere safe, like a password manager.
+          </div>
+          <ul className="security-codes mono" aria-label="Recovery codes">
+            {recovery.map((c) => (
+              <li key={c}>{c}</li>
+            ))}
+          </ul>
+          <div className="security-actions">
+            <button className="btn ghost" type="button" onClick={() => void copyCodes()}>
+              {copied ? "Copied" : "Copy codes"}
+            </button>
+            <button className="btn primary" type="button" onClick={() => setRecovery(null)}>
+              I&apos;ve saved them
+            </button>
+          </div>
+        </div>
+      )}
+
+      {typeof status === "object" && status.available && !recovery && (
+        <div className="setting-row">
+          <div className="label">
+            Two-step verification{" "}
+            <span className={`security-state ${status.enabled ? "on" : "off"}`}>
+              {status.enabled ? "On" : "Off"}
+            </span>
+          </div>
+          {status.enabled ? (
+            <div className="desc">
+              Signing in asks for a code from your authenticator app as well as your password
+              {status.enrolledAt
+                ? ` — on since ${new Date(status.enrolledAt).toLocaleDateString()}`
+                : ""}
+              . {status.recoveryCodesLeft} recovery code
+              {status.recoveryCodesLeft === 1 ? "" : "s"} left.
+            </div>
+          ) : (
+            <div className="desc">
+              Sign in with a code from an authenticator app as well as your password. Some
+              workspaces require it before you can open their boards.
+            </div>
+          )}
+
+          {!status.enabled && !setup && (
+            <button className="btn primary" type="button" disabled={busy} onClick={() => void start()}>
+              Set up two-step verification
+            </button>
+          )}
+
+          {setup && (
+            <form
+              className="security-setup"
+              onSubmit={(e) => {
+                e.preventDefault();
+                void finish();
+              }}
+            >
+              <ol>
+                <li>
+                  Add Lucent to an authenticator app (1Password, Google Authenticator, Authy…) with
+                  this key:
+                  <div className="security-secret mono" aria-label="Setup key">
+                    {groupedSecret(setup.secret)}
+                  </div>
+                  <a className="security-link" href={setup.otpauthUri}>
+                    Open in an authenticator app on this device
+                  </a>
+                </li>
+                <li>
+                  Enter the 6-digit code it shows:
+                  <div className="team-invite">
+                    <input
+                      inputMode="numeric"
+                      autoComplete="one-time-code"
+                      value={code}
+                      onChange={(e) => setCode(e.target.value)}
+                      placeholder="123 456"
+                      aria-label="Code from your authenticator app"
+                    />
+                    <button className="btn primary" type="submit" disabled={busy || code.trim().length < 6}>
+                      {busy ? "Checking…" : "Turn on"}
+                    </button>
+                    <button
+                      className="btn ghost"
+                      type="button"
+                      onClick={() => {
+                        setSetup(null);
+                        setError(null);
+                      }}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </li>
+              </ol>
+            </form>
+          )}
+
+          {status.enabled && !turningOff && (
+            <button
+              className="btn ghost"
+              type="button"
+              onClick={() => {
+                setTurningOff(true);
+                setError(null);
+                setCode("");
+              }}
+            >
+              Turn off
+            </button>
+          )}
+          {status.enabled && turningOff && (
+            <form
+              className="team-invite"
+              onSubmit={(e) => {
+                e.preventDefault();
+                void turnOff();
+              }}
+            >
+              <input
+                autoComplete="one-time-code"
+                value={code}
+                onChange={(e) => setCode(e.target.value)}
+                placeholder="Code or recovery code"
+                aria-label="Code to turn off two-step verification"
+              />
+              <button className="btn primary" type="submit" disabled={busy || !code.trim()}>
+                Turn off
+              </button>
+              <button className="btn ghost" type="button" onClick={() => setTurningOff(false)}>
+                Keep it on
+              </button>
+            </form>
+          )}
+          {error && (
+            <div className="team-note error" role="alert">
+              {error}
+            </div>
+          )}
+        </div>
+      )}
+    </>
+  );
+}
+
 function TeamPane() {
   const [org, setOrg] = useState<OrgMembership | null>(null);
   const [detail, setDetail] = useState<OrgDetail | null>(null);

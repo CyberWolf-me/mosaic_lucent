@@ -37,6 +37,7 @@ import { loadOrgs, setCurrentOrgId, type OrgSummary } from "../orgs.js";
 import { listBoards, listSharedWithMe, type BoardSummary } from "../boards.js";
 import { trashBoard } from "../trash.js";
 import { listFavorites, setFavorite } from "../me.js";
+import { AccessNotice } from "../ui/AccessNotice.js";
 import { KIND_TINT, statementIsHistory } from "../statementUi.js";
 import { TEMPLATES, type Template } from "../templates.js";
 
@@ -531,6 +532,7 @@ export function DashboardView({ onOpenSettings }: { onOpenSettings: (section?: s
 
       {firstRun && filter !== "templates" ? (
         <>
+          <AccessNotice />
           <EmptyState
             glyph={<Ico.Folder width={22} height={22} />}
             title="Your first board starts with a sentence"
@@ -616,6 +618,7 @@ export function DashboardView({ onOpenSettings }: { onOpenSettings: (section?: s
               Loading boards from {orgLabel}…
             </p>
           )}
+          <AccessNotice />
           {cloudState === "offline" && <OfflineNote />}
 
           {filter === "templates" ? (

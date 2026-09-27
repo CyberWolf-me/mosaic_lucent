@@ -851,10 +851,44 @@ a much better product — not rewriting the layout engine.
     first-run screen; that now counts as work.
     `GET/PUT/DELETE /api/me/favorites`, `GET /api/me/activity`.
 
+  - _Two-step verification._ An owner can require it (Admin → Security).
+    Anyone without it is kept out of that workspace until they turn it on.
+    That covers a member, a team, and a guest given one board. They aren't
+    signed out, and their other workspaces stay open. The switch says who
+    doesn't have it yet, and the members table marks each person 2FA or No
+    2FA.
+
+    The rule sits where access is decided: the org role (`orgRoleFor`) and
+    the board role (the board store wrapped once, `accessPolicy.ts`). So
+    every guard, the realtime room and every workspace read agree. Questions
+    about someone's membership rather than access ignore the rule: is this
+    person a teammate or a guest, whom may an owner remove, can they leave
+    (`storedOrgRole`). A member it keeps out is still a member, and can
+    still leave.
+
+    Nobody gets locked out by the switch. An owner can't require it before
+    having it, and nobody can turn theirs off while a workspace requires it.
+
+    Settings → Security is new: set it up with any authenticator app (a key
+    and an `otpauth:` link, no QR code yet). Ten recovery codes are shown
+    once. It shows how many codes are left and turns off with a code.
+
+    A workspace that's closed to you says so on Home and Boards, naming it,
+    with "Set it up" one click away (`GET /api/me/access`). `GET /api/orgs`
+    now marks such a workspace `blocked`. It also lists team workspaces in
+    memory, where it used to show only the personal one.
+
+    OAuth sign-in used to skip the code for an account with 2FA on. It now
+    asks for it, as a password sign-in does: the callback lands on
+    `/login#twofactor=<one-shot token>`. SAML SSO still trusts the identity
+    provider's own factors.
+
   - Evidence: server `org-members.test.ts` (3), `guests.test.ts` (4),
     `trash.test.ts` (3), `pg-trash.test.ts`; `scripts/trash-check.mjs` (6/6);
     `me.test.ts` (2), `pg-favorites.test.ts`; `scripts/favorites-check.mjs`
-    (8/8);
+    (8/8); `two-factor-policy.test.ts` (2), `oauth.test.ts` (the code after
+    OAuth); `scripts/two-factor-check.mjs` (10/10, codes computed as an
+    authenticator app would);
     `teams.test.ts` (3, with SCIM Groups), `pg-teams.test.ts`;
     `scripts/teams-check.mjs` (6/6);
     `scripts/guests-check.mjs` (6/6); `scripts/org-members-check.mjs`

@@ -262,6 +262,13 @@ export interface RouteServices {
     boardId: string,
   ): Promise<{ user: StoredUser; viaAgent: boolean } | undefined>;
   orgRoleFor(userId: string, orgId: string): Promise<Role | undefined>;
+  /**
+   * The membership as stored, the access policy aside (docs/26 A6): for
+   * questions about someone's membership, never for access.
+   */
+  storedOrgRole(userId: string, orgId: string): Promise<Role | undefined>;
+  /** docs/26 A6: who may reach a workspace right now, beyond their role. */
+  readonly access: import("../accessPolicy.js").AccessPolicy;
   requireOrgRole(
     req: IncomingMessage,
     res: ServerResponse,

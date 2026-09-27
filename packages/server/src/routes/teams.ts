@@ -132,7 +132,7 @@ export const registerTeamRoutes: RegisterRoutes = (router, s) => {
       const userId = ctx.param("userId");
       if (add) {
         // Teams hold members: a guest is never lifted by a team.
-        if (!(await s.orgRoleFor(userId, orgId))) {
+        if (!(await s.storedOrgRole(userId, orgId))) {
           return send(res, 404, { error: "not a member of this workspace" });
         }
         await teams.addMember(team.id, userId);

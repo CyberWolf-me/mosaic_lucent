@@ -12,6 +12,8 @@ import { Telemetry } from "../src/telemetry.js";
 import { Limiter } from "../src/limiter.js";
 import { InMemoryTicketStore } from "../src/realtimeTicket.js";
 import { readConfig } from "../src/config.js";
+import { InMemoryTotpStore } from "../src/totpStore.js";
+import { base32Decode, generateTotpSecret, totp } from "../src/totp.js";
 import { MockProvider, MockImageProvider } from "@lucent/ai";
 import {
   mintOauthState,
@@ -156,10 +158,12 @@ describe("resolveOauthUser", () => {
 interface Harness {
   base: string;
   userStore: InMemoryUserStore;
+  totpStore: InMemoryTotpStore;
   close: () => Promise<void>;
 }
 
 async function harness(oauthEnv: Record<string, string> = {}): Promise<Harness> {
+  const totpStore = new InMemoryTotpStore();
   const config = readConfig({
     LUCENT_REQUIRE_AUTH: "1",
     LUCENT_WEB_ORIGIN: ORIGIN,
@@ -182,10 +186,11 @@ async function harness(oauthEnv: Record<string, string> = {}): Promise<Harness> 
     orgStore: new InMemoryOrgStore(),
     inviteStore: new InMemoryOrgInviteStore(),
     notifications: new InMemoryNotificationStore(),
+    totpStore,
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const { port } = server.address() as AddressInfo;
-  return { base: `http://127.0.0.1:${port}`, userStore, close };
+  return { base: `http://127.0.0.1:${port}`, userStore, totpStore, close };
 }
 
 const GOOGLE_ENV = {
@@ -365,6 +370,55 @@ describe("oauth HTTP routes", () => {
       );
       expect(res.status).toBe(302);
       expect(res.headers.get("location")).toContain("oauth_error=provider_denied");
+    } finally {
+      await h.close();
+    }
+  });
+
+  // docs/26 A6: the provider proves the first factor, not the second.
+  it("callback asks an account with two-step verification for its code", async () => {
+    const h = await harness(GOOGLE_ENV);
+    const signIn = async () => {
+      const start = await fetch(`${h.base}/api/auth/oauth/google/start`, { redirect: "manual" });
+      const state = new URL(start.headers.get("location")!).searchParams.get("state")!;
+      const stateCookie = start.headers.get("set-cookie")!.split(";")[0]!;
+      return fetch(
+        `${h.base}/api/auth/oauth/google/callback?code=abc&state=${encodeURIComponent(state)}`,
+        { redirect: "manual", headers: { cookie: stateCookie } },
+      );
+    };
+    try {
+      stubFetch(h.base, (url) =>
+        url.includes("oauth2.googleapis.com/token")
+          ? { access_token: "at-2" }
+          : { sub: "sub-2fa", email: "tfa@example.com", email_verified: true, name: "Tia" },
+      );
+      expect((await signIn()).headers.get("location")).toBe(`${ORIGIN}/?auth=oauth`);
+      const user = (await h.userStore.findByEmail("tfa@example.com"))!;
+      const { base32 } = generateTotpSecret();
+      await h.totpStore.setCredential({
+        userId: user.id,
+        secret: base32,
+        enrolledAt: Date.now(),
+        lastCounter: 0,
+      });
+
+      const second = await signIn();
+      const location = second.headers.get("location")!;
+      expect(location).toMatch(new RegExp(`^${ORIGIN}/login#twofactor=[A-Za-z0-9_-]+$`));
+      expect(second.headers.getSetCookie().some((c) => c.startsWith("lucent_session="))).toBe(
+        false,
+      );
+      const loginToken = location.split("#twofactor=")[1]!;
+      const verified = await fetch(`${h.base}/api/auth/2fa/verify`, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: ORIGIN },
+        body: JSON.stringify({ loginToken, code: totp(base32Decode(base32)) }),
+      });
+      expect(verified.status).toBe(200);
+      expect(verified.headers.getSetCookie().some((c) => c.startsWith("lucent_session="))).toBe(
+        true,
+      );
     } finally {
       await h.close();
     }

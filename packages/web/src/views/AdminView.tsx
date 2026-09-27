@@ -43,6 +43,7 @@ import {
   type TeamView,
 } from "../teams.js";
 import { deleteForGood, loadTrash, restoreFromTrash, type TrashEntry } from "../trash.js";
+import { loadRequireTwoFactor, setRequireTwoFactor } from "../security.js";
 import {
   getCurrentOrgId,
   listOrgGuests,
@@ -75,6 +76,8 @@ interface OrgMember {
   role: string;
   email: string;
   name: string;
+  /** Owners see whether each member has two-step verification on (docs/26 A6). */
+  twoFactor?: boolean;
 }
 
 interface OrgSummary {
@@ -350,6 +353,18 @@ export function AdminView({ onBack }: { onBack: () => void }) {
                       <span className="boards-admin-person">
                         <Avatar name={m.name || m.email || "?"} size={28} />
                         <span>{m.name || "(no name)"}</span>
+                        {m.twoFactor !== undefined && (
+                          <span
+                            className={`admin-2fa ${m.twoFactor ? "on" : "off"}`}
+                            title={
+                              m.twoFactor
+                                ? "Two-step verification is on"
+                                : "Two-step verification is off"
+                            }
+                          >
+                            {m.twoFactor ? "2FA" : "No 2FA"}
+                          </span>
+                        )}
                       </span>
                     </td>
                     <td className="mono boards-admin-email">{m.email || "—"}</td>
@@ -426,6 +441,9 @@ export function AdminView({ onBack }: { onBack: () => void }) {
           </p>
         </>
       ) : null}
+
+      <SectionLabel>Security</SectionLabel>
+      <SecuritySection org={org} />
 
       <SectionLabel>Teams</SectionLabel>
       <TeamsSection org={org} />
@@ -615,6 +633,81 @@ function AiActivitySection({ org }: { org: OrgSummary | null }) {
  * shared with. Owners create them and choose their members; a team your
  * identity provider manages is shown, and changed there.
  */
+/**
+ * Requiring two-step verification (docs/26 A6). Members and guests without
+ * it are kept out of the workspace — not signed out — until they turn it on;
+ * the switch says how many that is before it's flipped.
+ */
+function SecuritySection({ org }: { org: OrgSummary | null }) {
+  const [required, setRequired] = useState<boolean | null | "failed">(null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    if (!org || org.role !== "owner") return;
+    void loadRequireTwoFactor(org.id).then((r) => setRequired(r ?? "failed"));
+  }, [org]);
+  if (!org) return null;
+  if (org.role !== "owner") {
+    return <EmptyState compact title="Security is set by workspace owners" />;
+  }
+  if (required === null) {
+    return (
+      <p className="boards-admin-muted" role="status">
+        Loading security…
+      </p>
+    );
+  }
+  if (required === "failed") {
+    return (
+      <p className="boards-admin-muted" role="alert">
+        Couldn&apos;t load security settings.
+      </p>
+    );
+  }
+  const without = org.members.filter((m) => m.twoFactor === false);
+  const toggle = async (on: boolean) => {
+    setRequired(on);
+    setSaving(true);
+    setError(null);
+    const r = await setRequireTwoFactor(org.id, on);
+    setSaving(false);
+    if (!r.ok) {
+      setRequired(!on);
+      setError(r.error);
+    }
+  };
+  return (
+    <Card className="boards-admin-card">
+      <label className="automation-rule">
+        <input
+          type="checkbox"
+          checked={required}
+          disabled={saving}
+          onChange={(e) => void toggle(e.target.checked)}
+        />
+        <span>
+          <span className="automation-rule-title">Require two-step verification</span>
+          <span className="automation-rule-body">
+            Anyone without it — members and guests — can&apos;t open this workspace&apos;s boards
+            until they turn it on in Settings → Security. They stay signed in, and keep their other
+            workspaces.
+            {without.length > 0
+              ? ` ${without.length} of ${org.members.length} member${org.members.length === 1 ? "" : "s"} ${without.length === 1 ? "doesn't" : "don't"} have it yet${required ? ", and can't get in" : ""}: ${without
+                  .map((m) => m.name || m.email)
+                  .join(", ")}.`
+              : " Every member has it on."}
+          </span>
+        </span>
+      </label>
+      {error && (
+        <p className="boards-admin-error" role="alert">
+          {error}
+        </p>
+      )}
+    </Card>
+  );
+}
+
 function TeamsSection({ org }: { org: OrgSummary | null }) {
   const [teams, setTeams] = useState<TeamView[] | null | "failed">(null);
   const [name, setName] = useState("");

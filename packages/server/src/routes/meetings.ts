@@ -487,9 +487,12 @@ export const registerMeetingRoutes: RegisterRoutes = (router, s) => {
     if (!meetings) return send(res, 503, { error: "meeting transcripts are not configured" });
     const orgId = ctx.param("id");
     const member = (await userStore.membershipsFor(user.id)).some((m) => m.orgId === orgId);
-    const boards = member
-      ? await boardStore.listForOrg(orgId)
-      : await boardStore.listForUser(orgId, user.id);
+    // docs/26 A6: a workspace that's closed to you right now lists nothing.
+    const boards = (await s.access.blocked(user.id, orgId))
+      ? []
+      : member
+        ? await boardStore.listForOrg(orgId)
+        : await boardStore.listForUser(orgId, user.id);
     const url = new URL(req.url ?? "/", "http://localhost");
     const requested = Number(url.searchParams.get("limit"));
     const limit = Number.isInteger(requested) && requested > 0 ? Math.min(requested, 200) : 50;

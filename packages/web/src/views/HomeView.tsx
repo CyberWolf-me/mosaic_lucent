@@ -8,6 +8,7 @@ import { listWorkspaceMeetings, meetingName, type MeetingSummary } from "../meet
 import { listOrgProjects, loadWorkspaceIntelligence, type OrgProject } from "../orgProjects.js";
 import { listFavorites, loadActivity, type ActivityItem, type FavoriteView } from "../me.js";
 import { ScopedAsk } from "../ui/ScopedAsk.js";
+import { AccessNotice } from "../ui/AccessNotice.js";
 import { threadScope } from "../workspaceAsk.js";
 import {
   busiestBoard,
@@ -511,6 +512,8 @@ export function HomeView({ onOpenSettings }: { onOpenSettings: (section?: string
                   : undefined))
           }
         />
+
+        <AccessNotice />
 
         {org.id && workspaceQuestion && (
           <section className="home-ask" aria-label="Ask your workspace">

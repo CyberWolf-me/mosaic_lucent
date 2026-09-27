@@ -33,6 +33,8 @@ export interface OrgSummary {
   createdAt: number;
   /** The org created with the account. Cannot be renamed away or deleted. */
   isPersonal: boolean;
+  /** Closed to you right now, and why (docs/26 A6): it requires two-step verification. */
+  blocked?: "two_factor";
 }
 
 export interface OrgMember {

@@ -50,7 +50,7 @@ export const registerOrgMemberRoutes: RegisterRoutes = (router, s) => {
       return send(res, 400, { error: `role must be one of: ${ORG_ROLES.join(", ")}` });
     }
     const role = body.role as OrgRole;
-    const current = await s.orgRoleFor(targetId, orgId);
+    const current = await s.storedOrgRole(targetId, orgId);
     if (!current) return send(res, 404, { error: "not a member of this workspace" });
     if (current === role) return send(res, 200, { userId: targetId, role });
     if (current === "owner" && role !== "owner") {
@@ -81,10 +81,14 @@ export const registerOrgMemberRoutes: RegisterRoutes = (router, s) => {
     const user = await requireUser(req, res);
     if (!user) return;
     const leaving = targetId === user.id;
-    // Leaving needs only membership; removing someone else needs ownership.
-    const guard = await requireOrgRole(req, res, orgId, leaving ? "viewer" : "owner", route);
-    if (!guard.ok) return;
-    const current = await s.orgRoleFor(targetId, orgId);
+    // Leaving needs only membership — as stored, so a workspace that requires
+    // two-step verification can still be left (docs/26 A6). Removing someone
+    // else needs ownership.
+    if (!leaving) {
+      const guard = await requireOrgRole(req, res, orgId, "owner", route);
+      if (!guard.ok) return;
+    }
+    const current = await s.storedOrgRole(targetId, orgId);
     if (!current) return send(res, 404, { error: "not a member of this workspace" });
     if (isFounder(orgId, targetId)) {
       return send(res, 409, { error: "a personal workspace stays its owner's" });

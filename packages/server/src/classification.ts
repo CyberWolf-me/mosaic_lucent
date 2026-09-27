@@ -298,6 +298,12 @@ export interface OrgSettings {
   providerPolicy?: OrgProviderPolicy;
   /** Automation rules (docs/26 A5); absent means every rule's default. */
   automation?: OrgAutomation;
+  /**
+   * Two-step verification required to reach the workspace (docs/26 A6):
+   * anyone without it — member, team or guest — is kept out until they
+   * turn it on (accessPolicy.ts). Absent means not required.
+   */
+  requireTwoFactor?: boolean;
 }
 
 /** Anything a gate can read an org's settings through (undefined = no policy). */
@@ -315,6 +321,7 @@ export interface EffectiveOrgSettings {
   retention: { transcriptDays: number | null };
   providerPolicy: EffectiveProviderPolicy;
   automation: Record<AutomationRule, boolean>;
+  requireTwoFactor: boolean;
 }
 
 /**
@@ -379,6 +386,7 @@ export function effectiveSettings(org: OrgPolicySource): EffectiveOrgSettings {
     retention: effectiveRetention(raw.retention),
     providerPolicy: effectiveProviderPolicy(raw.providerPolicy),
     automation: effectiveAutomation(raw.automation),
+    requireTwoFactor: coerceFlag(raw.requireTwoFactor),
   };
 }
 
@@ -454,6 +462,7 @@ export function parseOrgSettings(
       case "sharingDisabled":
       case "agentDisabled":
       case "recordingDisabled":
+      case "requireTwoFactor":
         if (typeof value !== "boolean") {
           return { ok: false, error: `${key} must be a boolean` };
         }
