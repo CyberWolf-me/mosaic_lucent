@@ -248,7 +248,13 @@ export function MeetingsView({ onOpenSettings }: { onOpenSettings: (section?: st
   );
 }
 
-function MeetingRow({ meeting: m, onOpen }: { meeting: MeetingSummary; onOpen: () => void }) {
+export function MeetingRow({
+  meeting: m,
+  onOpen,
+}: {
+  meeting: MeetingSummary;
+  onOpen: () => void;
+}) {
   const minutes =
     m.endedAt === null ? null : Math.max(1, Math.round((m.endedAt - m.startedAt) / 60_000));
   const planned = m.scheduledFor !== null && m.scheduledFor !== undefined;

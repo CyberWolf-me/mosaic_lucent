@@ -41,6 +41,8 @@ import {
 } from "../boards.js";
 import { listMeetings, type MeetingTranscript } from "../meetings.js";
 import { getCurrentOrgId } from "../orgs.js";
+import { hasSession } from "../session.js";
+import { WorkspaceIntelligence } from "./WorkspaceIntelligence.js";
 import { IntegrationPanel } from "./IntegrationPanel.js";
 import { inboundRowActions, inboundRowIsWarning, pendingInboundCount } from "./inboundRows.js";
 
@@ -150,6 +152,54 @@ export function IntelligenceView({
   onOpenSettings,
 }: {
   onOpenSettings: (section?: string) => void;
+}) {
+  // docs/26 J3 (ADR 0046): the same view across the whole workspace, from
+  // the server's index — signed in only; the scope rides the address bar.
+  const [scope, setScope] = useState<"board" | "workspace">(() =>
+    new URLSearchParams(window.location.search).get("scope") === "workspace"
+      ? "workspace"
+      : "board",
+  );
+  const choose = (next: "board" | "workspace") => {
+    const params = new URLSearchParams(window.location.search);
+    if (next === "workspace") params.set("scope", "workspace");
+    else params.delete("scope");
+    window.history.replaceState(null, "", `?${params.toString()}`);
+    setScope(next);
+  };
+  const scopeSwitch = hasSession() ? (
+    <div className="segmented" role="radiogroup" aria-label="Intelligence scope">
+      <button
+        type="button"
+        className={scope === "board" ? "active" : ""}
+        aria-pressed={scope === "board"}
+        onClick={() => choose("board")}
+      >
+        This board
+      </button>
+      <button
+        type="button"
+        className={scope === "workspace" ? "active" : ""}
+        aria-pressed={scope === "workspace"}
+        onClick={() => choose("workspace")}
+      >
+        Workspace
+      </button>
+    </div>
+  ) : null;
+  return scope === "workspace" && scopeSwitch ? (
+    <WorkspaceIntelligence onOpenSettings={onOpenSettings} scopeSwitch={scopeSwitch} />
+  ) : (
+    <BoardIntelligenceView onOpenSettings={onOpenSettings} scopeSwitch={scopeSwitch} />
+  );
+}
+
+function BoardIntelligenceView({
+  onOpenSettings,
+  scopeSwitch,
+}: {
+  onOpenSettings: (section?: string) => void;
+  scopeSwitch: ReactNode;
 }) {
   const { workspace, onCitation, applyManual, send, boardId, projectName, setView, readOnly } =
     useWorkspace();
@@ -996,7 +1046,14 @@ export function IntelligenceView({
                 ? boardLede()
                 : kindLede(activeFilter)
           }
-          actions={headerActions}
+          actions={
+            scopeSwitch || headerActions ? (
+              <>
+                {scopeSwitch}
+                {headerActions}
+              </>
+            ) : undefined
+          }
         />
 
         {totalStatements === 0 ? (

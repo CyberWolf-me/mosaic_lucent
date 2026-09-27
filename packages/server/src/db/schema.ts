@@ -1635,3 +1635,102 @@ export const rateCounters = pgTable(
 
 export type DbRateCounter = typeof rateCounters.$inferSelect;
 export type DbNewRateCounter = typeof rateCounters.$inferInsert;
+
+/**
+ * Projects (docs/26 J2, ADR 0046): org-scoped records that link boards. A
+ * project grants nothing — every board in it is still read through board
+ * access — so these rows carry no permission of their own. `members` is a
+ * list of user ids (who works on it, for filtering and notifications), not
+ * an access list.
+ */
+export const projects = pgTable(
+  "projects",
+  {
+    id: text("id").primaryKey(),
+    orgId: text("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    objective: text("objective").notNull().default(""),
+    status: text("status").notNull().default("active"),
+    leadId: text("lead_id").references(() => users.id, { onDelete: "set null" }),
+    members: jsonb("members").notNull().default(sql`'[]'::jsonb`),
+    createdBy: text("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: bigint("created_at", { mode: "number" }).notNull(),
+    updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
+    archivedAt: bigint("archived_at", { mode: "number" }),
+  },
+  (t) => ({
+    orgIdx: index("projects_org_idx").on(t.orgId),
+  }),
+);
+
+export type DbProject = typeof projects.$inferSelect;
+
+/** Which boards a project gathers — many to many (ADR 0046). */
+export const projectBoards = pgTable(
+  "project_boards",
+  {
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    boardId: text("board_id")
+      .notNull()
+      .references(() => boards.id, { onDelete: "cascade" }),
+    addedBy: text("added_by").references(() => users.id, { onDelete: "set null" }),
+    addedAt: bigint("added_at", { mode: "number" }).notNull(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.projectId, t.boardId] }),
+    boardIdx: index("project_boards_board_idx").on(t.boardId),
+  }),
+);
+
+/**
+ * The workspace intelligence index (docs/26 J3, ADR 0046): every board's
+ * statements, derived by core's `statementRows` — never written by a route,
+ * droppable and rebuildable from the boards at any time. `ord` keeps the
+ * board's insertion order.
+ */
+export const statementIndex = pgTable(
+  "statement_index",
+  {
+    boardId: text("board_id")
+      .notNull()
+      .references(() => boards.id, { onDelete: "cascade" }),
+    nodeId: text("node_id").notNull(),
+    orgId: text("org_id").notNull(),
+    ord: bigint("ord", { mode: "number" }).notNull(),
+    kind: text("kind").notNull(),
+    status: text("status").notNull(),
+    label: text("label").notNull(),
+    topic: text("topic"),
+    supersedes: jsonb("supersedes"),
+    assignee: text("assignee"),
+    dueDate: text("due_date"),
+    executionStatus: text("execution_status"),
+    blocked: boolean("blocked").notNull().default(false),
+    drivesActions: bigint("drives_actions", { mode: "number" }),
+    meetingId: text("meeting_id"),
+    turnStart: bigint("turn_start", { mode: "number" }),
+    turnEnd: bigint("turn_end", { mode: "number" }),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.boardId, t.nodeId] }),
+    orgKindIdx: index("statement_index_org_kind_idx").on(t.orgId, t.kind, t.status),
+  }),
+);
+
+/**
+ * The index's derivation source, one row per board: the board revision
+ * (`boards.updated_at`) its rows were derived from. A read compares it with
+ * the board and re-derives when the board is newer.
+ */
+export const statementIndexState = pgTable("statement_index_state", {
+  boardId: text("board_id")
+    .primaryKey()
+    .references(() => boards.id, { onDelete: "cascade" }),
+  orgId: text("org_id").notNull(),
+  sourceAt: bigint("source_at", { mode: "number" }).notNull(),
+  indexedAt: bigint("indexed_at", { mode: "number" }).notNull(),
+});

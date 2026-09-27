@@ -158,6 +158,10 @@ import {
   webhookSchemes,
 } from "./integrations/webhook.js";
 import { ingestInboundChange } from "./integrations/inbound.js";
+import { InMemoryProjectStore } from "./projects.js";
+import { registerProjectRoutes } from "./routes/projects.js";
+import { registerIntelligenceRoutes } from "./routes/intelligence.js";
+import { InMemoryStatementIndexStore, StatementIndexer } from "./statementIndex.js";
 import { openPortal, startCheckout, type BillingIntegration } from "./billing/service.js";
 
 /**
@@ -289,6 +293,10 @@ export interface AppDeps {
   meetings?: import("./meetings.js").MeetingStore;
   /** docs/27 N1: meeting notes; defaults to an in-memory store beside `meetings`. */
   meetingNotes?: import("./meetingNotes.js").MeetingNotesStore;
+  /** docs/26 J2 (ADR 0046): projects. Defaults to in-memory. */
+  projects?: import("./projects.js").ProjectStore;
+  /** docs/26 J3 (ADR 0046): the workspace intelligence index. Defaults to in-memory. */
+  statementIndex?: import("./statementIndex.js").StatementIndexStore;
   /**
    * P2's outbox. When present, ending a meeting announces `MeetingEnded`
    * (docs/28 A3.3) and main.ts's consumer queues its summary. Absent in most
@@ -448,6 +456,9 @@ const ROUTE_SEGMENTS = new Set([
   "portal",
   "history",
   "ask",
+  "projects",
+  "intelligence",
+  "rebuild",
 ]);
 
 /**
@@ -527,7 +538,7 @@ export function createApp(deps: AppDeps): App {
     imageProvider,
     vectorProvider = null,
     userStore,
-    boardStore,
+    boardStore: rawBoardStore,
     secret,
     usage,
     limits,
@@ -556,6 +567,19 @@ export function createApp(deps: AppDeps): App {
 
   const logger = deps.logger ?? silentLogger;
   const metrics = deps.metrics ?? new MetricsRegistry();
+
+  // docs/26 J3 (ADR 0046): the workspace intelligence index follows every
+  // board write. Wrapping the store here means every commit path inside the
+  // app — the realtime room, the ops route, whole-board saves, imports —
+  // re-derives the board's rows without knowing the index exists.
+  const intelligence = new StatementIndexer(
+    deps.statementIndex ?? new InMemoryStatementIndexStore(),
+    {
+      onError: (err, boardId) =>
+        logger.warn("statement_index_failed", { boardId, error: (err as Error).message }),
+    },
+  );
+  const boardStore = intelligence.observe(rawBoardStore);
 
   /**
    * docs/25 V1: the server STT service + its session table. Omitted deps
@@ -2032,6 +2056,18 @@ export function createApp(deps: AppDeps): App {
     // Notes live beside transcripts: with a meeting store and no notes store
     // (tests, in-memory dev), keep notes in memory rather than refusing them.
     meetingNotes: deps.meetingNotes ?? (meetings ? new InMemoryMeetingNotesStore() : undefined),
+    projects: deps.projects ?? new InMemoryProjectStore(),
+    intelligence,
+    readableBoards: async (userId, orgId) => {
+      // The two scopes of GET /api/boards (ADR 0045, 0046): an org member
+      // reads every board in the org; an outside collaborator only the
+      // boards shared with them.
+      const member = (await userStore.membershipsFor(userId)).some((m) => m.orgId === orgId);
+      const boards = member
+        ? await boardStore.listForOrg(orgId)
+        : await boardStore.listForUser(orgId, userId);
+      return { member, boards };
+    },
     ssoStore,
     integrations,
     proposals: proposalStore,
@@ -2116,6 +2152,8 @@ export function createApp(deps: AppDeps): App {
   registerMeetingScheduleRoutes(router, services);
   registerMeetingRoutes(router, services);
   registerMeetingNotesRoutes(router, services);
+  registerProjectRoutes(router, services);
+  registerIntelligenceRoutes(router, services);
   registerThemesRoutes(router, services);
   registerProposalRoutes(router, services);
   registerSsoRoutes(router, services);

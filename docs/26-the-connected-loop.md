@@ -554,6 +554,47 @@ move into the meeting/voice step.
 "Visual lead" means making the existing semantic and layout machinery produce
 a much better product — not rewriting the layout engine.
 
+### Status
+
+- **A1 — done (2026-09-27), per ADR 0046.** J1 shipped as docs/28 A3.1/A3.4
+  (the meeting is its record, listed across the workspace).
+  - _J2, projects._ `projects` + `project_boards` (migration 0036): an org
+    record with a name, objective, status (active / paused / done), lead,
+    members and linked boards, many to many. A project grants nothing — its
+    boards, meetings and statements come back only where the caller can read
+    the board, and an outside collaborator sees a project only through a
+    board shared with them. Org editors create, edit, archive and link;
+    every change is audited. A project's meetings are its boards' meetings.
+    The Projects view (rail and ⌘K) lists them with what needs attention in
+    each; a project's page shows its counts, boards (add and remove), meetings
+    and every statement on its boards, each one click from its node.
+  - _J3, the intelligence index._ One derivation in core
+    (`statementRows`) now feeds both a board's own Intelligence view and a
+    server index of every board's statements (`statement_index`, with
+    `statement_index_state` recording the board revision each board's rows
+    came from). It is maintained by wrapping `BoardStore` so every `put`
+    re-derives that board (debounced), and it is repaired on read: any board
+    newer than its rows is re-derived before answering. The owner can drop and
+    rebuild it. `GET /api/orgs/:id/intelligence` answers from the boards the
+    caller can read, by kind, status, project, board and assignee ("me").
+  - _Home and Intelligence._ Home's pulse now counts every server board from
+    the index instead of only the boards this browser had loaded, lists the
+    workspace's meetings (live, upcoming, recent) instead of the open board's,
+    and names the active projects. Intelligence gains a Workspace scope beside
+    This board, with open-only, assigned-to-me and project filters.
+  - Evidence: `server/test/workspace-spine.test.ts` (10: the scopes, the
+    project matrix, the indexer's put/delete/repair), `pg-workspace-spine`
+    (the Postgres stores against their twins), core `statement-index.test.ts`,
+    web `pulse.test.ts` (indexed boards), and
+    `scripts/workspace-spine-check.mjs` in the running app (9/9).
+  - Found on the way: two migrations shared the id 0031, so a fresh database
+    couldn't migrate and production would have skipped the notes table once
+    this branch merged (fixed in 538a9f4; the notes migration is 0031a).
+  - Not yet: projects on the board itself (a chip in the top bar — the route
+    `GET /api/boards/:id/projects` is there), member management beyond the
+    lead, a project dashboard with plans and integrations (A5), and search and
+    scoped Ask over the index (A4).
+
 ## 12. Decisions (locked 2026-09-24)
 
 | #   | Decision              | Locked answer                                                                                                                                                                                                                         |

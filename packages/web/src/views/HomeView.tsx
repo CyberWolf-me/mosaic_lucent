@@ -4,7 +4,8 @@ import { getSessionUser, hasSession } from "../session.js";
 import { boardIdOfMirror, listProjects, loadProject } from "../persistence.js";
 import { listBoards, type BoardSummary } from "../boards.js";
 import { loadOrgs } from "../orgs.js";
-import { listMeetings, type MeetingTranscript } from "../meetings.js";
+import { listWorkspaceMeetings, meetingName, type MeetingSummary } from "../meetings.js";
+import { listOrgProjects, loadWorkspaceIntelligence, type OrgProject } from "../orgProjects.js";
 import {
   busiestBoard,
   dueLabel,
@@ -13,6 +14,7 @@ import {
   pulseLede,
   timeAgo,
   workspacePulse,
+  type IndexedPulseRow,
   type PulseBoardInput,
   type PulseItem,
   type PulseNotice,
@@ -39,11 +41,12 @@ import {
  * (open questions, pending decisions, late or blocked work) across boards,
  * each one click from the node itself.
  *
- * Scope, stated honestly: the server has no cross-board aggregation, so the
- * pulse covers the boards this browser can read — the open board (live), the
- * local projects in storage, and the cached copy of any shared board opened
- * here. Server boards known only by name appear under "Pick up where you
- * left off" and are named as uncounted, never guessed at.
+ * Scope: the open board (live), the local boards in storage, and — signed
+ * in — every server board this person can read, whose statements come from
+ * the workspace index (ADR 0046) rather than from loading each board. Meetings
+ * and projects are the workspace's too. A server board the index can't speak
+ * for (it failed, or the board holds no statements) is named as uncounted,
+ * never guessed at.
  */
 
 /** How many local boards Home reads (each is a storage read + parse). */
@@ -142,26 +145,58 @@ export function HomeView({ onOpenSettings }: { onOpenSettings: (section?: string
     };
   }, []);
 
-  // Meetings live on the server per board, so only the open shared board has
-  // any to show. Nothing is rendered unless real transcripts come back.
-  const [meetings, setMeetings] = useState<MeetingTranscript[]>([]);
+  // The workspace's own reads (ADR 0046): every readable board's statements
+  // from the index, the workspace's meetings, and its active projects. Each
+  // part fails on its own — Home still answers from what it has.
+  const [org, setOrg] = useState<{
+    indexed: Map<string, IndexedPulseRow[]> | null;
+    meetings: MeetingSummary[];
+    projects: OrgProject[];
+  }>({ indexed: null, meetings: [], projects: [] });
   useEffect(() => {
-    if (!boardId) {
-      setMeetings([]);
-      return;
-    }
+    if (!hasSession()) return;
     let cancelled = false;
-    void listMeetings(boardId)
-      .then((rows) => {
-        if (!cancelled) setMeetings(rows ?? []);
-      })
-      .catch(() => {
-        /* the section simply stays hidden */
-      });
+    void (async () => {
+      try {
+        const { current } = await loadOrgs();
+        if (!current) return;
+        const [intelligence, meetings, projects] = await Promise.all([
+          loadWorkspaceIntelligence(current.id, { limit: 2000 }),
+          listWorkspaceMeetings(current.id),
+          listOrgProjects(current.id),
+        ]);
+        if (cancelled) return;
+        let indexed: Map<string, IndexedPulseRow[]> | null = null;
+        // A truncated answer would undercount; better uncounted than wrong.
+        if (intelligence && !intelligence.truncated) {
+          indexed = new Map();
+          for (const row of intelligence.statements) {
+            const list = indexed.get(row.boardId) ?? [];
+            list.push(row);
+            indexed.set(row.boardId, list);
+          }
+        }
+        setOrg({ indexed, meetings: meetings ?? [], projects: projects ?? [] });
+      } catch {
+        /* offline: local boards still answer */
+      }
+    })();
     return () => {
       cancelled = true;
     };
-  }, [boardId]);
+  }, []);
+
+  // Live first, then what's coming up soonest, then the most recent.
+  const meetings = useMemo(() => {
+    const live = org.meetings.filter((m) => m.status === "live");
+    const upcoming = org.meetings
+      .filter((m) => m.status === "scheduled" && (m.scheduledFor ?? 0) >= now - 60 * 60_000)
+      .sort((a, b) => (a.scheduledFor ?? 0) - (b.scheduledFor ?? 0));
+    const past = org.meetings.filter(
+      (m) => m.status !== "live" && m.status !== "scheduled" && m.status !== "cancelled",
+    );
+    return [...live, ...upcoming, ...past];
+  }, [org.meetings, now]);
 
   /* ------------------------------ the pulse ----------------------------- */
 
@@ -206,19 +241,33 @@ export function HomeView({ onOpenSettings }: { onOpenSettings: (section?: string
         name: b.name,
         updatedAt: b.updatedAt,
         workspace: null,
+        // From the index when it answered: a board with no rows there holds
+        // no statements, which is known, not unknown.
+        indexed: org.indexed ? (org.indexed.get(b.id) ?? []) : null,
         isCurrent: false,
       });
       openers.set(b.id, { cloud: b.id });
     }
     return { inputs: [...byKey.values()], openers };
-  }, [currentKey, projectId, projectName, boardId, workspace, local, cloud.boards, mountedAt]);
+  }, [
+    currentKey,
+    projectId,
+    projectName,
+    boardId,
+    workspace,
+    local,
+    cloud.boards,
+    org.indexed,
+    mountedAt,
+  ]);
 
   const pulse = useMemo(() => workspacePulse(inputs, now), [inputs, now]);
   const lede = pulseLede(pulse);
 
+  // Server boards neither loaded here nor spoken for by the index.
   const serverOnly = cloud.boards.filter((b) => {
     const input = inputs.find((i) => i.id === b.id);
-    return input ? input.workspace === null : false;
+    return input ? input.workspace === null && !input.indexed : false;
   });
   const serverOnlyWithContent = serverOnly.filter((b) => b.nodes === undefined || b.nodes > 0);
   const hasWork = pulse.boardsWithContent > 0 || serverOnlyWithContent.length > 0;
@@ -293,6 +342,26 @@ export function HomeView({ onOpenSettings }: { onOpenSettings: (section?: string
     },
     [currentKey, openers, openProject, onCitation, openKey],
   );
+
+  /** A workspace meeting, on its own board (the Meetings view's route). */
+  const openMeeting = async (m: MeetingSummary): Promise<void> => {
+    if (m.boardId !== boardId && !(await openBoard(m.boardId))) {
+      notify(MISSING_BOARD, undefined, "error");
+      return;
+    }
+    const params = new URLSearchParams(window.location.search);
+    params.set("meeting", m.id);
+    params.set("board", m.boardId);
+    window.history.replaceState(null, "", `?${params.toString()}`);
+    setView("meeting");
+  };
+
+  const openOrgProject = (id: string) => {
+    const params = new URLSearchParams(window.location.search);
+    params.set("project", id);
+    window.history.replaceState(null, "", `?${params.toString()}`);
+    setView("projects");
+  };
 
   const openRecent = (key: string) => {
     if (key === currentKey) setView("canvas");
@@ -514,10 +583,11 @@ export function HomeView({ onOpenSettings }: { onOpenSettings: (section?: string
             </div>
             {serverOnly.length > 0 && (
               <p className="home-scope">
-                Counts cover the {countedBoards === 1 ? "board" : `${countedBoards} boards`} open on
-                this device. {serverOnly.length} shared{" "}
-                {serverOnly.length === 1 ? "board joins" : "boards join"} the count once you open{" "}
-                {serverOnly.length === 1 ? "it" : "them"} here.
+                Counts cover {countedBoards === 1 ? "one board" : `${countedBoards} boards`}.{" "}
+                {serverOnly.length} shared{" "}
+                {serverOnly.length === 1 ? "board isn't" : "boards aren't"} counted yet — the
+                workspace index didn't answer for {serverOnly.length === 1 ? "it" : "them"}; opening{" "}
+                {serverOnly.length === 1 ? "it" : "one"} here counts it.
               </p>
             )}
 
@@ -570,22 +640,37 @@ export function HomeView({ onOpenSettings }: { onOpenSettings: (section?: string
 
                 {meetings.length > 0 && (
                   <>
-                    <SectionLabel count={meetings.length}>Recent meetings</SectionLabel>
+                    <SectionLabel count={meetings.length}>Meetings</SectionLabel>
                     <ul className="home-meetings">
                       {meetings.slice(0, 3).map((m) => (
-                        <MeetingRow
-                          key={m.id}
-                          meeting={m}
-                          boardName={boardLabel}
-                          onOpen={() => onCitation({ kind: "meeting", id: m.id })}
-                        />
+                        <MeetingRow key={m.id} meeting={m} onOpen={() => void openMeeting(m)} />
                       ))}
                     </ul>
+                    {meetings.length > 3 && (
+                      <Button
+                        variant="quiet"
+                        size="sm"
+                        className="home-more"
+                        onClick={() => setView("meetings")}
+                      >
+                        All meetings
+                      </Button>
+                    )}
                   </>
                 )}
               </div>
 
               <div className="home-col">
+                {org.projects.length > 0 && (
+                  <>
+                    <SectionLabel count={org.projects.length}>Projects</SectionLabel>
+                    <ul className="home-boards">
+                      {org.projects.slice(0, 4).map((p) => (
+                        <ProjectRow key={p.id} project={p} onOpen={() => openOrgProject(p.id)} />
+                      ))}
+                    </ul>
+                  </>
+                )}
                 <SectionLabel>Pick up where you left off</SectionLabel>
                 {recent.length === 0 ? (
                   <EmptyState
@@ -647,13 +732,7 @@ export function HomeView({ onOpenSettings }: { onOpenSettings: (section?: string
                     </SectionLabel>
                     <div className="home-noticed">
                       {pulse.noticed.map((n, i) => (
-                        <Notice
-                          key={i}
-                          notice={n}
-                          now={now}
-                          onReveal={reveal}
-                          onGoTo={goTo}
-                        />
+                        <Notice key={i} notice={n} now={now} onReveal={reveal} onGoTo={goTo} />
                       ))}
                     </div>
                   </>
@@ -746,49 +825,74 @@ function NeedRow({
   );
 }
 
-function MeetingRow({
-  meeting,
-  boardName,
-  onOpen,
-}: {
-  meeting: MeetingTranscript;
-  boardName: string;
-  onOpen: () => void;
-}) {
-  const started = new Date(meeting.startedAt);
-  const minutes = meeting.endedAt
-    ? Math.max(1, Math.round((meeting.endedAt - meeting.startedAt) / 60_000))
-    : null;
-  const speakers = [...new Set(meeting.turns.map((t) => t.speaker).filter(Boolean))];
+function MeetingRow({ meeting: m, onOpen }: { meeting: MeetingSummary; onOpen: () => void }) {
+  const when = new Date(m.status === "scheduled" ? (m.scheduledFor ?? m.startedAt) : m.startedAt);
+  const minutes =
+    m.endedAt !== null ? Math.max(1, Math.round((m.endedAt - m.startedAt) / 60_000)) : null;
+  const meta =
+    m.status === "live"
+      ? "Live now"
+      : m.status === "scheduled"
+        ? `Scheduled · ${m.durationMin ?? 30} min`
+        : [
+            `${m.turnCount} line${m.turnCount === 1 ? "" : "s"}`,
+            minutes !== null ? `${minutes} min` : null,
+            m.status === "summarized" ? "summary ready" : null,
+          ]
+            .filter(Boolean)
+            .join(" · ");
   return (
     <li>
       <button type="button" className="home-meeting" onClick={onOpen}>
         <span className="home-meeting-when">
           <span className="home-meeting-time">
-            {started.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}
+            {when.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}
           </span>
           <span className="home-meeting-date">
-            {started.toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+            {when.toLocaleDateString(undefined, { month: "short", day: "numeric" })}
           </span>
         </span>
         <span className="home-meeting-rule" aria-hidden />
         <span className="home-meeting-body">
           <span className="home-meeting-title">
-            {meeting.mode ? `${meeting.mode[0]!.toUpperCase()}${meeting.mode.slice(1)} meeting` : "Meeting"}{" "}
-            on {boardName}
+            {meetingName(m)} · {m.boardName || "Board"}
           </span>
-          <span className="home-meeting-meta">
-            {meeting.turns.length} turn{meeting.turns.length === 1 ? "" : "s"}
-            {minutes !== null ? ` · ${minutes} min` : " · still open"}
+          <span className="home-meeting-meta">{meta}</span>
+        </span>
+      </button>
+    </li>
+  );
+}
+
+function ProjectRow({ project: p, onOpen }: { project: OrgProject; onOpen: () => void }) {
+  const s = p.stats;
+  const signals = s
+    ? [
+        s.blocked > 0 ? `${s.blocked} blocked` : null,
+        s.openQuestions > 0
+          ? `${s.openQuestions} open question${s.openQuestions === 1 ? "" : "s"}`
+          : null,
+        s.openActions > 0 ? `${s.openActions} open action${s.openActions === 1 ? "" : "s"}` : null,
+      ].filter(Boolean)
+    : [];
+  return (
+    <li>
+      <button type="button" className="home-board" onClick={onOpen}>
+        <span className="home-board-text">
+          <span className="home-board-name">{p.name}</span>
+          <span className="home-board-meta">
+            {[
+              p.status === "active" ? null : p.status,
+              ...signals,
+              signals.length === 0
+                ? `${p.boards.length} board${p.boards.length === 1 ? "" : "s"}`
+                : null,
+            ]
+              .filter(Boolean)
+              .join(" · ")}
           </span>
         </span>
-        {speakers.length > 0 && (
-          <span className="home-meeting-people">
-            {speakers.slice(0, 4).map((s) => (
-              <Avatar key={s} name={s} size={22} />
-            ))}
-          </span>
-        )}
+        <Ico.Arrow className="home-board-arrow" aria-hidden />
       </button>
     </li>
   );
@@ -805,9 +909,7 @@ function Notice({
   onReveal: (boardKey: string, nodeId: string) => void;
   onGoTo: (boardKey: string, view: View) => void;
 }) {
-  const board = (
-    <ProvenanceChip icon={<Ico.Layers aria-hidden />} label={notice.boardName} />
-  );
+  const board = <ProvenanceChip icon={<Ico.Layers aria-hidden />} label={notice.boardName} />;
   switch (notice.kind) {
     case "blocked-chain": {
       const target = notice.chain[notice.chain.length - 1]!;
@@ -859,7 +961,11 @@ function Notice({
           </p>
           <div className="home-notice-actions">
             {board}
-            <Button variant="bloom" size="sm" onClick={() => onReveal(notice.boardId, notice.nodeId)}>
+            <Button
+              variant="bloom"
+              size="sm"
+              onClick={() => onReveal(notice.boardId, notice.nodeId)}
+            >
               Show on board
             </Button>
           </div>
@@ -889,7 +995,11 @@ function Notice({
           </div>
           <div className="home-notice-actions">
             {board}
-            <Button variant="bloom" size="sm" onClick={() => onGoTo(notice.boardId, "intelligence")}>
+            <Button
+              variant="bloom"
+              size="sm"
+              onClick={() => onGoTo(notice.boardId, "intelligence")}
+            >
               Review statements
             </Button>
           </div>
@@ -899,13 +1009,16 @@ function Notice({
       return (
         <div className="home-notice">
           <p className="home-notice-text">
-            <b>{notice.dup}</b> and <b>{notice.existing}</b> look like the same topic, split
-            across {notice.statements} statements. Merging keeps its decisions and questions
-            together.
+            <b>{notice.dup}</b> and <b>{notice.existing}</b> look like the same topic, split across{" "}
+            {notice.statements} statements. Merging keeps its decisions and questions together.
           </p>
           <div className="home-notice-actions">
             {board}
-            <Button variant="bloom" size="sm" onClick={() => onGoTo(notice.boardId, "intelligence")}>
+            <Button
+              variant="bloom"
+              size="sm"
+              onClick={() => onGoTo(notice.boardId, "intelligence")}
+            >
               Review merge
             </Button>
           </div>

@@ -1,5 +1,5 @@
-import type { Node, Operation, StatementKind, StatementStatus, Workspace } from "@lucent/core";
-import { actionsFromDecision, derivedExecution, statementNodes } from "@lucent/core";
+import type { Operation, StatementKind, StatementStatus, Workspace } from "@lucent/core";
+import { derivedExecution, statementNodes, statementRows, type StatementRow } from "@lucent/core";
 import { canonicalizeTopic, possibleDuplicateTopics, topicsAreVariants } from "@lucent/core";
 
 /**
@@ -46,66 +46,19 @@ export function isSettled(status: StatementStatus): boolean {
   return status !== "open";
 }
 
-/** One statement row as the view renders it. */
-export interface IntelligenceRow {
-  kind: StatementKind;
-  /** The node — the reveal target. */
-  id: string;
-  label: string;
-  status: StatementStatus;
-  /** The authored topic key, exactly as the board holds it. */
-  topic?: string;
-  /** Nodes this statement supersedes (the C3 chain, visible per row). */
-  supersedes?: string[];
-  /** Work-tracking fields when the node ALSO carries an issue — the Board
-   * bridge made visible (assignee, and the Stage D1 execution fields),
-   * never duplicated. */
-  assignee?: string;
-  /** Stage D1: the work's deadline (ISO YYYY-MM-DD), when the issue carries one. */
-  dueDate?: string;
-  /** Stage D1: the issue's execution status — a separate lifecycle from
-   * the statement `status` (semantic) above; neither derives from the other. */
-  executionStatus?: string;
-  /** Stage D3: upstream ids whose manual status is blocked (or that are
-   * themselves derived-blocked) — computed project truth, never stored. */
-  blockedBy?: string[];
+/**
+ * One statement row as the view renders it: core's row (ADR 0046) plus the
+ * calendar-dependent signal only a reader that knows today can compute.
+ */
+export interface IntelligenceRow extends StatementRow {
   /** Stage D3: upstream ids that are overdue-unfinished — an analytical
    * signal, never a status. */
   atRiskBy?: string[];
-  /** Stage E1: how many actions this decision drives — the causal count,
-   * from drives edges (0/undefined = the decision drove no work). */
-  drivesActions?: number;
-  /** Creation evidence — the ✦ jump's source. */
-  provenance?: { meetingId: string; turnRange?: [number, number] };
 }
 
 export interface IntelligenceSection {
   kind: StatementKind;
   rows: IntelligenceRow[];
-}
-
-function rowOf(node: Node): IntelligenceRow {
-  const statement = node.statement!;
-  const prov = node.provenance ?? statement.provenance;
-  return {
-    kind: statement.kind,
-    id: node.id,
-    label: node.label,
-    status: statement.status,
-    ...(statement.topic ? { topic: statement.topic } : {}),
-    ...(statement.supersedes?.length ? { supersedes: statement.supersedes } : {}),
-    ...(node.issue?.assignee ? { assignee: node.issue.assignee } : {}),
-    ...(node.issue?.dueDate ? { dueDate: node.issue.dueDate } : {}),
-    ...(node.issue ? { executionStatus: node.issue.status } : {}),
-    ...(prov?.meetingId
-      ? {
-          provenance: {
-            meetingId: prov.meetingId,
-            ...(prov.turnRange ? { turnRange: prov.turnRange } : {}),
-          },
-        }
-      : {}),
-  };
 }
 
 /**
@@ -134,37 +87,21 @@ export function isOverdue(
  * dimmed — the lifecycle stays visible, not deleted).
  */
 export function intelligenceSections(workspace: Workspace): IntelligenceSection[] {
-  // Stage D3: the derived execution state — computed once per render, read
-  // by every action row (the manual/derived split: manual state is
-  // issue.status; blockedBy/atRiskBy are computed project truth).
+  // The rows are core's (ADR 0046): the workspace index derives exactly
+  // these, so the board's view and the workspace's can never disagree. Only
+  // the calendar-dependent signal is added here — at risk because upstream
+  // work is overdue (Stage D3) — computed once per render.
   const derived = derivedExecution(workspace, Date.now());
-  // Stage E1: the decision→action adjacency — one graph walk per decision
-  // row's drives count.
-  const driveGraph = new Map<string, number>();
-  for (const n of statementNodes(workspace)) {
-    if (n.statement!.kind === "decision") {
-      const count = actionsFromDecision(workspace, n.id).length;
-      if (count > 0) driveGraph.set(n.id, count);
-    }
-  }
+  const rows: IntelligenceRow[] = statementRows(workspace).map((row) => {
+    const atRiskBy = derived.get(row.id)?.atRiskBy ?? [];
+    return atRiskBy.length > 0 ? { ...row, atRiskBy } : row;
+  });
   return SECTION_ORDER.map((kind) => {
-    const all = statementNodes(workspace)
-      .filter((n) => n.statement!.kind === kind)
-      .map((n) => {
-        const row = rowOf(n);
-        const d = derived.get(n.id);
-        return {
-          ...row,
-          ...(d && d.blockedBy.length > 0 ? { blockedBy: d.blockedBy } : {}),
-          ...(d && d.atRiskBy.length > 0 ? { atRiskBy: d.atRiskBy } : {}),
-          ...(driveGraph.has(n.id) ? { drivesActions: driveGraph.get(n.id) } : {}),
-        };
-      });
-    const rows = [
-      ...all.filter((r) => !isSettled(r.status)),
-      ...all.filter((r) => isSettled(r.status)),
-    ];
-    return { kind, rows };
+    const all = rows.filter((r) => r.kind === kind);
+    return {
+      kind,
+      rows: [...all.filter((r) => !isSettled(r.status)), ...all.filter((r) => isSettled(r.status))],
+    };
   });
 }
 

@@ -109,6 +109,20 @@ export interface RouteServices {
   announceMeetingEnded(ref: { boardId: string; orgId: string; meetingId: string }): void;
   /** docs/27 N1: one person's notes per meeting; undefined → the notes routes answer 503. */
   readonly meetingNotes: import("../meetingNotes.js").MeetingNotesStore | undefined;
+  /** docs/26 J2 (ADR 0046): projects — org records that link boards and grant nothing. */
+  readonly projects: import("../projects.js").ProjectStore;
+  /** docs/26 J3 (ADR 0046): the workspace intelligence index and its maintainer. */
+  readonly intelligence: import("../statementIndex.js").StatementIndexer;
+  /**
+   * The boards a user can read in an org — every board for a member, only
+   * the boards shared with them for an outside collaborator. Every
+   * workspace-wide read (meetings, projects, intelligence) starts here, so
+   * none of them can reach a board the caller couldn't open.
+   */
+  readableBoards(
+    userId: string,
+    orgId: string,
+  ): Promise<{ member: boolean; boards: StoredBoard[] }>;
   /**
    * docs/24 Phase E: external meeting connectors (Zoom/Meet/Teams → turns).
    * The registry always carries at least the mock source; vendor adapters

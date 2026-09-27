@@ -53,6 +53,10 @@ import { PostgresNotificationStore } from "./store/pg-notifications.js";
 import { InMemoryMeetingStore } from "./meetings.js";
 import { PostgresMeetingStore } from "./store/pg-meetings.js";
 import { PostgresMeetingNotesStore } from "./store/pg-meeting-notes.js";
+import { InMemoryProjectStore } from "./projects.js";
+import { InMemoryStatementIndexStore } from "./statementIndex.js";
+import { PostgresProjectStore } from "./store/pg-projects.js";
+import { PostgresStatementIndexStore } from "./store/pg-statement-index.js";
 import { InMemoryMeetingNotesStore } from "./meetingNotes.js";
 import { InMemoryProposalStore } from "./proposals.js";
 import { PostgresProposalStore } from "./store/pg-proposals.js";
@@ -163,6 +167,8 @@ function makeStores(databaseUrl: string | undefined): {
   /** E3/R3: meeting transcripts — in-memory for dev, Postgres when configured. */
   meetings: import("./meetings.js").MeetingStore;
   meetingNotes: import("./meetingNotes.js").MeetingNotesStore;
+  projects: import("./projects.js").ProjectStore;
+  statementIndex: import("./statementIndex.js").StatementIndexStore;
   /** F1: SSO connections + domain claims, on the same store-per-database rule. */
   ssoStore: import("./ssoStore.js").SsoStore;
   /** Stage B3: review-gate proposals — in-memory for dev, Postgres when set. */
@@ -202,6 +208,8 @@ function makeStores(databaseUrl: string | undefined): {
       usageStore: new InMemoryUsageStore(),
       meetings: new InMemoryMeetingStore(),
       meetingNotes: new InMemoryMeetingNotesStore(),
+      projects: new InMemoryProjectStore(),
+      statementIndex: new InMemoryStatementIndexStore(),
       ssoStore: new InMemorySsoStore(),
       integrations: {
         store: new InMemoryIntegrationStore(),
@@ -248,6 +256,8 @@ function makeStores(databaseUrl: string | undefined): {
     usageStore: new PostgresUsageStore(target),
     meetings: new PostgresMeetingStore(target),
     meetingNotes: new PostgresMeetingNotesStore(target),
+    projects: new PostgresProjectStore(target),
+    statementIndex: new PostgresStatementIndexStore(target),
     ssoStore: new PostgresSsoStore(target),
     proposals: new PostgresProposalStore(target),
     assetStore: new PostgresAssetStore(target),
@@ -611,6 +621,8 @@ const { server, realtime, writeMeetingRecap } = createApp({
   // E3/R3: meeting transcripts, on the same store-per-database rule as the rest.
   meetings: stores.meetings,
   meetingNotes: stores.meetingNotes,
+  projects: stores.projects,
+  statementIndex: stores.statementIndex,
   // docs/28 A3.3: ending a meeting announces MeetingEnded here.
   outbox,
   // docs/28 A3.2: host powers in the board call, over the same LiveKit project.

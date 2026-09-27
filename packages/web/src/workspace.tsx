@@ -94,6 +94,7 @@ export type View =
   | "history"
   | "meeting"
   | "meetings"
+  | "projects"
   | "intelligence"
   | "execution"
   | "wireframe"

@@ -205,6 +205,13 @@ export function CommandOverlay({
         run: { kind: "view", view: "history" },
       },
       {
+        id: "v-projects",
+        label: "Open projects",
+        hint: "What the team is working toward, across boards",
+        group: "view",
+        run: { kind: "view", view: "projects" },
+      },
+      {
         id: "v-meetings",
         label: "Open meetings",
         hint: "Every meeting in the workspace",

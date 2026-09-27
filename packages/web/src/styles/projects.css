@@ -1,0 +1,120 @@
+/* ============================================================
+   Projects and workspace intelligence (docs/26 A1, ADR 0046).
+   Built from the kit's rows, fields and stat tiles; these rules
+   only lay them out.
+   ============================================================ */
+
+/* ------------------------------------------------------- the list */
+
+.projects-footer {
+  margin-top: 18px;
+}
+.projects-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0 0 24px;
+  padding: 16px;
+  border: 1px solid var(--stroke-1);
+  border-radius: var(--r-sm);
+  background: var(--paper-0);
+}
+html[data-theme="dark"] .projects-form {
+  background: var(--paper-2);
+}
+.projects-boards-pick {
+  margin: 0;
+  padding: 0;
+  border: none;
+  min-width: 0;
+}
+.projects-boards-pick ul {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 4px;
+  max-height: 200px;
+  overflow-y: auto;
+  border: 1px solid var(--stroke-1);
+  border-radius: 10px;
+}
+.projects-boards-pick label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.projects-boards-pick label:hover {
+  background: var(--paper-1);
+}
+
+/* ---------------------------------------------------- one project */
+
+.projects-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 10px;
+  margin: 0 0 28px;
+}
+.projects-status select {
+  min-width: 110px;
+}
+.projects-board {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+}
+.projects-unlink {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+.projects-unlink:hover {
+  color: var(--ink-0);
+  background: var(--paper-3);
+}
+.projects-unlink svg {
+  width: 14px;
+  height: 14px;
+}
+.projects-add-board {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+}
+.projects-add-board select {
+  max-width: 320px;
+}
+.boards-notif-row.settled {
+  opacity: 0.62;
+}
+
+/* ------------------------------------------- workspace intelligence */
+
+.wsi-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+  margin: 0 0 16px;
+  color: var(--ink-1);
+  font-size: 13px;
+}
+.wsi-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+.wsi-toggle select {
+  min-width: 180px;
+}

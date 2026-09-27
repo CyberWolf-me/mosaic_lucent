@@ -15,13 +15,30 @@ import { inboxItems } from "./intelligence.js";
  * where do I pick up*, across every board this browser can read.
  *
  * A PROJECTION, like Intelligence and Execution: pure over the boards it is
- * handed and a `now`, never fetching, never storing, never inventing. There
- * is no cross-board aggregation on the server, so the caller passes what it
- * already holds — the live current board, local projects read from storage,
- * and server boards known by name only (`workspace: null`), which appear in
- * the recent list but contribute no items. Every item carries the board and
- * node it came from, so every row on Home is one click from the thing itself.
+ * handed and a `now`, never fetching, never storing, never inventing. The
+ * caller passes what it already holds — the live current board, local
+ * projects read from storage, and server boards it hasn't loaded, which come
+ * either with their statements from the workspace index (`indexed`, ADR 0046)
+ * or by name only (both null), appearing in the recent list without items.
+ * Every item carries the board and node it came from, so every row on Home is
+ * one click from the thing itself.
  */
+
+/**
+ * A statement as the workspace index serves it (orgProjects.ts) — enough for
+ * a pulse row without the board's workspace.
+ */
+export interface IndexedPulseRow {
+  id: string;
+  kind: StatementKind;
+  status: StatementStatus;
+  label: string;
+  blocked: boolean;
+  assignee?: string;
+  dueDate?: string;
+  executionStatus?: string;
+  provenance?: { meetingId: string; turnRange?: [number, number] };
+}
 
 export interface PulseBoardInput {
   /** Stable board key (the caller maps it back to how the board opens). */
@@ -30,6 +47,12 @@ export interface PulseBoardInput {
   updatedAt: number;
   /** Null when only the name is known (a server board not fetched here). */
   workspace: Workspace | null;
+  /**
+   * A server board's statements from the workspace index, when its workspace
+   * isn't loaded here. Rows only: no blocking chains or topic notices, which
+   * need the board itself.
+   */
+  indexed?: readonly IndexedPulseRow[] | null;
   isCurrent: boolean;
 }
 
@@ -240,6 +263,48 @@ function boardItems(board: PulseBoardInput, ws: Workspace, now: number): PulseIt
   return items;
 }
 
+/** Work that is finished or dropped leaves the pulse (the index has no status category). */
+const DONE_WORK = new Set(["completed", "cancelled"]);
+
+/** The open items from a board's indexed rows — `boardItems`' rules, without the workspace. */
+function indexedItems(
+  board: PulseBoardInput,
+  rows: readonly IndexedPulseRow[],
+  now: number,
+): PulseItem[] {
+  const items: PulseItem[] = [];
+  for (const row of rows) {
+    if (row.status !== "open" || row.kind === "requirement") continue;
+    const common = {
+      boardId: board.id,
+      boardName: board.name,
+      isCurrent: board.isCurrent,
+      nodeId: row.id,
+      kind: row.kind,
+      status: row.status,
+      label: row.label,
+      ...(row.assignee ? { assignee: row.assignee } : {}),
+      ...(row.dueDate ? { dueDate: row.dueDate } : {}),
+      ...(row.provenance?.meetingId ? { fromMeeting: row.provenance.meetingId } : {}),
+      ...(row.provenance?.turnRange ? { turnRange: row.provenance.turnRange } : {}),
+    };
+    if (row.kind === "action") {
+      // Executable work only, as on a loaded board: an action with issue fields.
+      if (row.executionStatus === undefined || DONE_WORK.has(row.executionStatus)) continue;
+      const overdue = isOverdueUnfinished(row.dueDate, row.executionStatus, now);
+      items.push({
+        ...common,
+        executionStatus: row.executionStatus,
+        ...(row.blocked ? { blocked: true } : {}),
+        signal: overdue ? "overdue" : row.blocked ? "blocked" : "open",
+      });
+      continue;
+    }
+    items.push({ ...common, signal: row.kind === "decision" ? "pending" : "open" });
+  }
+  return items;
+}
+
 /**
  * The pulse across `boards` at `now`. Deterministic: the same boards and
  * the same `now` always produce the same pulse, in the same order.
@@ -263,25 +328,7 @@ export function workspacePulse(boards: readonly PulseBoardInput[], now: number):
   let boardsWithContent = 0;
   const boardsWithItems = new Set<string>();
 
-  for (const board of inOrder) {
-    const ws = board.workspace;
-    if (!ws) {
-      summaries.push({
-        id: board.id,
-        name: board.name,
-        updatedAt: board.updatedAt,
-        isCurrent: board.isCurrent,
-        hasContent: null,
-        nodes: null,
-        statements: null,
-        openItems: null,
-        actions: null,
-      });
-      continue;
-    }
-    const content = hasContent(ws);
-    if (content) boardsWithContent += 1;
-    const items = boardItems(board, ws, now);
+  const tally = (board: PulseBoardInput, items: readonly PulseItem[]) => {
     for (const item of items) {
       all.push({ item, seq: all.length });
       boardsWithItems.add(board.id);
@@ -308,6 +355,52 @@ export function workspacePulse(boards: readonly PulseBoardInput[], now: number):
           break;
       }
     }
+  };
+
+  for (const board of inOrder) {
+    const ws = board.workspace;
+    if (!ws && board.indexed) {
+      // Counted from the index: its statements, not its shapes, so a board
+      // holding only sticky notes still reads as "unknown", not empty.
+      const rows = board.indexed;
+      const items = indexedItems(board, rows, now);
+      tally(board, items);
+      if (rows.length > 0) boardsWithContent += 1;
+      const work = rows.filter((r) => r.kind === "action" && r.executionStatus !== undefined);
+      summaries.push({
+        id: board.id,
+        name: board.name,
+        updatedAt: board.updatedAt,
+        isCurrent: board.isCurrent,
+        hasContent: rows.length > 0 ? true : null,
+        nodes: null,
+        statements: rows.length,
+        openItems: items.length,
+        actions: {
+          total: work.length,
+          completed: work.filter((r) => r.executionStatus === "completed").length,
+        },
+      });
+      continue;
+    }
+    if (!ws) {
+      summaries.push({
+        id: board.id,
+        name: board.name,
+        updatedAt: board.updatedAt,
+        isCurrent: board.isCurrent,
+        hasContent: null,
+        nodes: null,
+        statements: null,
+        openItems: null,
+        actions: null,
+      });
+      continue;
+    }
+    const content = hasContent(ws);
+    if (content) boardsWithContent += 1;
+    const items = boardItems(board, ws, now);
+    tally(board, items);
     const rollup = executionRollup(ws, now);
     summaries.push({
       id: board.id,

@@ -682,12 +682,15 @@ export function requestSettings(section?: string): void {
 }
 
 /**
- * The seven places a team works (Atelier IA). Ordered by the product's own
- * loop: see what needs you → pick a board → shape it → talk it through →
- * understand what was decided → carry it out → trace how it got here.
+ * The eight places a team works (Atelier IA). Ordered by the product's own
+ * loop: see what needs you → see what the team is working toward → pick a
+ * board → shape it → talk it through → understand what was decided → carry
+ * it out → trace how it got here.
  */
 const RAIL_ITEMS: { id: string; icon: keyof typeof Ico; label: string; view: View }[] = [
   { id: "home", icon: "Home", label: "Home", view: "home" },
+  // docs/26 J2 (ADR 0046): what the team is working toward, across boards.
+  { id: "projects", icon: "Grid", label: "Projects", view: "projects" },
   { id: "boards", icon: "Folder", label: "Boards", view: "dashboard" },
   { id: "canvas", icon: "Layers", label: "Canvas", view: "canvas" },
   // docs/28 S1: the rail opens the workspace's meetings; a board's own

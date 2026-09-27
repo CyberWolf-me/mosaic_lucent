@@ -253,6 +253,13 @@
       "when": 1790497351090,
       "tag": "0035_skinny_wolverine",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1790512360430,
+      "tag": "0036_sad_wildside",
+      "breakpoints": true
     }
   ]
 }

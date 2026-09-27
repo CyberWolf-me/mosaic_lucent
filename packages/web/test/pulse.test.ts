@@ -77,7 +77,10 @@ describe("workspacePulse", () => {
       ...statement("driver-supply", "risk"),
       ...action("onboarding", { status: "assigned", assignee: "Sam" }),
     ]);
-    const b = ws([...statement("pick-a-region", "decision"), ...statement("try-usage-pricing", "proposal")]);
+    const b = ws([
+      ...statement("pick-a-region", "decision"),
+      ...statement("try-usage-pricing", "proposal"),
+    ]);
     const pulse = workspacePulse(
       [board("a", a, { isCurrent: true }), board("b", b, { updatedAt: NOW - 5000 })],
       NOW,
@@ -94,7 +97,12 @@ describe("workspacePulse", () => {
     // The resolved decision is the record, not something that needs anyone.
     expect(pulse.items.map((i) => i.nodeId)).not.toContain("use-stripe");
     const q = pulse.items.find((i) => i.nodeId === "cash-on-delivery")!;
-    expect(q).toMatchObject({ boardId: "a", boardName: "Board a", isCurrent: true, kind: "question" });
+    expect(q).toMatchObject({
+      boardId: "a",
+      boardName: "Board a",
+      isCurrent: true,
+      kind: "question",
+    });
     const act = pulse.items.find((i) => i.nodeId === "onboarding")!;
     expect(act).toMatchObject({ assignee: "Sam", executionStatus: "assigned", signal: "open" });
     expect(pulse.boardsWithItems).toBe(2);
@@ -145,7 +153,10 @@ describe("workspacePulse", () => {
   });
 
   it("leaves bare action statements and requirements out (not tracked work)", () => {
-    const a = ws([...statement("we-should-redesign", "action"), ...statement("gdpr", "requirement")]);
+    const a = ws([
+      ...statement("we-should-redesign", "action"),
+      ...statement("gdpr", "requirement"),
+    ]);
     const pulse = workspacePulse([board("a", a)], NOW);
     expect(pulse.items).toEqual([]);
     expect(pulse.counts.openActions).toBe(0);
@@ -217,7 +228,12 @@ describe("noticed", () => {
       ...action("design", { status: "blocked" }),
       ...action("implementation"),
       ...action("qa"),
-      { op: "CONNECT_NODES", source: "implementation", target: "design", relationship: "depends_on" },
+      {
+        op: "CONNECT_NODES",
+        source: "implementation",
+        target: "design",
+        relationship: "depends_on",
+      },
       { op: "CONNECT_NODES", source: "qa", target: "implementation", relationship: "depends_on" },
     ]);
     const notice = workspacePulse([board("a", a)], NOW).noticed[0]!;
@@ -274,7 +290,9 @@ describe("noticed", () => {
       ...statement("p1", "decision", "open", "pricing"),
       ...statement("p2", "question", "open", "pricing-model"),
     ]);
-    const dup = workspacePulse([board("a", a)], NOW).noticed.find((n) => n.kind === "duplicate-topic");
+    const dup = workspacePulse([board("a", a)], NOW).noticed.find(
+      (n) => n.kind === "duplicate-topic",
+    );
     expect(dup).toMatchObject({ dup: "pricing-model", existing: "pricing", statements: 2 });
   });
 });
@@ -355,5 +373,85 @@ describe("words", () => {
     expect(dueLabel("2026-09-02", NOW)).not.toMatch(/2026/);
     // A year-old deadline must not read like last week's.
     expect(dueLabel("2025-06-13", NOW)).toMatch(/^was due .*2025/);
+  });
+});
+
+describe("workspacePulse over the workspace index (ADR 0046)", () => {
+  it("counts a server board from its indexed rows, by the same rules as a loaded one", () => {
+    const pulse = workspacePulse(
+      [
+        board("srv", null, {
+          indexed: [
+            {
+              id: "which-tier",
+              kind: "question",
+              status: "open",
+              label: "which tier",
+              blocked: false,
+            },
+            {
+              id: "go-annual",
+              kind: "decision",
+              status: "resolved",
+              label: "go annual",
+              blocked: false,
+            },
+            {
+              id: "late-work",
+              kind: "action",
+              status: "open",
+              label: "late work",
+              blocked: false,
+              executionStatus: "assigned",
+              dueDate: "2026-09-01",
+              assignee: "Sam",
+            },
+            {
+              id: "stuck",
+              kind: "action",
+              status: "open",
+              label: "stuck",
+              blocked: true,
+              executionStatus: "open",
+            },
+            {
+              id: "done",
+              kind: "action",
+              status: "open",
+              label: "done",
+              blocked: false,
+              executionStatus: "completed",
+            },
+            // A bare "we should…" is a statement, not work.
+            { id: "idea", kind: "action", status: "open", label: "idea", blocked: false },
+          ],
+        }),
+      ],
+      NOW,
+    );
+    expect(pulse.counts).toMatchObject({
+      openQuestions: 1,
+      openActions: 2,
+      overdue: 1,
+      blocked: 1,
+    });
+    expect(pulse.items.map((i) => [i.nodeId, i.signal])).toEqual([
+      ["late-work", "overdue"],
+      ["stuck", "blocked"],
+      ["which-tier", "open"],
+    ]);
+    expect(pulse.items[0]).toMatchObject({
+      boardId: "srv",
+      boardName: "Board srv",
+      assignee: "Sam",
+    });
+    expect(pulse.boardsWithContent).toBe(1);
+    expect(pulse.boards[0]).toMatchObject({ hasContent: true, statements: 6, openItems: 3 });
+  });
+
+  it("still names a board it knows only by name, uncounted", () => {
+    const pulse = workspacePulse([board("srv", null)], NOW);
+    expect(pulse.items).toEqual([]);
+    expect(pulse.boards[0]).toMatchObject({ hasContent: null, openItems: null });
   });
 });
