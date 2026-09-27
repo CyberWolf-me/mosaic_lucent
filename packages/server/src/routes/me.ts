@@ -118,7 +118,8 @@ export const registerMeRoutes: RegisterRoutes = (router, s) => {
     const blocked = [];
     for (const [orgId, asGuest] of orgs) {
       const reason = await s.access.blocked(user.id, orgId);
-      if (!reason) continue;
+      // An API token's own limit isn't news to it.
+      if (reason !== "two_factor") continue;
       const org = await s.orgStore?.get(orgId);
       blocked.push({ orgId, orgName: org?.name ?? "A workspace", reason, asGuest });
     }

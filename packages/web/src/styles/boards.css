@@ -447,6 +447,35 @@ html[data-theme="dark"] .boards-sk-shape {
   gap: 10px;
   font-weight: 500;
 }
+.admin-tokens {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid oklch(from var(--paper-4) l c h / 0.45);
+}
+.admin-token-list {
+  display: grid;
+  gap: 2px;
+  margin: 10px 0 0 26px;
+  padding: 0;
+  list-style: none;
+}
+.admin-token-list li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 0;
+}
+.admin-token-who {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+  gap: 1px;
+}
+.admin-token-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink-0);
+}
 .admin-2fa {
   padding: 1px 6px;
   border-radius: 999px;

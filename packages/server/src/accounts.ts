@@ -10,6 +10,7 @@ import {
   type StoredUser,
 } from "./identity.js";
 import { hashPassword, issueToken, verifyPassword, verifyToken } from "./auth.js";
+import { currentApiToken, hashApiToken, isApiToken } from "./apiTokens.js";
 import type { OauthIdentity, OauthProviderName } from "./oauth.js";
 import {
   getCookie,
@@ -599,6 +600,16 @@ export async function authenticate(
   cookieHeader: string | undefined | null,
   bearer: string | null,
 ): Promise<StoredUser | undefined> {
+  // docs/26 A6: an API token was checked when the request arrived
+  // (apiTokens.ts, `runAsApiToken`); here it only names its person — and only
+  // the token the request was admitted with. First, so a cookie riding along
+  // can't lift a request out of the token's limits.
+  if (isApiToken(bearer)) {
+    const token = currentApiToken();
+    if (!token || token.tokenHash !== hashApiToken(bearer)) return undefined;
+    return ctx.userStore.findById(token.userId);
+  }
+
   // Cookie path: look up the session, load the user, compare tokenVersion.
   if (ctx.sessionStore && ctx.sessionCookie) {
     const id = getCookie(parseCookies(cookieHeader), ctx.sessionCookie.name);

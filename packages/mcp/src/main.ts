@@ -18,6 +18,8 @@ import { RemoteBoardSession, remoteConfigFromEnv } from "./remote.js";
  *   - `LUCENT_MCP_URL` + `LUCENT_MCP_TOKEN` + `LUCENT_MCP_BOARD` all set →
  *     RemoteBoardSession: every tool call hits the real server over HTTP
  *     (bearer auth, the agent-ops route). This is the "agent access" mode.
+ *     The token is an API token from Settings → Security (docs/26 A6): it
+ *     reaches one workspace, and a Read token can't apply operations.
  *   - Otherwise → BoardSession: the process-local sandbox this package has
  *     always had. Still the default, because an MCP client should be able
  *     to try the tool surface with zero server setup.

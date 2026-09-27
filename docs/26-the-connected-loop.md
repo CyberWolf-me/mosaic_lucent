@@ -770,7 +770,9 @@ a much better product — not rewriting the layout engine.
     (it needs their OAuth apps or keys); revoking tokens at the provider on
     disconnect.
 
-- **A6 — in progress (2026-09-27).** Enterprise and sharing.
+- **A6 — built (2026-09-28).** Enterprise and sharing. Where the limits
+  live is ADR 0051. Not done: a versioned `/api/v1` alias. A token uses
+  today's routes as they are.
 
   - _Members._ An owner changes a member's role and removes members from
     Admin; anyone can leave. An org always keeps an owner: the last one
@@ -883,6 +885,28 @@ a much better product — not rewriting the layout engine.
     `/login#twofactor=<one-shot token>`. SAML SSO still trusts the identity
     provider's own factors.
 
+  - _API tokens._ Settings → Security makes a personal token for a script
+    or an agent. Lucent's MCP server takes one as `LUCENT_MCP_TOKEN`, with
+    no change to the MCP package. A token is shown once, and only a hash of
+    it is kept (migration 0045, RLS on).
+
+    A token acts as its person in one workspace, at a scope. Read acts as a
+    viewer and only reads. Read & write edits as an editor at most. A token
+    never shares, never changes settings or members, never opens a realtime
+    socket, and never touches the account it acts for. That includes making
+    more tokens.
+
+    Tokens expire (30 or 90 days, a year, or never) and last at most 25 per
+    person. Each can be revoked by its person, or by an owner from
+    Admin → Security, which lists every token that reaches the workspace.
+    An owner can also turn tokens off for the workspace, and every one stops
+    at once. Removing the person ends their tokens' reach. Every make and
+    revoke is in the audit log.
+
+    A token request is admitted before any route and then runs as the token
+    (`AsyncLocalStorage`). The same two places that hold the two-step
+    requirement hold a token's limits (ADR 0051).
+
   - Evidence: server `org-members.test.ts` (3), `guests.test.ts` (4),
     `trash.test.ts` (3), `pg-trash.test.ts`; `scripts/trash-check.mjs` (6/6);
     `me.test.ts` (2), `pg-favorites.test.ts`; `scripts/favorites-check.mjs`
@@ -893,7 +917,9 @@ a much better product — not rewriting the layout engine.
     `scripts/teams-check.mjs` (6/6);
     `scripts/guests-check.mjs` (6/6); `scripts/org-members-check.mjs`
     in the running app (6/6, with `LUCENT_DEV_PLAN=team` — a free workspace
-    has one seat).
+    has one seat); `api-tokens.test.ts` (4), `pg-api-tokens.test.ts`;
+    `scripts/api-tokens-check.mjs` (8/8, driving Lucent's real MCP server
+    over stdio with tokens made in Settings).
 
 ## 12. Decisions (locked 2026-09-24)
 

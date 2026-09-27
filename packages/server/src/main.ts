@@ -41,6 +41,8 @@ import { InMemoryTrashStore, purgeExpiredTrash } from "./trash.js";
 import { PostgresTrashStore } from "./store/pg-trash.js";
 import { InMemoryFavoriteStore } from "./favorites.js";
 import { PostgresFavoriteStore } from "./store/pg-favorites.js";
+import { InMemoryApiTokenStore } from "./apiTokens.js";
+import { PostgresApiTokenStore } from "./store/pg-api-tokens.js";
 
 /**
  * docs/26 A5: OAuth connect for Linear/Jira — only with a token key
@@ -233,6 +235,7 @@ function makeStores(databaseUrl: string | undefined): {
   teams: import("./teams.js").TeamStore;
   trash: import("./trash.js").TrashStore;
   favorites: import("./favorites.js").FavoriteStore;
+  apiTokens: import("./apiTokens.js").ApiTokenStore;
   /** F1: SSO connections + domain claims, on the same store-per-database rule. */
   ssoStore: import("./ssoStore.js").SsoStore;
   /** Stage B3: review-gate proposals — in-memory for dev, Postgres when set. */
@@ -281,6 +284,7 @@ function makeStores(databaseUrl: string | undefined): {
       teams: new InMemoryTeamStore(),
       trash: new InMemoryTrashStore(),
       favorites: new InMemoryFavoriteStore(),
+      apiTokens: new InMemoryApiTokenStore(),
       ssoStore: new InMemorySsoStore(),
       integrations: {
         store: new InMemoryIntegrationStore(),
@@ -337,6 +341,7 @@ function makeStores(databaseUrl: string | undefined): {
     teams: new PostgresTeamStore(target.db),
     trash: new PostgresTrashStore(target.db),
     favorites: new PostgresFavoriteStore(target.db),
+    apiTokens: new PostgresApiTokenStore(target.db),
     ssoStore: new PostgresSsoStore(target),
     proposals: new PostgresProposalStore(target),
     assetStore: new PostgresAssetStore(target),
@@ -737,6 +742,7 @@ const { server, realtime, writeMeetingRecap, automations } = createApp({
   teams: stores.teams,
   trash: stores.trash,
   favorites: stores.favorites,
+  apiTokens: stores.apiTokens,
   // docs/28 A3.3: ending a meeting announces MeetingEnded here.
   outbox,
   // docs/28 A3.2: host powers in the board call, over the same LiveKit project.

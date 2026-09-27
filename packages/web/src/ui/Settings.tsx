@@ -30,13 +30,20 @@ import type {
 } from "../billing.js";
 import { buildSupportReport, formatSupportReport } from "../support.js";
 import {
+  TOKEN_EXPIRY_CHOICES,
   beginEnrollment,
   confirmEnrollment,
+  createToken,
   disableTwoFactor,
   groupedSecret,
+  listMyTokens,
+  revokeMyToken,
+  scopeLabel,
   twoFactorStatus,
+  type ApiTokenView,
   type TwoFactorStatus,
 } from "../security.js";
+import { loadOrgs as loadOrgList } from "../orgs.js";
 import { useWorkspaceOptional } from "../workspace.js";
 import {
   fetchOrg,
@@ -1151,7 +1158,7 @@ function SecurityPane() {
   return (
     <>
       <h2>Security</h2>
-      <div className="subtitle">Two-step verification for your account.</div>
+      <div className="subtitle">Two-step verification, and tokens for scripts and agents.</div>
       {status === "signed-out" && (
         <div className="setting-row">
           <div className="desc">Sign in to protect your account with two-step verification.</div>
@@ -1314,7 +1321,193 @@ function SecurityPane() {
           )}
         </div>
       )}
+      {status !== "signed-out" && <ApiTokensSection />}
     </>
+  );
+}
+
+/** When a token was last used, or that it hasn't been. */
+function tokenMeta(t: ApiTokenView): string {
+  const day = (at: number) => new Date(at).toLocaleDateString();
+  return [
+    t.orgName ?? "",
+    scopeLabel(t.scopes),
+    t.lastUsedAt ? `last used ${day(t.lastUsedAt)}` : "never used",
+    t.expiresAt === null
+      ? "never expires"
+      : t.expiresAt < Date.now()
+        ? `expired ${day(t.expiresAt)}`
+        : `expires ${day(t.expiresAt)}`,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+/**
+ * Personal API tokens (docs/26 A6): for a script or an agent — Lucent's MCP
+ * server reads one from LUCENT_MCP_TOKEN. Each acts as you in one workspace;
+ * the token is shown once, when it's made.
+ */
+function ApiTokensSection() {
+  const [tokens, setTokens] = useState<ApiTokenView[] | null>(null);
+  const [orgs, setOrgs] = useState<Array<{ id: string; name: string; role: string }>>([]);
+  const [name, setName] = useState("");
+  const [orgId, setOrgId] = useState("");
+  const [write, setWrite] = useState(false);
+  const [days, setDays] = useState<number | null>(90);
+  const [made, setMade] = useState<(ApiTokenView & { token: string }) | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  const refresh = async () => setTokens(await listMyTokens());
+  useEffect(() => {
+    void refresh();
+    void loadOrgList().then(({ orgs: list, current }) => {
+      const open = list.filter((o) => !o.blocked);
+      setOrgs(open);
+      setOrgId((current && !current.blocked ? current.id : open[0]?.id) ?? "");
+    });
+  }, []);
+
+  const chosen = orgs.find((o) => o.id === orgId);
+  const canWrite = chosen ? chosen.role !== "viewer" : false;
+
+  const create = async () => {
+    setBusy(true);
+    setError(null);
+    const r = await createToken({
+      name: name.trim(),
+      orgId,
+      scopes: write && canWrite ? ["read", "write"] : ["read"],
+      expiresInDays: days,
+    });
+    setBusy(false);
+    if (!r.ok) return setError(r.error);
+    setMade(r);
+    setCopied(false);
+    setName("");
+    await refresh();
+  };
+  const revoke = async (id: string) => {
+    const r = await revokeMyToken(id);
+    if (!r.ok) setError(r.error);
+    await refresh();
+  };
+  const copy = async () => {
+    if (!made) return;
+    try {
+      await navigator.clipboard.writeText(made.token);
+      setCopied(true);
+    } catch {
+      /* it stays on screen to copy by hand */
+    }
+  };
+
+  return (
+    <div className="setting-row">
+      <div className="label">API tokens</div>
+      <div className="desc">
+        For a script or an agent — Lucent&apos;s MCP server reads one from{" "}
+        <span className="mono">LUCENT_MCP_TOKEN</span>. A token acts as you in one workspace:{" "}
+        <em>Read</em> only reads; <em>Read &amp; write</em> can change boards, but never share them
+        or change the workspace. It can&apos;t manage your account.
+      </div>
+
+      {made && (
+        <div className="security-made" role="status">
+          <div className="security-made-title">
+            Copy “{made.name}” now — it won&apos;t be shown again.
+          </div>
+          <div className="security-secret mono" aria-label="New API token">
+            {made.token}
+          </div>
+          <div className="security-actions">
+            <button className="btn ghost" type="button" onClick={() => void copy()}>
+              {copied ? "Copied" : "Copy token"}
+            </button>
+            <button className="btn ghost" type="button" onClick={() => setMade(null)}>
+              Done
+            </button>
+          </div>
+        </div>
+      )}
+
+      {orgs.length > 0 && (
+        <form
+          className="security-token-form"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void create();
+          }}
+        >
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="What it's for — e.g. Claude Desktop"
+            aria-label="Token name"
+            maxLength={80}
+          />
+          <select value={orgId} onChange={(e) => setOrgId(e.target.value)} aria-label="Workspace">
+            {orgs.map((o) => (
+              <option key={o.id} value={o.id}>
+                {o.name}
+              </option>
+            ))}
+          </select>
+          <select
+            value={write && canWrite ? "write" : "read"}
+            onChange={(e) => setWrite(e.target.value === "write")}
+            aria-label="Access"
+          >
+            <option value="read">Read</option>
+            {canWrite && <option value="write">Read &amp; write</option>}
+          </select>
+          <select
+            value={days === null ? "never" : String(days)}
+            onChange={(e) => setDays(e.target.value === "never" ? null : Number(e.target.value))}
+            aria-label="Expires"
+          >
+            {TOKEN_EXPIRY_CHOICES.map((c) => (
+              <option key={c.label} value={c.days === null ? "never" : String(c.days)}>
+                {c.days === null ? "Never expires" : `Expires in ${c.label}`}
+              </option>
+            ))}
+          </select>
+          <button className="btn primary" type="submit" disabled={busy || !name.trim() || !orgId}>
+            Create token
+          </button>
+        </form>
+      )}
+      {error && (
+        <div className="team-note error" role="alert">
+          {error}
+        </div>
+      )}
+
+      {tokens && tokens.length > 0 && (
+        <ul className="security-tokens" aria-label="Your API tokens">
+          {tokens.map((t) => (
+            <li key={t.id}>
+              <div className="team-member-who">
+                <div className="team-member-name">
+                  {t.name} <span className="mono security-prefix">{t.prefix}…</span>
+                </div>
+                <div className="team-member-email">{tokenMeta(t)}</div>
+              </div>
+              <button
+                className="btn ghost"
+                type="button"
+                aria-label={`Revoke ${t.name}`}
+                onClick={() => void revoke(t.id)}
+              >
+                Revoke
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }
 

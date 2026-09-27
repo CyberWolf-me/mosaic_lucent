@@ -138,6 +138,16 @@ import { InMemoryFavoriteStore } from "./favorites.js";
 import { InMemoryTrashStore, withMeetingTrash, withProjectTrash } from "./trash.js";
 import { InMemoryTeamStore, withTeamGrants } from "./teams.js";
 import { AccessPolicy, withAccessPolicy } from "./accessPolicy.js";
+import {
+  InMemoryApiTokenStore,
+  apiTokenRefusal,
+  currentApiToken,
+  hashApiToken,
+  isApiToken,
+  runAsApiToken,
+  tokenIsLive,
+} from "./apiTokens.js";
+import { registerApiTokenRoutes } from "./routes/apiTokens.js";
 import { registerSsoRoutes } from "./routes/sso.js";
 import { registerHistoryRoutes } from "./routes/history.js";
 import { registerAskRoutes } from "./routes/ask.js";
@@ -326,6 +336,8 @@ export interface AppDeps {
   trash?: import("./trash.js").TrashStore;
   /** docs/26 A6: the boards and projects people star (in-memory when absent). */
   favorites?: import("./favorites.js").FavoriteStore;
+  /** docs/26 A6: personal API tokens (in-memory when absent). */
+  apiTokens?: import("./apiTokens.js").ApiTokenStore;
   /**
    * P2's outbox. When present, ending a meeting announces `MeetingEnded`
    * (docs/28 A3.3) and main.ts's consumer queues its summary. Absent in most
@@ -639,6 +651,7 @@ export function createApp(deps: AppDeps): App {
     withTeamGrants(intelligence.observe(rawBoardStore), teamStore),
     access,
   );
+  const apiTokenStore = deps.apiTokens ?? new InMemoryApiTokenStore();
 
   // docs/26 J6 (ADR 0047): a record of every AI run. Writing one never fails
   // the request it describes — governance is kept, not enforced, here.
@@ -1076,6 +1089,8 @@ export function createApp(deps: AppDeps): App {
   }
 
   function clientKey(req: IncomingMessage): string {
+    const apiToken = currentApiToken();
+    if (apiToken) return `usr:${apiToken.userId}`;
     const token = bearerToken(req.headers.authorization);
     if (token) {
       const payload = verifyToken(token, secret);
@@ -2433,6 +2448,7 @@ export function createApp(deps: AppDeps): App {
     projects: withProjectTrash(deps.projects ?? new InMemoryProjectStore(), trashStore),
     trash: trashStore,
     favorites: deps.favorites ?? new InMemoryFavoriteStore(),
+    apiTokens: apiTokenStore,
     intelligence,
     aiRuns,
     recordRun,
@@ -2673,6 +2689,7 @@ export function createApp(deps: AppDeps): App {
   registerTeamRoutes(router, services);
   registerTrashRoutes(router, services);
   registerMeRoutes(router, services);
+  registerApiTokenRoutes(router, services);
   registerOrgSettingsRoutes(router, services);
   registerSttRoutes(router, services);
   registerCallRoutes(router, services);
@@ -2893,8 +2910,10 @@ export function createApp(deps: AppDeps): App {
       const orgs = [];
       for (const { org, role } of list) {
         // docs/26 A6: a workspace that's closed to this person right now
-        // still lists, saying why, so the app can explain instead of 404ing.
+        // still lists, saying why, so the app can explain instead of 404ing
+        // — except to an API token, which sees only its own workspace.
         const blocked = await access.blocked(user.id, org.id);
+        if (blocked === "token_scope") continue;
         orgs.push({
           id: org.id,
           name: org.name,
@@ -5491,8 +5510,59 @@ export function createApp(deps: AppDeps): App {
     send(res, 404, { error: "not found" });
   };
 
+  /**
+   * docs/26 A6: a request made with an API token is admitted here, before
+   * any route. The token must be live and its workspace must allow tokens,
+   * and the route must be one a token may use (`apiTokenRefusal`). The rest
+   * of the request runs as the token (`runAsApiToken`), which is how
+   * `authenticate` knows its person and the access policy its limits.
+   */
+  const tokenTouchedAt = new Map<string, number>();
+  async function admitApiToken(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const bearer = bearerToken(req.headers.authorization);
+    if (!isApiToken(bearer)) return handleRequest(req, res);
+    const now = Date.now();
+    const stored = await apiTokenStore.findByHash(hashApiToken(bearer));
+    if (!stored || !tokenIsLive(stored, now)) {
+      send(res, 401, { error: "this API token is invalid, expired or revoked" });
+      return;
+    }
+    if (
+      effectiveSettings(orgStore ? await orgStore.get(stored.orgId) : undefined).apiTokensDisabled
+    ) {
+      send(res, 403, { error: "API tokens are turned off for this workspace" });
+      return;
+    }
+    const refusal = apiTokenRefusal(
+      (req.method ?? "GET").toUpperCase(),
+      (req.url ?? "/").split("?")[0]!,
+      stored.scopes,
+    );
+    if (refusal) {
+      send(res, 403, { error: refusal });
+      return;
+    }
+    // "Last used" to the minute is plenty, and keeps a busy script from
+    // writing a row per request.
+    if (now - (tokenTouchedAt.get(stored.id) ?? 0) > 60_000) {
+      if (tokenTouchedAt.size > 10_000) tokenTouchedAt.clear();
+      tokenTouchedAt.set(stored.id, now);
+      void apiTokenStore.touch(stored.id, now).catch(() => undefined);
+    }
+    await runAsApiToken(
+      {
+        tokenId: stored.id,
+        tokenHash: stored.tokenHash,
+        userId: stored.userId,
+        orgId: stored.orgId,
+        scopes: stored.scopes,
+      },
+      () => handleRequest(req, res),
+    );
+  }
+
   const server = createServer((req, res) => {
-    void observe(req, res, handleRequest);
+    void observe(req, res, admitApiToken);
   });
 
   // Realtime collaboration shares the HTTP server, upgrading /ws connections.

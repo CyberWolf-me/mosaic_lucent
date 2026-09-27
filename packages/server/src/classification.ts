@@ -304,6 +304,11 @@ export interface OrgSettings {
    * turn it on (accessPolicy.ts). Absent means not required.
    */
   requireTwoFactor?: boolean;
+  /**
+   * Personal API tokens refused for the workspace (docs/26 A6): no new ones,
+   * and every existing one stops working at once. Absent means allowed.
+   */
+  apiTokensDisabled?: boolean;
 }
 
 /** Anything a gate can read an org's settings through (undefined = no policy). */
@@ -322,6 +327,7 @@ export interface EffectiveOrgSettings {
   providerPolicy: EffectiveProviderPolicy;
   automation: Record<AutomationRule, boolean>;
   requireTwoFactor: boolean;
+  apiTokensDisabled: boolean;
 }
 
 /**
@@ -387,6 +393,7 @@ export function effectiveSettings(org: OrgPolicySource): EffectiveOrgSettings {
     providerPolicy: effectiveProviderPolicy(raw.providerPolicy),
     automation: effectiveAutomation(raw.automation),
     requireTwoFactor: coerceFlag(raw.requireTwoFactor),
+    apiTokensDisabled: coerceFlag(raw.apiTokensDisabled),
   };
 }
 
@@ -463,6 +470,7 @@ export function parseOrgSettings(
       case "agentDisabled":
       case "recordingDisabled":
       case "requireTwoFactor":
+      case "apiTokensDisabled":
         if (typeof value !== "boolean") {
           return { ok: false, error: `${key} must be a boolean` };
         }

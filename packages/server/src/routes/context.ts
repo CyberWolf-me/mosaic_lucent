@@ -132,6 +132,8 @@ export interface RouteServices {
   readonly trash: import("../trash.js").TrashStore;
   /** docs/26 A6: the boards and projects people star. */
   readonly favorites: import("../favorites.js").FavoriteStore;
+  /** docs/26 A6: personal API tokens. */
+  readonly apiTokens: import("../apiTokens.js").ApiTokenStore;
   /**
    * The boards a user can read in an org — every board for a member, only
    * the boards shared with them for an outside collaborator. Every

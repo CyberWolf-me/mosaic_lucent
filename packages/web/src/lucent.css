@@ -1016,3 +1016,66 @@ button.prov-chip:hover {
 .security-actions .btn.primary {
   flex: 0 0 auto;
 }
+.security-made {
+  margin: 12px 0;
+  padding: 12px 14px;
+  background: oklch(from var(--moss) l c h / 0.08);
+  border: 1px solid oklch(from var(--moss) l c h / 0.3);
+  border-radius: 10px;
+}
+.security-made-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink-0);
+}
+.security-made .security-secret {
+  width: auto;
+  font-size: 12px;
+  letter-spacing: 0.02em;
+}
+.security-token-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+.security-token-form input,
+.security-token-form select {
+  padding: 9px 12px;
+  border-radius: 8px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--ink-0);
+  background: var(--paper-1);
+  border: 1px solid oklch(from var(--paper-4) l c h / 0.7);
+}
+.security-token-form input {
+  flex: 1 1 220px;
+  min-width: 0;
+}
+.security-token-form .btn.primary {
+  flex: 0 0 auto;
+}
+.security-tokens {
+  display: grid;
+  gap: 2px;
+  margin: 14px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.security-tokens li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0;
+  border-top: 1px solid oklch(from var(--paper-4) l c h / 0.4);
+}
+.security-tokens .team-member-who {
+  flex: 1;
+  min-width: 0;
+}
+.security-prefix {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--ink-3);
+}

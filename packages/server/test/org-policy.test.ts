@@ -78,6 +78,7 @@ describe("org settings policy (unit)", () => {
       },
       // docs/26 A6: two-step verification isn't required until an owner says so.
       requireTwoFactor: false,
+      apiTokensDisabled: false,
     });
     expect(effectiveSettings({}).classificationFloor).toBe("internal");
   });

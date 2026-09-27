@@ -1956,3 +1956,34 @@ export const threadMessages = pgTable(
     threadAt: index("thread_messages_thread_idx").on(t.threadId, t.at),
   }),
 );
+
+/**
+ * docs/26 A6: personal API tokens (apiTokens.ts). Only a hash of each token
+ * is kept — the token itself is shown once. Each reaches one workspace, at a
+ * scope, until it expires or is revoked.
+ */
+export const apiTokens = pgTable(
+  "api_tokens",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    orgId: text("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    tokenHash: text("token_hash").notNull(),
+    prefix: text("prefix").notNull(),
+    scopes: jsonb("scopes").notNull(),
+    createdAt: bigint("created_at", { mode: "number" }).notNull(),
+    lastUsedAt: bigint("last_used_at", { mode: "number" }),
+    expiresAt: bigint("expires_at", { mode: "number" }),
+    revokedAt: bigint("revoked_at", { mode: "number" }),
+  },
+  (t) => ({
+    hash: uniqueIndex("api_tokens_hash_uq").on(t.tokenHash),
+    user: index("api_tokens_user_idx").on(t.userId),
+    org: index("api_tokens_org_idx").on(t.orgId),
+  }),
+);

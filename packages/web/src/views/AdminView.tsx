@@ -43,7 +43,15 @@ import {
   type TeamView,
 } from "../teams.js";
 import { deleteForGood, loadTrash, restoreFromTrash, type TrashEntry } from "../trash.js";
-import { loadRequireTwoFactor, setRequireTwoFactor } from "../security.js";
+import {
+  listOrgTokens,
+  loadRequireTwoFactor,
+  revokeOrgToken,
+  scopeLabel,
+  setApiTokensDisabled,
+  setRequireTwoFactor,
+  type ApiTokenView,
+} from "../security.js";
 import {
   getCurrentOrgId,
   listOrgGuests,
@@ -704,7 +712,85 @@ function SecuritySection({ org }: { org: OrgSummary | null }) {
           {error}
         </p>
       )}
+      <ApiTokensAdmin orgId={org.id} />
     </Card>
+  );
+}
+
+/**
+ * The API tokens that reach the workspace (docs/26 A6): whose, what they can
+ * do, when last used — and the switch that stops every one of them at once.
+ */
+function ApiTokensAdmin({ orgId }: { orgId: string }) {
+  const [state, setState] = useState<{ tokens: ApiTokenView[]; disabled: boolean } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const refresh = async () => setState(await listOrgTokens(orgId));
+  useEffect(() => {
+    void listOrgTokens(orgId).then(setState);
+  }, [orgId]);
+  if (!state) return null;
+  const allow = async (on: boolean) => {
+    setState({ ...state, disabled: !on });
+    setError(null);
+    const r = await setApiTokensDisabled(orgId, !on);
+    if (!r.ok) {
+      setState({ ...state, disabled: on });
+      setError(r.error);
+    }
+  };
+  const revoke = async (id: string) => {
+    const r = await revokeOrgToken(orgId, id);
+    if (!r.ok) setError(r.error);
+    await refresh();
+  };
+  return (
+    <div className="admin-tokens">
+      <label className="automation-rule">
+        <input
+          type="checkbox"
+          checked={!state.disabled}
+          onChange={(e) => void allow(e.target.checked)}
+        />
+        <span>
+          <span className="automation-rule-title">Allow API tokens</span>
+          <span className="automation-rule-body">
+            Members can make tokens for scripts and agents that act as them here — reading, or
+            editing at most; never sharing, settings or members. Turning this off stops every token
+            at once.
+          </span>
+        </span>
+      </label>
+      {state.tokens.length > 0 && (
+        <ul className="admin-token-list" aria-label="API tokens for this workspace">
+          {state.tokens.map((t) => (
+            <li key={t.id}>
+              <span className="admin-token-who">
+                <span className="admin-token-name">{t.name}</span>
+                <span className="boards-admin-muted">
+                  {[
+                    t.userName,
+                    scopeLabel(t.scopes),
+                    t.lastUsedAt
+                      ? `last used ${new Date(t.lastUsedAt).toLocaleDateString()}`
+                      : "never used",
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </span>
+              </span>
+              <Button size="sm" onClick={() => void revoke(t.id)} aria-label={`Revoke ${t.name}`}>
+                Revoke
+              </Button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {error && (
+        <p className="boards-admin-error" role="alert">
+          {error}
+        </p>
+      )}
+    </div>
   );
 }
 

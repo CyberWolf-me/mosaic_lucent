@@ -88,3 +88,76 @@ export async function loadRequireTwoFactor(orgId: string): Promise<boolean | nul
   );
   return r.ok ? r.effective?.requireTwoFactor === true : null;
 }
+
+/* ------------------------------------------------------------------------ */
+/* API tokens                                                               */
+/* ------------------------------------------------------------------------ */
+
+export type ApiTokenScope = "read" | "write";
+
+export interface ApiTokenView {
+  id: string;
+  name: string;
+  orgId: string;
+  orgName?: string;
+  scopes: ApiTokenScope[];
+  /** The token's first characters, to recognize it by. */
+  prefix: string;
+  createdAt: number;
+  lastUsedAt: number | null;
+  expiresAt: number | null;
+  /** In a workspace's list: whose it is. */
+  userId?: string;
+  userName?: string;
+}
+
+export const TOKEN_EXPIRY_CHOICES: ReadonlyArray<{ days: number | null; label: string }> = [
+  { days: 30, label: "30 days" },
+  { days: 90, label: "90 days" },
+  { days: 365, label: "1 year" },
+  { days: null, label: "Never" },
+];
+
+export async function listMyTokens(): Promise<ApiTokenView[] | null> {
+  const r = await call<{ tokens?: ApiTokenView[] }>("/api/me/tokens");
+  return r.ok ? (r.tokens ?? []) : null;
+}
+
+/** Make one; the token itself is in this answer and nowhere else, ever. */
+export const createToken = (input: {
+  name: string;
+  orgId: string;
+  scopes: ApiTokenScope[];
+  expiresInDays: number | null;
+}) => call<ApiTokenView & { token: string }>("/api/me/tokens", post(input));
+
+export const revokeMyToken = (id: string) =>
+  call<object>(`/api/me/tokens/${encodeURIComponent(id)}`, { method: "DELETE" });
+
+/** Owner: every token that reaches the workspace, and whether tokens are off. */
+export async function listOrgTokens(
+  orgId: string,
+): Promise<{ tokens: ApiTokenView[]; disabled: boolean } | null> {
+  const r = await call<{ tokens?: ApiTokenView[]; disabled?: boolean }>(
+    `/api/orgs/${encodeURIComponent(orgId)}/tokens`,
+  );
+  return r.ok ? { tokens: r.tokens ?? [], disabled: r.disabled === true } : null;
+}
+
+export const revokeOrgToken = (orgId: string, id: string) =>
+  call<object>(`/api/orgs/${encodeURIComponent(orgId)}/tokens/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+
+/** Owner: refuse API tokens for the workspace (every existing one stops), or allow them. */
+export const setApiTokensDisabled = (orgId: string, off: boolean) =>
+  call<object>(`/api/orgs/${encodeURIComponent(orgId)}/settings`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ apiTokensDisabled: off }),
+  });
+
+/** "Read" or "Read & write", as people say it. */
+export function scopeLabel(scopes: readonly ApiTokenScope[]): string {
+  return scopes.includes("write") ? "Read & write" : "Read";
+}
