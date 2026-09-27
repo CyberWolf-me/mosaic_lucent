@@ -313,14 +313,14 @@ export const registerSsoRoutes: RegisterRoutes = (router, s) => {
         tokenVersion: 0,
         emailVerifiedAt: now,
       });
-      await userStore.setMembership({ userId: id, orgId, role: "editor" });
+      await s.memberships.set({ userId: id, orgId, role: "editor" });
       user = await userStore.findByEmail(email);
     } else {
       // An existing user gets this org membership if they lack it — the
       // enterprise ask: SSO admits the whole domain.
       const memberships = await userStore.membershipsFor(user.id);
       if (!memberships.some((m) => m.orgId === orgId)) {
-        await userStore.setMembership({ userId: user.id, orgId, role: "editor" });
+        await s.memberships.set({ userId: user.id, orgId, role: "editor" });
       }
     }
     if (!user) {

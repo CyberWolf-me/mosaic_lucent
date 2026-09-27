@@ -592,13 +592,13 @@ function ShareDialog({ onClose }: { onClose: () => void }) {
                           textOverflow: "ellipsis",
                         }}
                       >
-                        {m.userId}
+                        {m.name || m.email || m.userId}
                       </span>
                       {isOwner ? (
                         <>
                           <select
                             value={m.role}
-                            aria-label={`Role for ${m.userId}`}
+                            aria-label={`Role for ${m.name || m.email || m.userId}`}
                             onChange={(e) => {
                               const role = e.target.value as ShareRole;
                               void setMemberRole(m.boardId, m.userId, role).then(refreshMembers);
@@ -620,7 +620,7 @@ function ShareDialog({ onClose }: { onClose: () => void }) {
                             onClick={() =>
                               void removeMember(m.boardId, m.userId).then(refreshMembers)
                             }
-                            aria-label={`Remove ${m.userId}`}
+                            aria-label={`Remove ${m.name || m.email || m.userId}`}
                             style={{ color: "var(--ink-3)", padding: 2 }}
                           >
                             <Ico.X />

@@ -770,6 +770,25 @@ a much better product — not rewriting the layout engine.
     (it needs their OAuth apps or keys); revoking tokens at the provider on
     disconnect.
 
+- **A6 — in progress (2026-09-27).** Enterprise and sharing.
+
+  - _Members._ An owner changes a member's role and removes members from
+    Admin; anyone can leave. An org always keeps an owner: the last one
+    can't be demoted, removed or leave, and a personal workspace stays its
+    owner's.
+
+    Removing someone ends their access at once: the membership, their
+    direct grants on the org's boards, and any board they have open (the
+    socket is detached with "access removed"). All of it is audited.
+
+    Membership writes go to both stores that keep them (one table in
+    Postgres, two in memory, where an invited member used to be missing
+    from the list). The Share dialog names members instead of showing ids.
+
+  - Evidence: server `org-members.test.ts` (3); `scripts/org-members-check.mjs`
+    in the running app (6/6, with `LUCENT_DEV_PLAN=team` — a free workspace
+    has one seat).
+
 ## 12. Decisions (locked 2026-09-24)
 
 | #   | Decision              | Locked answer                                                                                                                                                                                                                         |

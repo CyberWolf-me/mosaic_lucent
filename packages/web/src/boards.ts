@@ -37,6 +37,9 @@ export interface BoardMemberSummary {
   role: BoardRole;
   invitedBy: string | null;
   createdAt: number;
+  /** Joined by the server so a member reads as a person, not an id. */
+  name?: string;
+  email?: string;
 }
 
 /**

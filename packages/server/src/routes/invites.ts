@@ -233,7 +233,7 @@ export function registerInviteRoutes(router: AppRouter, s: RouteServices): void 
         );
         if (!ok) return;
       }
-      await userStore.setMembership({ userId: user.id, orgId: invite.orgId, role: invite.role });
+      await s.memberships.set({ userId: user.id, orgId: invite.orgId, role: invite.role });
       await inviteStore.consume(invite.id, Date.now());
       void auditRow(req, user.id, invite.orgId, "org.member.joined_via_invite", invite.orgId, {
         role: invite.role,

@@ -397,6 +397,17 @@ export interface RouteServices {
    * free from being inside the request handler.
    */
   evictBoard(boardId: string): void;
+  /** docs/26 A6: detach one person from a board's live room (access removed). */
+  detachFromBoard(boardId: string, userId: string): void;
+  /**
+   * docs/26 A6: org memberships, written to every store that keeps them (the
+   * user store answers role checks; the org store lists members — one table
+   * in Postgres, two in memory).
+   */
+  memberships: {
+    set(membership: { userId: string; orgId: string; role: Role }): Promise<void>;
+    remove(orgId: string, userId: string): Promise<void>;
+  };
   /**
    * Stage B3: commit a proposal's ops into the board's live room, so the
    * approval broadcasts through the ordinary pipeline. Null when no room is

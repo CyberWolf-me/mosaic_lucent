@@ -153,6 +153,35 @@ export async function deleteOrg(id: string): Promise<OrgResult<null>> {
   return { ok: true, value: null };
 }
 
+/* --------------------------------- members -------------------------------- */
+
+/** Change a member's workspace role (owner only; docs/26 A6). */
+export async function setOrgMemberRole(
+  orgId: string,
+  userId: string,
+  role: "owner" | "editor" | "viewer",
+): Promise<OrgResult<null>> {
+  const res = await authed(
+    `/api/orgs/${encodeURIComponent(orgId)}/members/${encodeURIComponent(userId)}`,
+    { method: "PATCH", body: JSON.stringify({ role }) },
+  );
+  if (!res || !res.ok) return refusal(res, "Could not change that role.");
+  return { ok: true, value: null };
+}
+
+/**
+ * Remove a member (owner only), or leave — when `userId` is your own. Their
+ * direct access to the workspace's boards ends with it (docs/26 A6).
+ */
+export async function removeOrgMember(orgId: string, userId: string): Promise<OrgResult<null>> {
+  const res = await authed(
+    `/api/orgs/${encodeURIComponent(orgId)}/members/${encodeURIComponent(userId)}`,
+    { method: "DELETE" },
+  );
+  if (!res || !res.ok) return refusal(res, "Could not remove that member.");
+  return { ok: true, value: null };
+}
+
 /* --------------------------------- invites -------------------------------- */
 
 /** A pending invite as the owner-only list returns it (token hash never leaves). */

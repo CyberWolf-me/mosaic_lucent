@@ -34,7 +34,7 @@ import {
   type AvailableProvider,
   type ConnectionView,
 } from "../integrationsAdmin.js";
-import { getCurrentOrgId } from "../orgs.js";
+import { getCurrentOrgId, removeOrgMember, setOrgMemberRole } from "../orgs.js";
 import { useWorkspace } from "../workspace.js";
 
 /**
@@ -114,6 +114,11 @@ export function AdminView({ onBack }: { onBack: () => void }) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(true);
   const [roleFilter, setRoleFilter] = useState<RoleFilter>("all");
+  const [meId, setMeId] = useState<string | null>(null);
+  /** The member a Remove/Leave is waiting to be confirmed for. */
+  const [confirming, setConfirming] = useState<string | null>(null);
+  const [memberBusy, setMemberBusy] = useState<string | null>(null);
+  const [memberError, setMemberError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -130,7 +135,11 @@ export function AdminView({ onBack }: { onBack: () => void }) {
           );
           return;
         }
-        const meBody = (await meRes.json()) as { memberships?: Array<{ orgId: string }> };
+        const meBody = (await meRes.json()) as {
+          user?: { id: string };
+          memberships?: Array<{ orgId: string }>;
+        };
+        setMeId(meBody.user?.id ?? null);
         const memberships = meBody.memberships ?? [];
         // The org the rest of the app treats as active (Boards' switcher sets
         // it), when the user still belongs to it; otherwise the first
@@ -221,6 +230,33 @@ export function AdminView({ onBack }: { onBack: () => void }) {
     .map((r) => ({ id: r, label: `${roleLabel(r)}s`, count: roleCounts[r] ?? 0 }));
 
   const memberCount = org?.members.length ?? 0;
+  const personal = org?.id.startsWith("org_personal_") ?? false;
+
+  // docs/26 A6: an owner changes roles and removes people; anyone can leave.
+  const changeRole = async (userId: string, role: "owner" | "editor" | "viewer") => {
+    if (!org) return;
+    setMemberBusy(userId);
+    setMemberError(null);
+    const result = await setOrgMemberRole(org.id, userId, role);
+    setMemberBusy(null);
+    if (!result.ok) return setMemberError(result.error);
+    setOrg({ ...org, members: org.members.map((m) => (m.userId === userId ? { ...m, role } : m)) });
+  };
+  const remove = async (userId: string) => {
+    if (!org) return;
+    setMemberBusy(userId);
+    setMemberError(null);
+    const result = await removeOrgMember(org.id, userId);
+    setMemberBusy(null);
+    setConfirming(null);
+    if (!result.ok) return setMemberError(result.error);
+    if (userId === meId) {
+      // Left: this workspace is no longer yours to look at.
+      window.location.assign("/?view=home");
+      return;
+    }
+    setOrg({ ...org, members: org.members.filter((m) => m.userId !== userId) });
+  };
 
   return (
     <Page
@@ -286,6 +322,9 @@ export function AdminView({ onBack }: { onBack: () => void }) {
                   <th scope="col">Name</th>
                   <th scope="col">Email</th>
                   <th scope="col">Role</th>
+                  <th scope="col">
+                    <span className="sr-only">Actions</span>
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -299,16 +338,75 @@ export function AdminView({ onBack }: { onBack: () => void }) {
                     </td>
                     <td className="mono boards-admin-email">{m.email || "—"}</td>
                     <td>
-                      <span className={`boards-role ${m.role}`}>{roleLabel(m.role)}</span>
+                      {org.role === "owner" &&
+                      m.userId !== meId &&
+                      !(personal && m.role === "owner") ? (
+                        <select
+                          className="boards-admin-role-select"
+                          aria-label={`Role for ${m.name || m.email}`}
+                          value={m.role}
+                          disabled={memberBusy !== null}
+                          onChange={(e) =>
+                            void changeRole(
+                              m.userId,
+                              e.target.value as "owner" | "editor" | "viewer",
+                            )
+                          }
+                        >
+                          <option value="owner">Owner</option>
+                          <option value="editor">Editor</option>
+                          <option value="viewer">Viewer</option>
+                        </select>
+                      ) : (
+                        <span className={`boards-role ${m.role}`}>{roleLabel(m.role)}</span>
+                      )}
+                    </td>
+                    <td className="boards-admin-actions">
+                      {(org.role === "owner" || m.userId === meId) &&
+                        !(personal && m.role === "owner") &&
+                        (confirming === m.userId ? (
+                          <>
+                            <Button
+                              size="sm"
+                              variant="danger"
+                              disabled={memberBusy !== null}
+                              onClick={() => void remove(m.userId)}
+                            >
+                              {m.userId === meId
+                                ? "Leave the workspace"
+                                : `Remove ${m.name || m.email}`}
+                            </Button>
+                            <Button size="sm" onClick={() => setConfirming(null)}>
+                              Keep
+                            </Button>
+                          </>
+                        ) : (
+                          <Button
+                            size="sm"
+                            disabled={memberBusy !== null}
+                            onClick={() => {
+                              setMemberError(null);
+                              setConfirming(m.userId);
+                            }}
+                          >
+                            {m.userId === meId ? "Leave" : "Remove"}
+                          </Button>
+                        ))}
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </Card>
+          {memberError && (
+            <p className="boards-admin-error" role="alert">
+              {memberError}
+            </p>
+          )}
           <p className="boards-admin-hint">
-            These are workspace roles. Access to a single board, and the roles on it, is managed
-            from that board&apos;s Share dialog.
+            Removing someone ends their access to every board here, straight away. These are
+            workspace roles. Access to a single board, and the roles on it, is managed from that
+            board&apos;s Share dialog.
           </p>
         </>
       ) : null}

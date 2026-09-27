@@ -94,6 +94,8 @@ export interface UserStore {
   countMembers(orgId: string): Promise<number>;
   /** M2: insert or update one membership row (used when a joiner gets org access). */
   setMembership(membership: Membership): Promise<void>;
+  /** docs/26 A6: end one membership (removed by an owner, or left). */
+  removeMembership(orgId: string, userId: string): Promise<void>;
   /** Bump the user's `tokenVersion` to invalidate every live session. M1. */
   bumpTokenVersion(userId: string, now: number): Promise<number>;
   /** Mark the user's email as verified at the given timestamp. M1.4 */
@@ -189,6 +191,12 @@ export class InMemoryUserStore implements UserStore {
     );
     if (i === -1) this.memberships.push(membership);
     else this.memberships[i] = membership;
+  }
+  async removeMembership(orgId: string, userId: string): Promise<void> {
+    for (let i = this.memberships.length - 1; i >= 0; i -= 1) {
+      const m = this.memberships[i]!;
+      if (m.orgId === orgId && m.userId === userId) this.memberships.splice(i, 1);
+    }
   }
   async bumpTokenVersion(userId: string, _now: number): Promise<number> {
     const user = this.byId.get(userId);

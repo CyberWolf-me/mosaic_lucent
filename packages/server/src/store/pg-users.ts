@@ -149,6 +149,12 @@ export class PostgresUserStore implements UserStore {
     return Number.isFinite(parsed) ? parsed : 0;
   }
 
+  async removeMembership(orgId: string, userId: string): Promise<void> {
+    await this.target.db
+      .delete(memberships)
+      .where(and(eq(memberships.orgId, orgId), eq(memberships.userId, userId)));
+  }
+
   async setMembership(membership: Membership): Promise<void> {
     await this.target.db
       .insert(memberships)

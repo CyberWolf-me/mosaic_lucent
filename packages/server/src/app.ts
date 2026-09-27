@@ -128,6 +128,7 @@ import { InMemoryMeetingNotesStore } from "./meetingNotes.js";
 import { registerOrgSettingsRoutes } from "./routes/settings.js";
 import { registerProposalRoutes } from "./routes/proposals.js";
 import { registerIntegrationOAuthRoutes } from "./routes/integrationOAuth.js";
+import { registerOrgMemberRoutes } from "./routes/orgMembers.js";
 import { registerSsoRoutes } from "./routes/sso.js";
 import { registerHistoryRoutes } from "./routes/history.js";
 import { registerAskRoutes } from "./routes/ask.js";
@@ -704,6 +705,23 @@ export function createApp(deps: AppDeps): App {
       return { email: u.email, name: u.name };
     };
   }
+
+  /**
+   * docs/26 A6: every membership write goes to both stores that keep them.
+   * In Postgres they're one table (the second write is a no-op upsert); in
+   * memory they're two, and writing only the user store left a new member
+   * out of the org's member list.
+   */
+  const memberships = {
+    async set(membership: { userId: string; orgId: string; role: Role }): Promise<void> {
+      await userStore.setMembership(membership as import("./identity.js").Membership);
+      await orgStore?.setMembership(membership as import("./orgs.js").StoredMembership);
+    },
+    async remove(orgId: string, userId: string): Promise<void> {
+      await userStore.removeMembership(orgId, userId);
+      await orgStore?.removeMembership(orgId, userId);
+    },
+  };
 
   /**
    * Shared auth context (M1). The cookie name and flags are derived from the
@@ -2419,6 +2437,8 @@ export function createApp(deps: AppDeps): App {
     // Deferred deliberately: `realtime` is constructed below, after the HTTP
     // server it needs, so this closure resolves it at request time.
     evictBoard: (boardId) => realtime.evictBoard(boardId),
+    detachFromBoard: (boardId, userId) => realtime.detachUser(boardId, userId),
+    memberships,
     // Stage B3: the proposal seams, deferred for the same reason as evictBoard
     // — `realtime` is constructed below the route table.
     commitForBoard: (boardId, userId, ops, label, meta) =>
@@ -2562,6 +2582,7 @@ export function createApp(deps: AppDeps): App {
   registerSearchRoutes(router, services);
   registerIntegrationRoutes(router, services);
   registerIntegrationOAuthRoutes(router, services);
+  registerOrgMemberRoutes(router, services);
   registerOrgSettingsRoutes(router, services);
   registerSttRoutes(router, services);
   registerCallRoutes(router, services);
@@ -2784,7 +2805,7 @@ export function createApp(deps: AppDeps): App {
         const id = newOrgId();
         const now = Date.now();
         await orgStore.insert({ id, name: body.name.trim(), createdAt: now });
-        await userStore.setMembership({ userId: user.id, orgId: id, role: "owner" });
+        await memberships.set({ userId: user.id, orgId: id, role: "owner" });
         await orgStore.audit({
           orgId: id,
           actorId: user.id,

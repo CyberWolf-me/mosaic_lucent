@@ -42,6 +42,35 @@ import { PostgresIntegrationCredentialStore } from "./store/pg-integration-crede
  * (LUCENT_LINEAR_CLIENT_ID/SECRET, LUCENT_JIRA_CLIENT_ID/SECRET). A malformed
  * key stops the boot: a server that can't seal tokens must not take them.
  */
+/**
+ * Development only: LUCENT_DEV_PLAN=<plan code> (e.g. "team") answers every
+ * org as subscribed to that plan, so team features — inviting people, seats
+ * — can be tried on a laptop. Only the in-memory stores read it; with a
+ * database the real subscriptions answer, always.
+ */
+function devPlanUsageStore(store: InMemoryUsageStore): InMemoryUsageStore {
+  const plan = process.env.LUCENT_DEV_PLAN;
+  if (!plan) return store;
+  const real = store.subscription.bind(store);
+  store.subscription = async (orgId: string) =>
+    (await real(orgId)) ?? {
+      orgId,
+      plan,
+      seats: 50,
+      status: "active",
+      periodStart: null,
+      periodEnd: null,
+      cancelAt: null,
+      trialEndsAt: null,
+      stripeCustomerId: null,
+      stripeSubscriptionId: null,
+      createdAt: 0,
+      updatedAt: 0,
+    };
+  console.log(`[lucent] dev plan: every org answers as "${plan}" (LUCENT_DEV_PLAN)`);
+  return store;
+}
+
 function oauthBundle(
   credentials: import("./integrations/credentials.js").IntegrationCredentialStore,
 ): { oauth?: import("./integrations/oauth.js").OAuthDeps } {
@@ -233,7 +262,7 @@ function makeStores(databaseUrl: string | undefined): {
       orgStore: new InMemoryOrgStore(),
       inviteStore: new InMemoryOrgInviteStore(),
       notifications: new InMemoryNotificationStore(),
-      usageStore: new InMemoryUsageStore(),
+      usageStore: devPlanUsageStore(new InMemoryUsageStore()),
       meetings: new InMemoryMeetingStore(),
       meetingNotes: new InMemoryMeetingNotesStore(),
       projects: new InMemoryProjectStore(),

@@ -256,6 +256,11 @@ export class Room {
     return this.roles.get(userId);
   }
 
+  /** docs/26 A6: their access was removed; a rejoin is authorized afresh. */
+  forgetRole(userId: string): void {
+    this.roles.delete(userId);
+  }
+
   /**
    * Why a commenter's batch is refused, or null when it may commit (docs/26
    * F8). Comments, replies, reactions, votes and resolving a thread are the

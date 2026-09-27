@@ -838,6 +838,28 @@ export class RealtimeServer {
   }
 
   /**
+   * Detach one person from a board's room (docs/26 A6): their access was
+   * removed, so an open socket must not go on committing under a role they
+   * no longer hold. Like `evictBoard`, the socket stays open and is told why;
+   * the room forgets their role, so a rejoin is authorized afresh.
+   */
+  detachUser(boardId: string, userId: string): void {
+    const set = this.connsByBoard.get(boardId);
+    for (const conn of [...(set ?? [])]) {
+      if (conn.userId !== userId) continue;
+      this.sendTo(conn, { type: "error", message: "access removed" });
+      set!.delete(conn);
+      conn.boardId = null;
+    }
+    const room = this.rooms.get(boardId);
+    if (room) {
+      room.removePresence(userId);
+      room.forgetRole(userId);
+      this.broadcast(boardId, { type: "peer-left", userId });
+    }
+  }
+
+  /**
    * Commit a batch into a board's room on behalf of a user (Stage B3). The
    * proposal-approval path uses this so an applied proposal broadcasts through
    * the ordinary pipeline — peers receive the same sequenced entry any edit
