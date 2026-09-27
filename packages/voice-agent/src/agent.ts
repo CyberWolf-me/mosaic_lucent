@@ -8,12 +8,15 @@ import * as deepgram from "@livekit/agents-plugin-deepgram";
 import * as openai from "@livekit/agents-plugin-openai";
 import * as silero from "@livekit/agents-plugin-silero";
 import {
+  type JsonSchema,
   type Operation,
   isHumanOnlyOperation,
   repairOperations,
   stampAuthorship,
+  toolParametersJsonSchema,
   type Workspace,
 } from "@lucent/core";
+import type { JSONSchema7 } from "json-schema";
 import { z } from "zod";
 
 export const VOICE_AGENT_INSTRUCTIONS = `You are Lucent Voice, an expert visual architecture, design, and diagramming AI co-pilot.
@@ -23,29 +26,58 @@ You are interacting with the user over a real-time duplex voice call while they 
 - Keep your spoken responses concise, conversational, and natural (1 to 3 sentences maximum).
 - Respond in plain conversational text only. NEVER use markdown, bullet points, asterisks, tables, or raw JSON in your speech.
 - Never recite technical IDs (like "node_123" or "brd_456") to the user. Refer to components by their human labels (e.g. "the Auth Service", "the API Gateway").
-- Confirm visual actions naturally as you do them (e.g., "I've created the architecture diagram with your API gateway, auth, and database services.").
-- Talk WITH the person like a teammate at the whiteboard. Never read out a list of what changed or the operations you sent; name the one change that matters, then keep the conversation going: ask ONE short question about what they want next, or suggest the obvious next step.
+- Talk WITH the person like a teammate at the whiteboard. Never read out a list of what changed or the operations you sent, and don't describe what's inside what you built — they can see it. Say what you did in a few words ("Done — login now leads to the dashboard."), then keep the conversation going: ask ONE short question about what they want next, or suggest the obvious next step.
 - When the request is vague, ask one short question before building. When they ask something about the board, answer it (use get_board_summary) instead of changing anything.
 
 # Canvas Tools
-- You have the 'apply_canvas_operations' tool to create and edit diagrams, flowcharts, mind maps, architecture diagrams, sticky notes, and wireframes.
-- When the user asks you to create, build, add, connect, move, or delete elements, use 'apply_canvas_operations' to update the canvas.
-- Supported operations include:
-  - CREATE_NODE: { op: "CREATE_NODE", id: string, nodeType: "service"|"database"|"queue"|"gateway"|"storage"|"compute"|"external"|"client"|"decision"|"process"|"start"|"end", label: string, position: { x: number, y: number }, description?: string }
-  - CONNECT_NODES: { op: "CONNECT_NODES", id: string, from: string, to: string, label?: string, style?: "solid"|"dashed" }
-  - MOVE_NODE: { op: "MOVE_NODE", id: string, position: { x: number, y: number } }
-  - DELETE_NODE: { op: "DELETE_NODE", id: string }
-  - CREATE_SHAPE: { op: "CREATE_SHAPE", id: string, kind: "sticky"|"box"|"circle"|"frame", x: number, y: number, width: number, height: number, text?: string, color?: string }
-  - CREATE_WIREFRAME: { op: "CREATE_WIREFRAME", id: string, title: string, viewport?: "desktop"|"tablet"|"mobile", root: { kind: "screen", children?: Array<{ kind: "header"|"nav"|"sidebar"|"card"|"section"|"row"|"column"|"input"|"button"|"text"|"image"|"table", label?: string, placeholder?: string, variant?: "primary"|"secondary"|"ghost", children?: Array<any> }> } }
-- Always position nodes cleanly with spacing (e.g. horizontal flow x: 100, 350, 600, 850; vertical flow y: 100, 250, 400).
-- You have the 'get_board_summary' tool to inspect what is currently on the user's canvas. Call this if you need to know what exists before modifying or answering specific questions about the layout.
+- 'apply_canvas_operations' changes the board. Its parameter schema IS the operation contract: send exactly the fields it defines and nothing else. One invalid operation rejects the whole batch.
+- Never give nodes positions or coordinates — Lucent's layout engine places them. Create nodes first, then connect them with the ids you just gave them. Edges connect nodes only; a wireframe is not a node.
+- 'get_board_summary' lists what is on the board, with ids and labels. Call it before editing or connecting things that already exist, and to answer questions about the board.
+- Only say something is on the board after 'apply_canvas_operations' returned success: true. When it returns success: false, NOTHING changed: correct the operations from its errors and try once more, and if that fails too, tell the person plainly that it didn't work. Never say a change is done, or "already there", unless get_board_summary shows it.
 
 # Conversational Flow
-- When asked to build something:
-  1. Call 'apply_canvas_operations' with the operations.
-  2. Briefly tell the user what you constructed and ask if they'd like to refine or expand it.
+- When asked to build something: call 'apply_canvas_operations', then say in a sentence what's there now and ask what they'd like next.
 - If the user interrupts mid-sentence, immediately adapt to their new instruction.
 `;
+
+/**
+ * The apply tool's parameters: the same JSON Schema, derived from core's
+ * operation union, that the text pipeline and the MCP server hand their
+ * models. It used to be "an array of any objects" beside a hand-written list
+ * of operation shapes that had drifted from the contract (CONNECT_NODES with
+ * `from`/`to`, nodes with coordinates), so the server refused most of what
+ * the agent sent. `reply` is dropped: the agent speaks for itself.
+ */
+export function applyToolParameters(): JsonSchema {
+  const params = toolParametersJsonSchema();
+  const properties = { ...(params.properties as Record<string, unknown>) };
+  delete properties.reply;
+  return { ...params, properties };
+}
+
+/** The validator's refusal, as a short list the model can act on. */
+function refusalReasons(body: string): string {
+  try {
+    const parsed = JSON.parse(body) as {
+      error?: string;
+      errors?: Array<{ index?: number; op?: string; message?: string }>;
+    };
+    if (Array.isArray(parsed.errors) && parsed.errors.length > 0) {
+      return parsed.errors
+        .slice(0, 8)
+        .map((e) => `operation ${e.index ?? "?"} (${e.op ?? "?"}): ${e.message ?? "invalid"}`)
+        .join("; ");
+    }
+    if (parsed.error) return parsed.error;
+  } catch {
+    /* not JSON */
+  }
+  return body.slice(0, 500);
+}
+
+/** What the model is told when a write fails — so it can't mistake it for success. */
+const NOTHING_CHANGED =
+  "Nothing on the board changed. Correct the operations using these errors and call apply_canvas_operations once more; if it fails again, tell the person plainly that it didn't work. Do not say the change is done.";
 
 export interface AgentContextConfig {
   boardId: string;
@@ -133,19 +165,11 @@ export function resolveLlmConfig(env: Record<string, string | undefined>): {
 export function createApplyOpsTool(config: AgentContextConfig) {
   return llm.tool({
     description:
-      "Apply structured visual operations to create, edit, connect, or delete elements on the Lucent canvas.",
-    parameters: z.object({
-      operations: z
-        .array(z.record(z.unknown()))
-        .describe(
-          "List of canvas operations: CREATE_NODE, CONNECT_NODES, MOVE_NODE, DELETE_NODE, CREATE_SHAPE, CREATE_WIREFRAME, etc.",
-        ),
-      explanation: z
-        .string()
-        .optional()
-        .describe("Brief 1-sentence explanation of what was changed on the canvas"),
-    }),
-    execute: async ({ operations, explanation }) => {
+      "Apply structured visual operations to create, edit, connect, or delete elements on the Lucent canvas. Returns success: false, with the reasons, when the board refuses them — then nothing changed.",
+    parameters: applyToolParameters() as JSONSchema7,
+    execute: async (args: { operations?: unknown; explanation?: unknown }) => {
+      const operations = Array.isArray(args.operations) ? (args.operations as unknown[]) : [];
+      const explanation = typeof args.explanation === "string" ? args.explanation : undefined;
       if (!config.boardId) {
         return { success: false, error: "No boardId available in context" };
       }
@@ -183,10 +207,11 @@ export function createApplyOpsTool(config: AgentContextConfig) {
         });
 
         if (!res.ok) {
-          const errText = await res.text();
           return {
             success: false,
-            error: `Server rejected operations (${res.status}): ${errText}`,
+            changed: false,
+            error: `The board refused these operations (${res.status}): ${refusalReasons(await res.text())}`,
+            next: NOTHING_CHANGED,
           };
         }
 
@@ -303,6 +328,8 @@ export default defineAgent({
       apiKey: deepgramKey,
       model: "nova-3",
       language: "en",
+      // Its own name, heard as "Lisa" or "Lucid" without a hint.
+      keyterm: ["Lucent"],
     });
 
     const tts = new deepgram.TTS({

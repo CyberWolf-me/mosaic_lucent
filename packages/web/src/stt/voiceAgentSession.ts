@@ -194,18 +194,19 @@ export async function startVoiceAgentSession(
     );
 
     // 6. Real-time transcription events
+    // Who spoke is the event's SECOND argument — the participant whose track
+    // was transcribed — not a field on the segment. Reading it off the
+    // segment found nothing, so every line, the person's own words included,
+    // was shown as Lucent's.
     room.on(
       livekit.RoomEvent.TranscriptionReceived || "transcriptionReceived",
-      (segments: Array<{ text: string; final: boolean; participant?: any }>) => {
-        for (const seg of segments as Array<{
-          id?: string;
-          text: string;
-          final: boolean;
-          participant?: unknown;
-        }>) {
-          const who = seg.participant as { identity?: string } | string | undefined;
-          const participantId = typeof who === "string" ? who : who?.identity || "";
-          const isAgent = participantId !== room.localParticipant?.identity;
+      (
+        segments: Array<{ id?: string; text: string; final: boolean }>,
+        speaker?: { identity?: string },
+      ) => {
+        const participantId = speaker?.identity ?? "";
+        const isAgent = participantId !== "" && participantId !== room.localParticipant?.identity;
+        for (const seg of segments) {
           onTranscript?.({
             id: seg.id ?? `${participantId}-${Date.now()}`,
             text: seg.text,

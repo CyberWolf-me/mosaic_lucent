@@ -3426,14 +3426,15 @@ export function createApp(deps: AppDeps): App {
 
       let room = "";
       let boardId = "";
-      let agentName = "lucent-voice-agent";
+      // The deployment names its worker; a caller can't pick which agent in
+      // the LiveKit project receives a board grant.
+      const agentName = config.livekit.agentName;
       try {
         const raw = await readBody(req);
         const body = raw
           ? (JSON.parse(raw) as {
               room?: unknown;
               boardId?: unknown;
-              agentName?: unknown;
             })
           : {};
         if (typeof body.boardId === "string" && body.boardId.trim().length > 0) {
@@ -3443,9 +3444,6 @@ export function createApp(deps: AppDeps): App {
           room = body.room.trim().slice(0, 128);
         } else if (boardId) {
           room = `voice_${boardId}`;
-        }
-        if (typeof body.agentName === "string" && body.agentName.trim().length > 0) {
-          agentName = body.agentName.trim().slice(0, 64);
         }
       } catch {
         send(res, 400, { error: "Invalid JSON body" });

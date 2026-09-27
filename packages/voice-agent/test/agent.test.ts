@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   type AgentContextConfig,
+  applyToolParameters,
   createApplyOpsTool,
   createGetBoardSummaryTool,
   extractConfigFromJob,
@@ -116,6 +117,50 @@ describe("Voice Agent Context and Tools", () => {
     });
   });
 
+  describe("the operation contract", () => {
+    it("offers the model core's derived operation schema, not free-form objects", () => {
+      const params = applyToolParameters();
+      const json = JSON.stringify(params);
+      const properties = params.properties as Record<string, unknown>;
+      expect(Object.keys(properties).sort()).toEqual(["explanation", "operations"]);
+      // Real variants, with their real fields: an edge names its ends as the
+      // contract does, which the old hand-written list got wrong (from/to).
+      expect(json).toContain('"CONNECT_NODES"');
+      expect(json).toContain('"CREATE_NODE"');
+      expect(json).not.toContain('"from"');
+    });
+
+    it("tells the model nothing changed when the board refuses a batch", async () => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue({
+          ok: false,
+          status: 422,
+          text: async () =>
+            JSON.stringify({
+              error: "operations failed validation",
+              errors: [
+                { index: 1, op: "CONNECT_NODES", message: 'source node "a" does not exist' },
+              ],
+            }),
+        }),
+      );
+      const tool = createApplyOpsTool({
+        boardId: "brd_sample",
+        grant: "g",
+        serverUrl: "http://127.0.0.1:4387",
+      });
+      const res = (await tool.execute(
+        { operations: [{ op: "CREATE_NODE", id: "n1", label: "X" }] },
+        {} as never,
+      )) as { success: boolean; changed?: boolean; error?: string; next?: string };
+      expect(res).toMatchObject({ success: false, changed: false });
+      expect(res.error).toContain('operation 1 (CONNECT_NODES): source node "a" does not exist');
+      expect(res.next).toMatch(/Nothing on the board changed/);
+      vi.unstubAllGlobals();
+    });
+  });
+
   describe("the board grant", () => {
     it("refuses to write without a grant — no shared service-token fallback", async () => {
       const fetchSpy = vi.fn();
@@ -149,11 +194,14 @@ describe("Voice Agent Context and Tools", () => {
 
     it("never falls back to a third-party endpoint", () => {
       expect(() => resolveLlmConfig({})).toThrow(/no AI key/);
-      expect(() => resolveLlmConfig({ LUCENT_AI_KEY: "k", LUCENT_AI_BASE_URL: "https://gw.example" })).toThrow(
-        /LUCENT_AI_MODEL/,
-      );
+      expect(() =>
+        resolveLlmConfig({ LUCENT_AI_KEY: "k", LUCENT_AI_BASE_URL: "https://gw.example" }),
+      ).toThrow(/LUCENT_AI_MODEL/);
       // An OpenAI key alone means OpenAI itself: no baseURL override.
-      expect(resolveLlmConfig({ OPENAI_API_KEY: "sk" })).toEqual({ apiKey: "sk", model: "gpt-4o-mini" });
+      expect(resolveLlmConfig({ OPENAI_API_KEY: "sk" })).toEqual({
+        apiKey: "sk",
+        model: "gpt-4o-mini",
+      });
     });
   });
 

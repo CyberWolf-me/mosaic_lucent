@@ -109,6 +109,17 @@ async function waitFor(fn, timeout = 15000, every = 200) {
   return value;
 }
 
+// A deployment with server voice (Deepgram) speaks through /api/tts/speak
+// first. This check is about the conversation, not the vendor: answer 503
+// ("no server voice") so the answer falls through to the recording speaker.
+await page.route("**/api/tts/speak", (route) =>
+  route.fulfill({
+    status: 503,
+    contentType: "application/json",
+    body: JSON.stringify({ error: "unconfigured" }),
+  }),
+);
+
 // What the canvas sends to the model, turn by turn.
 const sent = [];
 page.on("request", (req) => {

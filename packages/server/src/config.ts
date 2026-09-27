@@ -100,6 +100,13 @@ export interface Config {
     apiKey: string | undefined;
     apiSecret: string | undefined;
     url: string | undefined;
+    /**
+     * The worker name `/api/livekit/dispatch` asks LiveKit for. The worker
+     * registers under the same variable. Workers sharing a name share the
+     * jobs, so a developer's worker on a shared LiveKit project would take
+     * real users' calls unless it runs under its own name.
+     */
+    agentName: string;
   };
   /**
    * docs/25 V1: server-hosted diarizing STT (the fourth STT slot). Key + URL
@@ -146,6 +153,7 @@ export interface ConfigEnv {
   LUCENT_LIVEKIT_API_KEY?: string;
   LUCENT_LIVEKIT_API_SECRET?: string;
   LUCENT_LIVEKIT_URL?: string;
+  LUCENT_VOICE_AGENT_NAME?: string;
   LUCENT_STT_KEY?: string;
   LUCENT_STT_URL?: string;
   LUCENT_STT_NAME?: string;
@@ -193,6 +201,9 @@ export interface ConfigEnv {
  * to the console transport, which never leaves the process - a typo in this key
  * must not silently post user email addresses at a provider.
  */
+/** The voice-agent worker's name when `LUCENT_VOICE_AGENT_NAME` is unset. */
+export const DEFAULT_VOICE_AGENT_NAME = "lucent-voice-agent";
+
 export const MAIL_TRANSPORTS = ["console", "smtp", "http"] as const;
 export type MailTransport = (typeof MAIL_TRANSPORTS)[number];
 
@@ -278,6 +289,7 @@ export function readConfig(env: ConfigEnv = process.env): Config {
       apiKey: env.LUCENT_LIVEKIT_API_KEY || undefined,
       apiSecret: env.LUCENT_LIVEKIT_API_SECRET || undefined,
       url: env.LUCENT_LIVEKIT_URL || undefined,
+      agentName: env.LUCENT_VOICE_AGENT_NAME?.trim() || DEFAULT_VOICE_AGENT_NAME,
     },
     stt: {
       apiKey: env.LUCENT_STT_KEY || undefined,

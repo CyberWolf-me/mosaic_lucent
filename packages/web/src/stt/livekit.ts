@@ -138,11 +138,13 @@ export const livekitSttProvider: SttProvider = {
         disconnect = () => void room.disconnect();
 
         // Transcription arrives from the server agent. LiveKit exposes it as a
-        // TranscriptionReceived event; segments carry `final` so interim words
-        // can stream while the final text accumulates — and the speaking
-        // participant's identity, which becomes the event's participantId
-        // (per-stream identity IS the person here — advisory §2, no
-        // diarization needed and none attempted).
+        // TranscriptionReceived event: segments carry `final` so interim words
+        // can stream while the final text accumulates, and the event's SECOND
+        // argument is the participant whose track was transcribed, which
+        // becomes the event's participantId (per-stream identity IS the
+        // person here — advisory §2, no diarization needed and none
+        // attempted). It used to be read off the segment, which has no such
+        // field, so no turn was ever attributed.
         //
         // Cadence preserved exactly: finals accumulate and emit ONCE at stop
         // as one joined turn. Per-utterance finals while running would change
@@ -150,12 +152,9 @@ export const livekitSttProvider: SttProvider = {
         // behavior decision, not a contract-migration side effect.
         room.on(
           livekit.RoomEvent.TranscriptionReceived ?? "transcriptionReceived",
-          (segments: TranscriptionSegment[]) => {
+          (segments: TranscriptionSegment[], participant?: TranscribedParticipant) => {
+            const speaker = participant?.name || participant?.identity || undefined;
             for (const seg of segments) {
-              const speaker =
-                typeof seg.participant === "string"
-                  ? seg.participant
-                  : seg.participant?.name || seg.participant?.identity || undefined;
               if (seg.final) {
                 chunks.push(seg.text);
                 lastSpeaker = speaker ?? lastSpeaker;
@@ -237,15 +236,17 @@ interface LiveKitRoom {
 }
 
 /**
- * A transcription segment as LiveKit actually delivers it. The SDK's own type
- * carries more; this file deliberately types only what it reads — and `final`
- * segments DO carry the speaking participant's identity, which is exactly
- * what meeting capture needs to attribute a turn to a person. The previous
- * structural type dropped those fields on the floor.
+ * A transcription segment as LiveKit delivers it. The SDK's own type carries
+ * more (id, language, timings); this file types only what it reads. Who spoke
+ * is NOT on the segment — it is the event's second argument.
  */
 interface TranscriptionSegment {
   text: string;
   final: boolean;
-  /** The participant who spoke — the room identity the token minted. */
-  participant?: { identity?: string; name?: string } | string | null;
+}
+
+/** The participant whose track a transcription belongs to — the room identity the token minted. */
+interface TranscribedParticipant {
+  identity?: string;
+  name?: string;
 }

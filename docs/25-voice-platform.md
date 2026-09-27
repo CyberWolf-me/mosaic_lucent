@@ -238,6 +238,31 @@ tts.ts` seam (free local speech synthesis default — nothing to bill;
     (no worker, no `DEEPGRAM_API_KEY`) says so instead of waiting in silence.
     The meeting speaks its reply after a voice command too, not only after
     a question.
+  - _The Live call, run for real (2026-09-27, owner's Deepgram key)._
+    `scripts/voice-agent-live-check.mjs` plays a Deepgram-rendered request
+    ("Hi Lucent. Please add a login page that leads to a dashboard") as
+    Chromium's microphone into a Live call, with the worker running locally:
+    5/5 — the agent hears it, changes the board through the governed route,
+    and answers. The first runs found four bugs. The agent's tool took "an
+    array of any objects" beside a hand-written list of operation shapes that
+    had drifted from the contract (edges with `from`/`to`, nodes with
+    coordinates, against the no-coordinates rule), so the server refused most
+    of its writes — and the model then said "it's already on your board". The
+    tool now carries core's derived operation schema (the same one the text
+    pipeline and MCP use), a refusal comes back as "nothing changed, here's
+    why", and the instructions forbid claiming a change the board didn't
+    take (a run showed one refusal, a corrected retry, then success). Every
+    call-transcript line was labelled "Lucent", the person's own words
+    included: who spoke is the event's second argument, not a field on the
+    segment — the LiveKit STT provider had the same bug, so its turns were
+    never attributed. Deepgram heard "Lucent" as "Lisa" until the name was
+    given as a keyterm. And the worker name is now the deployment's
+    (`LUCENT_VOICE_AGENT_NAME`, read by the server and the worker; the
+    dispatch route no longer takes one from the caller), so a developer's
+    worker on a shared LiveKit project can run under its own name instead of
+    taking real users' calls. With `LUCENT_TTS_PROVIDER=deepgram` the canvas
+    conversation speaks in Deepgram's voice through `POST /api/tts/speak`
+    (verified 200 `audio/mpeg`).
   - Evidence: `test/stt-browser.test.ts`, `test/voice-conversation.test.ts`,
     `ai/test/reply.test.ts`, the generate route tests, and
     `scripts/canvas-voice-check.mjs` (a scripted recognizer and a recording

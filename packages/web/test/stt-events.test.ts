@@ -25,10 +25,10 @@ vi.mock("livekit-client", () => {
   };
 });
 
-function lkHandlers(): Record<string, (segments: unknown) => void> {
+function lkHandlers(): Record<string, (segments: unknown, participant?: unknown) => void> {
   return (globalThis as Record<string, unknown>).__lkStore as Record<
     string,
-    (segments: unknown) => void
+    (segments: unknown, participant?: unknown) => void
   >;
 }
 
@@ -332,8 +332,10 @@ describe("livekit provider events", () => {
     expect(c.isStarted()).toBe(true);
 
     const onTx = lkHandlers()["transcriptionReceived"]!;
-    onTx([{ text: "half a", final: false, participant: { identity: "usr_alice", name: "Alice" } }]);
-    onTx([{ text: "a full thought", final: true, participant: "usr_alice" }]);
+    // As livekit-client calls it: (segments, participant) — who spoke is the
+    // second argument, never a field on the segment.
+    onTx([{ text: "half a", final: false }], { identity: "usr_alice", name: "Alice" });
+    onTx([{ text: "a full thought", final: true }], { identity: "usr_alice" });
     // Finals accumulate while running — no final event yet (turn cadence
     // preserved: per-utterance finals would change billed extraction calls).
     expect(c.finals()).toEqual([]);

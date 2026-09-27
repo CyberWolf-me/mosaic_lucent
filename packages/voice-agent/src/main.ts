@@ -45,7 +45,10 @@ const agentEntryPath = fs.existsSync(tsAgentPath) ? tsAgentPath : jsAgentPath;
 cli.runApp(
   new ServerOptions({
     agent: agentEntryPath,
-    agentName: "lucent-voice-agent",
+    // The same variable the server dispatches by. Workers sharing a name
+    // share the jobs: a developer's worker on a shared LiveKit project must
+    // run under its own name, or it answers real users' calls.
+    agentName: process.env.LUCENT_VOICE_AGENT_NAME?.trim() || "lucent-voice-agent",
     numIdleProcesses: 0,
     initializeProcessTimeout: 60_000,
   }),
