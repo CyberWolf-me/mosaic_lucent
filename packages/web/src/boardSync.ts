@@ -1,6 +1,6 @@
 import { applyOperations, type Operation, type Workspace } from "@lucent/core";
 import { fetchRealtimeTicket } from "./boards.js";
-import type { ServerProposal } from "./boards.js";
+import type { BoardRole, ServerProposal } from "./boards.js";
 
 /**
  * Client realtime sync (docs/12). Mirrors the server's Room over a WebSocket:
@@ -62,7 +62,7 @@ export interface BoardSyncCallbacks {
   /** Connection state, for a status dot. */
   onStatus?: (status: "connecting" | "online" | "offline") => void;
   /** The caller's role on this board. */
-  onRole?: (role: "owner" | "editor" | "viewer") => void;
+  onRole?: (role: BoardRole) => void;
 }
 
 /**
@@ -162,7 +162,7 @@ export class BoardSync {
     switch (msg.type) {
       case "welcome": {
         this.cb.onStatus?.("online");
-        if (msg.role) this.cb.onRole?.(msg.role as "owner" | "editor" | "viewer");
+        if (msg.role) this.cb.onRole?.(msg.role as BoardRole);
         // Replay everything we missed while away.
         const catchup = (msg.catchup ?? []) as Array<{ seq: number; ops: Operation[] }>;
         for (const entry of catchup) {
@@ -191,7 +191,7 @@ export class BoardSync {
         // atomically, never diff it — partial application here would leave
         // the board half-old.
         this.cb.onStatus?.("online");
-        if (msg.role) this.cb.onRole?.(msg.role as "owner" | "editor" | "viewer");
+        if (msg.role) this.cb.onRole?.(msg.role as BoardRole);
         this.workspace = msg.workspace as Workspace;
         this.version = Number(msg.version ?? 0);
         this.peers.clear();

@@ -3302,7 +3302,14 @@ export function createApp(deps: AppDeps): App {
         send(res, 400, { error: "the voice agent is dispatched for a board: send boardId" });
         return;
       }
-      const guard = await requireBoardRole(req, res, boardId, "editor", "/api/livekit/dispatch", user);
+      const guard = await requireBoardRole(
+        req,
+        res,
+        boardId,
+        "editor",
+        "/api/livekit/dispatch",
+        user,
+      );
       if (!guard.ok) return;
       // The agent reads the board into a model and writes back, so the agent
       // boundary (agentDisabled, classification) and the AI boundary are both
@@ -3677,7 +3684,9 @@ export function createApp(deps: AppDeps): App {
       try {
         const raw = await readBody(req);
         const body = raw ? (JSON.parse(raw) as { role?: unknown; expiresInHours?: unknown }) : {};
-        const role: ShareRole = body.role === "editor" ? "editor" : "viewer";
+        // docs/26 F8: a link may grant commenting; anything unknown stays view-only.
+        const role: ShareRole =
+          body.role === "editor" || body.role === "commenter" ? body.role : "viewer";
         const hours = typeof body.expiresInHours === "number" ? body.expiresInHours : null;
         const link: ShareLink = {
           token: newShareToken(),
@@ -3783,8 +3792,11 @@ export function createApp(deps: AppDeps): App {
         try {
           const raw = await readBody(req);
           const body = raw ? (JSON.parse(raw) as { role?: unknown }) : {};
-          if (body.role !== "editor" && body.role !== "viewer") {
-            send(res, 400, { error: "invalid request", detail: "role must be editor or viewer" });
+          if (body.role !== "editor" && body.role !== "commenter" && body.role !== "viewer") {
+            send(res, 400, {
+              error: "invalid request",
+              detail: "role must be editor, commenter or viewer",
+            });
             return;
           }
           const current = (await boardStore.members(id)).find((m) => m.userId === targetUserId);
@@ -3831,8 +3843,11 @@ export function createApp(deps: AppDeps): App {
             send(res, 400, { error: "invalid request", detail: "email is required" });
             return;
           }
-          if (body.role !== "editor" && body.role !== "viewer") {
-            send(res, 400, { error: "invalid request", detail: "role must be editor or viewer" });
+          if (body.role !== "editor" && body.role !== "commenter" && body.role !== "viewer") {
+            send(res, 400, {
+              error: "invalid request",
+              detail: "role must be editor, commenter or viewer",
+            });
             return;
           }
           const target = await userStore.findByEmail(body.email.toLowerCase().trim());
@@ -4352,7 +4367,14 @@ export function createApp(deps: AppDeps): App {
           send(res, 401, { error: "authentication required" });
           return;
         }
-        const guard = await requireBoardRole(req, res, request.boardId, "editor", "/api/vector", caller);
+        const guard = await requireBoardRole(
+          req,
+          res,
+          request.boardId,
+          "editor",
+          "/api/vector",
+          caller,
+        );
         if (!guard.ok) return;
         board = guard.board;
         // The prompt leaves the deployment for a vendor: the board's AI
@@ -4401,7 +4423,11 @@ export function createApp(deps: AppDeps): App {
           ...(board ? { boardId: board.id } : {}),
         });
       }
-      send(res, result.status, result.status < 400 ? withAllowance(result.body, allowance) : result.body);
+      send(
+        res,
+        result.status,
+        result.status < 400 ? withAllowance(result.body, allowance) : result.body,
+      );
       return;
     }
 

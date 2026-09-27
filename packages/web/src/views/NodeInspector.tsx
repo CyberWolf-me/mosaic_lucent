@@ -63,7 +63,7 @@ export function NodeInspector({
   onOpenMeeting: (meetingId: string | null, turnRange?: [number, number]) => void;
   onExplain: (label: string) => void;
   onExpand: (label: string) => void;
-  onComment: () => void;
+  onComment?: () => void;
   onClose: () => void;
 }) {
   const node = workspace.nodes[nodeId];
@@ -97,16 +97,27 @@ export function NodeInspector({
             <KindBadge kind={st.kind} status={st.status} />
           ) : (
             <>
-              <NodeIcon icon={node.icon} fallback={autoIconFor(node.label, node.nodeType)} size={13} />
+              <NodeIcon
+                icon={node.icon}
+                fallback={autoIconFor(node.label, node.nodeType)}
+                size={13}
+              />
               <span>{typeMeta}</span>
             </>
           )}
           {region && <span className="ni-region">· {region}</span>}
         </div>
-        <h2 className={`ni-title ${st?.kind === "decision" && st.status === "resolved" ? "serif" : ""}`}>
+        <h2
+          className={`ni-title ${st?.kind === "decision" && st.status === "resolved" ? "serif" : ""}`}
+        >
           {node.label}
         </h2>
-        <button className="ni-close" onClick={onClose} aria-label="Close details" title="Close · Esc">
+        <button
+          className="ni-close"
+          onClick={onClose}
+          aria-label="Close details"
+          title="Close · Esc"
+        >
           <Ico.X />
         </button>
       </header>
@@ -139,9 +150,13 @@ export function NodeInspector({
             <Ico.Plus /> Expand
           </Button>
         )}
-        <Button size="sm" variant="ghost" onClick={onComment}>
-          <Ico.Comment /> Comment
-        </Button>
+        {/* Only for people who can comment (docs/26 F8): for a viewer this was
+            a button that opened nothing. */}
+        {onComment && (
+          <Button size="sm" variant="ghost" onClick={onComment}>
+            <Ico.Comment /> Comment
+          </Button>
+        )}
       </footer>
     </aside>
   );
@@ -340,7 +355,12 @@ function when(at: number): string {
   const sameDay = d.toDateString() === new Date().toDateString();
   return sameDay
     ? d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })
-    : d.toLocaleDateString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+    : d.toLocaleDateString(undefined, {
+        month: "short",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+      });
 }
 
 function Provenance({
@@ -362,8 +382,7 @@ function Provenance({
       <section className="ni-section">
         <div className="ni-label">Why this is here</div>
         <p className="ni-none">
-          No recorded source — added by hand, or made before Lucent recorded where things come
-          from.
+          No recorded source — added by hand, or made before Lucent recorded where things come from.
         </p>
       </section>
     );
@@ -422,7 +441,9 @@ function Provenance({
             size="sm"
             variant="ghost"
             onClick={() => onOpenMeeting(live ? null : meetingId, live ? undefined : ev.turnRange)}
-            title={live ? "Captured live — open the meeting view" : "Open the transcript at these turns"}
+            title={
+              live ? "Captured live — open the meeting view" : "Open the transcript at these turns"
+            }
           >
             <Ico.Present /> {live ? "Open meeting" : "View transcript"}
           </Button>
@@ -488,7 +509,13 @@ function Work({
     <li key={n.id}>
       <button className="ni-link" onClick={() => onSelectNode(n.id)}>
         {n.statement && <StatementGlyph kind={n.statement.kind} size={11} />}
-        <span className={n.statement && n.statement.status !== "open" && n.statement.status !== "resolved" ? "struck" : ""}>
+        <span
+          className={
+            n.statement && n.statement.status !== "open" && n.statement.status !== "resolved"
+              ? "struck"
+              : ""
+          }
+        >
           {n.label}
         </span>
         {n.statement && (
@@ -712,7 +739,10 @@ function StatementSection({
       </div>
       <label className="ni-field">
         <span>Status</span>
-        <select value={status} onChange={(e) => setStatus(e.target.value as StatementFields["status"])}>
+        <select
+          value={status}
+          onChange={(e) => setStatus(e.target.value as StatementFields["status"])}
+        >
           {STATEMENT_STATUSES.map((s) => (
             <option key={s} value={s}>
               {statusLabel(kind, s)}

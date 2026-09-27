@@ -509,6 +509,12 @@ function ShareDialog({ onClose }: { onClose: () => void }) {
                       Can edit
                     </button>
                     <button
+                      className={linkRole === "commenter" ? "active" : ""}
+                      onClick={() => setLinkRole("commenter")}
+                    >
+                      Can comment
+                    </button>
+                    <button
                       className={linkRole === "viewer" ? "active" : ""}
                       onClick={() => setLinkRole("viewer")}
                     >
@@ -607,6 +613,7 @@ function ShareDialog({ onClose }: { onClose: () => void }) {
                             }}
                           >
                             <option value="editor">Can edit</option>
+                            <option value="commenter">Can comment</option>
                             <option value="viewer">Can view</option>
                           </select>
                           <button
@@ -694,7 +701,12 @@ const RAIL_ITEMS: { id: string; icon: keyof typeof Ico; label: string; view: Vie
  * and only unfold while the canvas is the active surface — one model, many
  * representations, without seven more icons competing on every screen.
  */
-const RAIL_LENSES: { id: string; label: string; lens: CanvasLens; Icon: (p: SVGProps<SVGSVGElement>) => JSX.Element }[] = [
+const RAIL_LENSES: {
+  id: string;
+  label: string;
+  lens: CanvasLens;
+  Icon: (p: SVGProps<SVGSVGElement>) => JSX.Element;
+}[] = [
   { id: "visual", label: "Diagram", lens: "visual", Icon: Ico.Flow },
   { id: "kanban", label: "Kanban", lens: "kanban", Icon: Ico.Kanban },
   { id: "document", label: "Document", lens: "document", Icon: Ico.Book },
@@ -831,8 +843,8 @@ function ConfirmNewWorkspace({
   return (
     <Dialog onClose={onCancel} title="Start a new workspace?">
       <div className="confirm-body">
-        This board stays saved in Projects, but the canvas will be cleared and you'll start from
-        an empty board.
+        This board stays saved in Projects, but the canvas will be cleared and you'll start from an
+        empty board.
       </div>
       <div className="confirm-actions">
         <button className="btn ghost" onClick={onCancel} autoFocus>

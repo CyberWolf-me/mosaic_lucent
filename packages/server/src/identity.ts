@@ -11,10 +11,16 @@
  * once requests are authenticated (Step 1e).
  */
 
-export type Role = "owner" | "editor" | "viewer";
+/**
+ * `commenter` (docs/26 F8) is a board-level role — a board member or a share
+ * link — between viewer and editor: it may comment, reply, react, vote and
+ * resolve threads, and delete only its own comments; everything else on the
+ * board needs an editor. Org roles stay owner / editor / viewer.
+ */
+export type Role = "owner" | "editor" | "commenter" | "viewer";
 
 /** Roles ranked so a permission check is a comparison, not a lookup table. */
-const ROLE_RANK: Record<Role, number> = { viewer: 0, editor: 1, owner: 2 };
+const ROLE_RANK: Record<Role, number> = { viewer: 0, commenter: 1, editor: 2, owner: 3 };
 
 export interface User {
   id: string;
@@ -29,10 +35,13 @@ export interface Organization {
   createdAt: number;
 }
 
+/** An org-level role: commenting is granted per board, never org-wide. */
+export type OrgRole = Exclude<Role, "commenter">;
+
 export interface Membership {
   userId: string;
   orgId: string;
-  role: Role;
+  role: OrgRole;
 }
 
 /** Public shape of a user — never carries the password hash. */
@@ -144,6 +153,7 @@ export function effectiveBoardRole(
 ): Role | undefined {
   if (orgRole === "owner" || boardRole === "owner") return "owner";
   if (orgRole === "editor" || boardRole === "editor") return "editor";
+  if (orgRole === "commenter" || boardRole === "commenter") return "commenter";
   if (orgRole === "viewer" || boardRole === "viewer") return "viewer";
   return undefined;
 }

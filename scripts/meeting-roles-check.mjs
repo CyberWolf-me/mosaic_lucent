@@ -110,6 +110,49 @@ check(
     .isDisabled()),
 );
 
+// --- docs/26 F8: a commenter comments; a viewer is offered no dead button ---
+const added = await post(owner.page, `/api/boards/${boardId}/ops`, {
+  ops: [{ op: "CREATE_NODE", id: "checkout", nodeType: "step", label: "Checkout" }],
+});
+check("owner added a node", added.status < 300, `${added.status} ${JSON.stringify(added.body)}`);
+const commentLink = await post(owner.page, `/api/boards/${boardId}/share`, { role: "commenter" });
+check("owner minted a commenter link", commentLink.status < 300 && !!commentLink.body.token);
+
+const commenter = await account("commenter");
+await commenter.page.goto(`${base}/?board=${boardId}&invite=${commentLink.body.token}`, {
+  waitUntil: "networkidle",
+});
+await commenter.page.waitForTimeout(1500);
+check(
+  "the commenter is told what they can do",
+  (await commenter.page.locator("body").innerText()).includes("You can comment on this board"),
+);
+await commenter.page.getByRole("button", { name: "Checkout" }).first().click();
+await commenter.page.getByRole("button", { name: /^Comment$/ }).click();
+await commenter.page
+  .getByPlaceholder("Comment… use @name to mention")
+  .fill("Does checkout need 3DS?");
+await commenter.page.getByRole("button", { name: "Send" }).click();
+await commenter.page.waitForTimeout(1500);
+const boardNow = await (await owner.page.request.get(`${base}/api/boards/${boardId}`)).json();
+const comment = Object.values(boardNow.workspace?.comments ?? {}).find(
+  (c) => c.body === "Does checkout need 3DS?",
+);
+check(
+  "the commenter's comment reached the board, as theirs",
+  !!comment && comment.by !== undefined,
+  JSON.stringify(comment ?? null),
+);
+
+await viewer.page.goto(`${base}/?view=canvas&board=${boardId}`, { waitUntil: "networkidle" });
+await viewer.page.waitForTimeout(1200);
+await viewer.page.getByRole("button", { name: "Checkout" }).first().click();
+await viewer.page.waitForTimeout(500);
+check(
+  "a viewer's inspector offers no Comment button that would open nothing",
+  (await viewer.page.getByRole("button", { name: /^Comment$/ }).count()) === 0,
+);
+
 if (headed) await viewer.page.waitForTimeout(4000);
 await browser.close();
 const failed = results.filter((r) => !r.pass);

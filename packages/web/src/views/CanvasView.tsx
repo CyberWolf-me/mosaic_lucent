@@ -180,14 +180,19 @@ export function parseExplicitImageIntent(text: string): string | null {
  */
 export function enrichImagePromptWithContext(
   prompt: string,
-  workspace?: { nodes?: Record<string, { label?: string }>; shapes?: Record<string, { label?: string; text?: string }> },
+  workspace?: {
+    nodes?: Record<string, { label?: string }>;
+    shapes?: Record<string, { label?: string; text?: string }>;
+  },
   chat?: Array<{ role: string; text: string }>,
   projectName?: string,
 ): string {
   const p = prompt.trim();
   const needsContext =
     p === "reference image or logo for the current board" ||
-    /\b(the brand|the project|we discussed|discussed earlier|our logo|this logo|the app|the restaurant|instead|image generation)\b/i.test(p) ||
+    /\b(the brand|the project|we discussed|discussed earlier|our logo|this logo|the app|the restaurant|instead|image generation)\b/i.test(
+      p,
+    ) ||
     p.length < 25;
 
   if (!needsContext) return p;
@@ -200,14 +205,21 @@ export function enrichImagePromptWithContext(
   if (chat && chat.length > 0) {
     for (let i = chat.length - 1; i >= Math.max(0, chat.length - 6); i--) {
       const msg = chat[i]?.text ?? "";
-      const matchBrand = msg.match(/\b(?:for|named|called|restaurant name|brand name)\s+([A-Z][a-zA-Z0-9_-]+)/i);
+      const matchBrand = msg.match(
+        /\b(?:for|named|called|restaurant name|brand name)\s+([A-Z][a-zA-Z0-9_-]+)/i,
+      );
       if (matchBrand && matchBrand[1] && !hints.includes(matchBrand[1])) {
         hints.push(matchBrand[1]);
       }
-      const matchDomain = msg.match(/\b([a-zA-Z\s]+platform|[a-zA-Z\s]+restaurant|[a-zA-Z\s]+service|[a-zA-Z\s]+app)\b/i);
+      const matchDomain = msg.match(
+        /\b([a-zA-Z\s]+platform|[a-zA-Z\s]+restaurant|[a-zA-Z\s]+service|[a-zA-Z\s]+app)\b/i,
+      );
       if (matchDomain && matchDomain[1]) {
         const cleaned = matchDomain[1].trim();
-        if (cleaned.length < 40 && !hints.some((h) => h.toLowerCase().includes(cleaned.toLowerCase()))) {
+        if (
+          cleaned.length < 40 &&
+          !hints.some((h) => h.toLowerCase().includes(cleaned.toLowerCase()))
+        ) {
           hints.push(cleaned);
         }
       }
@@ -290,6 +302,7 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
     redo,
     peers,
     readOnly,
+    canComment,
     setView,
     lens,
     syncStatus,
@@ -324,6 +337,9 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
   const [zoom, setZoom] = useState(85);
   const [mode, setMode] = useState<"edit" | "present" | "focus">("edit");
   const canEdit = mode === "edit" && !readOnly;
+  // docs/26 F8: a commenter may open threads, reply and resolve, though not
+  // edit — everything comment-shaped keys off this, not canEdit.
+  const canTalk = mode === "edit" && canComment;
   const [presentStep, setPresentStep] = useState(0);
   const [templatesOpen, setTemplatesOpen] = useState(false);
   const [timerOpen, setTimerOpen] = useState(false);
@@ -513,7 +529,11 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
 
       // Stacking order: ⌘] / ⌘[ one step, with Shift all the way. By code,
       // not key, so it works on layouts where Shift turns ] into }.
-      if (mod && (e.code === "BracketRight" || e.code === "BracketLeft") && selectedShapes.size > 0) {
+      if (
+        mod &&
+        (e.code === "BracketRight" || e.code === "BracketLeft") &&
+        selectedShapes.size > 0
+      ) {
         e.preventDefault();
         const up = e.code === "BracketRight";
         orderSelection(e.shiftKey ? (up ? "front" : "back") : up ? "forward" : "backward");
@@ -744,7 +764,11 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
       const prompt = enrichImagePromptWithContext(rawPrompt, workspace, chat, projectName);
       notify("Generating reference image with Lucent Imagine…");
       try {
-        const { src: generatedSrc, explanation } = await generateImage(prompt, "landscape", boardId);
+        const { src: generatedSrc, explanation } = await generateImage(
+          prompt,
+          "landscape",
+          boardId,
+        );
         // Move the bytes into the asset store on a shared board, so a ~2.6 MB
         // generated PNG rides a 20-byte `asset:` reference instead of the op
         // log. Falls back to the data URL on a local board or an upload failure.
@@ -780,7 +804,17 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
         notify((err as Error).message);
       }
     },
-    [applyManual, notify, shapes, viewportBox, workspace, chat, projectName, settings.aiSound, boardId],
+    [
+      applyManual,
+      notify,
+      shapes,
+      viewportBox,
+      workspace,
+      chat,
+      projectName,
+      settings.aiSound,
+      boardId,
+    ],
   );
 
   // The hero's attach path: a screenshot or document chosen before there is
@@ -922,7 +956,9 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
         const cleaned = t.trim();
         if (cleaned) {
           accumulatedVoiceTextRef.current = (
-            accumulatedVoiceTextRef.current ? `${accumulatedVoiceTextRef.current} ${cleaned}` : cleaned
+            accumulatedVoiceTextRef.current
+              ? `${accumulatedVoiceTextRef.current} ${cleaned}`
+              : cleaned
           ).trim();
           setMessage(accumulatedVoiceTextRef.current);
         }
@@ -1433,31 +1469,62 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
     // Vector Studio (docs/26 §6.3): an image traces into an editable vector
     // (locally, in a worker); pen strokes smooth into one.
     const onlyImage =
-      ids.length === 1 && workspace.shapes[ids[0]!]?.kind === "image" ? workspace.shapes[ids[0]!]! : null;
+      ids.length === 1 && workspace.shapes[ids[0]!]?.kind === "image"
+        ? workspace.shapes[ids[0]!]!
+        : null;
     const sketches = src.filter((s) => s.kind === "draw" && s.path);
     const vectorItems: MenuItem[] = [
       ...(onlyImage && canEdit
         ? [
-            { label: "Trace to vector — flat art", onClick: () => void traceShape(onlyImage, "logo") },
-            { label: "Trace to vector — detailed", onClick: () => void traceShape(onlyImage, "illustration") },
+            {
+              label: "Trace to vector — flat art",
+              onClick: () => void traceShape(onlyImage, "logo"),
+            },
+            {
+              label: "Trace to vector — detailed",
+              onClick: () => void traceShape(onlyImage, "illustration"),
+            },
           ]
         : []),
       ...(sketches.length > 0 && canEdit
-        ? [{ label: sketches.length > 1 ? "Smooth strokes into a vector" : "Smooth stroke into a vector", onClick: () => sketchSelectionToVector(sketches) }]
+        ? [
+            {
+              label:
+                sketches.length > 1
+                  ? "Smooth strokes into a vector"
+                  : "Smooth stroke into a vector",
+              onClick: () => sketchSelectionToVector(sketches),
+            },
+          ]
         : []),
     ];
     const items: MenuItem[] = [
       ...(vectorItems.length ? [...vectorItems, { label: "", onClick: () => {}, sep: true }] : []),
       ...(onlyFrame
         ? [
-            { label: "Zoom to frame", onClick: () => sendCanvasCommand({ kind: "frame", id: onlyFrame }) },
+            {
+              label: "Zoom to frame",
+              onClick: () => sendCanvasCommand({ kind: "frame", id: onlyFrame }),
+            },
             { label: "", onClick: () => {}, sep: true },
           ]
         : []),
       { label: "Duplicate", onClick: () => pasteShapes(src, 24), disabled: ids.length === 0 },
-      { label: "Bring to front", onClick: () => orderSelection("front"), disabled: ids.length === 0 },
-      { label: "Bring forward", onClick: () => orderSelection("forward"), disabled: ids.length === 0 },
-      { label: "Send backward", onClick: () => orderSelection("backward"), disabled: ids.length === 0 },
+      {
+        label: "Bring to front",
+        onClick: () => orderSelection("front"),
+        disabled: ids.length === 0,
+      },
+      {
+        label: "Bring forward",
+        onClick: () => orderSelection("forward"),
+        disabled: ids.length === 0,
+      },
+      {
+        label: "Send backward",
+        onClick: () => orderSelection("backward"),
+        disabled: ids.length === 0,
+      },
       { label: "Send to back", onClick: () => orderSelection("back"), disabled: ids.length === 0 },
       { label: "", onClick: () => {}, sep: true },
       { label: "Group", onClick: groupSelection, disabled: !canGroup },
@@ -1607,7 +1674,8 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
   const camBack = useRef<Camera[]>([]);
   const camFwd = useRef<Camera[]>([]);
   const [camDepth, setCamDepth] = useState({ back: 0, fwd: 0 });
-  const syncCamDepth = () => setCamDepth({ back: camBack.current.length, fwd: camFwd.current.length });
+  const syncCamDepth = () =>
+    setCamDepth({ back: camBack.current.length, fwd: camFwd.current.length });
   const rememberCamera = useCallback(() => {
     const cam = controls.current?.getCamera();
     if (!cam) return;
@@ -1724,7 +1792,10 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
           .map((s) => ({ op: "DELETE_SHAPE" as const, id: s.id })),
         ...payload.nodes.map((n) => ({ op: "DELETE_NODE" as const, id: n.id })),
       ];
-      if (ops.length > 0 && applyManual(ops, `Cut ${ops.length} object${ops.length > 1 ? "s" : ""}`)) {
+      if (
+        ops.length > 0 &&
+        applyManual(ops, `Cut ${ops.length} object${ops.length > 1 ? "s" : ""}`)
+      ) {
         setSelectedShapes(new Set());
         setSelectedNodes(new Set());
       }
@@ -1766,7 +1837,9 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
           if (applyManual([asVector.op], "Paste SVG")) {
             setSelectedShapes(new Set([asVector.op.id]));
             if (asVector.dropped.length)
-              notify(`Pasted as a vector. Skipped what can't be edited: ${asVector.dropped.join(", ")}.`);
+              notify(
+                `Pasted as a vector. Skipped what can't be edited: ${asVector.dropped.join(", ")}.`,
+              );
           }
           return;
         }
@@ -1778,7 +1851,10 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
               op: "CREATE_SHAPE",
               id: shapeId(),
               kind: "image",
-              position: { x: Math.round(at.x - size.width / 2), y: Math.round(at.y - size.height / 2) },
+              position: {
+                x: Math.round(at.x - size.width / 2),
+                y: Math.round(at.y - size.height / 2),
+              },
               size,
               src: svg,
               z: topZ(),
@@ -1809,7 +1885,10 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
                 op: "CREATE_SHAPE",
                 id: shapeId(),
                 kind: "image",
-                position: { x: Math.round(at.x - size.width / 2), y: Math.round(at.y - size.height / 2) },
+                position: {
+                  x: Math.round(at.x - size.width / 2),
+                  y: Math.round(at.y - size.height / 2),
+                },
                 size,
                 src: img.src,
                 z: topZ(),
@@ -1867,7 +1946,16 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
       document.removeEventListener("cut", onCut);
       document.removeEventListener("paste", onPaste);
     };
-  }, [workspace, selectedShapes, selectedNodes, readOnly, viewportBox, applyManual, notify, boardId]);
+  }, [
+    workspace,
+    selectedShapes,
+    selectedNodes,
+    readOnly,
+    viewportBox,
+    applyManual,
+    notify,
+    boardId,
+  ]);
 
   // Citation jump (Stage C1): a clicked citation chip with kind "node" sets
   // ?reveal=<id> and switches to the canvas (workspace.tsx onCitation). This
@@ -1983,7 +2071,12 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
               // scatter one sticky per cell. A .tsv is split on tabs; a .csv
               // on whichever of tab/comma its header line uses.
               const tsv = file.name.toLowerCase().endsWith(".tsv");
-              const r = delimitedToTableOp(content, { x: dropX, y: dropY }, nextZ(existing), tsv ? "\t" : undefined);
+              const r = delimitedToTableOp(
+                content,
+                { x: dropX, y: dropY },
+                nextZ(existing),
+                tsv ? "\t" : undefined,
+              );
               if (!r) {
                 notify(`Nothing importable found in ${file.name}.`);
                 return;
@@ -1998,7 +2091,8 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
               }
               return;
             }
-            const ops = kind === "pdf" ? pdfToOps(content, existing) : documentToOps(content, existing);
+            const ops =
+              kind === "pdf" ? pdfToOps(content, existing) : documentToOps(content, existing);
             if (ops.length === 0) {
               notify(
                 kind === "pdf" && pdfIsCompressed(content)
@@ -2069,7 +2163,12 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
       const at = viewportBox
         ? { x: viewportBox.x + viewportBox.width / 2, y: viewportBox.y + viewportBox.height / 2 }
         : { x: 400, y: 300 };
-      const op = vectorShapeOp(vector, at, fitSize(width, height, 200), nextZ(Object.values(workspace.shapes)));
+      const op = vectorShapeOp(
+        vector,
+        at,
+        fitSize(width, height, 200),
+        nextZ(Object.values(workspace.shapes)),
+      );
       if (applyManual([op], "Place generated vector")) setSelectedShapes(new Set([op.id]));
     },
     [applyManual, viewportBox, workspace.shapes],
@@ -2085,7 +2184,12 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
       const at = viewportBox
         ? { x: viewportBox.x + viewportBox.width / 2, y: viewportBox.y + viewportBox.height / 2 }
         : { x: 400, y: 300 };
-      const op = vectorShapeOp(vector, at, { width: 72, height: 72 }, nextZ(Object.values(workspace.shapes)));
+      const op = vectorShapeOp(
+        vector,
+        at,
+        { width: 72, height: 72 },
+        nextZ(Object.values(workspace.shapes)),
+      );
       if (applyManual([op], "Insert icon")) {
         setSelectedShapes(new Set([op.id]));
         setVectorsOpen(false);
@@ -2394,7 +2498,9 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
     try {
       text = await navigator.clipboard.readText();
     } catch {
-      notify("Clipboard access was blocked — paste the Mermaid onto the canvas with Ctrl/⌘ V instead.");
+      notify(
+        "Clipboard access was blocked — paste the Mermaid onto the canvas with Ctrl/⌘ V instead.",
+      );
       return;
     }
     const plan = planMermaidImport(workspace, text);
@@ -2795,7 +2901,10 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
                     padding: "32px 16px 16px",
                   }}
                 >
-                  <div className="frame-label" style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
+                  <div
+                    className="frame-label"
+                    style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}
+                  >
                     <Ico.Grid /> {wf.title} · Wireframe · {size.label}
                   </div>
                   <div className="wf-browser">
@@ -2915,7 +3024,11 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
           {readOnly && (
             <div className="readonly-banner" role="status" aria-live="polite">
               <Ico.Eye />
-              <span>You're viewing this board. Ask the owner for edit access to change it.</span>
+              <span>
+                {canComment
+                  ? "You can comment on this board. Ask the owner for edit access to change it."
+                  : "You're viewing this board. Ask the owner for edit access to change it."}
+              </span>
             </div>
           )}
           {/* UX-6: realtime awareness. The protocol is sequenced + correct;
@@ -2986,146 +3099,150 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
               stays separate — comments are attention, not tools. */}
           {/* Top-right consolidated Activity & Utilities Bar */}
           <div className="canvas-top-right">
-          {(camDepth.back > 0 || camDepth.fwd > 0) && (
-            <div className="camera-nav" role="group" aria-label="Camera history">
-              <button
-                className="camera-nav-btn"
-                onClick={cameraBack}
-                disabled={camDepth.back === 0}
-                title="Back to where you were"
-              >
-                ↩ Back
-              </button>
-              {camDepth.fwd > 0 && (
-                <button className="camera-nav-btn" onClick={cameraForward} title="Forward again">
-                  ↪
-                </button>
-              )}
-            </div>
-          )}
-          {canvasPhase === "main" && (
-            <ModeBar
-              mode={mode}
-              onEdit={() => setMode("edit")}
-              onPresent={enterPresent}
-              onFocus={() => {
-                if (!selected) {
-                  notify("Select a node, then Focus to spotlight it.");
-                  return;
-                }
-                setMode((m) => (m === "focus" ? "edit" : "focus"));
-              }}
-            />
-          )}
-          {rightClusterVisible && (
-            <div className="canvas-utility-bar">
-              <div className="utility-bar-item">
+            {(camDepth.back > 0 || camDepth.fwd > 0) && (
+              <div className="camera-nav" role="group" aria-label="Camera history">
                 <button
-                  className="templates-btn"
-                  style={{ position: "static" }}
-                  onClick={() => {
-                    setToolsOpen((v) => !v);
-                    setAttentionOpen(false);
-                    setInboxOpen(false);
-                  }}
-                  aria-haspopup="menu"
-                  aria-expanded={toolsOpen}
-                  aria-label="Board tools"
-                  title="Board tools"
+                  className="camera-nav-btn"
+                  onClick={cameraBack}
+                  disabled={camDepth.back === 0}
+                  title="Back to where you were"
                 >
-                  <Ico.Book /> Tools
+                  ↩ Back
                 </button>
-                {toolsOpen && (
-                  <Menu onClose={() => setToolsOpen(false)} label="Board tools">
-                    <button
-                      role="menuitem"
-                      disabled={busy || (nodeCount === 0 && shapes.length === 0)}
-                      onClick={() => {
-                        setToolsOpen(false);
-                        void send(
-                          "Review this board and improve it: fix unclear or inconsistent labels, " +
-                            "add any obviously missing steps or connections, remove duplicates, and " +
-                            "group related nodes. Change only what genuinely improves it, and explain " +
-                            "each change.",
-                        );
-                      }}
-                    >
-                      <Ico.Sparkle /> Polish board
-                    </button>
-                    <button
-                      role="menuitem"
-                      onClick={() => {
-                        setToolsOpen(false);
-                        setTemplatesOpen(true);
-                      }}
-                    >
-                      <Ico.Book /> Insert a template
-                    </button>
-                    <button
-                      role="menuitem"
-                      onClick={() => {
-                        setToolsOpen(false);
-                        setTimerOpen((v) => !v);
-                      }}
-                    >
-                      <Ico.History /> Workshop timer
-                    </button>
-                    <button
-                      role="menuitem"
-                      onClick={() => {
-                        setToolsOpen(false);
-                        setVotePanelOpen((v) => !v);
-                      }}
-                    >
-                      ▲ {voting ? "Stop voting" : "Voting and reactions"}
-                    </button>
-                  </Menu>
+                {camDepth.fwd > 0 && (
+                  <button className="camera-nav-btn" onClick={cameraForward} title="Forward again">
+                    ↪
+                  </button>
                 )}
               </div>
+            )}
+            {canvasPhase === "main" && (
+              <ModeBar
+                mode={mode}
+                onEdit={() => setMode("edit")}
+                onPresent={enterPresent}
+                onFocus={() => {
+                  if (!selected) {
+                    notify("Select a node, then Focus to spotlight it.");
+                    return;
+                  }
+                  setMode((m) => (m === "focus" ? "edit" : "focus"));
+                }}
+              />
+            )}
+            {(rightClusterVisible || (canTalk && canvasPhase !== "proposing")) && (
+              <div className="canvas-utility-bar">
+                {rightClusterVisible && (
+                  <div className="utility-bar-item">
+                    <button
+                      className="templates-btn"
+                      style={{ position: "static" }}
+                      onClick={() => {
+                        setToolsOpen((v) => !v);
+                        setAttentionOpen(false);
+                        setInboxOpen(false);
+                      }}
+                      aria-haspopup="menu"
+                      aria-expanded={toolsOpen}
+                      aria-label="Board tools"
+                      title="Board tools"
+                    >
+                      <Ico.Book /> Tools
+                    </button>
+                    {toolsOpen && (
+                      <Menu onClose={() => setToolsOpen(false)} label="Board tools">
+                        <button
+                          role="menuitem"
+                          disabled={busy || (nodeCount === 0 && shapes.length === 0)}
+                          onClick={() => {
+                            setToolsOpen(false);
+                            void send(
+                              "Review this board and improve it: fix unclear or inconsistent labels, " +
+                                "add any obviously missing steps or connections, remove duplicates, and " +
+                                "group related nodes. Change only what genuinely improves it, and explain " +
+                                "each change.",
+                            );
+                          }}
+                        >
+                          <Ico.Sparkle /> Polish board
+                        </button>
+                        <button
+                          role="menuitem"
+                          onClick={() => {
+                            setToolsOpen(false);
+                            setTemplatesOpen(true);
+                          }}
+                        >
+                          <Ico.Book /> Insert a template
+                        </button>
+                        <button
+                          role="menuitem"
+                          onClick={() => {
+                            setToolsOpen(false);
+                            setTimerOpen((v) => !v);
+                          }}
+                        >
+                          <Ico.History /> Workshop timer
+                        </button>
+                        <button
+                          role="menuitem"
+                          onClick={() => {
+                            setToolsOpen(false);
+                            setVotePanelOpen((v) => !v);
+                          }}
+                        >
+                          ▲ {voting ? "Stop voting" : "Voting and reactions"}
+                        </button>
+                      </Menu>
+                    )}
+                  </div>
+                )}
 
-              {attentionItems.length > 0 && (
-                <div className="utility-bar-item">
+                {rightClusterVisible && attentionItems.length > 0 && (
+                  <div className="utility-bar-item">
+                    <button
+                      className="timer-btn"
+                      style={{ position: "static", borderColor: "var(--amber-3)" }}
+                      onClick={() => {
+                        setAttentionOpen((v) => !v);
+                        setToolsOpen(false);
+                        setInboxOpen(false);
+                      }}
+                      aria-expanded={attentionOpen}
+                      aria-label={`Needs attention, ${attentionItems.length} items`}
+                      title={`${attentionItems.length} thing${attentionItems.length > 1 ? "s need" : " needs"} review`}
+                    >
+                      ⚠ {attentionItems.length} to review
+                    </button>
+                    {attentionOpen && (
+                      <div role="dialog" aria-label="Needs attention" className="utility-popover">
+                        <AttentionPanel items={attentionItems} />
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <div className="utility-bar-item utility-comments-cluster">
+                  <NotificationBell workspace={workspace} onOpenTarget={setCommentTarget} />
                   <button
-                    className="timer-btn"
-                    style={{ position: "static", borderColor: "var(--amber-3)" }}
+                    className={`inbox-btn ${openThreads ? "has" : ""}`}
                     onClick={() => {
-                      setAttentionOpen((v) => !v);
+                      setInboxOpen((v) => !v);
+                      setAttentionOpen(false);
                       setToolsOpen(false);
-                      setInboxOpen(false);
                     }}
-                    aria-expanded={attentionOpen}
-                    aria-label={`Needs attention, ${attentionItems.length} items`}
-                    title={`${attentionItems.length} thing${attentionItems.length > 1 ? "s need" : " needs"} review`}
+                    title={openThreads ? `${openThreads} open thread(s)` : "All comments"}
+                    aria-label={
+                      openThreads ? `${openThreads} open comment threads` : "All comments"
+                    }
                   >
-                    ⚠ {attentionItems.length} to review
+                    All
                   </button>
-                  {attentionOpen && (
-                    <div role="dialog" aria-label="Needs attention" className="utility-popover">
-                      <AttentionPanel items={attentionItems} />
-                    </div>
-                  )}
                 </div>
-              )}
-
-              <div className="utility-bar-item utility-comments-cluster">
-                <NotificationBell workspace={workspace} onOpenTarget={setCommentTarget} />
-                <button
-                  className={`inbox-btn ${openThreads ? "has" : ""}`}
-                  onClick={() => {
-                    setInboxOpen((v) => !v);
-                    setAttentionOpen(false);
-                    setToolsOpen(false);
-                  }}
-                  title={openThreads ? `${openThreads} open thread(s)` : "All comments"}
-                  aria-label={openThreads ? `${openThreads} open comment threads` : "All comments"}
-                >
-                  All
-                </button>
               </div>
-            </div>
-          )}
+            )}
           </div>
-          {inboxOpen && canEdit && (
+          {inboxOpen && canTalk && (
             <CommentInbox
               workspace={workspace}
               onApply={applyManual}
@@ -3136,7 +3253,7 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
               onClose={() => setInboxOpen(false)}
             />
           )}
-          {commentTarget && canEdit && (
+          {commentTarget && canTalk && (
             <CommentPanel
               workspace={workspace}
               targetId={commentTarget}
@@ -3196,7 +3313,7 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
                 onOpenMeeting={openMeetingAt}
                 onExplain={(label) => void send(`Explain the "${label}" node and its role.`)}
                 onExpand={(label) => void send(`Expand the "${label}" node into its sub-steps.`)}
-                onComment={() => setCommentTarget(selected)}
+                {...(canTalk ? { onComment: () => setCommentTarget(selected) } : {})}
                 onClose={() => setSelected(null)}
               />
             )}

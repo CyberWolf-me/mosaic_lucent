@@ -5,12 +5,14 @@ import {
   stampAuthorship,
   existingTopics,
   foldStatementTopics,
+  CONVERSATION_OPS,
   type Operation,
   type Workspace,
 } from "@lucent/core";
 import type { Role } from "./identity.js";
 import { roleAtLeast } from "./identity.js";
 import type { AppendResult, BoardSnapshot, OperationActor } from "./boards.js";
+
 /**
  * A collaboration room: the server-authoritative sync engine for one board
  * (docs/03, docs/12). Transport-free on purpose — it takes operations and
@@ -254,6 +256,26 @@ export class Room {
     return this.roles.get(userId);
   }
 
+  /**
+   * Why a commenter's batch is refused, or null when it may commit (docs/26
+   * F8). Comments, replies, reactions, votes and resolving a thread are the
+   * conversation; deleting is allowed only for the commenter's own comments
+   * (authorship is the server-stamped `by`); anything else edits the board.
+   */
+  private commenterRefusal(userId: string, ops: readonly Operation[]): string | null {
+    for (const op of ops) {
+      if (op.op === "DELETE_COMMENT") {
+        const comment = this.workspace.comments[op.id];
+        if (comment && comment.by !== userId) {
+          return "commenters can delete only their own comments";
+        }
+      } else if (!CONVERSATION_OPS.has(op.op)) {
+        return "editor role required";
+      }
+    }
+    return null;
+  }
+
   current(): Workspace {
     return this.workspace;
   }
@@ -298,7 +320,15 @@ export class Room {
   ): Promise<CommitResult> {
     const role = this.roles.get(userId);
     if (!role || !roleAtLeast(role, "editor")) {
-      return { ok: false, error: "permission", detail: "editor role required" };
+      // docs/26 F8: a commenter may converse on the board without editing it.
+      const refused = role === "commenter" ? this.commenterRefusal(userId, ops) : null;
+      if (role !== "commenter" || refused !== null) {
+        return {
+          ok: false,
+          error: "permission",
+          detail: refused ?? "editor role required",
+        };
+      }
     }
     // The replay guard runs BEFORE validation, on the queue: the world has
     // moved since the original landed, so recognizing a retry by re-checking

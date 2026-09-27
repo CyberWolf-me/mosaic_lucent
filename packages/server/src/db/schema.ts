@@ -214,7 +214,9 @@ export const boardMembers = pgTable(
     userId: text("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    role: text("role", { enum: ["owner", "editor", "viewer"] }).notNull(),
+    // `commenter` (docs/26 F8) is board-level only. The enum is type-level —
+    // a text column with no CHECK — so adding a value needs no migration.
+    role: text("role", { enum: ["owner", "editor", "commenter", "viewer"] }).notNull(),
     invitedBy: text("invited_by"),
     createdAt: bigint("created_at", { mode: "number" }).notNull(),
   },
@@ -237,7 +239,7 @@ export const boardShareLinks = pgTable(
     boardId: text("board_id")
       .notNull()
       .references(() => boards.id, { onDelete: "cascade" }),
-    role: text("role", { enum: ["editor", "viewer"] }).notNull(),
+    role: text("role", { enum: ["editor", "commenter", "viewer"] }).notNull(),
     createdBy: text("created_by").notNull(),
     createdAt: bigint("created_at", { mode: "number" }).notNull(),
     expiresAt: bigint("expires_at", { mode: "number" }),

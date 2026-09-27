@@ -180,7 +180,10 @@ export function nodeDetailsChars(details: NodeDetails): number {
 // eslint-disable-next-line no-control-regex
 const DETAILS_LINE = /^[^\u0000-\u001f\u007f]*$/;
 const detailsLine = (max: number) =>
-  z.string().max(max).regex(DETAILS_LINE, "a details line holds no line breaks or control characters");
+  z
+    .string()
+    .max(max)
+    .regex(DETAILS_LINE, "a details line holds no line breaks or control characters");
 
 /**
  * A node's compartments (V4: UML attributes/operations, ER columns, C4
@@ -213,14 +216,20 @@ export const nodeDetailsSchema = z
  * Returns null when nothing is left (no sections, or only empty ones), which
  * is what SET_NODE_DETAILS spells "clear".
  */
-export function clampNodeDetails(sections: readonly NodeDetails["sections"][number][]): NodeDetails | null {
+export function clampNodeDetails(
+  sections: readonly NodeDetails["sections"][number][],
+): NodeDetails | null {
   const flat = (s: string, max: number) =>
     // eslint-disable-next-line no-control-regex
-    s.replace(/[\u0000-\u001f\u007f]+/g, " ").trim().slice(0, max);
+    s
+      .replace(/[\u0000-\u001f\u007f]+/g, " ")
+      .trim()
+      .slice(0, max);
   let budget: number = NODE_DETAILS_LIMITS.totalChars;
   const out: NodeDetails["sections"] = [];
   for (const section of sections.slice(0, NODE_DETAILS_LIMITS.sections)) {
-    const title = section.title !== undefined ? flat(section.title, NODE_DETAILS_LIMITS.titleChars) : "";
+    const title =
+      section.title !== undefined ? flat(section.title, NODE_DETAILS_LIMITS.titleChars) : "";
     if (title.length > budget) break;
     budget -= title.length;
     const items: string[] = [];
@@ -700,6 +709,29 @@ export const AI_OPERATION_NAMES: readonly string[] = ALL_OPERATION_NAMES.filter(
 /** True when this operation is reserved for direct human manipulation. */
 export function isHumanOnlyOperation(op: string): boolean {
   return (AI_FORBIDDEN_OPS as readonly string[]).includes(op);
+}
+
+/**
+ * The conversation on a board — comments, replies, reactions, votes and
+ * resolving a thread — as opposed to its content. A board `commenter` may
+ * send these and nothing else (docs/26 F8); the server room enforces it (and
+ * lets a commenter delete only their own comments), the web client mirrors
+ * it so its local state never runs ahead of the room.
+ */
+export const CONVERSATION_OPS: ReadonlySet<Operation["op"]> = new Set<Operation["op"]>([
+  "ADD_COMMENT",
+  "REPLY_COMMENT",
+  "RESOLVE_COMMENT",
+  "DELETE_COMMENT",
+  "ADD_REACTION",
+  "REMOVE_REACTION",
+  "ADD_VOTE",
+  "REMOVE_VOTE",
+]);
+
+/** True when every operation in the batch is conversation, not content. */
+export function isConversationOnly(ops: readonly Operation[]): boolean {
+  return ops.length > 0 && ops.every((op) => CONVERSATION_OPS.has(op.op));
 }
 
 const OP_ALIASES: Record<string, string> = {

@@ -14,7 +14,8 @@ export type { BoardTier };
  * localStorage flow and never reach these endpoints.
  */
 
-export type BoardRole = "owner" | "editor" | "viewer";
+/** `commenter` (docs/26 F8): may comment, react, vote and resolve; not edit. */
+export type BoardRole = "owner" | "editor" | "commenter" | "viewer";
 /** Roles a share link may grant — ownership is never transferable by link. */
 export type ShareRole = Exclude<BoardRole, "owner">;
 

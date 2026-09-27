@@ -21,6 +21,7 @@ import {
   createWorkspace,
   existingTopics,
   foldStatementTopics,
+  isConversationOnly,
   lensFor,
   parseWorkspace,
   parseWorkspaceOrDefault,
@@ -325,7 +326,7 @@ export interface WorkspaceState {
   /** Realtime connection state, for the share dialog and a status dot. */
   syncStatus: SyncStatus;
   /** This user's role on the shared board, once connected. */
-  syncRole: "owner" | "editor" | "viewer" | null;
+  syncRole: BoardRole | null;
   /**
    * True when this user may look but not touch: they joined someone else's
    * shared board as a viewer. The server already rejects their operations, so
@@ -334,6 +335,11 @@ export interface WorkspaceState {
    * the views hide the affordances rather than letting them fail.
    */
   readOnly: boolean;
+  /**
+   * True when this person may comment, react and vote (docs/26 F8): everyone
+   * but a viewer. A commenter is `readOnly` for content but not for talk.
+   */
+  canComment: boolean;
   /** Server-side board id when this project is shared; null when local-only. */
   boardId: string | null;
   /**
@@ -865,11 +871,13 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   // realtime socket is connected; empty in the offline/solo localStorage flow.
   const [peers, setPeers] = useState<Peer[]>([]);
   const [syncStatus, setSyncStatus] = useState<SyncStatus>("offline");
-  const [syncRole, setSyncRole] = useState<"owner" | "editor" | "viewer" | null>(null);
+  const [syncRole, setSyncRole] = useState<BoardRole | null>(null);
   const [boardId, setBoardId] = useState<string | null>(null);
-  // A viewer may read the board but not change it. Derived rather than stored so
-  // it can never disagree with the role the server assigned.
-  const readOnly = syncRole === "viewer";
+  // A viewer may read the board but not change it; a commenter may also talk
+  // on it (docs/26 F8). Derived rather than stored so it can never disagree
+  // with the role the server assigned.
+  const readOnly = syncRole === "viewer" || syncRole === "commenter";
+  const canComment = syncRole !== "viewer";
   const syncRef = useRef<BoardSync | null>(null);
   // Set while applying a server broadcast, so the echo isn't re-sent as a new
   // local edit (which would loop the room).
@@ -2110,7 +2118,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       if (ops.length === 0) return false;
       // A viewer's operations would be rejected by the server anyway; refusing
       // here keeps local state from diverging from the room in the meantime.
-      if (readOnly) return false;
+      // A commenter's comments, reactions and votes go through (docs/26 F8).
+      if (readOnly && !(canComment && isConversationOnly(ops))) return false;
       const errors = validateOperations(workspace, ops);
       if (errors.length > 0) return false;
       const next = applyOperations(workspace, ops);
@@ -2118,7 +2127,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       commitAndShare(next, ops, label, chat, projectName);
       return true;
     },
-    [workspace, chat, commitAndShare, projectName, readOnly],
+    [workspace, chat, commitAndShare, projectName, readOnly, canComment],
   );
 
   const setRegionKind = useCallback(
@@ -2410,6 +2419,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     syncStatus,
     syncRole,
     readOnly,
+    canComment,
     boardId,
     startSharing,
     openBoard,

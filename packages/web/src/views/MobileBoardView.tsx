@@ -39,7 +39,7 @@ export function isMobileViewport(
 }
 
 export function MobileBoardView(): React.ReactElement {
-  const { workspace, boardId, syncStatus, peers, applyManual, readOnly, projectName } =
+  const { workspace, boardId, syncStatus, peers, applyManual, canComment, projectName } =
     useWorkspace();
   // The mobile board is the SVG export, which draws only loaded icons: warm
   // this board's buckets, then redraw once with them (docs/26 §6.2).
@@ -79,16 +79,19 @@ export function MobileBoardView(): React.ReactElement {
     return () => window.removeEventListener("resize", onResize);
   }, []);
 
-  const handlePointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>): void => {
-    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-    activePointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
-    setIsPanning(true);
-    if (activePointersRef.current.size === 2) {
-      const pts = Array.from(activePointersRef.current.values());
-      pinchStartDistRef.current = Math.hypot(pts[0]!.x - pts[1]!.x, pts[0]!.y - pts[1]!.y);
-      pinchStartScaleRef.current = scale;
-    }
-  }, [scale]);
+  const handlePointerDown = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>): void => {
+      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+      activePointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      setIsPanning(true);
+      if (activePointersRef.current.size === 2) {
+        const pts = Array.from(activePointersRef.current.values());
+        pinchStartDistRef.current = Math.hypot(pts[0]!.x - pts[1]!.x, pts[0]!.y - pts[1]!.y);
+        pinchStartScaleRef.current = scale;
+      }
+    },
+    [scale],
+  );
 
   const handlePointerMove = useCallback((e: React.PointerEvent<HTMLDivElement>): void => {
     const prev = activePointersRef.current.get(e.pointerId);
@@ -238,7 +241,7 @@ export function MobileBoardView(): React.ReactElement {
         </button>
       </div>
 
-      {!readOnly && (
+      {canComment && (
         <button
           className="btn primary mobile-comment-btn"
           onClick={() => setCommentOpen((v) => !v)}

@@ -77,6 +77,60 @@ describe("permissions", () => {
     expect(result.error).toBe("permission");
   });
 
+  // docs/26 F8: viewers could not comment at all — comments needed an editor.
+  it("a commenter converses on the board without editing it", async () => {
+    const r = room();
+    r.setRole("usr_c", "commenter");
+    const said = await r.commit("usr_c", [
+      { op: "ADD_COMMENT", id: "c1", targetId: "a", body: "Is A still needed?" },
+      { op: "ADD_VOTE", id: "v1", targetId: "a" },
+      { op: "ADD_REACTION", id: "r1", targetId: "a", emoji: "👍" },
+    ]);
+    expect(said.ok).toBe(true);
+    expect(r.current().comments.c1?.by).toBe("usr_c");
+    expect(
+      (await r.commit("usr_c", [{ op: "REPLY_COMMENT", id: "c2", parentId: "c1", body: "yes" }]))
+        .ok,
+    ).toBe(true);
+    expect(
+      (await r.commit("usr_c", [{ op: "RESOLVE_COMMENT", id: "c1", resolved: true }])).ok,
+    ).toBe(true);
+
+    const edit = await r.commit("usr_c", [{ op: "CHANGE_TEXT", id: "a", text: "X" }]);
+    expect(edit).toMatchObject({ ok: false, error: "permission", detail: "editor role required" });
+    // A batch that smuggles an edit in with a comment is refused whole.
+    const mixed = await r.commit("usr_c", [
+      { op: "ADD_COMMENT", id: "c3", targetId: "a", body: "and" },
+      { op: "CHANGE_TEXT", id: "a", text: "X" },
+    ]);
+    expect(mixed.ok).toBe(false);
+    expect(r.current().comments.c3).toBeUndefined();
+  });
+
+  it("a commenter deletes only their own comments", async () => {
+    const r = room();
+    r.setRole("usr_c", "commenter");
+    r.setRole("usr_e", "editor");
+    await r.commit("usr_e", [{ op: "ADD_COMMENT", id: "theirs", targetId: "a", body: "x" }]);
+    await r.commit("usr_c", [{ op: "ADD_COMMENT", id: "mine", targetId: "a", body: "y" }]);
+    const other = await r.commit("usr_c", [{ op: "DELETE_COMMENT", id: "theirs" }]);
+    expect(other).toMatchObject({
+      ok: false,
+      detail: "commenters can delete only their own comments",
+    });
+    expect((await r.commit("usr_c", [{ op: "DELETE_COMMENT", id: "mine" }])).ok).toBe(true);
+    expect(r.current().comments.theirs).toBeDefined();
+  });
+
+  it("a viewer still cannot comment — that is what the commenter role is for", async () => {
+    const r = room();
+    r.setRole("usr_v", "viewer");
+    const res = await r.commit("usr_v", [
+      { op: "ADD_COMMENT", id: "c1", targetId: "a", body: "hi" },
+    ]);
+    expect(res.ok).toBe(false);
+  });
+
   it("allows an editor to edit", async () => {
     const r = room();
     r.setRole("usr_editor", "editor");
