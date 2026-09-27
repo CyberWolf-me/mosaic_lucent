@@ -604,7 +604,9 @@ V8 transport (F4).
   Transcript lines are acknowledged by the recording device and resent until
   they are, so a data-channel hiccup doesn't cost anyone their words.
 - **A3.5, per-participant capture — done (2026-09-27).** In a board call, each
-  person is transcribed on their own device while someone records the call,
+  person's own browser captures their mic and transcribes it (with the speech
+  provider it uses — browser speech recognition sends audio to the browser's
+  speech service; hosted runs on our server) while someone records the call,
   and every line lands in ONE transcript under the name LiveKit knows them by
   — with their account id on the turn (`speakerId`). The recording tab stays
   the one writer: other devices send finished lines to it over the call's data

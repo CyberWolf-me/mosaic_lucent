@@ -753,7 +753,7 @@ export function CallStage({
             {!transcribeMe
               ? "You're not being transcribed. Others see that on your tile."
               : contribution === "live"
-                ? "Your words are transcribed on this device and go into the meeting's transcript under your name."
+                ? "Your words are transcribed as you speak and go into the meeting's transcript under your name."
                 : contribution === "paused"
                   ? "Your mic is off, so nothing of yours is transcribed."
                   : contribution === "unsupported"
@@ -774,7 +774,7 @@ export function CallStage({
         <div className="call-banner is-capture" role="status">
           <span>
             {transcribeMe
-              ? "Someone is reading live captions, so your words are transcribed on this device. Nothing is kept."
+              ? "Someone is reading live captions, so your words are transcribed as you speak. Captions aren't kept."
               : "You're not being transcribed, so your words don't appear in anyone's captions."}
           </span>
           <button

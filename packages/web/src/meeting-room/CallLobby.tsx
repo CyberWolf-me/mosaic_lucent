@@ -422,8 +422,8 @@ export function CallLobby({ boardId, title }: { boardId: string | null; title: s
           )}
         </div>
         <p className="call-lobby-fine">
-          Everyone on this board can join. Lucent transcribes only when someone starts recording,
-          and everyone in the call sees it.
+          Everyone on this board can join. You're transcribed only while someone records or reads
+          captions — everyone in the call sees it, and you can stop it for yourself.
         </p>
       </div>
     </section>
