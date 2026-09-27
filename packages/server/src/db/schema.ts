@@ -1416,6 +1416,29 @@ export const integrationWebhookEvents = pgTable(
   }),
 );
 
+/**
+ * docs/26 A5: OAuth tokens for integration connections, sealed with
+ * LUCENT_TOKEN_KEY (integrations/tokenBox.ts) — never stored in the clear.
+ */
+export const integrationCredentials = pgTable(
+  "integration_credentials",
+  {
+    orgId: text("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    provider: text("provider").notNull(),
+    accessToken: text("access_token").notNull(),
+    refreshToken: text("refresh_token"),
+    expiresAt: bigint("expires_at", { mode: "number" }),
+    scope: text("scope"),
+    obtainedBy: text("obtained_by").notNull(),
+    updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.orgId, t.provider] }),
+  }),
+);
+
 export const integrationInboundChanges = pgTable(
   "integration_inbound_changes",
   {

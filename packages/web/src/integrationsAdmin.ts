@@ -27,6 +27,8 @@ export interface ConnectionView {
   config?: Record<string, string>;
   /** The credential reference as a fingerprint ("LINE…(18 chars)"). */
   credentialRef: string;
+  /** Connected with OAuth, or with a key on the server. */
+  via?: "oauth" | "key";
   supportsInbound?: boolean;
   updatedAt: number;
 }
@@ -34,6 +36,8 @@ export interface ConnectionView {
 export interface AvailableProvider {
   provider: string;
   supportsInbound: boolean;
+  /** The server can connect it with OAuth ("Connect with Linear"). */
+  oauth?: boolean;
 }
 
 interface FieldSpec {
@@ -190,6 +194,49 @@ export async function checkIntegration(orgId: string, provider: string): Promise
   } catch {
     return { ok: false, error: "Couldn't reach the server." };
   }
+}
+
+/**
+ * Start OAuth (docs/26 A5): the server answers the provider's sign-in page;
+ * the caller sends the browser there, and the provider sends it back to
+ * Admin, connected or with the reason.
+ */
+export async function startOAuth(
+  orgId: string,
+  provider: string,
+  config: Record<string, string>,
+): Promise<{ url: string } | { error: string }> {
+  try {
+    const res = await apiFetch(
+      `/api/orgs/${encodeURIComponent(orgId)}/integrations/${encodeURIComponent(provider)}/oauth`,
+      { method: "POST", body: JSON.stringify({ config }) },
+    );
+    const body = await json(res);
+    if (!res.ok || typeof body?.url !== "string") {
+      return { error: String(body?.error ?? "Couldn't start connecting.") };
+    }
+    return { url: body.url };
+  } catch {
+    return { error: "Couldn't reach the server." };
+  }
+}
+
+/** What OAuth sends back to Admin, read once from the URL and cleared. */
+export function takeOAuthReturn(): {
+  provider: string;
+  connected: boolean;
+  reason: string | null;
+} | null {
+  const params = new URLSearchParams(window.location.search);
+  const outcome = params.get("oauth");
+  const provider = params.get("integration");
+  if (!outcome || !provider) return null;
+  const reason = params.get("reason");
+  params.delete("oauth");
+  params.delete("integration");
+  params.delete("reason");
+  window.history.replaceState(null, "", `?${params.toString()}`);
+  return { provider, connected: outcome === "connected", reason };
 }
 
 export async function disconnectIntegration(orgId: string, provider: string): Promise<boolean> {

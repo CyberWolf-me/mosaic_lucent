@@ -159,4 +159,6 @@ export interface ExecutionProvider {
 export type ExecutionProviderFactory = (connection: {
   credentialRef: string;
   config?: Record<string, string>;
+  /** docs/26 A5: an OAuth connection's (fresh) access token, resolved first. */
+  oauth?: { accessToken: string };
 }) => ExecutionProvider;

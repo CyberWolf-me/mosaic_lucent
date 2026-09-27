@@ -29,6 +29,8 @@ import {
   disconnectIntegration,
   loadIntegrations,
   providerLabel,
+  startOAuth,
+  takeOAuthReturn,
   type AvailableProvider,
   type ConnectionView,
 } from "../integrationsAdmin.js";
@@ -509,6 +511,18 @@ function IntegrationsSection({ org }: { org: OrgSummary | null }) {
     if (!org || org.role !== "owner") return;
     void reload(org.id);
   }, [org]);
+  // Back from a provider's sign-in page (docs/26 A5): say how it went.
+  useEffect(() => {
+    const back = takeOAuthReturn();
+    if (!back) return;
+    setNotice({
+      provider: back.provider,
+      text: back.connected
+        ? `${providerLabel(back.provider)} is connected.`
+        : (back.reason ?? `${providerLabel(back.provider)} wasn't connected.`),
+      tone: back.connected ? "ok" : "error",
+    });
+  }, []);
   if (!org) return null;
   if (org.role !== "owner") {
     return <EmptyState compact title="Integrations are set up by workspace owners" />;
@@ -622,6 +636,7 @@ function IntegrationsSection({ org }: { org: OrgSummary | null }) {
               {editing === provider && (
                 <ConnectForm
                   provider={provider}
+                  oauth={data.available.some((a) => a.provider === provider && a.oauth)}
                   connection={c}
                   onCancel={() => setEditing(null)}
                   onSaved={async (text, tone) => {
@@ -660,12 +675,15 @@ function healthLine(c: ConnectionView): string {
 function ConnectForm({
   orgId,
   provider,
+  oauth,
   connection,
   onCancel,
   onSaved,
 }: {
   orgId: string;
   provider: string;
+  /** The server can connect it with OAuth: the key variable is optional. */
+  oauth: boolean;
   connection: ConnectionView | undefined;
   onCancel: () => void;
   onSaved: (text: string, tone: "ok" | "error") => Promise<void>;
@@ -675,10 +693,30 @@ function ConnectForm({
   const [config, setConfig] = useState<Record<string, string>>(connection?.config ?? {});
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const missing = [
-    ...(credentialRef.trim() ? [] : ["the key's variable"]),
-    ...form.fields.filter((f) => f.required && !config[f.key]?.trim()).map((f) => f.label),
-  ];
+  const missingFields = form.fields
+    .filter((f) => f.required && !config[f.key]?.trim())
+    .map((f) => f.label);
+  const missing = [...(credentialRef.trim() ? [] : ["the key's variable"]), ...missingFields];
+  const signIn = async () => {
+    if (missingFields.length > 0) {
+      setError(`Fill in ${missingFields.join(", ")}.`);
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    const clean = Object.fromEntries(
+      Object.entries(config)
+        .map(([k, v]) => [k, v.trim()] as const)
+        .filter(([, v]) => v !== ""),
+    );
+    const started = await startOAuth(orgId, provider, clean);
+    if ("url" in started) {
+      window.location.assign(started.url);
+      return;
+    }
+    setSaving(false);
+    setError(started.error);
+  };
   const submit = async () => {
     if (missing.length > 0) {
       setError(`Fill in ${missing.join(", ")}.`);
@@ -704,6 +742,41 @@ function ConnectForm({
       result.checked ? "ok" : "error",
     );
   };
+  const keyField = (
+    <label className="integ-field">
+      <span>Key variable</span>
+      <input
+        className="mono"
+        value={credentialRef}
+        placeholder={`${provider.toUpperCase()}_API_KEY`}
+        onChange={(e) => {
+          setCredentialRef(e.target.value);
+          setError(null);
+        }}
+      />
+      <small>
+        The name of an environment variable on the Lucent server that holds {form.credential}. The
+        key itself never passes through your browser
+        {connection ? ` — enter it again to save changes (now ${connection.credentialRef})` : ""}.
+      </small>
+    </label>
+  );
+  const settings = form.fields.map((f) => (
+    <label key={f.key} className="integ-field">
+      <span>
+        {f.label}
+        {f.required ? "" : " (optional)"}
+      </span>
+      <input
+        value={config[f.key] ?? ""}
+        placeholder={f.placeholder}
+        onChange={(e) => {
+          setConfig({ ...config, [f.key]: e.target.value });
+          setError(null);
+        }}
+      />
+    </label>
+  ));
   return (
     <form
       className="integ-form"
@@ -713,33 +786,24 @@ function ConnectForm({
         void submit();
       }}
     >
-      <label className="integ-field">
-        <span>Key variable</span>
-        <input
-          className="mono"
-          value={credentialRef}
-          placeholder={`${provider.toUpperCase()}_API_KEY`}
-          onChange={(e) => setCredentialRef(e.target.value)}
-        />
-        <small>
-          The name of an environment variable on the Lucent server that holds {form.credential}. The
-          key itself never passes through your browser
-          {connection ? ` — enter it again to save changes (now ${connection.credentialRef})` : ""}.
-        </small>
-      </label>
-      {form.fields.map((f) => (
-        <label key={f.key} className="integ-field">
-          <span>
-            {f.label}
-            {f.required ? "" : " (optional)"}
-          </span>
-          <input
-            value={config[f.key] ?? ""}
-            placeholder={f.placeholder}
-            onChange={(e) => setConfig({ ...config, [f.key]: e.target.value })}
-          />
-        </label>
-      ))}
+      {oauth ? (
+        <>
+          {settings}
+          <div className="integ-oauth">
+            <Button size="sm" variant="primary" disabled={saving} onClick={() => void signIn()}>
+              Connect with {form.label}
+            </Button>
+            <small>You&apos;ll approve Lucent in {form.label} and come back here connected.</small>
+          </div>
+          <div className="integ-or mono-caps">or use a key on the server</div>
+          {keyField}
+        </>
+      ) : (
+        <>
+          {keyField}
+          {settings}
+        </>
+      )}
       {error && (
         <p className="integ-notice error" role="alert">
           {error}

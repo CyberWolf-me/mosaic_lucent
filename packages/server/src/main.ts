@@ -31,6 +31,23 @@ import { buildMediaHandlers } from "./workers/media.js";
 import { buildIntegrationHandlers } from "./workers/integration.js";
 import { connectionFailure } from "./integrations/health.js";
 import { httpSlackPoster } from "./integrations/slack.js";
+import { oauthFromEnv, withCredential } from "./integrations/oauth.js";
+import { tokenBox } from "./integrations/tokenBox.js";
+import { InMemoryIntegrationCredentialStore } from "./integrations/credentials.js";
+import { PostgresIntegrationCredentialStore } from "./store/pg-integration-credentials.js";
+
+/**
+ * docs/26 A5: OAuth connect for Linear/Jira — only with a token key
+ * (LUCENT_TOKEN_KEY) to seal what the providers hand over, and an app
+ * (LUCENT_LINEAR_CLIENT_ID/SECRET, LUCENT_JIRA_CLIENT_ID/SECRET). A malformed
+ * key stops the boot: a server that can't seal tokens must not take them.
+ */
+function oauthBundle(
+  credentials: import("./integrations/credentials.js").IntegrationCredentialStore,
+): { oauth?: import("./integrations/oauth.js").OAuthDeps } {
+  const oauth = oauthFromEnv(process.env, tokenBox(process.env.LUCENT_TOKEN_KEY), credentials);
+  return oauth ? { oauth } : {};
+}
 import { boardNodeIssue, pollInbound } from "./integrations/poll.js";
 import { createStaticHandler } from "./static.js";
 import { resolve as resolvePath } from "node:path";
@@ -194,6 +211,7 @@ function makeStores(databaseUrl: string | undefined): {
     webhookEvents: import("./integrations/webhook.js").IntegrationWebhookEventStore;
     inbound: import("./integrations/inbound.js").InboundChangeStore;
     slack: import("./integrations/slack.js").SlackPoster;
+    oauth?: import("./integrations/oauth.js").OAuthDeps;
   };
   /** Stage B6: asset metadata — in-memory for dev, Postgres when set. */
   assetStore: import("./assets.js").AssetStore;
@@ -248,6 +266,8 @@ function makeStores(databaseUrl: string | undefined): {
         webhookEvents: new InMemoryIntegrationWebhookEventStore(),
         inbound: new InMemoryInboundChangeStore(),
         slack: httpSlackPoster(),
+        // docs/26 A5: OAuth connect, when the server has a token key and an app.
+        ...oauthBundle(new InMemoryIntegrationCredentialStore()),
       },
       proposals: new InMemoryProposalStore(),
       assetStore: new InMemoryAssetStore(),
@@ -302,6 +322,7 @@ function makeStores(databaseUrl: string | undefined): {
       inbound: new PostgresInboundChangeStore(target.db),
       // docs/26 A5: Slack, outbound — meeting summaries to a channel.
       slack: httpSlackPoster(),
+      ...oauthBundle(new PostgresIntegrationCredentialStore(target.db)),
     },
     db: target,
   };
@@ -908,7 +929,7 @@ async function sweepIntegration(): Promise<void> {
         if (!connection || connection.status !== "active") continue;
         const factory = stores.integrations.providers.get(row.provider);
         if (!factory) continue;
-        const provider = factory(connection);
+        const provider = factory(await withCredential(stores.integrations.oauth, connection));
         const task = await provider.getTask(row.externalId);
         // docs/26 A5: the connection answered.
         await stores.integrations.store.recordCall(
@@ -1084,6 +1105,7 @@ const jobRunner = runsJobs(role)
               inbound: stores.integrations.inbound,
               providers: stores.integrations.providers,
               boardStore: stores.boardStore,
+              ...(stores.integrations.oauth ? { oauth: stores.integrations.oauth } : {}),
               afterQueued: (records) => automations.closeFromTracker(records),
               logger: { warn: (e, f) => logger.warn(e, f) },
             }),

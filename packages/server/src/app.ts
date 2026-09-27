@@ -127,6 +127,7 @@ import { registerThemesRoutes } from "./routes/themes.js";
 import { InMemoryMeetingNotesStore } from "./meetingNotes.js";
 import { registerOrgSettingsRoutes } from "./routes/settings.js";
 import { registerProposalRoutes } from "./routes/proposals.js";
+import { registerIntegrationOAuthRoutes } from "./routes/integrationOAuth.js";
 import { registerSsoRoutes } from "./routes/sso.js";
 import { registerHistoryRoutes } from "./routes/history.js";
 import { registerAskRoutes } from "./routes/ask.js";
@@ -364,6 +365,8 @@ export interface AppDeps {
     inbound?: import("./integrations/inbound.js").InboundChangeStore;
     /** docs/26 A5: Slack, outbound (meeting summaries); absent = no Slack. */
     slack?: import("./integrations/slack.js").SlackPoster;
+    /** docs/26 A5: OAuth connect for Linear/Jira; absent = keys only. */
+    oauth?: import("./integrations/oauth.js").OAuthDeps;
   };
   /**
    * M4.3: Stripe billing integration — the REST client, the endpoint signing
@@ -2558,6 +2561,7 @@ export function createApp(deps: AppDeps): App {
   registerAskRoutes(router, services);
   registerSearchRoutes(router, services);
   registerIntegrationRoutes(router, services);
+  registerIntegrationOAuthRoutes(router, services);
   registerOrgSettingsRoutes(router, services);
   registerSttRoutes(router, services);
   registerCallRoutes(router, services);

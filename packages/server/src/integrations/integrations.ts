@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { actionNodes, decisionsBehindAction, type Workspace } from "@lucent/core";
 import { connectionState, nextHealth, type CallOutcome, type ConnectionHealth } from "./health.js";
+import { OAUTH_REF } from "./oauth.js";
 
 /**
  * The integration connection + task-link store (Stage D4, ADR 0030).
@@ -114,6 +115,12 @@ export interface NewIntegrationConnection {
   credentialRef: string;
   scopes?: string[];
   createdBy: string;
+  /**
+   * docs/26 A5: set only by the OAuth callback, whose connection names the
+   * sealed token (`OAUTH_REF`) rather than a variable. The PUT route never
+   * sets it, so an owner can't type their way into the sentinel.
+   */
+  viaOAuth?: true;
 }
 
 /**
@@ -226,7 +233,7 @@ export function newIntegrationId(prefix: "int_" | "lnk_" | "act_" | "inb_"): str
  * the caller gave none) — the row type requires it. */
 export function normalizeConnection(
   input: NewIntegrationConnection,
-): Required<NewIntegrationConnection> & { config?: Record<string, string> } {
+): Required<Omit<NewIntegrationConnection, "viaOAuth">> & { config?: Record<string, string> } {
   const provider = INTEGRATION_PROVIDERS.find((p) => p === input.provider);
   if (!provider) {
     throw new Error(
@@ -237,7 +244,7 @@ export function normalizeConnection(
   if (!ref || ref.length > MAX_CREDENTIAL_REF_CHARS) {
     throw new Error(`credentialRef must be 1..${MAX_CREDENTIAL_REF_CHARS} characters`);
   }
-  assertSafeCredentialRef(ref);
+  if (!(input.viaOAuth && ref === OAUTH_REF)) assertSafeCredentialRef(ref);
   const scopes = (input.scopes ?? [])
     .map((s) => s.trim())
     .filter(Boolean)
@@ -346,6 +353,7 @@ export function connectionView(c: IntegrationConnection): Record<string, unknown
     ...(c.config ? { config: c.config } : {}),
     scopes: c.scopes,
     status: c.status,
+    via: c.credentialRef === OAUTH_REF ? "oauth" : "key",
     // docs/26 A5: the derived state and what it's based on; Slack is a
     // channel Lucent posts to, not a tracker work syncs with.
     state: connectionState(c),

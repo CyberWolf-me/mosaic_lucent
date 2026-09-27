@@ -7,6 +7,7 @@ import {
 } from "./inbound.js";
 import type { IntegrationStore } from "./integrations.js";
 import type { ExecutionProviderFactory } from "./provider.js";
+import { withCredential, type OAuthDeps } from "./oauth.js";
 
 /**
  * The inbound poll (docs/26 A5, the `integration.poll` job): read every
@@ -30,6 +31,8 @@ export interface PollDeps {
   inbound: InboundChangeStore;
   providers: ReadonlyMap<string, ExecutionProviderFactory>;
   boardStore: Pick<BoardStore, "get">;
+  /** docs/26 A5: resolves OAuth connections' tokens. */
+  oauth?: OAuthDeps;
   /** What an automation may do with what was queued (the external-close rule). */
   afterQueued?: (records: InboundChangeRecord[]) => Promise<unknown>;
   logger?: { warn(event: string, fields?: Record<string, unknown>): void };
@@ -74,7 +77,7 @@ export async function pollInbound(
         deps.store.recordCall(connection.orgId, name, outcome, now());
       let watched: ReturnType<typeof watchProvider>;
       try {
-        watched = watchProvider(factory(connection), record);
+        watched = watchProvider(factory(await withCredential(deps.oauth, connection)), record);
       } catch (err) {
         const failed = connectionFailure(err);
         if (failed?.auth) await record(failed).catch(() => {});

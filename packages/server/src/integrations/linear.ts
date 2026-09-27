@@ -58,7 +58,9 @@ export class LinearError extends Error {
 }
 
 export interface LinearProviderOptions {
-  apiKey: string;
+  apiKey?: string;
+  /** docs/26 A5: an OAuth connection's access token, sent as a Bearer. */
+  accessToken?: string;
   /** The Linear team issues are created in — connection.config.teamId. */
   teamId: string;
   baseUrl?: string;
@@ -85,7 +87,7 @@ interface LinearIssue {
 export class LinearProvider implements ExecutionProvider {
   readonly name = "linear";
 
-  private readonly apiKey: string;
+  private readonly authorization: string;
   private readonly teamId: string;
   private readonly baseUrl: string;
   private readonly fetchImpl: typeof fetch;
@@ -103,11 +105,15 @@ export class LinearProvider implements ExecutionProvider {
   private readonly idByIdentifier = new Map<string, string>();
 
   constructor(options: LinearProviderOptions) {
-    if (!options.apiKey) throw new Error("LinearProvider requires an apiKey");
+    if (!options.apiKey && !options.accessToken) {
+      throw new Error("LinearProvider requires an apiKey or an OAuth access token");
+    }
     if (!options.teamId) {
       throw new Error("LinearProvider requires a teamId (connection.config.teamId)");
     }
-    this.apiKey = options.apiKey;
+    // Linear's documented schemes: a personal API key RAW, an OAuth access
+    // token as a Bearer.
+    this.authorization = options.accessToken ? `Bearer ${options.accessToken}` : options.apiKey!;
     this.teamId = options.teamId;
     this.baseUrl = options.baseUrl ?? "https://api.linear.app/graphql";
     this.fetchImpl = options.fetchImpl ?? fetch;
@@ -129,8 +135,7 @@ export class LinearProvider implements ExecutionProvider {
         const res = await this.fetchImpl(this.baseUrl, {
           method: "POST",
           headers: {
-            // Linear's documented scheme: the RAW key, no Bearer prefix.
-            authorization: this.apiKey,
+            authorization: this.authorization,
             "content-type": "application/json",
           },
           body: JSON.stringify({ query, variables }),
@@ -393,10 +398,12 @@ export class LinearProvider implements ExecutionProvider {
 export function linearConnectionFactory(): (connection: {
   credentialRef: string;
   config?: Record<string, string>;
+  oauth?: { accessToken: string };
 }) => ExecutionProvider {
   return (connection) => {
-    const apiKey = process.env[connection.credentialRef];
-    if (!apiKey) {
+    // docs/26 A5: a connection made through OAuth brings its token.
+    const apiKey = connection.oauth ? undefined : process.env[connection.credentialRef];
+    if (!apiKey && !connection.oauth) {
       throw new LinearError(
         `credential ref "${connection.credentialRef}" is not set in the environment`,
         0,
@@ -408,7 +415,7 @@ export function linearConnectionFactory(): (connection: {
       throw new LinearError("the linear connection is missing config.teamId", 0, false);
     }
     return new LinearProvider({
-      apiKey,
+      ...(connection.oauth ? { accessToken: connection.oauth.accessToken } : { apiKey: apiKey! }),
       teamId,
       // A connection-scoped wire override for testing and self-hosted
       // proxies; unset means the public api.linear.app endpoint. Validated

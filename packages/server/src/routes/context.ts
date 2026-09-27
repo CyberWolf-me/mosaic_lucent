@@ -168,6 +168,8 @@ export interface RouteServices {
         inbound?: import("../integrations/inbound.js").InboundChangeStore;
         /** docs/26 A5: Slack, outbound — meeting summaries to a channel. */
         slack?: import("../integrations/slack.js").SlackPoster;
+        /** docs/26 A5: OAuth connect for Linear/Jira (sealed tokens). */
+        oauth?: import("../integrations/oauth.js").OAuthDeps;
       }
     | undefined;
   /**

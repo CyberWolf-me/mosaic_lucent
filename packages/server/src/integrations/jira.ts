@@ -59,8 +59,14 @@ export function validJiraProjectKey(key: string): boolean {
 
 export interface JiraProviderOptions {
   /** email:api-token Basic auth (the token resolved through the env ref). */
-  email: string;
-  apiToken: string;
+  email?: string;
+  apiToken?: string;
+  /**
+   * docs/26 A5: an OAuth (3LO) connection instead — a bearer token for the
+   * Atlassian API gateway, and the site's cloud id it addresses.
+   */
+  accessToken?: string;
+  cloudId?: string;
   /** The per-org site base URL (https, SSRF-validated at factory time). */
   site: string;
   projectKey: string;
@@ -137,7 +143,10 @@ function _adfText(doc: unknown): string {
 
 export class JiraProvider implements ExecutionProvider {
   readonly name = "jira";
-  private readonly auth: string;
+  private readonly authorization: string;
+  /** Where the REST API is: the site itself, or the OAuth gateway for it. */
+  private readonly apiBase: string;
+  /** The site people open (browse links). */
   private readonly site: string;
   private readonly projectKey: string;
   private readonly issueType: string;
@@ -153,10 +162,22 @@ export class JiraProvider implements ExecutionProvider {
   private assigneeIndexPromise: Promise<void> | null = null;
 
   constructor(options: JiraProviderOptions) {
-    this.auth = Buffer.from(`${options.email}:${options.apiToken}`).toString("base64");
     // The factory validated the site; a direct constructor use validates
     // too (the boundary is authoritative both ways).
     this.site = assertSafeOutboundUrl(options.site, "jira site").origin;
+    if (options.accessToken) {
+      if (!options.cloudId || !/^[0-9a-f-]{36}$/i.test(options.cloudId)) {
+        throw new JiraError("an OAuth Jira connection needs its site's cloud id", 0, false);
+      }
+      this.authorization = `Bearer ${options.accessToken}`;
+      this.apiBase = `https://api.atlassian.com/ex/jira/${options.cloudId}`;
+    } else {
+      if (!options.email || !options.apiToken) {
+        throw new JiraError("a Jira connection needs email:api_token or OAuth", 0, false);
+      }
+      this.authorization = `Basic ${Buffer.from(`${options.email}:${options.apiToken}`).toString("base64")}`;
+      this.apiBase = this.site;
+    }
     if (!validJiraProjectKey(options.projectKey)) {
       throw new JiraError(
         `projectKey must be uppercase letters/digits (got "${options.projectKey}")`,
@@ -182,10 +203,10 @@ export class JiraProvider implements ExecutionProvider {
         await this.sleep(Math.floor(backoff / 2 + this.random() * (backoff / 2)));
       }
       try {
-        const res = await this.fetchImpl(`${this.site}/rest/api/3${path}`, {
+        const res = await this.fetchImpl(`${this.apiBase}/rest/api/3${path}`, {
           ...init,
           headers: {
-            authorization: `Basic ${this.auth}`,
+            authorization: this.authorization,
             accept: "application/json",
             ...(init?.body !== undefined ? { "content-type": "application/json" } : {}),
             ...init?.headers,
@@ -475,8 +496,24 @@ export class JiraProvider implements ExecutionProvider {
 export function jiraConnectionFactory(): (connection: {
   credentialRef: string;
   config?: Record<string, string>;
+  oauth?: { accessToken: string };
 }) => ExecutionProvider {
   return (connection) => {
+    // docs/26 A5: a connection made through OAuth reaches its site through
+    // the Atlassian gateway with its token; the site is what OAuth found.
+    if (connection.oauth) {
+      const projectKey = connection.config?.projectKey;
+      if (!projectKey || !validJiraProjectKey(projectKey)) {
+        throw new JiraError("the jira connection is missing a valid config.projectKey", 0, false);
+      }
+      return new JiraProvider({
+        accessToken: connection.oauth.accessToken,
+        cloudId: connection.config?.cloudId ?? "",
+        site: connection.config?.site ?? "",
+        projectKey,
+        ...(connection.config?.issueType ? { issueType: connection.config.issueType } : {}),
+      });
+    }
     const credential = process.env[connection.credentialRef];
     if (!credential) {
       throw new JiraError(

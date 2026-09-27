@@ -31,6 +31,11 @@ import {
   InMemoryInboundChangeStore,
   type InboundChangeStore,
 } from "../src/integrations/inbound.js";
+import {
+  InMemoryIntegrationCredentialStore,
+  type IntegrationCredentialStore,
+} from "../src/integrations/credentials.js";
+import { PostgresIntegrationCredentialStore } from "../src/store/pg-integration-credentials.js";
 
 /**
  * The D6 integration-store parity suites (the billing-events convention): the
@@ -572,9 +577,46 @@ function inboundContract(name: string, make: () => InboundChangeStore, prefix: s
 
 /* -------------------------------------------------------------------------- */
 /* The halves                                                                 */
+/** docs/26 A5: sealed OAuth tokens, one row per (org, provider). */
+function credentialContract(name: string, make: () => IntegrationCredentialStore, prefix: string) {
+  describe(`credential store parity — ${name}`, () => {
+    it("upserts per (org, provider), reads back as written, deletes", async () => {
+      const store = make();
+      const org = `${prefix}-org`;
+      const row = {
+        orgId: org,
+        provider: "linear",
+        accessToken: "v1.sealed.access",
+        refreshToken: "v1.sealed.refresh",
+        expiresAt: 5_000,
+        scope: "read,write",
+        obtainedBy: "u",
+        updatedAt: 1,
+      };
+      await store.put(row);
+      await store.put({
+        ...row,
+        accessToken: "v1.sealed.access-2",
+        refreshToken: null,
+        updatedAt: 2,
+      });
+      expect(await store.get(org, "linear")).toEqual({
+        ...row,
+        accessToken: "v1.sealed.access-2",
+        refreshToken: null,
+        updatedAt: 2,
+      });
+      expect(await store.get(org, "jira")).toBeUndefined();
+      expect(await store.delete(org, "linear")).toBe(true);
+      expect(await store.delete(org, "linear")).toBe(false);
+    });
+  });
+}
+
 /* -------------------------------------------------------------------------- */
 
 connectionContract("in-memory", () => new InMemoryIntegrationStore(), `int${tag}`);
+credentialContract("in-memory", () => new InMemoryIntegrationCredentialStore(), `int${tag}`);
 actionContract("in-memory", () => new InMemoryIntegrationActionStore(), `act${tag}`);
 ledgerContract(
   "in-memory",
@@ -671,4 +713,9 @@ describeIf("Postgres integration parity (needs LUCENT_TEST_DATABASE_URL)", () =>
     `pgw${tag}`,
   );
   inboundContract("postgres", () => new PostgresInboundChangeStore(target.db), `pgn${tag}`);
+  credentialContract(
+    "postgres",
+    () => new PostgresIntegrationCredentialStore(target.db),
+    `pgi${tag}`,
+  );
 });

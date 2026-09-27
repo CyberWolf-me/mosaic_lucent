@@ -9,6 +9,7 @@ import {
 } from "../integrations/integrations.js";
 import { webhookSchemes } from "../integrations/webhook.js";
 import { connectionFailure, connectionState, watchProvider } from "../integrations/health.js";
+import { withCredential } from "../integrations/oauth.js";
 import { providerFact } from "../modelRouter.js";
 import { MAX_AI_SELECTED_ACTIONS } from "@lucent/ai";
 import type { IntegrationProviderName } from "../integrations/integrations.js";
@@ -45,23 +46,25 @@ const putConnectionSchema = z.object({
  * env ref answers 503 — the honest "credential not configured", never a
  * silent skip.
  */
-function resolveProvider(
+async function resolveProvider(
   integrations: NonNullable<import("./context.js").RouteServices["integrations"]>,
   providerName: string,
   connection: {
     id: string;
     orgId: string;
+    provider: string;
     credentialRef: string;
     config?: Record<string, string>;
   },
-):
+): Promise<
   | {
       ok: true;
       provider: import("../integrations/provider.js").ExecutionProvider;
       /** docs/26 A5: report how this request's calls went, once. */
       settle(): Promise<void>;
     }
-  | { ok: false; error: string; recorded?: Promise<void> } {
+  | { ok: false; error: string; recorded?: Promise<void> }
+> {
   const factory = integrations.providers.get(providerName);
   if (!factory) {
     return {
@@ -72,7 +75,9 @@ function resolveProvider(
   const record = (outcome: import("../integrations/health.js").CallOutcome) =>
     integrations.store.recordCall(connection.orgId, providerName, outcome, Date.now());
   try {
-    const watched = watchProvider(factory(connection), record);
+    // docs/26 A5: an OAuth connection's token first (refreshed if due).
+    const resolvedConnection = await withCredential(integrations.oauth, connection);
+    const watched = watchProvider(factory(resolvedConnection), record);
     return { ok: true as const, provider: watched.provider, settle: watched.settle };
   } catch (err) {
     // The factory's honest errors: an unset env credential, a missing
@@ -135,6 +140,8 @@ export const registerIntegrationRoutes: RegisterRoutes = (router, s) => {
           provider: name,
           kind: "tracker",
           supportsInbound: webhookSchemes.has(name),
+          // "Connect with Linear" — when the server has an OAuth app for it.
+          ...(integrations.oauth?.apps[name as "linear" | "jira"] ? { oauth: true } : {}),
         })),
         ...(integrations.slack
           ? [{ provider: "slack", kind: "notifier", supportsInbound: false }]
@@ -229,6 +236,8 @@ export const registerIntegrationRoutes: RegisterRoutes = (router, s) => {
       send(res, 404, { error: "no such integration connection" });
       return;
     }
+    // docs/26 A5: disconnecting forgets an OAuth token — reconnecting asks again.
+    await integrations.oauth?.credentials.delete(orgId, provider);
     void auditRow(req, user.id, orgId, "integration.disconnected", provider, { provider });
     send(res, 200, { provider, status: "disabled" });
   });
@@ -279,7 +288,7 @@ export const registerIntegrationRoutes: RegisterRoutes = (router, s) => {
       });
       return;
     }
-    const resolved = resolveProvider(integrations, provider, connection);
+    const resolved = await resolveProvider(integrations, provider, connection);
     if (resolved.ok) {
       try {
         await resolved.provider.searchTasks("lucent-connection-check");
@@ -377,7 +386,7 @@ export const registerIntegrationRoutes: RegisterRoutes = (router, s) => {
     }
     // Stage D6: the factory — the per-org credential resolved through the
     // connection, not a process-global instance.
-    const resolved = resolveProvider(integrations, providerName, connection);
+    const resolved = await resolveProvider(integrations, providerName, connection);
     if (!resolved.ok) {
       send(res, 400, { error: resolved.error });
       return;
@@ -590,7 +599,7 @@ export const registerIntegrationRoutes: RegisterRoutes = (router, s) => {
       send(res, 409, { error: `the ${providerName} connection is ${connection.status}` });
       return;
     }
-    const resolved = resolveProvider(integrations, providerName, connection);
+    const resolved = await resolveProvider(integrations, providerName, connection);
     if (!resolved.ok) {
       send(res, 400, { error: resolved.error });
       return;
@@ -710,7 +719,7 @@ export const registerIntegrationRoutes: RegisterRoutes = (router, s) => {
       send(res, 409, { error: "Integration connection changed; please create a new preview" });
       return;
     }
-    const resolved = resolveProvider(integrations, record.provider, connection);
+    const resolved = await resolveProvider(integrations, record.provider, connection);
     if (!resolved.ok) {
       send(res, 400, { error: resolved.error });
       return;
@@ -1258,7 +1267,7 @@ export const registerIntegrationRoutes: RegisterRoutes = (router, s) => {
       send(res, 409, { error: `the ${providerName} connection is ${connection.status}` });
       return;
     }
-    const resolved = resolveProvider(integrations, providerName, connection);
+    const resolved = await resolveProvider(integrations, providerName, connection);
     if (!resolved.ok) {
       send(res, 400, { error: resolved.error });
       return;

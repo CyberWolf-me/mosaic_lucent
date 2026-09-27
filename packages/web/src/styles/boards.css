@@ -951,3 +951,17 @@ html[data-theme="dark"] .boards-notif-row.static:hover {
   justify-content: flex-end;
   gap: 6px;
 }
+.integ-oauth {
+  display: grid;
+  gap: 6px;
+  justify-items: start;
+}
+.integ-oauth small {
+  font-size: 11.5px;
+  color: var(--ink-3);
+}
+.integ-or {
+  margin-top: 4px;
+  font-size: 10px;
+  color: var(--ink-3);
+}

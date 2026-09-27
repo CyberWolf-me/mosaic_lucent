@@ -673,7 +673,8 @@ a much better product — not rewriting the layout engine.
   - Not yet: embeddings (keyword first, per ADR 0024), a Postgres full-text
     index (not needed at today's sizes), and "Ask → canvas views" beyond
     selection (a generated view of the cited architecture).
-- **A5 — in progress (2026-09-27).** Execution and automation.
+- **A5 — built (2026-09-27); the live tracker run is what's left.**
+  Execution and automation.
 
   - _The project dashboard (§8)._ A project's page shows its execution across
     the boards the caller can read (`GET /api/orgs/:id/projects/:pid/execution`,
@@ -743,9 +744,11 @@ a much better product — not rewriting the layout engine.
       runner, the owner told), `scripts/integrations-check.mjs` (6/6) and
       `scripts/inbound-fields-check.mjs` (5/5: a signed tracker webhook
       reassigns and reschedules a synced task; Review asks in words; accepting
-      the owner moves only the owner) in the running app;
-    - server `integration-health.test.ts`, `inbound-fields.test.ts` and
-      `pg-integrations` (health, the link baseline).
+      the owner moves only the owner) and `scripts/oauth-connect-check.mjs`
+      (5/5, Linear's page intercepted) in the running app;
+    - server `integration-health.test.ts`, `inbound-fields.test.ts`,
+      `slack.test.ts`, `integration-oauth.test.ts` (against a stub provider)
+      and `pg-integrations` (health, the link baseline, sealed credentials).
   - _Slack, outbound (A5.4)._ Connect Slack in Admin with a server variable
     holding an incoming-webhook URL (only https on hooks.slack.com is
     accepted). Checking says hello in the channel. Every written meeting
@@ -754,8 +757,18 @@ a much better product — not rewriting the layout engine.
     Lucent posts nothing. A webhook Slack refuses (403/404/410) marks the
     connection as needing a new one. Slack is a channel, not a tracker, so
     it never appears as a Sync target.
-  - Not yet (A5.4): OAuth connect for Linear and Jira (keys are still server
-    variables).
+  - _OAuth connect (A5.4), per ADR 0050._ "Connect with Linear" and
+    "Connect with Jira" in Admin, when the server has an app for them and a
+    token key.
+    - The state is signed and completes only for the owner who started it;
+      Linear gets PKCE.
+    - Tokens are sealed at rest (AES-256-GCM, bound to their org) and
+      refreshed before they expire; a refused refresh needs re-auth.
+    - A Jira connection finds its site from the token.
+    - Disconnect forgets the token.
+  - Not yet: the live run of golden steps 25–31 against real Linear and Jira
+    (it needs their OAuth apps or keys); revoking tokens at the provider on
+    disconnect.
 
 ## 12. Decisions (locked 2026-09-24)
 
