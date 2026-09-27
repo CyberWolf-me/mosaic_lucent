@@ -1,6 +1,16 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { configureLiveKit } from "../src/stt/livekit.js";
-import { getSttProvider, isAnyVoiceSupported, sttProviderStatus } from "../src/stt/index.js";
+import {
+  STT_LABELS,
+  getSttProvider,
+  isAnyVoiceSupported,
+  resolveSttProvider,
+  sttProviderStatus,
+} from "../src/stt/index.js";
+import { livekitSttProvider } from "../src/stt/livekit.js";
+import { whisperSttProvider } from "../src/stt/whisper.js";
+import { browserSttProvider } from "../src/stt/browser.js";
+import { hostedDegradedReason, hostedSttProvider } from "../src/stt/hosted.js";
 
 /**
  * The provider registry gained a third member (LiveKit), then a fourth
@@ -79,5 +89,56 @@ describe("stt registry", () => {
     } finally {
       Object.defineProperty(globalThis, "navigator", { value: original, configurable: true });
     }
+  });
+});
+
+/**
+ * docs/28 F22: transcription used to work with less without a word — a
+ * silent fallback, dropped hosted audio, and providers whose text only comes
+ * at Stop (so live answers and extraction silently do nothing).
+ */
+describe("degraded capture is said, not silent (F22)", () => {
+  beforeEach(() => {
+    configureLiveKit({ url: "", tokenUrl: "", room: "" });
+  });
+
+  it("reports a fallback and why the requested provider can't run", () => {
+    const r = resolveSttProvider("livekit");
+    if (r.provider.id === "livekit") {
+      // Nothing at all runs here: no fallback to report.
+      expect(r.fellBackFrom).toBeNull();
+    } else {
+      expect(r.fellBackFrom).toBe("livekit");
+      expect(r.reason).toBeTruthy();
+    }
+  });
+
+  it("a provider that runs as asked reports no fallback", () => {
+    const r = resolveSttProvider("browser");
+    if (r.provider.id === "browser") expect(r.fellBackFrom).toBeNull();
+  });
+
+  it("Whisper and LiveKit say their text only comes at Stop; browser and hosted stream", () => {
+    const byId = Object.fromEntries(
+      sttProviderStatus().map((p) => [p.id, resolveSttProvider(p.id)]),
+    );
+    expect(Object.keys(STT_LABELS)).toEqual(["browser", "whisper", "livekit", "hosted"]);
+    // The flag lives on the provider objects, whatever this environment supports.
+    expect(whisperSttProvider.finalsAtStop).toBe(true);
+    expect(livekitSttProvider.finalsAtStop).toBe(true);
+    expect(browserSttProvider.finalsAtStop).toBeUndefined();
+    expect(hostedSttProvider.finalsAtStop).toBeUndefined();
+    expect(byId).toBeTruthy();
+  });
+
+  it("hosted capture names an at-close server and dropped audio", () => {
+    expect(hostedDegradedReason(false, 0)).toBeNull();
+    expect(hostedDegradedReason(true, 0)).toContain("returns the text when you stop");
+    expect(hostedDegradedReason(false, 3)).toContain(
+      "About 6 seconds of audio weren't transcribed",
+    );
+    const both = hostedDegradedReason(true, 1)!;
+    expect(both).toContain("when you stop");
+    expect(both).toContain("About 2 seconds");
   });
 });

@@ -153,6 +153,20 @@ describe("POST /api/stt/sessions", () => {
     expect(res.body.expiresAt).toBeGreaterThan(Date.now());
   });
 
+  it("reports at-close for a provider that transcribes only at close (docs/28 F22)", async () => {
+    // The default Deepgram and OpenAI services buffer the audio; the session
+    // used to answer mode "live" whatever the provider did.
+    const buffering = Object.assign(
+      new MockSttService({ script: SCRIPT, bytesPerUtterance: 4, now: () => Date.now() }),
+      { streaming: false },
+    );
+    const h = (open = await harness(buffering));
+    const alice = await signup(h, "alice.stt.atclose@example.com");
+    const res = await openSession(h, alice);
+    expect(res.status).toBe(200);
+    expect(res.body.mode).toBe("at-close");
+  });
+
   it("answers 503 on an unconfigured deployment — never a silent void", async () => {
     const h = (open = await harness(new MockSttService()));
     const alice = await signup(h, "alice.stt.standby@example.com");

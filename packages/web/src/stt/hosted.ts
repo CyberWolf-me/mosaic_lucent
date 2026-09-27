@@ -26,7 +26,26 @@ import { eventConsumerFromCallbacks, type VoiceEventHandlers } from "./events.js
 
 interface SessionResponse {
   sessionId?: string;
+  /** "at-close" when the server's provider transcribes only at close. */
+  mode?: string;
   error?: string;
+}
+
+/** docs/28 F22: what the person is told when hosted capture works with less. */
+export function hostedDegradedReason(atClose: boolean, droppedChunks: number): string | null {
+  const parts: string[] = [];
+  if (atClose) {
+    parts.push(
+      "This server's transcription returns the text when you stop, so Lucent can't answer or pick out decisions while the meeting runs.",
+    );
+  }
+  if (droppedChunks > 0) {
+    const seconds = droppedChunks * 2;
+    parts.push(
+      `About ${seconds} seconds of audio weren't transcribed — the server didn't answer. The rest is still being transcribed.`,
+    );
+  }
+  return parts.length > 0 ? parts.join(" ") : null;
 }
 
 interface ServerFinal {
@@ -95,6 +114,11 @@ export const hostedSttProvider: SttProvider = {
     // guarantee the server does not need is still one less thing to reason
     // about when finals arrive out of order.
     let chain: Promise<void> = Promise.resolve();
+    // docs/28 F22: failed chunk uploads used to vanish without a word.
+    let atClose = false;
+    let dropped = 0;
+    const reportDegraded = (): void =>
+      handlers.onDegraded?.(hostedDegradedReason(atClose, dropped));
 
     handlers.onStatus?.("connecting");
 
@@ -134,9 +158,18 @@ export const hostedSttProvider: SttProvider = {
             body: bytes,
           });
         } catch {
+          if (!disposed) {
+            dropped += 1;
+            reportDegraded();
+          }
           return;
         }
-        if (!res.ok || disposed) return;
+        if (disposed) return;
+        if (!res.ok) {
+          dropped += 1;
+          reportDegraded();
+          return;
+        }
         const data = (await res.json().catch(() => null)) as AudioResponse | null;
         emitFinals(data?.finals);
       });
@@ -191,6 +224,10 @@ export const hostedSttProvider: SttProvider = {
         return;
       }
       sessionId = data.sessionId;
+      if (data.mode === "at-close") {
+        atClose = true;
+        reportDegraded();
+      }
       if (stopped) {
         closeSession();
         return;

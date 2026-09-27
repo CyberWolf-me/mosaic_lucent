@@ -78,6 +78,13 @@ export interface SttService {
   readonly name: string;
   /** False when this service transcribes nothing (offline mock): the route 503s. */
   readonly live: boolean;
+  /**
+   * True when finals come back per chunk while the session runs; false when
+   * the provider buffers the audio and transcribes at close. The session
+   * reports it (`mode`), so the client can say that Lucent can't answer or
+   * extract during the meeting instead of silently doing nothing (docs/28 F22).
+   */
+  readonly streaming: boolean;
   createSession(): SttSession;
 }
 
@@ -91,6 +98,7 @@ export interface SttService {
  * decided by exactly this flag.
  */
 export class MockSttService implements SttService {
+  readonly streaming = true;
   readonly name = "mock";
   readonly live: boolean;
   private readonly script: SttUtterance[];
@@ -154,6 +162,7 @@ export class MockSttService implements SttService {
  * against this interface, not as edits to the routes.
  */
 export class GenericHttpSttService implements SttService {
+  readonly streaming = true;
   readonly name: string;
   readonly live = true;
 
@@ -274,6 +283,7 @@ export interface SttEnv {
  * with strict tests, not a claim.
  */
 export class OpenAiSttService implements SttService {
+  readonly streaming = false;
   readonly name = "openai";
   readonly live = true;
 
@@ -400,6 +410,7 @@ export function mapOpenAiTranscript(body: unknown): SttUtterance[] {
  * metadata, never from a byte-count guess.
  */
 export class DeepgramSttService implements SttService {
+  readonly streaming = false;
   readonly name: string;
   readonly live = true;
 
@@ -489,6 +500,7 @@ export class DeepgramSttService implements SttService {
  * Audio stays ephemeral (session handle only, like the REST path).
  */
 export class DeepgramStreamingSttService implements SttService {
+  readonly streaming = true;
   readonly name = "deepgram-stream";
   readonly live = true;
 

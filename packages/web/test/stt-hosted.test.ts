@@ -185,6 +185,41 @@ describe("hosted STT provider", () => {
     expect(h.errors).toEqual([]);
   });
 
+  it("says so when the server transcribes only at close, or drops audio (docs/28 F22)", async () => {
+    stubMic();
+    let audioCalls = 0;
+    stubFetch((url) => {
+      if (url === "/api/stt/sessions")
+        return jsonResponse(200, { sessionId: "stt_1", mode: "at-close" });
+      if (url === "/api/stt/sessions/stt_1/audio") {
+        audioCalls += 1;
+        // The first chunk fails; the second is transcribed.
+        return audioCalls === 1
+          ? jsonResponse(502, { error: "sidecar down" })
+          : jsonResponse(200, { finals: [{ text: "still here" }] });
+      }
+      if (url === "/api/stt/sessions/stt_1/close")
+        return jsonResponse(200, { finals: [], audioSeconds: 4, minutes: 0 });
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+    const degraded: Array<string | null> = [];
+    const h = { ...handlers(), onDegraded: (r: string | null) => void degraded.push(r) };
+    const session = hostedSttProvider.start(h);
+    await flush();
+    expect(degraded.at(-1)).toContain("returns the text when you stop");
+
+    recorders[0]!.emit(new Blob([new Uint8Array([1])]));
+    await flush();
+    expect(degraded.at(-1)).toContain("About 2 seconds of audio weren't transcribed");
+    // The capture carries on: a dropped chunk is not an error.
+    recorders[0]!.emit(new Blob([new Uint8Array([2])]));
+    await flush();
+    expect(h.finals).toEqual([{ text: "still here", speaker: undefined }]);
+    expect(h.errors).toEqual([]);
+    session!.stop();
+    await flush();
+  });
+
   it("a 503 becomes the honest unconfigured message, not an empty transcript", async () => {
     stubMic();
     stubFetch((url) => {

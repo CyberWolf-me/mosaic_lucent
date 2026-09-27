@@ -51,6 +51,7 @@ function isConfigured(): boolean {
 
 export const livekitSttProvider: SttProvider = {
   id: "livekit",
+  finalsAtStop: true,
 
   isSupported() {
     // Needs a mic and a configured room; the SDK check happens at start(),

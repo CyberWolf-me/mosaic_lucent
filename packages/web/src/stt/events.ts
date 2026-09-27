@@ -72,6 +72,7 @@ export interface VoiceEventHandlers {
   onStart?: () => void;
   onError?: (message: string) => void;
   onStatus?: (status: VoiceStatus) => void;
+  onDegraded?: (reason: string | null) => void;
 }
 
 /**
@@ -98,5 +99,6 @@ export function eventConsumerFromCallbacks(handlers: VoiceHandlers): VoiceEventH
     ...(handlers.onStart ? { onStart: handlers.onStart } : {}),
     ...(handlers.onError ? { onError: handlers.onError } : {}),
     ...(handlers.onStatus ? { onStatus: handlers.onStatus } : {}),
+    ...(handlers.onDegraded ? { onDegraded: handlers.onDegraded } : {}),
   };
 }

@@ -71,7 +71,9 @@ export const registerSttRoutes: RegisterRoutes = (router, s) => {
     send(res, 200, {
       sessionId: entry.id,
       expiresAt: entry.lastSeenAt + 15 * 60_000,
-      mode: "live",
+      // docs/28 F22: say whether finals arrive during the session or only at
+      // close — this used to answer "live" whatever the provider did.
+      mode: stt.streaming ? "live" : "at-close",
       provider: stt.name,
     });
   });

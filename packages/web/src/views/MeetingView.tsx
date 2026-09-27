@@ -16,7 +16,12 @@ import { KIND_LABEL } from "../statementUi.js";
 import { useWorkspace } from "../workspace.js";
 import { useToast } from "../ui/Toast.js";
 import { useSettings } from "../settings.js";
-import { getSttProvider, isAnyVoiceSupported, type VoiceSession } from "../stt/index.js";
+import {
+  STT_LABELS,
+  isAnyVoiceSupported,
+  resolveSttProvider,
+  type VoiceSession,
+} from "../stt/index.js";
 import { askLucent, type AskCitation } from "../boards.js";
 import {
   ConversationalLeaseManager,
@@ -258,6 +263,8 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
   const [extractQueued, setExtractQueued] = useState(0);
   const engineRef = useRef(createMeetingEngine());
   const [lastExtractStatus, setLastExtractStatus] = useState<string | null>(null);
+  // Why the running capture works with less (docs/28 F22), shown while it runs.
+  const [captureDegraded, setCaptureDegraded] = useState<string[]>([]);
   // M6.1: spoken answers (text) and typed asks. Session-local, never stored —
   // answers are reads, not minutes. One in flight at a time; a question
   // arriving while busy waits for the next trigger rather than overlapping.
@@ -523,7 +530,24 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
       notify("Voice is not supported in this browser.");
       return;
     }
-    const provider = getSttProvider(settings.sttProvider);
+    // docs/28 F22: the capture works with less — say so for as long as it
+    // does. A fallback, a provider whose text only comes at the end, and what
+    // the provider reports while it runs (dropped audio).
+    const resolved = resolveSttProvider(settings.sttProvider);
+    const provider = resolved.provider;
+    const fixedReasons: string[] = [];
+    if (resolved.fellBackFrom) {
+      const why = resolved.reason ? ` (${resolved.reason.replace(/\.$/, "")})` : "";
+      fixedReasons.push(
+        `${STT_LABELS[provider.id]} is transcribing: ${STT_LABELS[resolved.fellBackFrom]} isn't available here${why}.`,
+      );
+    }
+    if (provider.finalsAtStop) {
+      fixedReasons.push(
+        `${STT_LABELS[provider.id]} returns the text when you stop, so Lucent can't answer or pick out decisions while the meeting runs.`,
+      );
+    }
+    setCaptureDegraded(fixedReasons);
     provider.configure?.({
       url: settings.livekitUrl,
       tokenUrl: settings.livekitTokenUrl,
@@ -697,6 +721,7 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
         setRecording(false);
         if (msg) notify(msg);
       },
+      onDegraded: (reason) => setCaptureDegraded(reason ? [...fixedReasons, reason] : fixedReasons),
     };
     // The event stream is the primitive; callbacks are derived. Interim
     // events never reach onFinal (the bridge is structurally silent on
@@ -720,6 +745,7 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
           onStart: voiceCallbacks.onStart,
           onError: voiceCallbacks.onError,
           onStatus: voiceCallbacks.onStatus,
+          onDegraded: voiceCallbacks.onDegraded,
         })
       : provider.start(voiceCallbacks);
     if (session) {
@@ -1742,6 +1768,12 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
                   {statusLine}
                 </p>
               )}
+              {recording &&
+                captureDegraded.map((reason) => (
+                  <p key={reason} className="meet-note" role="status">
+                    {reason}
+                  </p>
+                ))}
               {voiceHints}
             </>
           )}

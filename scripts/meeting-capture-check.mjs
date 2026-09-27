@@ -324,6 +324,39 @@ check(
 await page.getByRole("button", { name: /^stop$/i }).click();
 await page.waitForTimeout(1000);
 
+// --- F22: a capture that works with less says so ---
+// Ask for on-device Whisper in a page where it can't run (no MediaRecorder):
+// the browser recognizer takes over, and the fallback used to be silent.
+await page.evaluate(() => {
+  const raw = localStorage.getItem("lucent.settings");
+  const s = raw ? JSON.parse(raw) : {};
+  localStorage.setItem("lucent.settings", JSON.stringify({ ...s, sttProvider: "whisper" }));
+});
+await page.goto(`${base}/?view=meeting&board=${boardId}`, { waitUntil: "networkidle" });
+await page.evaluate(() => {
+  window.MediaRecorder = undefined;
+});
+await page
+  .getByRole("button", { name: /start recording|new recording/i })
+  .first()
+  .click();
+const degradedNote = await until(
+  async () =>
+    (await statusText()).includes(
+      "Browser speech recognition is transcribing: On-device Whisper isn't available here",
+    ),
+  10000,
+);
+check("a fallback is named while the capture runs", degradedNote);
+await page
+  .getByRole("button", { name: /^stop$/i })
+  .click()
+  .catch(() => {});
+await page.evaluate(() => {
+  const s = JSON.parse(localStorage.getItem("lucent.settings") ?? "{}");
+  localStorage.setItem("lucent.settings", JSON.stringify({ ...s, sttProvider: "browser" }));
+});
+
 if (headed) {
   console.log("\n(headed) leaving the window open 5s…");
   await page.waitForTimeout(5000);

@@ -19,6 +19,29 @@ const PROVIDERS: Record<SttProviderId, SttProvider> = {
 /** Order used when the requested provider can't run here. */
 const FALLBACK_ORDER: SttProviderId[] = ["browser", "whisper", "livekit", "hosted"];
 
+/** What each provider is called where a person reads it. */
+export const STT_LABELS: Record<SttProviderId, string> = {
+  browser: "Browser speech recognition",
+  whisper: "On-device Whisper",
+  livekit: "LiveKit",
+  hosted: "Hosted transcription",
+};
+
+/**
+ * The provider that will actually run, and — when it is not the one asked for
+ * — which was asked for and why it can't run here (docs/28 F22). The fallback
+ * used to happen without a word.
+ */
+export function resolveSttProvider(id: SttProviderId): {
+  provider: SttProvider;
+  fellBackFrom: SttProviderId | null;
+  reason: string | null;
+} {
+  const provider = getSttProvider(id);
+  if (provider.id === id) return { provider, fellBackFrom: null, reason: null };
+  return { provider, fellBackFrom: id, reason: PROVIDERS[id].unavailableReason?.() ?? null };
+}
+
 /** Resolve the requested STT provider, falling back to whichever is supported. */
 export function getSttProvider(id: SttProviderId): SttProvider {
   const chosen = PROVIDERS[id];

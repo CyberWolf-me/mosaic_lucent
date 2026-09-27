@@ -55,6 +55,12 @@ export interface VoiceHandlers {
   onError?: (message: string) => void;
   /** Coarse status for UI (e.g. "transcribing" while Whisper runs). */
   onStatus?: (status: VoiceStatus) => void;
+  /**
+   * The capture works, with less (docs/28 F22): a reason the person should
+   * see — audio the server didn't transcribe, text that only comes at the
+   * end — or null when it recovers. Never an error: capture carries on.
+   */
+  onDegraded?: (reason: string | null) => void;
 }
 
 export type VoiceStatus = "idle" | "listening" | "transcribing" | "connecting";
@@ -86,4 +92,10 @@ export interface SttProvider {
   unavailableReason?(): string | null;
   /** Supply runtime configuration before `start` (hosted providers only). */
   configure?(config: LiveKitConfig): void;
+  /**
+   * True when the text arrives only when the session stops (Whisper, LiveKit
+   * here): nothing reaches the meeting while it runs, so Lucent can't answer
+   * or extract live. The meeting view says so (docs/28 F22).
+   */
+  readonly finalsAtStop?: boolean;
 }

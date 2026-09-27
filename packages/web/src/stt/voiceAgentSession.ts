@@ -137,20 +137,15 @@ export async function startVoiceAgentSession(
       },
     );
 
-    room.on(
-      livekit.RoomEvent.TrackUnsubscribed || "trackUnsubscribed",
-      (track: LiveKitTrack) => {
-        track.detach();
-      },
-    );
+    room.on(livekit.RoomEvent.TrackUnsubscribed || "trackUnsubscribed", (track: LiveKitTrack) => {
+      track.detach();
+    });
 
     // 5. Active speaker detection for agent speaking state
     room.on(
       livekit.RoomEvent.ActiveSpeakersChanged || "activeSpeakersChanged",
       (speakers: LiveKitParticipant[]) => {
-        const isAgent = speakers.some(
-          (s) => s.identity !== room.localParticipant?.identity,
-        );
+        const isAgent = speakers.some((s) => s.identity !== room.localParticipant?.identity);
         if (isAgent) {
           onStateChange("agent_speaking");
         } else {
@@ -165,9 +160,7 @@ export async function startVoiceAgentSession(
       (segments: Array<{ text: string; final: boolean; participant?: any }>) => {
         for (const seg of segments) {
           const participantId =
-            typeof seg.participant === "string"
-              ? seg.participant
-              : seg.participant?.identity || "";
+            typeof seg.participant === "string" ? seg.participant : seg.participant?.identity || "";
           const isAgent = participantId !== room.localParticipant?.identity;
           onTranscript?.({
             text: seg.text,

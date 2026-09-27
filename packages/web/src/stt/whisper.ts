@@ -57,6 +57,7 @@ async function blobToPcm16k(blob: Blob): Promise<Float32Array> {
 
 export const whisperSttProvider: SttProvider = {
   id: "whisper",
+  finalsAtStop: true,
   isSupported: () =>
     typeof MediaRecorder !== "undefined" &&
     typeof navigator !== "undefined" &&
