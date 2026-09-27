@@ -213,6 +213,16 @@ const whoHere = await waitFor(async () => {
 });
 check("a joining link opens the lobby, which says who's in", !!whoHere, whoHere ?? "");
 await guest.page.getByRole("button", { name: "Join now" }).click();
+
+// docs/28 S5 (A6): Gus has the board by its link, not the workspace, so he
+// asks to join and the host lets him in.
+const asking = await waitFor(async () =>
+  /Asking to join/.test((await guest.page.locator(".call-join").first().textContent()) ?? ""),
+);
+const knock = host.page.locator(".call-banner.is-waiting").filter({ hasText: "Gus Guest" });
+await knock.waitFor({ timeout: 15000 });
+check("a guest asks to join, and the host is told", asking && (await knock.count()) === 1);
+await knock.getByRole("button", { name: "Let in" }).click();
 await stage(guest.page).waitFor({ timeout: 20000 });
 
 const seeEachOther = await waitFor(async () => {
@@ -500,6 +510,10 @@ check(
 );
 
 await third.page.getByRole("button", { name: /Try again|Join now/ }).click();
+// Cy is a guest too: the host lets him in.
+const cyKnock = host.page.locator(".call-banner.is-waiting").filter({ hasText: "Cy Viewer" });
+await cyKnock.waitFor({ timeout: 15000 });
+await cyKnock.getByRole("button", { name: "Let in" }).click();
 await stage(third.page).waitFor({ timeout: 20000 });
 check(
   "a board viewer can join and speak (docs/28 §9.3)",

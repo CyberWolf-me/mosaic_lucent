@@ -160,6 +160,7 @@ import { registerTtsRoutes } from "./routes/tts.js";
 import { mintLiveKitToken } from "./livekit.js";
 import {
   admitToCall,
+  withWaiting,
   callRoomName,
   newCallMeta,
   publishScopeFor,
@@ -4003,6 +4004,9 @@ export function createApp(deps: AppDeps): App {
         send(res, 403, { error: "room not permitted" });
         return;
       }
+      // docs/28 S5 (A6): someone on the board only by a grant on it — not a
+      // member of its workspace — is a guest, and waits to be let into a call.
+      let guest = false;
       if (access.kind === "board") {
         const guard = await requireBoardRole(
           req,
@@ -4013,6 +4017,7 @@ export function createApp(deps: AppDeps): App {
           user,
         );
         if (!guard.ok) return;
+        guest = !(await storedOrgRole(user.id, guard.board.orgId));
       }
       const room = access.room;
       // docs/28 A3.2: a board's call has hosts. The first person in starts the
@@ -4028,17 +4033,33 @@ export function createApp(deps: AppDeps): App {
           const opened = await calls.open(room, newCallMeta(user.id, now));
           const state = await calls.read(room);
           const present = (state?.participants ?? []).map((p) => p.identity);
-          let admission = admitToCall(state ? state.meta : opened, present, user.id, now);
+          let admission = admitToCall(state ? state.meta : opened, present, user.id, now, guest);
           // Handing hosting on writes the metadata: decide again on the latest
           // value, in turn with the host's own changes (calls.ts updateMeta).
           if (admission.kind === "admitted" && admission.changed) {
             await calls.updateMeta(room, (current) => {
-              admission = admitToCall(current, present, user.id, now);
+              admission = admitToCall(current, present, user.id, now, guest);
               return admission.kind === "admitted" && admission.changed ? admission.meta : null;
             });
           }
+          if (admission.kind === "waiting") {
+            // Knock once; the lobby asks again until a host answers.
+            await calls.updateMeta(room, (current) => {
+              const base = current ?? newCallMeta(user.id, now);
+              const known = base.waiting?.some((w) => w.userId === user.id);
+              return known
+                ? null
+                : withWaiting(base, { userId: user.id, name: user.name, at: now }, now);
+            });
+            send(res, 202, { waiting: true, error: "Waiting for the host to let you in." });
+            return;
+          }
           if (admission.kind === "removed") {
             send(res, 403, { error: "The host removed you from this call.", removed: true });
+            return;
+          }
+          if (admission.kind === "denied") {
+            send(res, 403, { error: "The host didn't let you into this call.", denied: true });
             return;
           }
           if (admission.kind === "locked") {

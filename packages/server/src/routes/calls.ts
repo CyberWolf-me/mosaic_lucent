@@ -8,6 +8,7 @@ import {
   isCallHost,
   newCallMeta,
   publishScopeFor,
+  withAnswered,
   withHost,
   withRemoved,
   type CallRoom,
@@ -220,6 +221,37 @@ export const registerCallRoutes: RegisterRoutes = (router, s) => {
     send(res, 200, { ok: true });
   });
 
+  // docs/28 S5 (A6): a host answers a guest who asked to join — let them in,
+  // or keep them out of this call.
+  router.post("/api/boards/:id/call/admit", async (ctx) => {
+    const { req, res } = ctx;
+    const route = "/api/boards/:id/call/admit";
+    const call = await inCall(req, res, ctx.param("id"), route, { host: true });
+    if (!call || !calls) return;
+    const input = await body(req, res);
+    if (!input) return;
+    if (typeof input.userId !== "string" || typeof input.allow !== "boolean") {
+      return send(res, 400, { error: "send the userId and allow" });
+    }
+    const guestId = input.userId;
+    const allow = input.allow;
+    if (!(call.state.meta?.waiting ?? []).some((w) => w.userId === guestId)) {
+      return send(res, 404, { error: "They're not waiting to join." });
+    }
+    await calls.updateMeta(call.room, (current) =>
+      withAnswered(current ?? newCallMeta(call.user.id, Date.now()), guestId, allow),
+    );
+    await auditRow(
+      req,
+      call.user.id,
+      call.board.orgId,
+      allow ? "board.call.guest_admitted" : "board.call.guest_denied",
+      call.board.id,
+      { userId: guestId },
+    );
+    send(res, 200, { ok: true });
+  });
+
   router.post("/api/boards/:id/call/hosts", async (ctx) => {
     const { req, res } = ctx;
     const route = "/api/boards/:id/call/hosts";
@@ -267,6 +299,11 @@ export const registerCallRoutes: RegisterRoutes = (router, s) => {
           if (input.hostsOnlyShare) changed.hostsOnlyShare = true;
           else delete changed.hostsOnlyShare;
         }
+        // docs/28 S5 (A6): guests come in without asking.
+        if (typeof input.openToGuests === "boolean") {
+          if (input.openToGuests) changed.openToGuests = true;
+          else delete changed.openToGuests;
+        }
         return changed;
       })) ?? before;
     if (Boolean(next.hostsOnlyShare) !== Boolean(before.hostsOnlyShare)) {
@@ -291,12 +328,14 @@ export const registerCallRoutes: RegisterRoutes = (router, s) => {
       {
         locked: Boolean(next.locked),
         hostsOnlyShare: Boolean(next.hostsOnlyShare),
+        openToGuests: Boolean(next.openToGuests),
       },
     );
     send(res, 200, {
       ok: true,
       locked: Boolean(next.locked),
       hostsOnlyShare: Boolean(next.hostsOnlyShare),
+      openToGuests: Boolean(next.openToGuests),
     });
   });
 

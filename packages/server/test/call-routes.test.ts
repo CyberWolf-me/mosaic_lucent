@@ -17,8 +17,11 @@ import {
   InMemoryCallControl,
   newCallMeta,
   parseCallMeta,
+  WAITING_TTL_MS,
+  withAnswered,
   withHost,
   withRemoved,
+  withWaiting,
 } from "../src/calls.js";
 
 /**
@@ -112,7 +115,11 @@ async function signup(h: Harness, email: string): Promise<Actor> {
   return { token: body.token, id: body.user.id };
 }
 
-/** Alice's board, with Bob and Carol as members of the given role. */
+/**
+ * Alice's board, with Bob and Carol as members of the given role — in her
+ * workspace too, so they're teammates rather than guests (docs/28 S5: a
+ * guest asks to join the call).
+ */
 async function boardWith(
   h: Harness,
   role: "editor" | "viewer" = "editor",
@@ -134,6 +141,11 @@ async function boardWith(
       token: link.body.token,
     });
     expect(joined.status).toBe(200);
+    await h.userStore.setMembership({
+      userId: member.id,
+      orgId: `org_personal_${alice.id}`,
+      role: role === "viewer" ? "viewer" : "editor",
+    });
   }
   return { boardId, alice, bob, carol };
 }
@@ -435,5 +447,91 @@ describe("the board call's host (docs/28 A3.2)", () => {
     const call = await api(h, `/api/boards/${boardId}/call`, { token: alice.token });
     expect(call.status).toBe(503);
     expect(call.body.error).toBe("Video calls aren't set up on this server.");
+  });
+});
+
+describe("guests ask to join (docs/28 S5, A6)", () => {
+  it("waits a guest until a host answers; never hands hosting to one (pure)", () => {
+    const meta = newCallMeta("usr_a", 1);
+    expect(admitToCall(meta, ["usr_a"], "usr_g", 2, true)).toEqual({ kind: "waiting" });
+    // No one from the workspace in the call: still waiting, not host.
+    expect(admitToCall(meta, [], "usr_g", 2, true)).toEqual({ kind: "waiting" });
+    const knocked = withWaiting(meta, { userId: "usr_g", name: "Gil", at: 10 }, 10);
+    const again = withWaiting(knocked, { userId: "usr_g", name: "Gil", at: 20 }, 20);
+    expect(again.waiting).toEqual([{ userId: "usr_g", name: "Gil", at: 10 }]);
+    const stale = withWaiting(
+      knocked,
+      { userId: "usr_h", name: "Hal", at: 30 },
+      10 + WAITING_TTL_MS,
+    );
+    expect(stale.waiting?.map((w) => w.userId)).toEqual(["usr_h"]);
+
+    const letIn = withAnswered(knocked, "usr_g", true);
+    expect(letIn.waiting).toEqual([]);
+    expect(admitToCall(letIn, [], "usr_g", 3, true)).toMatchObject({
+      kind: "admitted",
+      host: false,
+    });
+    const kept = withAnswered(knocked, "usr_g", false);
+    expect(admitToCall(kept, ["usr_a"], "usr_g", 3, true)).toEqual({ kind: "denied" });
+    // A locked call says so to a guest too, rather than queueing them.
+    expect(admitToCall({ ...meta, locked: true }, ["usr_a"], "usr_g", 3, true)).toEqual({
+      kind: "locked",
+    });
+
+    const open = { ...meta, openToGuests: true };
+    expect(admitToCall(open, ["usr_a"], "usr_g", 2, true)).toMatchObject({ kind: "admitted" });
+    expect(admitToCall(open, [], "usr_g", 2, true)).toEqual({ kind: "waiting" });
+  });
+
+  it("a host lets a guest in, or keeps one out; or lets guests in without asking", async () => {
+    const h = (open = await harness());
+    const { boardId, alice, bob } = await boardWith(h);
+    await enter(h, boardId, alice, "Alice");
+    await enter(h, boardId, bob, "Bob");
+    // Gil and Dan have the board by its link, and aren't in Alice's workspace.
+    const tag = Math.random().toString(36).slice(2, 8);
+    const guests: Actor[] = [];
+    for (const name of ["gil", "dan", "eve"]) {
+      const who = await signup(h, `${name}.${tag}@example.com`);
+      const link = await post(h, `/api/boards/${boardId}/share`, alice, { role: "editor" });
+      await post(h, `/api/boards/${boardId}/join`, who, { token: link.body.token });
+      guests.push(who);
+    }
+    const [gil, dan, eve] = guests as [Actor, Actor, Actor];
+
+    const waiting = await enter(h, boardId, gil, "Gil");
+    expect(waiting.status).toBe(202);
+    expect(waiting.body).toMatchObject({ waiting: true });
+    const meta = () => h.calls.rooms.get(`board-${boardId}`)!.meta!;
+    expect(meta().waiting?.map((w) => w.userId)).toEqual([gil.id]);
+
+    // Only a host answers.
+    expect(
+      (await post(h, `/api/boards/${boardId}/call/admit`, bob, { userId: gil.id, allow: true }))
+        .status,
+    ).toBe(403);
+    expect(
+      (await post(h, `/api/boards/${boardId}/call/admit`, alice, { userId: gil.id, allow: true }))
+        .status,
+    ).toBe(200);
+    const inNow = await enter(h, boardId, gil, "Gil");
+    expect(inNow.status).toBe(200);
+    expect(inNow.body.host).toBe(false);
+
+    expect((await enter(h, boardId, dan, "Dan")).status).toBe(202);
+    await post(h, `/api/boards/${boardId}/call/admit`, alice, { userId: dan.id, allow: false });
+    const denied = await enter(h, boardId, dan, "Dan");
+    expect(denied.status).toBe(403);
+    expect(denied.body).toMatchObject({
+      denied: true,
+      error: "The host didn't let you into this call.",
+    });
+
+    const opened = await post(h, `/api/boards/${boardId}/call/settings`, alice, {
+      openToGuests: true,
+    });
+    expect(opened.body.openToGuests).toBe(true);
+    expect((await enter(h, boardId, eve, "Eve")).status).toBe(200);
   });
 });

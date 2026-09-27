@@ -38,12 +38,35 @@ export interface CallMeta {
   /** Only hosts may present their screen. */
   hostsOnlyShare?: boolean;
   /**
+   * Guests asking to join (docs/28 S5, A6): someone who reaches the board
+   * only through a grant on it, not as a member of its workspace, waits here
+   * until a host lets them in — Meet's "ask to join" for people outside the
+   * organization.
+   */
+  waiting?: WaitingGuest[];
+  /** Guests a host let into this call. */
+  admitted?: string[];
+  /** Guests a host kept out of this call (they asked; the answer was no). */
+  denied?: string[];
+  /** The host lets guests in without asking (the waiting room off). */
+  openToGuests?: boolean;
+  /**
    * Bumped by every write, so a client that receives an older room update
    * after a newer one (LiveKit can deliver them out of order around a
    * permission change) keeps the newer.
    */
   rev?: number;
 }
+
+export interface WaitingGuest {
+  userId: string;
+  name: string;
+  /** When they asked; a knock older than WAITING_TTL_MS is dropped. */
+  at: number;
+}
+
+/** A guest who stopped asking (closed the tab) leaves the list after this. */
+export const WAITING_TTL_MS = 5 * 60_000;
 
 export type CallTrackSource =
   | "microphone"
@@ -120,6 +143,15 @@ function stringList(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((v): v is string => typeof v === "string") : [];
 }
 
+function waitingList(value: unknown[]): WaitingGuest[] {
+  return value.flatMap((v) => {
+    const w = v as Record<string, unknown>;
+    return typeof w?.userId === "string" && typeof w.name === "string" && typeof w.at === "number"
+      ? [{ userId: w.userId, name: w.name, at: w.at }]
+      : [];
+  });
+}
+
 /** Read room metadata; null for a room with none (or with someone else's). */
 export function parseCallMeta(raw: string | null | undefined): CallMeta | null {
   if (!raw) return null;
@@ -134,6 +166,10 @@ export function parseCallMeta(raw: string | null | undefined): CallMeta | null {
       startedAt: typeof value.startedAt === "number" ? value.startedAt : 0,
       ...(value.locked === true ? { locked: true } : {}),
       ...(value.hostsOnlyShare === true ? { hostsOnlyShare: true } : {}),
+      ...(Array.isArray(value.waiting) ? { waiting: waitingList(value.waiting) } : {}),
+      ...(Array.isArray(value.admitted) ? { admitted: stringList(value.admitted) } : {}),
+      ...(Array.isArray(value.denied) ? { denied: stringList(value.denied) } : {}),
+      ...(value.openToGuests === true ? { openToGuests: true } : {}),
       ...(typeof value.rev === "number" ? { rev: value.rev } : {}),
     };
   } catch {
@@ -144,6 +180,8 @@ export function parseCallMeta(raw: string | null | undefined): CallMeta | null {
 export type CallAdmission =
   | { kind: "removed" }
   | { kind: "locked" }
+  | { kind: "waiting" }
+  | { kind: "denied" }
   | { kind: "admitted"; host: boolean; meta: CallMeta; changed: boolean };
 
 /**
@@ -158,6 +196,12 @@ export function admitToCall(
   present: readonly string[],
   userId: string,
   now: number,
+  /**
+   * A guest (docs/28 S5, A6) — on the board by a grant, not a member of its
+   * workspace — waits until a host lets them in, and never takes hosting
+   * over: a call with no host in it waits for someone from the workspace.
+   */
+  guest = false,
 ): CallAdmission {
   const current = meta ?? { ...newCallMeta(userId, now), hosts: [] };
   if (current.removed.includes(userId)) return { kind: "removed" };
@@ -165,10 +209,19 @@ export function admitToCall(
     return { kind: "admitted", host: true, meta: current, changed: meta === null };
   }
   const hostHere = current.hosts.some((h) => present.includes(h));
-  // A locked call keeps newcomers out while a host is there to let them in
-  // (unlock); with every host gone, the lock would strand the call, so the
-  // hand-off below still applies.
+  // A locked call keeps newcomers out — guests included — while a host is
+  // there to let them in (unlock); with every host gone, the lock would
+  // strand the call, so the hand-off below still applies.
   if (hostHere && current.locked && !present.includes(userId)) return { kind: "locked" };
+  if (guest) {
+    if ((current.denied ?? []).includes(userId)) return { kind: "denied" };
+    const letIn =
+      (current.openToGuests && hostHere) ||
+      (current.admitted ?? []).includes(userId) ||
+      present.includes(userId);
+    if (!letIn) return { kind: "waiting" };
+    return { kind: "admitted", host: false, meta: current, changed: false };
+  }
   if (hostHere) return { kind: "admitted", host: false, meta: current, changed: false };
   return {
     kind: "admitted",
@@ -188,6 +241,30 @@ export function withRemoved(meta: CallMeta, userId: string): CallMeta {
     ...meta,
     hosts: meta.hosts.filter((h) => h !== userId),
     removed: meta.removed.includes(userId) ? meta.removed : [...meta.removed, userId],
+  };
+}
+
+/** A guest asks to join: listed once, and stale knocks drop off. */
+export function withWaiting(meta: CallMeta, guest: WaitingGuest, now: number): CallMeta {
+  const fresh = (meta.waiting ?? []).filter(
+    (w) => now - w.at < WAITING_TTL_MS && w.userId !== guest.userId,
+  );
+  const prior = (meta.waiting ?? []).find((w) => w.userId === guest.userId);
+  return { ...meta, waiting: [...fresh, prior && now - prior.at < WAITING_TTL_MS ? prior : guest] };
+}
+
+/** A host lets a guest in, or keeps them out of this call. */
+export function withAnswered(meta: CallMeta, userId: string, allow: boolean): CallMeta {
+  const waiting = (meta.waiting ?? []).filter((w) => w.userId !== userId);
+  if (!allow) {
+    const denied = meta.denied ?? [];
+    return { ...meta, waiting, denied: denied.includes(userId) ? denied : [...denied, userId] };
+  }
+  const admitted = meta.admitted ?? [];
+  return {
+    ...meta,
+    waiting,
+    admitted: admitted.includes(userId) ? admitted : [...admitted, userId],
   };
 }
 

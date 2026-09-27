@@ -416,6 +416,33 @@
   background: var(--call-surface-2);
   font-size: 12.5px;
 }
+/* A guest asking to join (docs/28 S5, A6): the host answers here. */
+.call-banner.is-waiting {
+  justify-content: space-between;
+  background: oklch(0.55 0.12 250 / 0.22);
+  color: var(--call-ink);
+  text-align: left;
+}
+.call-banner-actions {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 8px;
+}
+.call-join.small {
+  height: 30px;
+  padding: 0 14px;
+  font-size: 12.5px;
+}
+.call-lobby-waiting {
+  margin: 0;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: oklch(0.55 0.12 250 / 0.14);
+  color: var(--ink-0);
+  font-size: 12.5px;
+  max-width: 360px;
+}
 .call-banner.is-capture {
   justify-content: space-between;
   background: rgba(229, 72, 77, 0.1);

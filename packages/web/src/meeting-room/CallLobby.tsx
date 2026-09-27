@@ -250,6 +250,7 @@ export function CallLobby({ boardId, title }: { boardId: string | null; title: s
     setCamOn,
     devices,
     chooseDevice,
+    waitingToJoin,
   } = useMeetingSession();
   const [retry, setRetry] = useState(0);
   const media = useLobbyMedia(micOn, camOn, devices, retry);
@@ -392,12 +393,18 @@ export function CallLobby({ boardId, title }: { boardId: string | null; title: s
             {unavailable ? CALLS_UNAVAILABLE : error}
           </p>
         )}
+        {joining && waitingToJoin && (
+          <p className="call-lobby-waiting" role="status">
+            You&apos;re not in this workspace, so a host lets you in. They&apos;ve been told
+            you&apos;re here — this page joins as soon as they do.
+          </p>
+        )}
 
         <div className="call-lobby-actions">
           {joining ? (
             <>
               <button type="button" className="call-join" disabled>
-                Connecting…
+                {waitingToJoin ? "Asking to join…" : "Connecting…"}
               </button>
               <button type="button" className="call-link-btn" onClick={cancelJoin}>
                 Cancel

@@ -519,6 +519,7 @@ export function CallStage({
     captions,
     captionsRequested,
     setCallSettings,
+    answerGuest,
   } = s;
 
   const [panel, setPanel] = useState<Panel>(null);
@@ -746,6 +747,31 @@ export function CallStage({
           {screenOn && <span className="call-chip is-share">You're presenting</span>}
         </div>
       </header>
+
+      {isHost &&
+        (meta?.waiting ?? []).map((w) => (
+          <div key={w.userId} className="call-banner is-waiting" role="status">
+            <span>
+              <strong>{w.name}</strong> wants to join — a guest from outside the workspace.
+            </span>
+            <span className="call-banner-actions">
+              <button
+                type="button"
+                className="call-link-btn"
+                onClick={() => void answerGuest(w.userId, false)}
+              >
+                Deny
+              </button>
+              <button
+                type="button"
+                className="call-join small"
+                onClick={() => void answerGuest(w.userId, true)}
+              >
+                Let in
+              </button>
+            </span>
+          </div>
+        ))}
 
       {transcriber && !transcriber.isLocal && (
         <div className="call-banner is-capture" role="status">
@@ -1085,6 +1111,19 @@ export function CallStage({
                         {meta?.locked
                           ? "Anyone on the board can join again."
                           : "No one new can join until you unlock it."}
+                      </small>
+                    </MenuItem>
+                    <MenuItem
+                      onClick={() => {
+                        close();
+                        void setCallSettings({ openToGuests: !meta?.openToGuests });
+                      }}
+                    >
+                      {meta?.openToGuests ? "Guests ask to join" : "Let guests in without asking"}
+                      <small>
+                        {meta?.openToGuests
+                          ? "People outside the workspace wait for a host again."
+                          : "People outside the workspace join like everyone else."}
                       </small>
                     </MenuItem>
                     <MenuItem

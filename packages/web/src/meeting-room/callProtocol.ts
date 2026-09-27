@@ -23,6 +23,10 @@ export interface CallMeta {
   locked: boolean;
   /** Only hosts may present. */
   hostsOnlyShare: boolean;
+  /** Guests asking to join (docs/28 S5, A6), oldest first; a host answers. */
+  waiting: Array<{ userId: string; name: string; at: number }>;
+  /** Guests come in without asking (the host turned the waiting room off). */
+  openToGuests: boolean;
   /** The server's write counter: an update older than the one held is stale. */
   rev: number;
 }
@@ -55,6 +59,14 @@ export function readCallMeta(raw: string | undefined | null): CallMeta | null {
       startedAt: typeof value.startedAt === "number" ? value.startedAt : 0,
       locked: value.locked === true,
       hostsOnlyShare: value.hostsOnlyShare === true,
+      waiting: Array.isArray(value.waiting)
+        ? value.waiting.flatMap((w: Record<string, unknown>) =>
+            typeof w?.userId === "string" && typeof w.name === "string" && typeof w.at === "number"
+              ? [{ userId: w.userId, name: w.name, at: w.at }]
+              : [],
+          )
+        : [],
+      openToGuests: value.openToGuests === true,
       rev: typeof value.rev === "number" ? value.rev : 0,
     };
   } catch {
@@ -356,12 +368,13 @@ export function describeDisconnect(reason: string | undefined): CallEnd {
  */
 export function describeJoinFailure(
   status: number | null,
-  body: { error?: string; removed?: boolean; locked?: boolean } = {},
+  body: { error?: string; removed?: boolean; locked?: boolean; denied?: boolean } = {},
 ): string {
   if (status === null) return "Couldn't connect. Check your connection, then try again.";
   if (status === 503) {
     return "Video calls aren't set up on this server. You can still transcribe on this device.";
   }
+  if (status === 403 && body.denied) return "The host didn't let you into this call.";
   if (status === 403 && body.removed) return "The host removed you from this call.";
   if (status === 403 && body.locked) {
     return "The host locked this call, so no one new can join. Ask them to unlock it.";

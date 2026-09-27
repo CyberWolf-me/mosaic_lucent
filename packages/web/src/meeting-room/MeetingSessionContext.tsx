@@ -249,8 +249,16 @@ interface MeetingSessionValue {
    * whose recognizer is the recording's (a browser runs one at a time).
    */
   broadcastCaption: (text: string, final: boolean) => void;
-  /** The host's call settings: lock the call; let only hosts present. */
-  setCallSettings: (settings: { locked?: boolean; hostsOnlyShare?: boolean }) => Promise<boolean>;
+  /** The host's call settings: lock the call; let only hosts present; let guests straight in. */
+  setCallSettings: (settings: {
+    locked?: boolean;
+    hostsOnlyShare?: boolean;
+    openToGuests?: boolean;
+  }) => Promise<boolean>;
+  /** You asked to join as a guest, and wait for a host (docs/28 S5, A6). */
+  waitingToJoin: boolean;
+  /** A host lets a waiting guest in, or keeps them out of this call. */
+  answerGuest: (userId: string, allow: boolean) => Promise<boolean>;
 }
 
 /** One line of someone else's speech, sent to this device's transcript. */
@@ -313,6 +321,7 @@ export function MeetingSessionProvider({ children }: { children: ReactNode }) {
   const [error, setError] = useState<string | null>(null);
   const [ended, setEnded] = useState<Exclude<CallEnd, { kind: "left" }> | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [waitingToJoin, setWaitingToJoin] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [activeBoardId, setActiveBoardId] = useState<string | null>(null);
   const [peers, setPeers] = useState<Map<string, RoomPeer>>(new Map());
@@ -475,23 +484,38 @@ export function MeetingSessionProvider({ children }: { children: ReactNode }) {
       let data: { token: string; url: string };
       try {
         let resp: Response;
-        try {
-          resp = await apiFetch("/api/livekit/token", {
-            method: "POST",
-            body: JSON.stringify(
-              targetBoardId
-                ? { boardId: targetBoardId, room: `board-${targetBoardId}` }
-                : { room: "lucent-voice" },
-            ),
-          });
-        } catch {
-          throw new Error(describeJoinFailure(null));
+        // docs/28 S5 (A6): a guest waits to be let in — ask again every few
+        // seconds until a host answers, or until Cancel.
+        for (;;) {
+          try {
+            resp = await apiFetch("/api/livekit/token", {
+              method: "POST",
+              body: JSON.stringify(
+                targetBoardId
+                  ? { boardId: targetBoardId, room: `board-${targetBoardId}` }
+                  : { room: "lucent-voice" },
+              ),
+            });
+          } catch {
+            setWaitingToJoin(false);
+            throw new Error(describeJoinFailure(null));
+          }
+          if (resp.status !== 202) break;
+          if (!current()) return;
+          setWaitingToJoin(true);
+          await new Promise((r) => setTimeout(r, 3000));
+          if (!current()) {
+            setWaitingToJoin(false);
+            return;
+          }
         }
+        setWaitingToJoin(false);
         if (!resp.ok) {
           const body = (await resp.json().catch(() => ({}))) as {
             error?: string;
             removed?: boolean;
             locked?: boolean;
+            denied?: boolean;
           };
           throw new Error(describeJoinFailure(resp.status, body));
         }
@@ -823,6 +847,7 @@ export function MeetingSessionProvider({ children }: { children: ReactNode }) {
   );
 
   const cancelJoin = useCallback(() => {
+    setWaitingToJoin(false);
     leave();
   }, [leave]);
 
@@ -1129,7 +1154,7 @@ export function MeetingSessionProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const setCallSettings = useCallback(
-    async (settings: { locked?: boolean; hostsOnlyShare?: boolean }) => {
+    async (settings: { locked?: boolean; hostsOnlyShare?: boolean; openToGuests?: boolean }) => {
       const board = boardRef.current;
       if (!board) return false;
       const result = await callRoute(board, "settings", settings);
@@ -1138,6 +1163,14 @@ export function MeetingSessionProvider({ children }: { children: ReactNode }) {
     },
     [],
   );
+
+  const answerGuest = useCallback(async (userId: string, allow: boolean) => {
+    const board = boardRef.current;
+    if (!board) return false;
+    const result = await callRoute(board, "admit", { userId, allow });
+    if (!result.ok) setNotice(result.error);
+    return result.ok;
+  }, []);
 
   // Captions fade a few seconds after they stop changing.
   useEffect(() => {
@@ -1250,8 +1283,12 @@ export function MeetingSessionProvider({ children }: { children: ReactNode }) {
       captionsRequested,
       broadcastCaption,
       setCallSettings,
+      waitingToJoin,
+      answerGuest,
     }),
     [
+      waitingToJoin,
+      answerGuest,
       captionsOn,
       setCaptionsOn,
       captions,

@@ -566,8 +566,9 @@ V8 transport (F4).
   token can rename itself. The dock (S6) offers the call back after a reload.
   Fixed on the way: remote audio was attached nowhere, so a call could be
   silent. `scripts/meeting-call-check.mjs` drives three accounts through a real
-  LiveKit project (37/37, four runs in a row). Not yet: the board beside the
-  call, a waiting room for guests (A6), background blur, and video recording.
+  LiveKit project (37/37, four runs in a row). Not yet: background blur and
+  video recording. (The board beside the call, and a waiting room for
+  guests, came later — see below.)
 - **A3.4 — done (2026-09-27): meetings can be scheduled.** The plan lives on
   the meeting's own row (ADR 0045; migration 0035 adds `scheduled_for`,
   `duration_min`, `invitees`, `template`, `cancelled_at`, `cancelled_by`),
@@ -748,6 +749,32 @@ V8 transport (F4).
   connector seam when their apps exist. `transcriptImport.test.ts` (8:
   Teams, Zoom, SRT, text, Otter/Meet, splitting, refusals, the cap);
   `scripts/meeting-import-check.mjs` 6/6.
+
+- **Guests ask to join the call — done (2026-09-28).** Like Meet for people
+  outside the organization: someone on the board only through a grant on
+  it (a share link, an email share), not as a member of its workspace, asks
+  to join its call.
+
+  - Their lobby reads "Asking to join…" and joins by itself once a host
+    answers. Every host sees "Gil wants to join — a guest from outside the
+    workspace" with **Let in** and **Deny**.
+  - A denied guest is told "The host didn't let you into this call." This
+    is kept apart from being removed mid-call, which reads as before.
+  - A guest never takes hosting over: a call with no host in it keeps them
+    waiting for someone from the workspace. A locked call says it's locked
+    to a guest too, rather than queueing them.
+  - A host can turn the waiting room off for the call ("Let guests in
+    without asking").
+  - The list lives in the call's room metadata, which only the server
+    writes. A knock is recorded once and drops off after five minutes
+    unanswered. Answers are audited (`board.call.guest_admitted` /
+    `guest_denied`).
+
+  People who joined a board by its link are guests by A6's definition, so
+  `scripts/meeting-call-check.mjs` now lets its two link guests in (51/51,
+  against the real LiveKit project). The host tests' teammates are
+  workspace members. `call-routes.test.ts` (the rule; let in, deny, open to
+  guests), `call-protocol.test.ts`.
 
 ## 9. Decisions needed
 

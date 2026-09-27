@@ -59,6 +59,8 @@ describe("host metadata and attributes", () => {
       startedAt: 9,
       locked: false,
       hostsOnlyShare: false,
+      waiting: [],
+      openToGuests: false,
       rev: 0,
     });
     expect(readCallMeta("")).toBeNull();
@@ -232,6 +234,26 @@ describe("live captions (docs/28 S5)", () => {
     });
     expect(describeJoinFailure(403, { locked: true })).toBe(
       "The host locked this call, so no one new can join. Ask them to unlock it.",
+    );
+  });
+
+  // docs/28 S5 (A6): guests ask to join; a host answers.
+  it("reads who is waiting to join, and says when a host said no", () => {
+    const raw = JSON.stringify({
+      v: 1,
+      hosts: ["a"],
+      removed: [],
+      startedBy: "a",
+      startedAt: 1,
+      waiting: [{ userId: "g", name: "Gil", at: 5 }, { userId: 3 }],
+      openToGuests: true,
+    });
+    expect(readCallMeta(raw)).toMatchObject({
+      waiting: [{ userId: "g", name: "Gil", at: 5 }],
+      openToGuests: true,
+    });
+    expect(describeJoinFailure(403, { removed: true, denied: true })).toBe(
+      "The host didn't let you into this call.",
     );
   });
 });
