@@ -3,6 +3,7 @@ import { applyOperations, createWorkspace, type Operation } from "@lucent/core";
 import {
   BRIEF_ORDER,
   TOPIC_BREAK_LINE,
+  awaitsReview,
   citationTurns,
   formatElapsed,
   meetingBrief,
@@ -209,9 +210,50 @@ describe("meetingBrief", () => {
       provisional: false,
       sections: [],
       total: 0,
+      suggested: 0,
     });
     const ws = board(statementNode("d", "decision", "mtg_1", [0, 0]));
     expect(meetingBrief(ws, { id: "mtg_9" }).total).toBe(0);
+  });
+
+  // docs/28 S9: the brief is where a meeting's suggestions are reviewed.
+  it("carries each statement's trust and counts what still waits on review", () => {
+    const withTrust = (
+      id: string,
+      trust?: "ai-suggested" | "human-approved" | "human-edited",
+    ): Operation[] => [
+      { op: "CREATE_NODE", id, nodeType: "action", label: `action ${id}` },
+      {
+        op: "SET_STATEMENT",
+        id,
+        statement: {
+          kind: "action",
+          status: "open",
+          provenance: { meetingId: "mtg_1", turnRange: [0, 0] },
+          ...(trust ? { trust } : {}),
+        },
+      },
+    ];
+    const ws = board([
+      ...withTrust("a", "ai-suggested"),
+      ...withTrust("b", "human-approved"),
+      ...withTrust("c", "human-edited"),
+      ...withTrust("d", "ai-suggested"),
+      // From before trust existed: nothing to review.
+      ...withTrust("e"),
+    ]);
+    const brief = meetingBrief(ws, { id: "mtg_1" });
+    expect(brief.total).toBe(5);
+    expect(brief.suggested).toBe(2);
+    const items = brief.sections.flatMap((s) => s.items);
+    expect(items.map((i) => [i.nodeId, i.trust ?? null])).toEqual([
+      ["a", "ai-suggested"],
+      ["b", "human-approved"],
+      ["c", "human-edited"],
+      ["d", "ai-suggested"],
+      ["e", null],
+    ]);
+    expect(items.filter(awaitsReview).map((i) => i.nodeId)).toEqual(["a", "d"]);
   });
 
   it("keeps only superseded ids that still exist on the board", () => {

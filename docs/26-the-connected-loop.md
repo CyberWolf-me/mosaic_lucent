@@ -634,9 +634,10 @@ a much better product — not rewriting the layout engine.
     against Postgres), and `scripts/review-check.mjs` in the running app
     (8/8: an agent's claims overridden, the owner told, approve/reword/reject
     through the UI, the canvas run on record as approved by its asker).
-  - Not yet: `decision.superseded` (statements have no author to tell),
-    per-item review of the end-of-meeting candidates (the recap still writes
-    a summary, not candidates), and trust on nodes that aren't statements.
+  - Not yet: `decision.superseded` (statements have no author to tell), and
+    trust on nodes that aren't statements. The end-of-meeting candidates are
+    now reviewed item by item on the meeting's own page (docs/28 S9); the
+    recap still writes a summary, not candidates.
 - **A4 — done (2026-09-27), per ADR 0048.** "Why are we doing this?" answers
   with its evidence, from wherever it is asked.
   - _J4, scoped reads._ Every workspace read resolves a scope — workspace,

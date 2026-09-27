@@ -77,6 +77,7 @@ import { ProposalPanel } from "./ProposalPanel.js";
 import { VoiceStateHud, type VoiceHudSnapshot } from "../meeting-room/VoiceStateHud.js";
 import {
   TOPIC_BREAK_LINE,
+  awaitsReview,
   citationTurns,
   formatElapsed,
   meetingBrief,
@@ -84,6 +85,7 @@ import {
   type BriefItem,
   type BriefSection,
 } from "../meetingBrief.js";
+import { decideStatements, type StatementDecision } from "../review.js";
 
 /**
  * Meeting mode (E3 / R3): live capture into a transcript that persists per
@@ -1530,6 +1532,33 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
     shown.turns.length > 0;
   const [recapWaitOver, setRecapWaitOver] = useState(false);
   const [writingRecap, setWritingRecap] = useState(false);
+
+  /* ------------------------------ review (S9) ------------------------------ */
+  // docs/28 S9: after the meeting, what Lucent suggested from it is reviewed
+  // here, item by item — the Review center's decisions, scoped to this meeting.
+  // A decision is committed on the server and reaches this board through the
+  // room like any other change, so two reviewers see each other's calls.
+  const [reviewBusy, setReviewBusy] = useState<string | null>(null);
+  const [reviewing, setReviewing] = useState<{
+    nodeId: string;
+    mode: "edit" | "assign";
+    label: string;
+    owner: string;
+    due: string;
+  } | null>(null);
+  const canReview = phase === "saved" && Boolean(boardId) && !readOnly;
+  const decide = async (decision: StatementDecision, done: string, key: string): Promise<void> => {
+    if (!boardId || reviewBusy) return;
+    setReviewBusy(key);
+    const error = await decideStatements(boardId, decision);
+    setReviewBusy(null);
+    if (error) {
+      notify(error, undefined, "error");
+      return;
+    }
+    setReviewing(null);
+    notify(done);
+  };
   useEffect(() => {
     setRecapWaitOver(false);
     if (!recapPending || !boardId || !shown) return;
@@ -1688,6 +1717,136 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
   };
 
   const today = todayIso();
+  /** Approve · Edit · Assign (actions) · Reject — one suggestion (docs/28 S9). */
+  const renderReview = (item: BriefItem): ReactNode => {
+    const busy = reviewBusy !== null;
+    const open = reviewing?.nodeId === item.nodeId ? reviewing : null;
+    if (open?.mode === "edit") {
+      return (
+        <form
+          className="meet-review-form"
+          onSubmit={(e) => {
+            e.preventDefault();
+            const label = open.label.trim();
+            if (label)
+              void decide(
+                { action: "edit", nodeIds: [item.nodeId], label },
+                "Saved in your words",
+                item.nodeId,
+              );
+          }}
+        >
+          <input
+            className="field-input auth-input"
+            aria-label={`What “${item.label}” should say`}
+            value={open.label}
+            onChange={(e) => setReviewing({ ...open, label: e.target.value })}
+            autoFocus
+          />
+          <Button size="sm" variant="quiet" onClick={() => setReviewing(null)}>
+            Cancel
+          </Button>
+          <Button size="sm" variant="primary" type="submit" disabled={busy || !open.label.trim()}>
+            Save
+          </Button>
+        </form>
+      );
+    }
+    if (open?.mode === "assign") {
+      const owner = open.owner.trim();
+      return (
+        <form
+          className="meet-review-form"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (!owner && !open.due) return;
+            void decide(
+              {
+                action: "assign",
+                nodeIds: [item.nodeId],
+                ...(owner ? { assignee: owner } : {}),
+                ...(open.due ? { dueDate: open.due } : {}),
+              },
+              owner ? `Assigned to ${owner}` : "Due date set",
+              item.nodeId,
+            );
+          }}
+        >
+          <input
+            className="field-input auth-input"
+            aria-label={`Owner of “${item.label}”`}
+            placeholder="Owner"
+            value={open.owner}
+            onChange={(e) => setReviewing({ ...open, owner: e.target.value })}
+            autoFocus
+          />
+          <input
+            className="field-input auth-input"
+            type="date"
+            aria-label={`Due date of “${item.label}”`}
+            value={open.due}
+            onChange={(e) => setReviewing({ ...open, due: e.target.value })}
+          />
+          <Button size="sm" variant="quiet" onClick={() => setReviewing(null)}>
+            Cancel
+          </Button>
+          <Button
+            size="sm"
+            variant="primary"
+            type="submit"
+            disabled={busy || (!owner && !open.due)}
+          >
+            Assign
+          </Button>
+        </form>
+      );
+    }
+    const start = (mode: "edit" | "assign") =>
+      setReviewing({
+        nodeId: item.nodeId,
+        mode,
+        label: item.label,
+        owner: item.assignee ?? "",
+        due: item.dueDate ?? "",
+      });
+    return (
+      <div className="meet-review" role="group" aria-label={`Review “${item.label}”`}>
+        <Button
+          size="sm"
+          variant="primary"
+          disabled={busy}
+          onClick={() =>
+            void decide({ action: "approve", nodeIds: [item.nodeId] }, "Approved", item.nodeId)
+          }
+        >
+          Approve
+        </Button>
+        <Button size="sm" variant="quiet" disabled={busy} onClick={() => start("edit")}>
+          Edit
+        </Button>
+        {item.kind === "action" && (
+          <Button size="sm" variant="quiet" disabled={busy} onClick={() => start("assign")}>
+            Assign
+          </Button>
+        )}
+        <Button
+          size="sm"
+          variant="quiet"
+          disabled={busy}
+          onClick={() =>
+            void decide(
+              { action: "reject", nodeIds: [item.nodeId] },
+              "Removed from the board — undo brings it back",
+              item.nodeId,
+            )
+          }
+        >
+          Reject
+        </Button>
+      </div>
+    );
+  };
+
   const renderItem = (item: BriefItem): ReactNode => {
     const overdue =
       item.kind === "action" &&
@@ -1706,6 +1865,7 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
             >
               {item.label}
             </span>
+            {awaitsReview(item) && <span className="trust-chip">Suggested</span>}
             {renderCitations(item)}
           </span>
           <button
@@ -1718,6 +1878,7 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
             <Ico.Arrow />
           </button>
         </div>
+        {canReview && awaitsReview(item) && renderReview(item)}
         {hasMeta && (
           <div className="meet-item-meta">
             {item.assignee && (
@@ -1819,6 +1980,17 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
             </span>
           )}
         </div>
+        {phase === "saved" && brief.total > 0 && (
+          <p className={`meet-review-count ${brief.suggested === 0 ? "done" : ""}`} role="status">
+            {brief.suggested === 0
+              ? "All reviewed"
+              : `${brief.total - brief.suggested} of ${brief.total} reviewed`}
+            {brief.suggested > 0 &&
+              (readOnly
+                ? " · only editors approve what Lucent suggested"
+                : " · approve, edit or reject what Lucent suggested")}
+          </p>
+        )}
         {empty}
         {brief.sections.map((section) => (
           <div key={section.kind} className="meet-brief-section">
@@ -1826,6 +1998,25 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
               <StatementGlyph kind={section.kind} size={13} />
               {sectionHeading(section)}
               <span className="section-count">{section.items.length}</span>
+              {canReview && section.items.filter(awaitsReview).length > 1 && (
+                <Button
+                  size="sm"
+                  variant="quiet"
+                  className="meet-approve-all"
+                  aria-label={`Approve all ${section.items.filter(awaitsReview).length} ${KIND_LABEL[section.kind].many.toLowerCase()}`}
+                  disabled={reviewBusy !== null}
+                  onClick={() => {
+                    const ids = section.items.filter(awaitsReview).map((i) => i.nodeId);
+                    void decide(
+                      { action: "approve", nodeIds: ids },
+                      `Approved ${ids.length}`,
+                      section.kind,
+                    );
+                  }}
+                >
+                  Approve all {section.items.filter(awaitsReview).length}
+                </Button>
+              )}
             </h3>
             <ul className="meet-items">{section.items.map(renderItem)}</ul>
           </div>

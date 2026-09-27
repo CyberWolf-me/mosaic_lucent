@@ -1,4 +1,4 @@
-import type { ProvenanceFields, StatementFields, Workspace } from "@lucent/core";
+import type { ProvenanceFields, StatementFields, StatementTrust, Workspace } from "@lucent/core";
 
 /**
  * The meeting brief: what a meeting DECIDED, ASSIGNED, LEFT OPEN and FLAGGED,
@@ -48,6 +48,13 @@ export interface BriefItem {
   quote?: string;
   /** Statements this one replaces — ids that still exist on the board. */
   supersedes?: string[];
+  /** How it came to be trusted (ADR 0047); absent on statements from before trust. */
+  trust?: StatementTrust;
+}
+
+/** Still waiting on a person's step (docs/28 S9): the AI suggested it and nobody decided. */
+export function awaitsReview(item: Pick<BriefItem, "trust">): boolean {
+  return item.trust === "ai-suggested";
 }
 
 export interface BriefSection {
@@ -66,6 +73,8 @@ export interface MeetingBrief {
   /** Non-empty sections only, in BRIEF_ORDER. */
   sections: BriefSection[];
   total: number;
+  /** How many of them still wait on review (docs/28 S9). */
+  suggested: number;
 }
 
 export interface BriefMeeting {
@@ -120,7 +129,13 @@ function clampRange(
  */
 export function meetingBrief(workspace: Workspace, meeting: BriefMeeting): MeetingBrief {
   const live = meeting.id === LIVE_SESSION;
-  const empty: MeetingBrief = { meetingId: meeting.id, provisional: live, sections: [], total: 0 };
+  const empty: MeetingBrief = {
+    meetingId: meeting.id,
+    provisional: live,
+    sections: [],
+    total: 0,
+    suggested: 0,
+  };
   // No transcript behind the placeholder: nothing can be attributed to it.
   if (live && !meeting.turns) return empty;
   const turnCount = meeting.turns?.length;
@@ -155,6 +170,7 @@ export function meetingBrief(workspace: Workspace, meeting: BriefMeeting): Meeti
       ...(turnRange ? { turnRange } : {}),
       ...(quote ? { quote } : {}),
       ...(supersedes.length > 0 ? { supersedes } : {}),
+      ...(statement.trust ? { trust: statement.trust } : {}),
     };
     found.push({ item, order });
   }
@@ -173,7 +189,13 @@ export function meetingBrief(workspace: Workspace, meeting: BriefMeeting): Meeti
     const items = found.filter((f) => f.item.kind === kind).map((f) => f.item);
     if (items.length > 0) sections.push({ kind, items });
   }
-  return { meetingId: meeting.id, provisional: live, sections, total: found.length };
+  return {
+    meetingId: meeting.id,
+    provisional: live,
+    sections,
+    total: found.length,
+    suggested: found.filter((f) => awaitsReview(f.item)).length,
+  };
 }
 
 /** The people who spoke, in order of first appearance — never invented. */

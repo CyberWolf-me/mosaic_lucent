@@ -108,7 +108,7 @@ against every file their row cites.
 | S6 Dock (call outside the meeting) | —           |      ✅ with F25, rejoin       |
 | S7 Capture panel                   | §22–25      |    🟡 today's `MeetingView`    |
 | S8 Ending                          | §120        |      ✅ A3.3 (server job)      |
-| S9 Review                          | §26–27, §57 | 🟡 A3.3 summary; review is A2  |
+| S9 Review                          | §26–27, §57 |    ✅ per item, on its page    |
 | S10 Past meeting                   | §121        |       ✅ A3.1 (+ rename)       |
 | S11 Follow-up                      | §57         |      🟡 pieces elsewhere       |
 | S12 Import transcript              | §64         |   🟡 route, mock only, no UI   |
@@ -648,6 +648,24 @@ V8 transport (F4).
   meeting's proposal review floated over the
   Notes tab; it now docks at the top of the side pane and shows the meeting
   lines it came from, not the internal extraction prompt.
+
+- **S9, review after a meeting — done (2026-09-28).** A past meeting's page
+  reviews what Lucent suggested from it, item by item. The Brief (the
+  statements that cite the meeting) marks each suggestion. An editor
+  approves it, rewords it (Edit), gives an action an owner and a due date
+  (Assign), or rejects it, which removes it and undo brings it back.
+  "Approve all" takes a section at once. The head says "3 of 5 reviewed",
+  then "All reviewed".
+
+  These are the Review center's decisions (`POST /api/boards/:id/review`,
+  ADR 0047), committed as the person who decided. They reach the page
+  through the room like any change, so a second reviewer's calls show at
+  once. A viewer sees the count and "only editors approve what Lucent
+  suggested". `scripts/meeting-review-check.mjs` 7/7.
+
+  Not yet: "Merge with existing" and marking duplicates and contradictions
+  (§103–104). Candidates still come from extraction, live or "Extract to
+  board"; the recap job writes the summary only.
 
 ## 9. Decisions needed
 
