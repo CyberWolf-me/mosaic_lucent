@@ -279,6 +279,51 @@ check("once it is decided, the held lines go out", released);
 await page.getByRole("button", { name: /^stop$/i }).click();
 await page.waitForTimeout(1000);
 
+// --- capture 5 (F21): a spoken command the canvas AI must clarify ---
+// The mock answers "add it…" with a question and no operations, as the real
+// prompt instructs for a request with no referent. The question used to land
+// only in the canvas chat.
+const boardNodes = async () => {
+  const res = await page.request.get(`${base}/api/boards/${boardId}`);
+  const board = res.ok() ? await res.json() : {};
+  return Object.values(board.workspace?.nodes ?? {}).map((n) => n.label ?? "");
+};
+await page.goto(`${base}/?view=meeting&board=${boardId}&voicehud=1`, {
+  waitUntil: "networkidle",
+});
+await page
+  .getByRole("button", { name: /start recording|new recording/i })
+  .first()
+  .click();
+await page.waitForFunction(
+  () => !!window.__recognizer?.onresult && window.__recognizer.results.length === 0,
+  { timeout: 10000 },
+);
+await say("Lucent, add it to the board.");
+const asked = await until(
+  async () => (await statusText()).includes("Which part of the board do you mean"),
+  20000,
+);
+check("the clarifying question reaches the meeting view", asked);
+const leaseState = () => page.evaluate(() => window.__lucentVoiceDebug?.state());
+const waiting = await until(
+  async () => (await leaseState()) === "waiting_for_user_response",
+  20000,
+);
+check("the conversation waits for the speaker's answer", waiting, await leaseState());
+await say("the payments service");
+const answered = await until(
+  async () => (await boardNodes()).some((l) => l.startsWith("add it to the board")),
+  20000,
+);
+check(
+  "the answer goes back to the canvas with the instruction it clarifies",
+  answered,
+  (await boardNodes()).filter((l) => l.startsWith("add it")).join(" | "),
+);
+await page.getByRole("button", { name: /^stop$/i }).click();
+await page.waitForTimeout(1000);
+
 if (headed) {
   console.log("\n(headed) leaving the window open 5s…");
   await page.waitForTimeout(5000);

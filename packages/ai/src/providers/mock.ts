@@ -258,11 +258,7 @@ function familyNamed(
     if (options.only && !options.only(kind)) continue;
     const m = re.exec(text);
     if (!m || (options.target && m.index !== 0)) continue;
-    if (
-      !best ||
-      m.index < best.index ||
-      (m.index === best.index && m[0].length > best.length)
-    ) {
+    if (!best || m.index < best.index || (m.index === best.index && m[0].length > best.length)) {
       best = { kind, index: m.index, length: m[0].length };
     }
   }
@@ -273,9 +269,7 @@ const isRegionable = (kind: DiagramKind) => getRepresentation(kind).regionable;
 
 /** Every id a batch creates (nodes and groups), to test a prefix for collisions. */
 function createdIds(ops: readonly Operation[]): string[] {
-  return ops.flatMap((op) =>
-    op.op === "CREATE_NODE" || op.op === "CREATE_GROUP" ? [op.id] : [],
-  );
+  return ops.flatMap((op) => (op.op === "CREATE_NODE" || op.op === "CREATE_GROUP" ? [op.id] : []));
 }
 
 /**
@@ -409,6 +403,21 @@ function capitalize(text: string): string {
 }
 
 const scripts: Script[] = [
+  {
+    // The clarifying reply (docs/26's locked philosophy; docs/28 F21): a
+    // request with no referent — "add it", "put that there" — is answered
+    // with a question and NO operations, as the real prompt instructs,
+    // instead of a guessed diagram. A request that already carries its
+    // answer ("add it — the payments service", how the meeting's voice loop
+    // sends one back) is not asked again.
+    match: (m) =>
+      /^\s*(?:add|put|move|place|connect|draw)\s+(?:it|that|this|them|those)\b/i.test(m) &&
+      !m.includes(" — "),
+    build: () => ({
+      operations: [],
+      explanation: "Which part of the board do you mean, and where should it go?",
+    }),
+  },
   {
     // Stage D3: the ordering script — "can't start until X" becomes a typed
     // dependency edge, DIRECTION PINNED (the waiting work is the source,

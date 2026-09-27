@@ -278,7 +278,9 @@ export type GenPhase = "understanding" | "constructing" | "validating" | "applyi
 export type SendOutcome =
   | { outcome: "applied"; ops: number }
   | { outcome: "proposed"; ops: number }
-  | { outcome: "answered" }
+  /** A zero-op reply — often a clarifying question — carried as `text` so a
+   *  caller outside the chat (the meeting's voice loop) can relay it. */
+  | { outcome: "answered"; text: string }
   | { outcome: "rejected" }
   | { outcome: "failed"; error: string }
   | { outcome: "busy" }
@@ -1527,7 +1529,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           // the user's message and the answer simply disappeared (found live:
           // a "move the monitoring stack" answer was gone after a reload).
           persist(workspace, conversation, projectName);
-          return { outcome: "answered" };
+          return { outcome: "answered", text: explanation };
         }
         const errors = validateOperations(workspace, result.operations);
         if (errors.length > 0) {
@@ -1685,7 +1687,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           ];
           setChat(conversation);
           persist(workspace, conversation, projectName);
-          return { outcome: "answered" };
+          return { outcome: "answered", text: explanation };
         } else {
           const next = applyStamped();
           const conversation: ChatEntry[] = [

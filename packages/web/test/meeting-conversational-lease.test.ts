@@ -407,4 +407,66 @@ describe("Conversational Lease Engine — Edge Cases", () => {
       }
     });
   });
+
+  // docs/28 F21: the canvas AI asked a clarifying question about a spoken
+  // command; the SAME speaker's next turn — any words — is the answer.
+  describe("Clarifying a spoken command", () => {
+    const ask = (at = T0) => {
+      const cmd = manager.evaluateTurn(
+        { speaker: "Alice", text: "Lucent, add a database to the architecture" },
+        at,
+      );
+      expect(cmd.action).toBe("direct_mutation");
+      manager.onAiStartResponding();
+      manager.onClarificationAsked(
+        "add a database to the architecture",
+        "Which database?",
+        at + 2_000,
+      );
+    };
+
+    it("waits for the speaker's answer, whatever its words", () => {
+      ask();
+      expect(manager.getState()).toBe("waiting_for_user_response");
+      const res = manager.evaluateTurn(
+        { speaker: "Alice", text: "the managed one, below the API" },
+        T0 + 5_000,
+      );
+      expect(res).toEqual({
+        action: "clarification_answer",
+        instruction: "add a database to the architecture",
+        answer: "the managed one, below the API",
+        speakerId: "Alice",
+      });
+      // Answered once: the next turn is an ordinary follow-up again.
+      expect(manager.getLease()?.clarifying).toBeUndefined();
+    });
+
+    it("another speaker, a dismissal, or the window closing ends it without an answer", () => {
+      ask();
+      expect(manager.evaluateTurn({ speaker: "Bob", text: "Postgres" }, T0 + 5_000).action).toBe(
+        "ignore",
+      );
+      expect(manager.getState()).toBe("dormant");
+
+      ask(T0 + 60_000);
+      expect(
+        manager.evaluateTurn({ speaker: "Alice", text: "Thanks, Lucent" }, T0 + 63_000).action,
+      ).toBe("dismiss");
+
+      ask(T0 + 120_000);
+      const late = manager.evaluateTurn({ speaker: "Alice", text: "Postgres" }, T0 + 140_000);
+      expect(late).toEqual({ action: "ignore", reason: "lease_expired" });
+    });
+
+    it("a new wake phrase starts a new request instead of answering", () => {
+      ask();
+      const res = manager.evaluateTurn(
+        { speaker: "Alice", text: "Lucent, what is our uptime?" },
+        T0 + 5_000,
+      );
+      expect(res.action).toBe("direct_invoke");
+      expect(manager.getLease()?.clarifying).toBeUndefined();
+    });
+  });
 });

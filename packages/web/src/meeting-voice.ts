@@ -194,6 +194,12 @@ export interface ConversationalLease {
   lastQuestion: string;
   lastAnswer: string;
   lastAnswerEndedWithQuestion: boolean;
+  /**
+   * A spoken canvas command the canvas AI answered with a question instead of
+   * guessing (docs/28 F21): the lease waits for this speaker's answer, and
+   * the answer goes back to the canvas together with this instruction.
+   */
+  clarifying?: string;
 }
 
 export type TurnEvaluationResult =
@@ -206,6 +212,8 @@ export type TurnEvaluationResult =
       kind: "continuation" | "clarification" | "direct_answer";
     }
   | { action: "followup_mutation"; instruction: string; speakerId: string }
+  /** The answer to a clarifying question about `instruction` (docs/28 F21). */
+  | { action: "clarification_answer"; instruction: string; answer: string; speakerId: string }
   | { action: "dismiss"; reason: string }
   | {
       action: "ignore";
@@ -312,6 +320,31 @@ export class ConversationalLeaseManager {
       expiresAt: now + this.leaseDurationMs,
       lastAnswer: answerText,
       lastAnswerEndedWithQuestion: endsWithQuestion,
+    };
+    this.emitChange();
+  }
+
+  /**
+   * The canvas AI asked a clarifying question about a spoken command, and it
+   * has been shown and spoken (docs/28 F21). The follow-up window opens from
+   * now, waiting for THIS speaker's answer — any turn of theirs, not only the
+   * short fixed vocabulary `isDirectAnswer` knows, since "below the API" is
+   * as good an answer as "Postgres".
+   */
+  onClarificationAsked(instruction: string, question: string, now: number = Date.now()): void {
+    if (!this.lease) {
+      this.state = "dormant";
+      this.emitChange();
+      return;
+    }
+    this.state = "waiting_for_user_response";
+    this.lease = {
+      ...this.lease,
+      state: "waiting_for_user_response",
+      expiresAt: now + this.leaseDurationMs,
+      lastAnswer: question,
+      lastAnswerEndedWithQuestion: true,
+      clarifying: instruction,
     };
     this.emitChange();
   }
@@ -438,6 +471,19 @@ export class ConversationalLeaseManager {
     if (addressesOtherPerson(text, this.knownTeammates)) {
       this.dismissLease();
       return { action: "ignore", reason: "unrelated" };
+    }
+
+    // 8a. The answer to a pending clarification (docs/28 F21): the same
+    // speaker's next turn, whatever its words — the checks above already
+    // let expiry, another speaker, a dismissal and a teammate's name end it.
+    if (this.lease.state === "waiting_for_user_response" && this.lease.clarifying) {
+      const instruction = this.lease.clarifying;
+      this.lease.clarifying = undefined;
+      this.lease.turnCount += 1;
+      this.lease.lastQuestion = text;
+      this.state = "invoked";
+      this.emitChange();
+      return { action: "clarification_answer", instruction, answer: text, speakerId };
     }
 
     // 8. Direct answer check (when waiting for user response)

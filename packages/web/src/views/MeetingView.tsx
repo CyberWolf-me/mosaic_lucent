@@ -222,6 +222,10 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
     proposal,
     readOnly,
   } = useWorkspace();
+  // The capture's callbacks are armed once per capture; they reach the
+  // CURRENT send through this ref (docs/28 F13's leftover, F21).
+  const sendRef = useRef(send);
+  sendRef.current = send;
   // docs/28 F16: the server keeps ONE pending proposal per board, and a new one
   // supersedes it. A batch sent while a proposal awaits review would silently
   // replace it — the last batch's candidates, or the user's own canvas
@@ -581,6 +585,39 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
       }
     };
 
+    // A spoken canvas command (docs/28 F21). When the canvas AI asks instead
+    // of guessing — a zero-op "answered" reply — the question used to land
+    // only in the canvas chat. Now it is shown as a card and spoken, and the
+    // lease waits for THIS speaker's answer (clarification_answer above).
+    // `sendRef`, not `send`: this closure is armed once per capture, and the
+    // send of that render would work from the board as it was at Start.
+    const runVoiceCommand = async (speaker: string, instruction: string): Promise<void> => {
+      notify("Applying voice instruction to canvas…");
+      const result = await sendRef.current(instruction);
+      if (result.outcome !== "answered") return;
+      const reply = result.text.trim();
+      if (!reply) return;
+      setVoiceAnswers((prev) => [...prev, voiceAnswerCard(instruction, { answer: reply })]);
+      const manager = leaseManagerRef.current;
+      // "Thanks, Lucent" while the canvas was thinking: show it, don't speak.
+      if (manager.getState() === "dormant") return;
+      manager.onAiStartResponding();
+      const listen = (): void => {
+        if (reply.endsWith("?")) manager.onClarificationAsked(instruction, reply);
+        else manager.onTtsDone(reply);
+      };
+      if (voiceMutedRef.current) {
+        listen();
+        return;
+      }
+      playbackRef.current?.stop();
+      const spoken = await speakAnswer(reply);
+      playbackRef.current = spoken.playback;
+      if (spoken.reason) notify(`Voice: ${spoken.reason}`);
+      if (spoken.playback) void spoken.playback.done.then(listen, listen);
+      else listen();
+    };
+
     // One callbacks object feeding both surfaces: providers that speak
     // events go through it (final → onFinal below), so the stream and the
     // legacy path append byte-identical turns.
@@ -632,8 +669,14 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
             evaluation.action === "direct_mutation" ||
             evaluation.action === "followup_mutation"
           ) {
-            notify("Applying voice instruction to canvas…");
-            void send(evaluation.instruction);
+            void runVoiceCommand(evaluation.speakerId, evaluation.instruction);
+          } else if (evaluation.action === "clarification_answer") {
+            // The answer goes back WITH the instruction it clarifies, so the
+            // request stands on its own (docs/28 F21).
+            void runVoiceCommand(
+              evaluation.speakerId,
+              `${evaluation.instruction} — ${evaluation.answer}`,
+            );
           } else if (
             evaluation.action === "direct_invoke" ||
             evaluation.action === "followup_query"

@@ -29,7 +29,9 @@ export interface VoiceHudSnapshot {
 }
 
 /** A coarse, human label for what the loop is doing right now. */
-export function voiceMacroState(s: VoiceHudSnapshot): "SPEAKING" | "PROCESSING" | "LISTENING" | "IDLE" {
+export function voiceMacroState(
+  s: VoiceHudSnapshot,
+): "SPEAKING" | "PROCESSING" | "LISTENING" | "IDLE" {
   if (s.ttsSpeaking || s.conversation === "ai_responding") return "SPEAKING";
   if (s.conversation === "invoked") return "PROCESSING";
   if (s.recording) return "LISTENING";
@@ -48,7 +50,13 @@ function Row({ label, value }: { label: string; value: string }) {
 export function VoiceStateHud({ snapshot }: { snapshot: VoiceHudSnapshot }) {
   const macro = voiceMacroState(snapshot);
   const macroColor =
-    macro === "SPEAKING" ? "#ff8f4f" : macro === "PROCESSING" ? "#ffcf4f" : macro === "LISTENING" ? "#43c59e" : "#8a8a94";
+    macro === "SPEAKING"
+      ? "#ff8f4f"
+      : macro === "PROCESSING"
+        ? "#ffcf4f"
+        : macro === "LISTENING"
+          ? "#43c59e"
+          : "#8a8a94";
   return (
     <aside
       className="voice-hud"
@@ -72,17 +80,34 @@ export function VoiceStateHud({ snapshot }: { snapshot: VoiceHudSnapshot }) {
         pointerEvents: "none",
       }}
     >
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          marginBottom: 6,
+        }}
+      >
         <span style={{ letterSpacing: 0.5, color: "#8a8a94" }}>VOICE STATE</span>
         <span style={{ color: macroColor, fontWeight: 700 }} data-testid="voice-macro">
           {macro}
         </span>
       </div>
-      <div style={{ borderTop: "1px solid rgba(255,255,255,0.10)", paddingTop: 6, display: "grid", gap: 2 }}>
+      <div
+        style={{
+          borderTop: "1px solid rgba(255,255,255,0.10)",
+          paddingTop: 6,
+          display: "grid",
+          gap: 2,
+        }}
+      >
         <Row label="STT" value={snapshot.recording ? snapshot.sttStatus.toUpperCase() : "OFF"} />
         <Row label="TTS" value={snapshot.ttsSpeaking ? "SPEAKING" : "IDLE"} />
         <Row label="Lease" value={snapshot.conversation.toUpperCase()} />
-        <Row label="Window" value={snapshot.leaseRemainingSec > 0 ? `${snapshot.leaseRemainingSec}s` : "—"} />
+        <Row
+          label="Window"
+          value={snapshot.leaseRemainingSec > 0 ? `${snapshot.leaseRemainingSec}s` : "—"}
+        />
         <Row label="Speaker" value={snapshot.leaseSpeaker ?? snapshot.lastSpeaker ?? "—"} />
         <Row label="Turn" value={String(snapshot.turnCount)} />
       </div>
