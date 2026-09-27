@@ -442,6 +442,15 @@ function ConvoTurn({
         {!isUser && entry.citations && entry.citations.length > 0 && (
           <CitationList citations={entry.citations} onCitation={onCitation} />
         )}
+        {/* ADR 0048: how well the answer is supported — counted from the
+            evidence that survived, never the model's own estimate. */}
+        {!isUser && entry.confidence && (
+          <div className={`answer-confidence is-${entry.confidence.level}`}>
+            {entry.confidence.level === "none"
+              ? "No evidence — nothing on this board supports this answer."
+              : entry.confidence.reason}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -497,9 +506,29 @@ function CitationList({
   citations: NonNullable<ChatEntry["citations"]>;
   onCitation?: (citation: AskCitation & { turnRange?: [number, number] }) => void;
 }) {
+  const { revealNodes } = useWorkspace();
   if (!onCitation) return null;
+  const nodes = citations.filter((c) => c.kind === "node").map((c) => c.id);
   return (
     <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
+      {nodes.length > 1 && (
+        <button
+          className="citation-chip"
+          onClick={() => revealNodes(nodes)}
+          title="Select every node this answer cites, on the canvas"
+          style={{
+            fontSize: 11,
+            fontFamily: "var(--font-mono)",
+            padding: "3px 9px",
+            borderRadius: 999,
+            border: "1px solid var(--amber-2)",
+            background: "transparent",
+            color: "var(--ink-1)",
+          }}
+        >
+          Show all {nodes.length} on canvas
+        </button>
+      )}
       {citations.map((c, i) => (
         <button
           key={i}

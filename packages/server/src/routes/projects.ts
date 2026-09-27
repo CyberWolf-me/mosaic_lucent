@@ -96,10 +96,15 @@ export const registerProjectRoutes: RegisterRoutes = (router, s) => {
   } = s;
 
   /** The project if this caller may see it in this org, else undefined. */
-  async function visible(orgId: string, projectId: string, userId: string) {
+  async function visible(
+    orgId: string,
+    projectId: string,
+    userId: string,
+    req?: Parameters<typeof readableBoards>[2],
+  ) {
     const project = await projects.get(projectId);
     if (!project || project.orgId !== orgId) return undefined;
-    const { member, boards } = await readableBoards(userId, orgId);
+    const { member, boards } = await readableBoards(userId, orgId, req);
     const readable = new Map(boards.map((b) => [b.id, b] as const));
     if (!member && !project.boardIds.some((id) => readable.has(id))) return undefined;
     return { project, readable, member };
@@ -133,7 +138,7 @@ export const registerProjectRoutes: RegisterRoutes = (router, s) => {
     const orgId = ctx.param("id");
     const url = new URL(req.url ?? "/", "http://localhost");
     const includeArchived = url.searchParams.get("archived") === "1";
-    const { member, boards } = await readableBoards(user.id, orgId);
+    const { member, boards } = await readableBoards(user.id, orgId, req);
     const readable = new Map(boards.map((b) => [b.id, b] as const));
     const all = await projects.listForOrg(orgId, { includeArchived });
     const shown = member ? all : all.filter((p) => p.boardIds.some((id) => readable.has(id)));
@@ -207,7 +212,7 @@ export const registerProjectRoutes: RegisterRoutes = (router, s) => {
     const user = await requireUser(req, res);
     if (!user) return;
     const orgId = ctx.param("id");
-    const found = await visible(orgId, ctx.param("pid"), user.id);
+    const found = await visible(orgId, ctx.param("pid"), user.id, req);
     if (!found) return send(res, 404, { error: "project not found" });
     const { project, readable } = found;
     const boards = project.boardIds.map((id) => readable.get(id)).filter((b) => b !== undefined);

@@ -4,6 +4,12 @@ import { useWorkspace } from "../workspace.js";
 import type { WorkspaceState } from "../workspace.js";
 import type { Workspace } from "@lucent/core";
 import { searchBoard, type BoardSearchHit, type BoardSearchResponse } from "../boards.js";
+import { searchWorkspace, type WorkspaceHit } from "../workspaceAsk.js";
+import { getCurrentOrgId } from "../orgs.js";
+import { hasSession } from "../session.js";
+
+/** Hits from the rest of the workspace the palette shows. */
+const WORKSPACE_HITS = 8;
 import { resolveLocale, t } from "@lucent/i18n";
 import { listProjects } from "../persistence.js";
 import { frameEntries, sendCanvasCommand } from "../canvasCommands.js";
@@ -59,6 +65,7 @@ export function CommandOverlay({
     onCitation,
     convertBoard,
     readOnly,
+    openBoard,
   } = useWorkspace() as unknown as {
     setView: WorkspaceState["setView"];
     send: WorkspaceState["send"];
@@ -73,6 +80,7 @@ export function CommandOverlay({
     onCitation: WorkspaceState["onCitation"];
     convertBoard: WorkspaceState["convertBoard"];
     readOnly: boolean;
+    openBoard: WorkspaceState["openBoard"];
   };
   const [q, setQ] = useState("");
   const [active, setActive] = useState(0);
@@ -80,6 +88,11 @@ export function CommandOverlay({
   const [search, setSearch] = useState<BoardSearchResponse | null>(null);
   /** True after a server search failure/offline — surfaced inline, not silent. */
   const [searchError, setSearchError] = useState(false);
+  /**
+   * ADR 0048: the same query across the rest of the workspace — every board,
+   * meeting and comment this person can open, beyond the one in front of them.
+   */
+  const [elsewhere, setElsewhere] = useState<WorkspaceHit[]>([]);
   /** The ask-bridge composer: the input becomes the question field. */
   const [askMode, setAskMode] = useState(false);
   const [askText, setAskText] = useState("");
@@ -373,6 +386,44 @@ export function CommandOverlay({
     };
   }, [boardId, searchQuery]);
 
+  // The workspace, debounced like the board search; the open board's own hits
+  // are already above, so this group is everything else.
+  const workspaceQuery = hasSession() ? q.trim() : "";
+  useEffect(() => {
+    const orgId = getCurrentOrgId();
+    if (!orgId || workspaceQuery.length < SEARCH_MIN_QUERY) {
+      setElsewhere([]);
+      return;
+    }
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      void searchWorkspace(orgId, workspaceQuery).then((hits) => {
+        if (cancelled || !hits) return;
+        setElsewhere(hits.filter((h) => h.boardId !== boardId).slice(0, WORKSPACE_HITS));
+      });
+    }, SEARCH_DEBOUNCE_MS);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [workspaceQuery, boardId]);
+
+  /** A workspace hit opens where it lives: its board, its node, its meeting turn. */
+  const runElsewhere = async (hit: WorkspaceHit): Promise<void> => {
+    onClose();
+    const params = new URLSearchParams(window.location.search);
+    if (hit.kind === "node") params.set("reveal", hit.id);
+    if (hit.kind === "comment") params.set("reveal", hit.targetId);
+    if (hit.kind === "turn" || hit.kind === "meeting") {
+      params.set("meeting", hit.meetingId);
+      params.set("board", hit.boardId);
+      if (hit.kind === "turn") params.set("turn", String(hit.turnIndex));
+    }
+    window.history.replaceState(null, "", `?${params.toString()}`);
+    if (!(await openBoard(hit.boardId))) return;
+    if (hit.kind === "turn" || hit.kind === "meeting") setView("meeting");
+  };
+
   const serverHits = useMemo(
     () => (search && !useLocalScan ? search.results : []),
     [search, useLocalScan],
@@ -385,9 +436,12 @@ export function CommandOverlay({
     () => ({
       ...buildResults(items, boardHits, q),
       search: grouped,
-      total: buildResults(items, boardHits, q).total + (useLocalScan ? 0 : grouped.total),
+      total:
+        buildResults(items, boardHits, q).total +
+        (useLocalScan ? 0 : grouped.total) +
+        elsewhere.length,
     }),
-    [items, boardHits, q, grouped, useLocalScan],
+    [items, boardHits, q, grouped, useLocalScan, elsewhere],
   );
   useEffect(() => {
     setActive(0);
@@ -482,6 +536,12 @@ export function CommandOverlay({
         runSearchHit(hit);
         return;
       }
+    }
+    const boardCount = useLocalScan ? results.board.length : grouped.total;
+    const far = elsewhere[index - itemCount - boardCount];
+    if (far) {
+      void runElsewhere(far);
+      return;
     }
     if (q.trim()) {
       setView("canvas");
@@ -756,6 +816,48 @@ export function CommandOverlay({
                 grouped.revisions.map((hit, i) =>
                   searchRow(hit, searchOffset + grouped.nodes.length + grouped.turns.length + i),
                 )}
+              {elsewhere.length > 0 && header("Elsewhere in your workspace")}
+              {elsewhere.map((hit, i) => {
+                const index =
+                  searchOffset + (useLocalScan ? results.board.length : grouped.total) + i;
+                const title =
+                  hit.kind === "node"
+                    ? hit.label
+                    : hit.kind === "turn"
+                      ? `${hit.speaker}: ${hit.snippet}`
+                      : hit.kind === "comment"
+                        ? hit.snippet
+                        : hit.kind === "meeting"
+                          ? hit.title
+                          : hit.boardName;
+                const where =
+                  hit.kind === "turn"
+                    ? `${hit.meetingTitle ?? "Meeting"} · ${hit.boardName}`
+                    : hit.kind === "comment"
+                      ? `Comment · ${hit.boardName}`
+                      : hit.kind === "board"
+                        ? "Board"
+                        : hit.boardName;
+                return (
+                  <button
+                    key={`far-${hit.kind}-${hit.boardId}-${i}`}
+                    onClick={() => void runElsewhere(hit)}
+                    onMouseEnter={() => setActive(index)}
+                    style={entryStyle(index === active)}
+                  >
+                    {iconBox(
+                      hit.kind === "turn" || hit.kind === "meeting" ? (
+                        <Ico.Journey />
+                      ) : hit.kind === "comment" ? (
+                        <Ico.Comment />
+                      ) : (
+                        <Ico.Grid />
+                      ),
+                    )}
+                    {labelBlock(title, where)}
+                  </button>
+                );
+              })}
               {!useLocalScan && searchError && (
                 <div
                   className="mono"

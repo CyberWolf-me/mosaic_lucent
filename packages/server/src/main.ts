@@ -59,6 +59,8 @@ import { PostgresProjectStore } from "./store/pg-projects.js";
 import { PostgresStatementIndexStore } from "./store/pg-statement-index.js";
 import { InMemoryAiRunStore } from "./aiRuns.js";
 import { PostgresAiRunStore } from "./store/pg-ai-runs.js";
+import { InMemoryThreadStore } from "./threads.js";
+import { PostgresThreadStore } from "./store/pg-threads.js";
 import { InMemoryMeetingNotesStore } from "./meetingNotes.js";
 import { InMemoryProposalStore } from "./proposals.js";
 import { PostgresProposalStore } from "./store/pg-proposals.js";
@@ -172,6 +174,7 @@ function makeStores(databaseUrl: string | undefined): {
   projects: import("./projects.js").ProjectStore;
   statementIndex: import("./statementIndex.js").StatementIndexStore;
   aiRuns: import("./aiRuns.js").AiRunStore;
+  threads: import("./threads.js").ThreadStore;
   /** F1: SSO connections + domain claims, on the same store-per-database rule. */
   ssoStore: import("./ssoStore.js").SsoStore;
   /** Stage B3: review-gate proposals — in-memory for dev, Postgres when set. */
@@ -214,6 +217,7 @@ function makeStores(databaseUrl: string | undefined): {
       projects: new InMemoryProjectStore(),
       statementIndex: new InMemoryStatementIndexStore(),
       aiRuns: new InMemoryAiRunStore(),
+      threads: new InMemoryThreadStore(),
       ssoStore: new InMemorySsoStore(),
       integrations: {
         store: new InMemoryIntegrationStore(),
@@ -263,6 +267,7 @@ function makeStores(databaseUrl: string | undefined): {
     projects: new PostgresProjectStore(target),
     statementIndex: new PostgresStatementIndexStore(target),
     aiRuns: new PostgresAiRunStore(target),
+    threads: new PostgresThreadStore(target),
     ssoStore: new PostgresSsoStore(target),
     proposals: new PostgresProposalStore(target),
     assetStore: new PostgresAssetStore(target),
@@ -629,6 +634,7 @@ const { server, realtime, writeMeetingRecap } = createApp({
   projects: stores.projects,
   statementIndex: stores.statementIndex,
   aiRuns: stores.aiRuns,
+  threads: stores.threads,
   // docs/28 A3.3: ending a meeting announces MeetingEnded here.
   outbox,
   // docs/28 A3.2: host powers in the board call, over the same LiveKit project.

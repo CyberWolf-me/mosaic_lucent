@@ -8,6 +8,7 @@ import { actorNamesFor, loadVisibleLog } from "../historyView.js";
 import { buildAnswerRequest } from "../askContext.js";
 import { visibleMeetings } from "../meetingsWindow.js";
 import type { MeetingStore } from "../meetings.js";
+import { answerConfidence } from "../confidence.js";
 
 /**
  * The ask route (Stage C1):
@@ -67,6 +68,9 @@ interface CitationView {
   why?: string;
   /** For meetings: the turn range the linked proposal recorded, if any. */
   turnRange?: [number, number];
+  /** Workspace answers (ADR 0048): the board the evidence lives on. */
+  boardId?: string;
+  boardName?: string;
 }
 
 export const registerAskRoutes: RegisterRoutes = (router, s) => {
@@ -282,6 +286,18 @@ export const registerAskRoutes: RegisterRoutes = (router, s) => {
       }
     }
 
+    // ADR 0048: how well supported, from the evidence that survived.
+    const confidence = answerConfidence(
+      citations.map((c) => ({
+        kind: c.kind,
+        key: c.id,
+        label: c.label,
+        ...(c.kind === "node" && guard.board.workspace.nodes[c.id]?.statement
+          ? { statementStatus: guard.board.workspace.nodes[c.id]!.statement!.status }
+          : {}),
+      })),
+    );
+
     // Metered on success only, same contract as generate. The mode tag keeps
     // the usage rows answerable by surface without a second usage kind.
     meterUsage(billTo, "ai.generation", 1, {
@@ -319,6 +335,7 @@ export const registerAskRoutes: RegisterRoutes = (router, s) => {
         {
           answer: result.answer,
           citations,
+          confidence,
           ...(warnings.length ? { warnings } : {}),
           // The honest-window numbers, so the client can render the same
           // "you see the latest N" statement the model was told to make.

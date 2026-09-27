@@ -6,6 +6,8 @@ import { listBoards, type BoardSummary } from "../boards.js";
 import { loadOrgs } from "../orgs.js";
 import { listWorkspaceMeetings, meetingName, type MeetingSummary } from "../meetings.js";
 import { listOrgProjects, loadWorkspaceIntelligence, type OrgProject } from "../orgProjects.js";
+import { ScopedAsk } from "../ui/ScopedAsk.js";
+import { threadScope } from "../workspaceAsk.js";
 import {
   busiestBoard,
   dueLabel,
@@ -149,10 +151,13 @@ export function HomeView({ onOpenSettings }: { onOpenSettings: (section?: string
   // from the index, the workspace's meetings, and its active projects. Each
   // part fails on its own — Home still answers from what it has.
   const [org, setOrg] = useState<{
+    id: string | null;
     indexed: Map<string, IndexedPulseRow[]> | null;
     meetings: MeetingSummary[];
     projects: OrgProject[];
-  }>({ indexed: null, meetings: [], projects: [] });
+  }>({ id: null, indexed: null, meetings: [], projects: [] });
+  /** A question Home's composer asked of the whole workspace (ADR 0048). */
+  const [workspaceQuestion, setWorkspaceQuestion] = useState<string | null>(null);
   useEffect(() => {
     if (!hasSession()) return;
     let cancelled = false;
@@ -176,7 +181,7 @@ export function HomeView({ onOpenSettings }: { onOpenSettings: (section?: string
             indexed.set(row.boardId, list);
           }
         }
-        setOrg({ indexed, meetings: meetings ?? [], projects: projects ?? [] });
+        setOrg({ id: current.id, indexed, meetings: meetings ?? [], projects: projects ?? [] });
       } catch {
         /* offline: local boards still answer */
       }
@@ -377,6 +382,12 @@ export function HomeView({ onOpenSettings }: { onOpenSettings: (section?: string
 
   const runAsk = (question: string) => {
     setDraft("");
+    // Signed in, Home's question is about the work, not one board: it asks
+    // the whole workspace, and the answer appears here (ADR 0048).
+    if (org.id) {
+      setWorkspaceQuestion(question);
+      return;
+    }
     // The canvas's Ask mode owns the answer — and the honest refusal on a
     // local board, whose history is not on the server to be asked.
     setPillMode("ask");
@@ -398,13 +409,15 @@ export function HomeView({ onOpenSettings }: { onOpenSettings: (section?: string
   const hint = busy
     ? "Lucent is still working on your last request."
     : !text
-      ? boardId
-        ? `Describe something new to start a board, or ask a question about “${boardLabel}”.`
-        : "Describe something new to start a board. Questions are answered from a shared board’s history."
+      ? org.id
+        ? "Describe something new to start a board, or ask about anything across your workspace."
+        : boardId
+          ? `Describe something new to start a board, or ask a question about “${boardLabel}”.`
+          : `Describe something new to start a board, or ask about “${boardLabel}”.`
       : asQuestion
-        ? boardId
-          ? `Enter asks Lucent about “${boardLabel}”.`
-          : `Enter asks about “${boardLabel}” — it’s a local board, so Lucent will ask you to share it first.`
+        ? org.id
+          ? "Enter asks Lucent across your workspace — every board, meeting and decision you can open."
+          : `Enter asks Lucent about “${boardLabel}”.`
         : "Enter starts a new board from this description.";
 
   /* ------------------------------- tiles -------------------------------- */
@@ -464,6 +477,19 @@ export function HomeView({ onOpenSettings }: { onOpenSettings: (section?: string
           }
         />
 
+        {org.id && workspaceQuestion && (
+          <section className="home-ask" aria-label="Ask your workspace">
+            <SectionLabel>Across your workspace</SectionLabel>
+            <ScopedAsk
+              orgId={org.id}
+              scope={{}}
+              threadKey={threadScope.workspace(org.id)}
+              placeholder="Ask a follow-up about your work…"
+              ask={workspaceQuestion}
+            />
+          </section>
+        )}
+
         <form className="home-composer" onSubmit={onSubmit}>
           <div className="home-composer-row">
             <span className="home-composer-mark" aria-hidden>
@@ -482,7 +508,9 @@ export function HomeView({ onOpenSettings }: { onOpenSettings: (section?: string
               size="sm"
               disabled={!text || busy}
               onClick={() => runAsk(text)}
-              title={`Ask Lucent about “${boardLabel}”`}
+              title={
+                org.id ? "Ask Lucent across your workspace" : `Ask Lucent about “${boardLabel}”`
+              }
             >
               Ask
             </Button>

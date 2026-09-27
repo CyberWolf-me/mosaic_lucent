@@ -1774,3 +1774,46 @@ export const aiRuns = pgTable(
 );
 
 export type DbAiRun = typeof aiRuns.$inferSelect;
+
+/**
+ * Conversation threads (docs/26 J7, ADR 0048): one person's conversation on
+ * one scope ("board:…", "meeting:…:…", "project:…:…", "workspace:…"),
+ * private to them. Messages keep the latest THREAD_KEEP per thread.
+ */
+export const threads = pgTable(
+  "threads",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    orgId: text("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    scopeKey: text("scope_key").notNull(),
+    createdAt: bigint("created_at", { mode: "number" }).notNull(),
+    updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
+  },
+  (t) => ({
+    ownerScope: uniqueIndex("threads_user_scope_idx").on(t.userId, t.scopeKey),
+  }),
+);
+
+export const threadMessages = pgTable(
+  "thread_messages",
+  {
+    id: text("id").primaryKey(),
+    threadId: text("thread_id")
+      .notNull()
+      .references(() => threads.id, { onDelete: "cascade" }),
+    role: text("role").notNull(),
+    text: text("text").notNull(),
+    reply: text("reply"),
+    citations: jsonb("citations"),
+    surface: text("surface").notNull(),
+    at: bigint("at", { mode: "number" }).notNull(),
+  },
+  (t) => ({
+    threadAt: index("thread_messages_thread_idx").on(t.threadId, t.at),
+  }),
+);

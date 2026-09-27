@@ -23,6 +23,7 @@ import {
   type VoiceSession,
 } from "../stt/index.js";
 import { askLucent, type AskCitation } from "../boards.js";
+import { appendThread, loadThread, threadScope } from "../workspaceAsk.js";
 import {
   ConversationalLeaseManager,
   voiceAnswerCard,
@@ -313,6 +314,38 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
   // The live transcript id lives in state (renders) and in a ref (the capture
   // callbacks below read it without re-arming the STT provider).
   const liveMeetingIdRef = useRef<string | null>(null);
+  // J7 (ADR 0048): this meeting's conversation is the person's thread on it —
+  // spoken and typed questions share it, so "and what about PostgreSQL?"
+  // after a spoken answer continues the same context. Read through refs: the
+  // voice callbacks are armed once.
+  const shownMeetingIdRef = useRef<string | null>(null);
+  const meetingThread = useRef<{
+    key: string | null;
+    turns: Array<{ role: "user" | "ai"; text: string }>;
+  }>({
+    key: null,
+    turns: [],
+  });
+  const askInThread = async (board: string, q: string, surface: "voice" | "ask") => {
+    const meeting = shownMeetingIdRef.current ?? liveMeetingIdRef.current;
+    const key = meeting ? threadScope.meeting(board, meeting) : threadScope.board(board);
+    if (meetingThread.current.key !== key) {
+      const loaded = (await loadThread(key)) ?? [];
+      meetingThread.current = { key, turns: loaded.map((m) => ({ role: m.role, text: m.text })) };
+    }
+    const result = await askLucent(board, q, meetingThread.current.turns.slice(-8));
+    if (!("error" in result)) {
+      meetingThread.current.turns.push(
+        { role: "user", text: q },
+        { role: "ai", text: result.answer },
+      );
+      void appendThread(key, [
+        { role: "user", text: q, surface, at: Date.now() },
+        { role: "ai", text: result.answer, surface, at: Date.now(), citations: result.citations },
+      ]);
+    }
+    return result;
+  };
   // P1-MT-001 / docs/28 F13: capture durability independent of extraction.
   // One per capture, built at Start; it reads refs, never this render's state,
   // because the STT callbacks that feed it are armed once. The board is read
@@ -638,7 +671,7 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
       leaseManagerRef.current.onAiStartResponding();
       try {
         const q = question.trim();
-        const result = await askLucent(targetBoardId, q);
+        const result = await askInThread(targetBoardId, q, "voice");
         const card = voiceAnswerCard(q, result);
         setVoiceAnswers((prev) => [
           ...prev,
@@ -1124,6 +1157,7 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
   };
 
   const shown = selectedMeeting;
+  shownMeetingIdRef.current = shown?.id ?? null;
   // A saved meeting reads as corrected (docs/28 S7); the live list has none yet.
   const displayTurns: ReadTurn[] = useMemo(
     () => (shown ? correctedTurns(shown) : turns),
@@ -1386,7 +1420,7 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
     answerInFlight.current = true;
     setAskBusy(true);
     try {
-      const result = await askLucent(target, q);
+      const result = await askInThread(target, q, "ask");
       const card = voiceAnswerCard(q, result);
       setVoiceAnswers((prev) => [
         ...prev,

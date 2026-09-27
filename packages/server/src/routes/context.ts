@@ -117,6 +117,8 @@ export interface RouteServices {
   readonly aiRuns: import("../aiRuns.js").AiRunStore;
   /** Write a run; resolves null (and logs) rather than failing the request. */
   recordRun(run: import("../aiRuns.js").NewAiRun): Promise<string | null>;
+  /** docs/26 J7 (ADR 0048): one person's conversation per scope. */
+  readonly threads: import("../threads.js").ThreadStore;
   /**
    * The boards a user can read in an org — every board for a member, only
    * the boards shared with them for an outside collaborator. Every
@@ -126,6 +128,8 @@ export interface RouteServices {
   readableBoards(
     userId: string,
     orgId: string,
+    /** The request, when it may come from an agent (MCP): agent-refusing boards drop out. */
+    req?: IncomingMessage,
   ): Promise<{ member: boolean; boards: StoredBoard[] }>;
   /**
    * docs/24 Phase E: external meeting connectors (Zoom/Meet/Teams → turns).

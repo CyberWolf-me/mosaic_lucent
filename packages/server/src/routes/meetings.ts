@@ -31,6 +31,7 @@ export const registerMeetingRoutes: RegisterRoutes = (router, s) => {
     boardStore,
     writeMeetingRecap,
     announceMeetingEnded,
+    outboundRefusal,
   } = s;
 
   router.post("/api/boards/:id/meetings", async (ctx) => {
@@ -333,6 +334,18 @@ export const registerMeetingRoutes: RegisterRoutes = (router, s) => {
       "/api/boards/:id/meetings/:mid",
     );
     if (!guard.ok) return;
+    // docs/23 S1: an agent (MCP) reads a meeting only where the board lets
+    // agents read (ADR 0048's get_meeting).
+    if (req.headers["x-lucent-client"] === "mcp") {
+      const refusal = await outboundRefusal(guard.board, "agent");
+      if (refusal) {
+        return send(res, 403, {
+          error: refusal.error,
+          classification: refusal.classification,
+          boundary: refusal.boundary,
+        });
+      }
+    }
     if (!meetings) return send(res, 503, { error: "meeting transcripts are not configured" });
     const row = await meetings.get(boardId, mid);
     if (!row) {

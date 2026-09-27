@@ -54,3 +54,4 @@ back to it.
 | [0045](0045-a-meeting-is-its-record.md)                           | A meeting is its transcript record; J1's fields arrive as columns with the features that use them (docs/26 J1, A3.1)               | Accepted |
 | [0046](0046-projects-link-boards-intelligence-is-an-index.md)     | Projects link boards and grant nothing; intelligence is a rebuildable index (docs/26 J2/J3)                                        | Accepted |
 | [0047](0047-trust-is-stamped-where-the-actor-is-known.md)         | Trust is stamped where the actor is known; the model never sets it (docs/26 J5/J6)                                                 | Accepted |
+| [0048](0048-scoped-reads-and-per-person-threads.md)               | Search and Ask read scopes the caller can open; a conversation is a person's thread (J4/J7)                                        | Accepted |

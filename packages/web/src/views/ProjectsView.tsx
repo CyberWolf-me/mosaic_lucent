@@ -29,6 +29,8 @@ import {
   type WorkspaceStatement,
 } from "../orgProjects.js";
 import { MeetingRow } from "./MeetingsView.js";
+import { ScopedAsk } from "../ui/ScopedAsk.js";
+import { threadScope } from "../workspaceAsk.js";
 import { StatementGlyph } from "../ui/StatementGlyph.js";
 
 /**
@@ -594,6 +596,15 @@ function ProjectDetail({
           <StatTile label="Decisions" value={stats.decisions} tone="decision" />
           <StatTile label="Open risks" value={stats.openRisks} tone="risk" />
         </div>
+      )}
+
+      {project.boards.length > 0 && (
+        <ScopedAsk
+          orgId={org.id}
+          scope={{ project: project.id }}
+          threadKey={threadScope.project(org.id, project.id)}
+          placeholder={`Ask about ${project.name} — why, who, what's still open…`}
+        />
       )}
 
       <section className="boards-notif-group" aria-label="Boards">

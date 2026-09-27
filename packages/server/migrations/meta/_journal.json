@@ -267,6 +267,13 @@
       "when": 1790515714682,
       "tag": "0037_salty_energizer",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1790519233420,
+      "tag": "0038_lowly_jean_grey",
+      "breakpoints": true
     }
   ]
 }

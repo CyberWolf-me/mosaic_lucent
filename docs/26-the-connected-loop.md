@@ -637,6 +637,42 @@ a much better product — not rewriting the layout engine.
   - Not yet: `decision.superseded` (statements have no author to tell),
     per-item review of the end-of-meeting candidates (the recap still writes
     a summary, not candidates), and trust on nodes that aren't statements.
+- **A4 — done (2026-09-27), per ADR 0048.** "Why are we doing this?" answers
+  with its evidence, from wherever it is asked.
+  - _J4, scoped reads._ Every workspace read resolves a scope — workspace,
+    project, board, meeting, `since`/`until` — through the boards the caller
+    can open. Search (`GET /api/orgs/:id/search`) runs the board retriever
+    over the whole scope: statements and nodes, meeting titles and turns (as
+    corrected), comments, board names — each hit carrying its board. Ask
+    (`POST /api/orgs/:id/ask`) builds the same answer request from the index,
+    the scope's meetings (windowed by history depth, per board) and those
+    hits, cites `board:node`, and leaves any board whose policy keeps content
+    from AI out of the prompt, named as excluded. A board in the browser can
+    be asked too (`POST /api/ask/local`) — it used to be refused.
+  - _Confidence._ Every answer — board, scoped, local — carries it, counted
+    from the citations that survived: none (shown as "No evidence"), low,
+    medium, high; a cited statement since superseded caps it at low.
+  - _J7, threads._ One private thread per person per scope (`threads`,
+    `thread_messages`, migration 0038, RLS). A shared board's chat loads from
+    and appends to its thread; the meeting's spoken and typed questions share
+    the meeting's thread (they used to send no history, so a spoken
+    follow-up lost its context); Home and project Ask write to theirs.
+  - _Where it shows._ Home's composer asks the whole workspace and answers in
+    place; a project page asks its boards; ⌘K adds "Elsewhere in your
+    workspace"; an answer's evidence shows together on the canvas ("Show all
+    N"), selected and framed.
+  - _MCP v2._ `search_workspace`, `list_decisions`, `get_meeting`,
+    `get_project`, over the same routes. Workspace reads from an MCP client
+    leave out boards whose policy refuses agents — the board read's boundary,
+    now on every workspace read.
+  - Evidence: server `scoped-ask.test.ts` (confidence, search across boards
+    and time, scoped and local Ask, threads' privacy) and `pg-threads`
+    (Postgres), MCP `remote.test.ts` (the four tools, and a restricted board
+    kept out of an agent's search), and `scripts/ask-everywhere-check.mjs` in
+    the running app (11/11).
+  - Not yet: embeddings (keyword first, per ADR 0024), a Postgres full-text
+    index (not needed at today's sizes), and "Ask → canvas views" beyond
+    selection (a generated view of the cited architecture).
 
 ## 12. Decisions (locked 2026-09-24)
 

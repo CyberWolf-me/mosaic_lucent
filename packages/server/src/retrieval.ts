@@ -151,7 +151,7 @@ function sharedPrefix(a: string, b: string): number {
  *    on either side (price ↔ pricing; the tail cap keeps "monetization"
  *    away from "monetary").
  */
-function tokensMatch(queryToken: string, corpusToken: string): boolean {
+export function tokensMatch(queryToken: string, corpusToken: string): boolean {
   const q = foldToken(queryToken);
   const c = foldToken(corpusToken);
   if (q === c) return true;
@@ -171,7 +171,7 @@ function tokensMatch(queryToken: string, corpusToken: string): boolean {
  * list is a tuning knob, not a C4 dependency), capped at 12 so a pasted
  * paragraph does not scan the corpus 800 times.
  */
-function queryTokensOf(query: string): string[] {
+export function queryTokensOf(query: string): string[] {
   const seen = new Set<string>();
   const tokens: string[] = [];
   for (const token of normalizeText(query).split(/\s+/)) {
@@ -351,7 +351,7 @@ export function buildSearchCorpus(input: SearchCorpusInput): SearchCorpus {
  * the middle of a 400-character turn still shows the words that matched
  * instead of the turn's opening "so, anyway".
  */
-function snippetAround(text: string, anchor: number, max: number): string {
+export function snippetAround(text: string, anchor: number, max: number): string {
   if (text.length <= max) return text;
   const half = Math.floor(max / 2) - 1;
   let start = Math.max(0, anchor - half);
@@ -363,7 +363,7 @@ function snippetAround(text: string, anchor: number, max: number): string {
 }
 
 /** Where in the raw (lowercased) text a matched token first appears. */
-function anchorIndex(rawText: string, token: string): number {
+export function anchorIndex(rawText: string, token: string): number {
   const direct = rawText.indexOf(token);
   if (direct >= 0) return direct;
   const folded = foldToken(token);

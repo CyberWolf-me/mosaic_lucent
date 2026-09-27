@@ -289,3 +289,98 @@ describe("RemoteBoardSession against a real server (E3/R1)", () => {
     ).toEqual({ baseUrl: "http://127.0.0.1:4387", token: "t", boardId: "brd_x" });
   });
 });
+
+describe("MCP v2: reads across the workspace (docs/26 A4, ADR 0048)", () => {
+  let h: Harness;
+
+  afterEach(async () => {
+    if (h) await h.close();
+  });
+
+  it("search_workspace, list_decisions and get_project answer from the board's workspace", async () => {
+    h = await harness();
+    const { token, boardId } = await ownerWithBoard(h);
+    const session = new RemoteBoardSession({ baseUrl: h.base, token, boardId });
+    await session.callTool("apply_canvas_operations", {
+      operations: [
+        { op: "CREATE_NODE", id: "pg", nodeType: "process", label: "Use Postgres for billing" },
+        { op: "SET_STATEMENT", id: "pg", statement: { kind: "decision", status: "resolved" } },
+      ] as Operation[],
+    });
+
+    const found = await session.callTool("search_workspace", { query: "postgres" });
+    expect(found.isError).toBeUndefined();
+    const results = JSON.parse(found.content[0]!.text).results as Array<{
+      kind: string;
+      id?: string;
+      boardId: string;
+    }>;
+    expect(results[0]).toMatchObject({ kind: "node", id: "pg", boardId });
+
+    const decisions = await session.callTool("list_decisions", { status: "resolved" });
+    const statements = JSON.parse(decisions.content[0]!.text).statements as Array<{
+      id: string;
+      trust?: string;
+    }>;
+    // Written by an agent: a suggestion until a person reviews it (ADR 0047).
+    expect(statements).toEqual([expect.objectContaining({ id: "pg", trust: "ai-suggested" })]);
+
+    const me = await h.api("/api/auth/me", { token });
+    const orgId = (me.body.memberships as Array<{ orgId: string }>)[0]!.orgId;
+    const project = await h.api(`/api/orgs/${orgId}/projects`, {
+      method: "POST",
+      token,
+      body: JSON.stringify({ name: "Billing", boardIds: [boardId] }),
+    });
+    const read = await session.callTool("get_project", { projectId: project.body.id });
+    expect(JSON.parse(read.content[0]!.text).project).toMatchObject({ name: "Billing" });
+
+    const missing = await session.callTool("get_meeting", { meetingId: "mtg_nope" });
+    expect(missing.isError).toBe(true);
+  });
+
+  it("a restricted board stays out of an agent's workspace reads", async () => {
+    h = await harness();
+    const { token, boardId } = await ownerWithBoard(h);
+    const session = new RemoteBoardSession({ baseUrl: h.base, token, boardId });
+    await session.callTool("apply_canvas_operations", {
+      operations: [
+        { op: "CREATE_NODE", id: "secret", nodeType: "process", label: "Postgres secret plan" },
+      ],
+    });
+    // A second, restricted board in the same workspace.
+    const me = await h.api("/api/auth/me", { token });
+    const orgId = (me.body.memberships as Array<{ orgId: string }>)[0]!.orgId;
+    const restricted = await h.api("/api/boards", {
+      method: "POST",
+      token,
+      body: JSON.stringify({
+        name: "Restricted",
+        orgId,
+        classification: "restricted",
+        workspace: {
+          ...createWorkspace(),
+          nodes: {
+            r: {
+              id: "r",
+              nodeType: "process",
+              label: "Postgres restricted thing",
+              position: { x: 0, y: 0 },
+            },
+          },
+        },
+      }),
+    });
+    expect([200, 201]).toContain(restricted.status);
+    const found = await session.callTool("search_workspace", { query: "postgres" });
+    const results = JSON.parse(found.content[0]!.text).results as Array<{ boardId: string }>;
+    expect(results.some((r) => r.boardId === restricted.body.id)).toBe(false);
+    // A person's own search still sees both boards.
+    const human = await h.api(`/api/orgs/${orgId}/search?q=postgres`, { token });
+    expect(
+      (human.body.results as Array<{ boardId: string }>).some(
+        (r) => r.boardId === restricted.body.id,
+      ),
+    ).toBe(true);
+  });
+});

@@ -486,6 +486,8 @@ export interface AskCitation {
 export interface AskResponse {
   answer: string;
   citations: AskCitation[];
+  /** ADR 0048: how well supported, from the citations that survived. */
+  confidence?: import("./workspaceAsk.js").Confidence;
   warnings?: Array<{ citation: { kind: string; id: string }; reason: string }>;
   historyDepth: number | null;
   hasMore: boolean;

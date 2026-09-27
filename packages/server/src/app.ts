@@ -164,6 +164,9 @@ import { TOOL_NAME } from "@lucent/core";
 import { registerProjectRoutes } from "./routes/projects.js";
 import { registerIntelligenceRoutes } from "./routes/intelligence.js";
 import { registerReviewRoutes } from "./routes/review.js";
+import { registerScopedAskRoutes } from "./routes/scopedAsk.js";
+import { registerThreadRoutes } from "./routes/threads.js";
+import { InMemoryThreadStore } from "./threads.js";
 import { InMemoryStatementIndexStore, StatementIndexer } from "./statementIndex.js";
 import { openPortal, startCheckout, type BillingIntegration } from "./billing/service.js";
 
@@ -302,6 +305,8 @@ export interface AppDeps {
   statementIndex?: import("./statementIndex.js").StatementIndexStore;
   /** docs/26 J6 (ADR 0047): AI run records. Defaults to in-memory. */
   aiRuns?: import("./aiRuns.js").AiRunStore;
+  /** docs/26 J7 (ADR 0048): conversation threads. Defaults to in-memory. */
+  threads?: import("./threads.js").ThreadStore;
   /**
    * P2's outbox. When present, ending a meeting announces `MeetingEnded`
    * (docs/28 A3.3) and main.ts's consumer queues its summary. Absent in most
@@ -466,6 +471,9 @@ const ROUTE_SEGMENTS = new Set([
   "rebuild",
   "review",
   "ai-runs",
+  "search",
+  "local",
+  "threads",
 ]);
 
 /**
@@ -2248,7 +2256,8 @@ export function createApp(deps: AppDeps): App {
     intelligence,
     aiRuns,
     recordRun,
-    readableBoards: async (userId, orgId) => {
+    threads: deps.threads ?? new InMemoryThreadStore(),
+    readableBoards: async (userId, orgId, req) => {
       // The two scopes of GET /api/boards (ADR 0045, 0046): an org member
       // reads every board in the org; an outside collaborator only the
       // boards shared with them.
@@ -2256,6 +2265,16 @@ export function createApp(deps: AppDeps): App {
       const boards = member
         ? await boardStore.listForOrg(orgId)
         : await boardStore.listForUser(orgId, userId);
+      // docs/23 S1 on workspace reads (ADR 0048): an MCP client is an agent,
+      // and a board whose policy keeps its content away from agents is left
+      // out of anything it reads — the same boundary the board read applies.
+      if (req?.headers["x-lucent-client"] === "mcp") {
+        const open: typeof boards = [];
+        for (const board of boards) {
+          if (!(await outboundRefusal(board, "agent"))) open.push(board);
+        }
+        return { member, boards: open };
+      }
       return { member, boards };
     },
     ssoStore,
@@ -2345,6 +2364,8 @@ export function createApp(deps: AppDeps): App {
   registerProjectRoutes(router, services);
   registerIntelligenceRoutes(router, services);
   registerReviewRoutes(router, services);
+  registerScopedAskRoutes(router, services);
+  registerThreadRoutes(router, services);
   registerThemesRoutes(router, services);
   registerProposalRoutes(router, services);
   registerSsoRoutes(router, services);

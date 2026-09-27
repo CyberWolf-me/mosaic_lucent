@@ -184,6 +184,8 @@ export interface ChatEntry {
    * entry without re-parsing the text.
    */
   historyTruncated?: boolean;
+  /** How well an Ask answer is supported (ADR 0048), computed on the server. */
+  confidence?: { level: "none" | "low" | "medium" | "high"; reason: string };
   /**
    * On a generation-failure `error` entry: the user's original prompt, so
    * the entry renders a one-click "try again" affordance (found live,

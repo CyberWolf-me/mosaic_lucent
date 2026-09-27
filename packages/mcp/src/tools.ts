@@ -92,6 +92,70 @@ export function listTools(): McpTool[] {
         "groups as subgraphs — for a README, ticket or doc.",
       inputSchema: { type: "object", properties: {}, additionalProperties: false },
     },
+    // docs/26 A4 (ADR 0048): reads across the workspace the board belongs to —
+    // only what the token's user can open, and never a board whose policy
+    // keeps its content away from agents.
+    {
+      name: "search_workspace",
+      description:
+        "Search the workspace this board belongs to: statements and nodes, meeting " +
+        "titles and what was said, comments, and board names. Keyword search; each " +
+        "hit names the board it lives on. Narrow by project, board, or a time range.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          query: { type: "string", maxLength: 200 },
+          project: { type: "string", description: "A project id (get_project)." },
+          board: { type: "string", description: "A board id." },
+          since: { type: "string", description: "ISO date; only what was said or written since." },
+          until: { type: "string", description: "ISO date; only what was said or written until." },
+        },
+        required: ["query"],
+        additionalProperties: false,
+      },
+    },
+    {
+      name: "list_decisions",
+      description:
+        "List the decisions across the workspace (from its intelligence index): what " +
+        "was decided, its status, the board, and the meeting it came from. Use status " +
+        '"resolved" for decisions made, "open" for ones pending.',
+      inputSchema: {
+        type: "object",
+        properties: {
+          status: { type: "string", enum: ["open", "resolved", "rejected", "superseded"] },
+          project: { type: "string", description: "A project id, to narrow to its boards." },
+        },
+        additionalProperties: false,
+      },
+    },
+    {
+      name: "get_meeting",
+      description:
+        "Read one meeting: its title, when it ran, its summary (each line cited to the " +
+        "turns), and what was said. On this board unless boardId names another.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          meetingId: { type: "string" },
+          boardId: { type: "string" },
+        },
+        required: ["meetingId"],
+        additionalProperties: false,
+      },
+    },
+    {
+      name: "get_project",
+      description:
+        "Read a project: its objective and status, its boards, its meetings, and the " +
+        "decisions, questions, actions and risks on its boards.",
+      inputSchema: {
+        type: "object",
+        properties: { projectId: { type: "string" } },
+        required: ["projectId"],
+        additionalProperties: false,
+      },
+    },
     {
       name: "reset_board",
       description: "Clear the board to an empty workspace. Destructive and not undoable here.",
@@ -284,6 +348,14 @@ export class BoardSession {
       }
       case "export_mermaid":
         return text(boardToMermaid(this.ws));
+      case "search_workspace":
+      case "list_decisions":
+      case "get_meeting":
+      case "get_project":
+        // Workspace reads need the workspace: a Lucent server.
+        return errorResult(
+          `"${name}" reads the workspace on a Lucent server — set LUCENT_MCP_URL, LUCENT_MCP_TOKEN and LUCENT_MCP_BOARD.`,
+        );
       case "reset_board": {
         const kind = typeof args.diagramKind === "string" ? args.diagramKind : undefined;
         this.ws = createWorkspace(

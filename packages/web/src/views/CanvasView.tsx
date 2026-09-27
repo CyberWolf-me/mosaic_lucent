@@ -2075,9 +2075,32 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
     if (!reveal) return;
     params.delete("reveal");
     window.history.replaceState(null, "", `?${params.toString()}`);
-    const node = workspace.nodes[reveal];
+    // ADR 0048: an answer's evidence, shown together — several ids select
+    // them all and frame them; one id selects and centres it, as before.
+    const ids = reveal.split(",").filter((id) => workspace.nodes[id]);
+    if (ids.length > 1) {
+      setSelectedShapes(new Set());
+      setSelectedNodes(new Set(ids));
+      setSelected(null);
+      const boxes = ids.map((id) => {
+        const n = workspace.nodes[id]!;
+        return {
+          x: n.position?.x ?? 0,
+          y: n.position?.y ?? 0,
+          width: n.size?.width ?? 160,
+          height: n.size?.height ?? 64,
+        };
+      });
+      const minX = Math.min(...boxes.map((b) => b.x));
+      const minY = Math.min(...boxes.map((b) => b.y));
+      const maxX = Math.max(...boxes.map((b) => b.x + b.width));
+      const maxY = Math.max(...boxes.map((b) => b.y + b.height));
+      controls.current?.fitBounds({ x: minX, y: minY, width: maxX - minX, height: maxY - minY });
+      return;
+    }
+    const node = ids[0] ? workspace.nodes[ids[0]] : undefined;
     if (node) {
-      selectNode(reveal, false);
+      selectNode(node.id, false);
       controls.current?.focusOn((node.position?.x ?? 0) + 80, (node.position?.y ?? 0) + 40);
     }
   }, [workspace.nodes, selectNode]);

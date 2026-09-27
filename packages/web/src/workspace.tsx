@@ -58,8 +58,15 @@ import {
   type BoardRole,
   type ServerProposal,
 } from "./boards.js";
+import {
+  appendThread,
+  askLocalBoard,
+  clearThread,
+  loadThread,
+  threadScope,
+} from "./workspaceAsk.js";
 import { loadOrgs } from "./orgs.js";
-import { getSessionUser } from "./session.js";
+import { getSessionUser, hasSession } from "./session.js";
 import {
   archiveDecision,
   getSharedBoardId,
@@ -410,6 +417,8 @@ export interface WorkspaceState {
     id: string;
     turnRange?: [number, number];
   }) => void;
+  /** ADR 0048: select and frame several nodes on the canvas (an answer's evidence). */
+  revealNodes: (ids: string[]) => void;
   /**
    * docs/27 D2: open a client-computed batch (a sorted sticky wall) as a
    * proposal. False when there is nothing valid to propose or the board is
@@ -1840,18 +1849,6 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     async (question: string): Promise<string | null> => {
       const text = question.trim();
       if (!text || busy) return null;
-      if (!boardId) {
-        const refusal =
-          "Ask works on shared boards — their history lives on the server. Share this board first, then ask.";
-        const conversation: ChatEntry[] = [
-          ...chat,
-          { role: "user", text },
-          { role: "error", text: refusal },
-        ];
-        setChat(conversation);
-        persist(workspace, conversation, projectName);
-        return refusal;
-      }
       const withUser: ChatEntry[] = [...chat, { role: "user", text }];
       setChat(withUser);
       setBusy(true);
@@ -1866,7 +1863,12 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
             role: c.role === "user" ? ("user" as const) : ("ai" as const),
             text: c.text,
           }));
-        const result = await askLucent(boardId, text, turns);
+        // ADR 0048: a board that lives only in this browser is asked from
+        // what it holds (no history or meetings to cite); a shared board from
+        // the server's full context.
+        const result = boardId
+          ? await askLucent(boardId, text, turns)
+          : await askLocalBoard(text, workspace, projectName, turns);
         if ("error" in result) {
           const conversation: ChatEntry[] = [...withUser, { role: "error", text: result.error }];
           setChat(conversation);
@@ -1892,7 +1894,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
                   ),
                 }
               : {}),
-            ...(result.hasMore ? { historyTruncated: true } : {}),
+            ...("hasMore" in result && result.hasMore ? { historyTruncated: true } : {}),
+            ...(result.confidence
+              ? { confidence: { level: result.confidence.level, reason: result.confidence.reason } }
+              : {}),
           },
         ];
         setChat(conversation);
@@ -1912,6 +1917,73 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     },
     [busy, boardId, chat, workspace, persist, projectName],
   );
+
+  // J7 (ADR 0048): a shared board's conversation is this person's thread on
+  // the server, so it follows them to another browser and the meeting's
+  // spoken questions share its context. It loads when the board opens (what
+  // this browser held goes up the first time), each new user or Lucent turn
+  // is appended, and clearing the chat clears the thread. Local boards keep
+  // their chat in the browser: there is no server scope to hold it.
+  const threadSync = useRef<{ boardId: string | null; sent: number; loading: boolean }>({
+    boardId: null,
+    sent: 0,
+    loading: false,
+  });
+  useEffect(() => {
+    if (!boardId || !hasSession()) {
+      threadSync.current = { boardId: null, sent: 0, loading: false };
+      return;
+    }
+    if (threadSync.current.boardId === boardId) return;
+    threadSync.current = { boardId, sent: 0, loading: true };
+    let cancelled = false;
+    void loadThread(threadScope.board(boardId)).then((messages) => {
+      if (cancelled || threadSync.current.boardId !== boardId) return;
+      if (messages && messages.length > 0) {
+        const entries: ChatEntry[] = messages.map((m) => ({
+          role: m.role,
+          text: m.text,
+          ...(m.reply ? { reply: m.reply } : {}),
+          ...(Array.isArray(m.citations) && m.citations.length
+            ? { citations: m.citations as NonNullable<ChatEntry["citations"]> }
+            : {}),
+        }));
+        threadSync.current = { boardId, sent: entries.length, loading: false };
+        setChat(entries);
+      } else {
+        threadSync.current = { boardId, sent: 0, loading: false };
+        // Nothing on the server yet: the append effect sends what's here.
+        setChat((c) => [...c]);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [boardId]);
+  useEffect(() => {
+    const sync = threadSync.current;
+    if (!boardId || sync.boardId !== boardId || sync.loading) return;
+    const said = chat.filter((c) => c.role === "user" || c.role === "ai");
+    if (said.length < sync.sent) {
+      sync.sent = said.length;
+      if (said.length === 0) void clearThread(threadScope.board(boardId));
+      return;
+    }
+    const fresh = said.slice(sync.sent);
+    if (fresh.length === 0) return;
+    sync.sent = said.length;
+    void appendThread(
+      threadScope.board(boardId),
+      fresh.map((c) => ({
+        role: c.role as "user" | "ai",
+        text: c.text,
+        surface: c.citations ? ("ask" as const) : ("chat" as const),
+        at: Date.now(),
+        ...(c.reply && c.reply !== c.text ? { reply: c.reply } : {}),
+        ...(c.citations?.length ? { citations: c.citations } : {}),
+      })),
+    );
+  }, [chat, boardId]);
 
   /**
    * Citation navigation (Stage C1). The views own the actual navigation
@@ -1951,6 +2023,18 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       params.set("rev", citation.id);
       window.history.replaceState(null, "", `?${params.toString()}`);
       setView("history");
+    },
+    [setView],
+  );
+
+  /** ADR 0048: show an answer's evidence together — the canvas selects and frames them all. */
+  const revealNodes = useCallback(
+    (ids: string[]) => {
+      if (ids.length === 0) return;
+      const params = new URLSearchParams(window.location.search);
+      params.set("reveal", ids.join(","));
+      window.history.replaceState(null, "", `?${params.toString()}`);
+      setView("canvas");
     },
     [setView],
   );
@@ -2494,6 +2578,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     pillMode,
     setPillMode,
     onCitation,
+    revealNodes,
     applyProposal,
     cancelProposal,
     undo,

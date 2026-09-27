@@ -66,7 +66,7 @@ export const registerIntelligenceRoutes: RegisterRoutes = (router, s) => {
     const limit =
       Number.isInteger(requested) && requested > 0 ? Math.min(requested, MAX_LIMIT) : DEFAULT_LIMIT;
 
-    const { member, boards } = await readableBoards(user.id, orgId);
+    const { member, boards } = await readableBoards(user.id, orgId, req);
     let scope = boards;
     const projectId = url.searchParams.get("project");
     if (projectId) {

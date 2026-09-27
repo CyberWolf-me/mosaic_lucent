@@ -93,6 +93,14 @@ export class RemoteBoardSession {
         return this.importMermaid(args);
       case "export_mermaid":
         return this.exportMermaid();
+      case "search_workspace":
+        return this.searchWorkspace(args);
+      case "list_decisions":
+        return this.listDecisions(args);
+      case "get_meeting":
+        return this.getMeeting(args);
+      case "get_project":
+        return this.getProject(args);
       case "reset_board":
         // No server route destroys a board's contents, and inventing one
         // for parity with the local session would be a footgun an agent can
@@ -303,6 +311,82 @@ export class RemoteBoardSession {
       },
       ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
     });
+  }
+
+  /** The org this board belongs to — the workspace the read tools search. */
+  private orgId: string | null = null;
+  private async org(): Promise<string | ToolResult> {
+    if (this.orgId) return this.orgId;
+    const res = await this.request("GET", `/api/boards/${this.opts.boardId}`);
+    if (!res.ok) return this.failure(`Couldn't read board ${this.opts.boardId} (${res.status}).`);
+    const board = (await res.json()) as { orgId?: string };
+    if (!board.orgId) return this.failure("The board didn't say which workspace it belongs to.");
+    this.orgId = board.orgId;
+    return board.orgId;
+  }
+
+  /** GET a workspace route and hand back its JSON as the tool's text. */
+  private async read(path: string, what: string): Promise<ToolResult> {
+    const res = await this.request("GET", path);
+    if (res.status === 404)
+      return this.failure(`${what} not found (or not visible to this token).`);
+    if (!res.ok) {
+      const detail = (await res.json().catch(() => null)) as { error?: string } | null;
+      return this.failure(
+        `${what} failed (${res.status})${detail?.error ? `: ${detail.error}` : ""}.`,
+      );
+    }
+    return { content: [{ type: "text", text: JSON.stringify(await res.json(), null, 2) }] };
+  }
+
+  private str(args: Record<string, unknown>, key: string): string | undefined {
+    const v = args[key];
+    return typeof v === "string" && v.trim() ? v.trim() : undefined;
+  }
+
+  private async searchWorkspace(args: Record<string, unknown>): Promise<ToolResult> {
+    const query = this.str(args, "query");
+    if (!query) return this.failure("search_workspace needs a query.");
+    const org = await this.org();
+    if (typeof org !== "string") return org;
+    const params = new URLSearchParams({ q: query.slice(0, 200) });
+    for (const key of ["project", "board", "since", "until"]) {
+      const v = this.str(args, key);
+      if (v) params.set(key, v);
+    }
+    return this.read(`/api/orgs/${encodeURIComponent(org)}/search?${params}`, "Search");
+  }
+
+  private async listDecisions(args: Record<string, unknown>): Promise<ToolResult> {
+    const org = await this.org();
+    if (typeof org !== "string") return org;
+    const params = new URLSearchParams({ kind: "decision" });
+    const status = this.str(args, "status");
+    const project = this.str(args, "project");
+    if (status) params.set("status", status);
+    if (project) params.set("project", project);
+    return this.read(`/api/orgs/${encodeURIComponent(org)}/intelligence?${params}`, "Decisions");
+  }
+
+  private async getMeeting(args: Record<string, unknown>): Promise<ToolResult> {
+    const meetingId = this.str(args, "meetingId");
+    if (!meetingId) return this.failure("get_meeting needs a meetingId.");
+    const boardId = this.str(args, "boardId") ?? this.opts.boardId;
+    return this.read(
+      `/api/boards/${encodeURIComponent(boardId)}/meetings/${encodeURIComponent(meetingId)}`,
+      "Meeting",
+    );
+  }
+
+  private async getProject(args: Record<string, unknown>): Promise<ToolResult> {
+    const projectId = this.str(args, "projectId");
+    if (!projectId) return this.failure("get_project needs a projectId.");
+    const org = await this.org();
+    if (typeof org !== "string") return org;
+    return this.read(
+      `/api/orgs/${encodeURIComponent(org)}/projects/${encodeURIComponent(projectId)}`,
+      "Project",
+    );
   }
 
   private failure(message: string): ToolResult {
