@@ -141,6 +141,15 @@ export interface NotificationPayloads {
     meetingId: string;
     title: string;
   };
+  /** Someone sent you what you own from a meeting (docs/28 S11). */
+  "meeting.followup": {
+    boardId: string;
+    boardName: string;
+    meetingId: string;
+    title: string;
+    byName: string;
+    items: Array<{ nodeId: string; label: string; dueDate: string | null }>;
+  };
   /** Work on a board names you as its owner (ADR 0047). */
   "work.assigned": {
     boardId: string;
@@ -200,6 +209,7 @@ export const NOTIFICATION_KINDS = [
   "meeting.invited",
   "meeting.cancelled",
   "meeting.summarized",
+  "meeting.followup",
   "work.assigned",
   "work.blocked",
   "work.overdue",
@@ -422,6 +432,24 @@ export const NOTIFICATION_CATALOGUE: {
     compose: (p) => ({
       title: `"${p.title}" has its summary`,
       body: `On ${p.boardName}: what was decided and what's next, each line cited.`,
+      link: meetingPath(p.boardId, p.meetingId),
+    }),
+  },
+  "meeting.followup": {
+    label: "Meeting follow-ups",
+    description: "When someone sends you the actions you own from a meeting.",
+    // A person addressing you about your commitments, like an assignment.
+    defaults: { inApp: "on", email: "on" },
+    compose: (p) => ({
+      title:
+        p.items.length === 1
+          ? `${p.byName} sent you your action from "${p.title}"`
+          : `${p.byName} sent you your ${p.items.length} actions from "${p.title}"`,
+      body: p.items
+        .slice(0, 5)
+        .map((i) => (i.dueDate ? `${i.label} (due ${i.dueDate})` : i.label))
+        .concat(p.items.length > 5 ? [`and ${p.items.length - 5} more`] : [])
+        .join(" · "),
       link: meetingPath(p.boardId, p.meetingId),
     }),
   },

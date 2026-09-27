@@ -122,6 +122,7 @@ import { registerNotificationRoutes } from "./routes/notifications.js";
 import { registerInviteRoutes } from "./routes/invites.js";
 import { registerBoardOpsRoutes } from "./routes/boardOps.js";
 import { registerMeetingRoutes } from "./routes/meetings.js";
+import { registerMeetingFollowUpRoutes } from "./routes/meetingFollowUp.js";
 import { registerMeetingScheduleRoutes } from "./routes/meetingSchedule.js";
 import { registerMeetingNotesRoutes } from "./routes/meetingNotes.js";
 import { registerThemesRoutes } from "./routes/themes.js";
@@ -2670,6 +2671,7 @@ export function createApp(deps: AppDeps): App {
   // Before the meeting routes: /meetings/invitable must win over /meetings/:mid.
   registerMeetingScheduleRoutes(router, services);
   registerMeetingRoutes(router, services);
+  registerMeetingFollowUpRoutes(router, services);
   registerMeetingNotesRoutes(router, services);
   registerProjectRoutes(router, services);
   registerIntelligenceRoutes(router, services);

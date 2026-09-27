@@ -492,6 +492,61 @@ html[data-theme="dark"] .meet-past {
   margin-left: auto;
   font-family: var(--font-sans);
 }
+/* Follow-up once reviewed (docs/28 S11) */
+.meet-offers {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.meet-offer {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 12px 0;
+  border-bottom: 1px solid oklch(from var(--paper-4) l c h / 0.4);
+}
+.meet-offer:last-child {
+  border-bottom: 0;
+}
+.meet-offer-text {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+  gap: 2px;
+}
+.meet-offer-title {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--ink-0);
+}
+.meet-offer-body {
+  font-size: 12.5px;
+  color: var(--ink-2);
+}
+.meet-offer-note {
+  margin: 6px 0 0;
+  font-size: 12.5px;
+}
+.meet-offer-note.ok {
+  color: var(--moss);
+}
+.meet-offer-note.error {
+  color: var(--madder);
+}
+.meet-offer-actions {
+  display: flex;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+@media (max-width: 560px) {
+  .meet-offer {
+    flex-direction: column;
+    gap: 8px;
+  }
+}
 .meet-owner {
   display: inline-flex;
   align-items: center;

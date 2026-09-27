@@ -110,7 +110,7 @@ against every file their row cites.
 | S8 Ending                          | §120        |      ✅ A3.3 (server job)      |
 | S9 Review                          | §26–27, §57 |    ✅ per item, on its page    |
 | S10 Past meeting                   | §121        |       ✅ A3.1 (+ rename)       |
-| S11 Follow-up                      | §57         |      🟡 pieces elsewhere       |
+| S11 Follow-up                      | §57         |  ✅ offers once it's reviewed  |
 | S12 Import transcript              | §64         |   🟡 route, mock only, no UI   |
 
 ## 4. State machines every screen shares
@@ -666,6 +666,28 @@ V8 transport (F4).
   Not yet: "Merge with existing" and marking duplicates and contradictions
   (§103–104). Candidates still come from extraction, live or "Extract to
   board"; the recap job writes the summary only.
+
+- **S11, follow-up — done (2026-09-28).** Once everything from a meeting is
+  reviewed, its page offers what comes next. Each offer goes through a path
+  that already has its own gate:
+
+  - **Create tasks:** the meeting's open actions, through the external-action
+    preview of each connected tracker (Linear, Jira, GitHub). With none
+    connected, it points to Admin.
+  - **Schedule the next meeting:** S2, titled "Follow-up: …", inviting the
+    people who spoke when they can be matched by name. Its page (S3) opens
+    with what's still open.
+  - **Notify owners:** a new notification kind, `meeting.followup` (in-app
+    and email). Each owner gets one notification listing what they own from
+    the meeting (`POST …/meetings/:mid/notify-owners`). An owner is matched
+    exactly to one person who can open the board, as `work.assigned` is.
+    The page names any owner who matched no one, and the sender isn't told
+    about their own actions. Suggestions still waiting stay out.
+  - **Add a board section:** a proposal grouping the meeting's statements
+    that aren't in a section yet, under the meeting's name.
+
+  `meeting-followup.test.ts` (2); `scripts/meeting-followup-check.mjs` 7/7
+  (two accounts, the dev mailbox).
 
 ## 9. Decisions needed
 

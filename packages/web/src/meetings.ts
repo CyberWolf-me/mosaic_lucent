@@ -286,6 +286,31 @@ export async function writeMeetingSummary(
   return { ok: false, error: body.error ?? "Couldn't write the summary — try again." };
 }
 
+/** Who "Notify owners" told, and which owners matched no one (docs/28 S11). */
+export interface OwnersNotified {
+  told: Array<{ name: string; you: boolean; actions: number }>;
+  unmatched: string[];
+  actions: number;
+}
+
+/** Tell each owner the actions they own from this meeting (docs/28 S11). */
+export async function notifyMeetingOwners(
+  boardId: string,
+  meetingId: string,
+): Promise<{ ok: true; result: OwnersNotified } | { ok: false; error: string }> {
+  try {
+    const res = await apiFetch(
+      `/api/boards/${encodeURIComponent(boardId)}/meetings/${encodeURIComponent(meetingId)}/notify-owners`,
+      { method: "POST" },
+    );
+    const body = (await res.json().catch(() => ({}))) as { error?: string } & OwnersNotified;
+    if (!res.ok) return { ok: false, error: body.error ?? "Couldn't tell the owners — try again." };
+    return { ok: true, result: body };
+  } catch {
+    return { ok: false, error: "Couldn't reach Lucent — try again." };
+  }
+}
+
 /** One row of the workspace meetings list (ADR 0045): no turns. */
 export interface MeetingSummary {
   id: string;

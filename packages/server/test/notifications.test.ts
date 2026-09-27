@@ -797,6 +797,14 @@ const SAMPLE_PAYLOADS: { [K in NotificationKind]: NotificationPayloads[K] } = {
     meetingId: "mtg_1",
     title: "Launch sync",
   },
+  "meeting.followup": {
+    boardId: "brd_1",
+    boardName: "Roadmap",
+    meetingId: "mtg_1",
+    title: "Launch sync",
+    byName: "Ada",
+    items: [{ nodeId: "n1", label: "Update the pricing page", dueDate: "2026-11-02" }],
+  },
   "work.assigned": {
     boardId: "brd_1",
     boardName: "Roadmap",
@@ -856,6 +864,7 @@ describe("notification catalogue", () => {
       // addressed to you, like a mention; blocked work and review volume
       // scale with activity.
       "meeting.summarized": { inApp: "on", email: "off" },
+      "meeting.followup": { inApp: "on", email: "on" },
       "work.assigned": { inApp: "on", email: "on" },
       "work.blocked": { inApp: "on", email: "off" },
       // docs/26 A5: overdue work is addressed to its owner, like an
@@ -876,6 +885,7 @@ describe("notification catalogue", () => {
       "comment.mention",
       "meeting.invited",
       "meeting.cancelled",
+      "meeting.followup",
       "work.assigned",
       "work.overdue",
     ]);

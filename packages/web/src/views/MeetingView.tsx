@@ -54,6 +54,7 @@ import {
   renameMeeting,
   saveMeeting,
   writeMeetingSummary,
+  notifyMeetingOwners,
   type MeetingRecap,
   type ReadTurn,
   type MeetingTranscript,
@@ -86,6 +87,9 @@ import {
   type BriefSection,
 } from "../meetingBrief.js";
 import { decideStatements, type StatementDecision } from "../review.js";
+import { fetchOrgIntegrations, type IntegrationConnectionView } from "../boards.js";
+import { getCurrentOrgId } from "../orgs.js";
+import { IntegrationPanel } from "./IntegrationPanel.js";
 
 /**
  * Meeting mode (E3 / R3): live capture into a transcript that persists per
@@ -255,6 +259,7 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
     onCitation,
     startSharing,
     proposal,
+    proposeOps,
     readOnly,
   } = useWorkspace();
   // The capture's callbacks are armed once per capture; they reach the
@@ -435,6 +440,11 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
   // remounts this view once while it checks the session.
   // docs/28 S2: the Schedule sheet, from this board.
   const [scheduling, setScheduling] = useState(false);
+  /** The next meeting's title and who to invite, when scheduled as a follow-up (S11). */
+  const [schedulePrefill, setSchedulePrefill] = useState<{
+    title: string;
+    names: string[];
+  } | null>(null);
   // A recording that started a scheduled meeting carries its title (A3.4).
   const [liveTitle, setLiveTitle] = useState<string | null>(null);
   const [callOpen, setCallOpen] = useState(
@@ -1559,6 +1569,26 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
     setReviewing(null);
     notify(done);
   };
+
+  /* ---------------------------- follow-up (S11) ---------------------------- */
+  // docs/28 S11: once everything is reviewed, what to do with it — each offer
+  // goes through a path that already has its own gate: tasks through the
+  // external-action preview, the next meeting through scheduling, owners
+  // through a notification, a board section through a proposal.
+  const followUpReady = canReview && brief.total > 0 && brief.suggested === 0;
+  const [trackers, setTrackers] = useState<IntegrationConnectionView[] | null>(null);
+  const [taskProvider, setTaskProvider] = useState<string | null>(null);
+  const [followBusy, setFollowBusy] = useState<"owners" | "section" | null>(null);
+  const [followNote, setFollowNote] = useState<{
+    key: "owners" | "section";
+    tone: "ok" | "error";
+    text: string;
+  } | null>(null);
+  useEffect(() => {
+    if (!followUpReady || trackers !== null) return;
+    const orgId = getCurrentOrgId();
+    void (orgId ? fetchOrgIntegrations(orgId) : Promise.resolve([])).then(setTrackers);
+  }, [followUpReady, trackers]);
   useEffect(() => {
     setRecapWaitOver(false);
     if (!recapPending || !boardId || !shown) return;
@@ -2025,6 +2055,185 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
     );
   };
 
+  /** What to do once the meeting is reviewed (docs/28 S11). */
+  const renderFollowUp = (): ReactNode => {
+    if (!followUpReady || !shown || !boardId) return null;
+    const title = shown.title ?? `the meeting on ${fmtDay(shown.startedAt)}`;
+    const items = brief.sections.flatMap((s) => s.items);
+    const actions = items.filter((i) => i.kind === "action" && i.status === "open");
+    const owned = actions.filter((i) => i.assignee);
+    const sectionId = `sec-${shown.id}`;
+    const ungrouped = items.filter((i) => !workspace.nodes[i.nodeId]?.groupId);
+    const sendTo = (trackers ?? []).filter(
+      (c) => c.status === "active" && (c.state === undefined || c.state === "active"),
+    );
+    const providerName = (p: string) =>
+      p === "github" ? "GitHub" : p.charAt(0).toUpperCase() + p.slice(1);
+
+    const notifyOwners = async () => {
+      setFollowBusy("owners");
+      setFollowNote(null);
+      const r = await notifyMeetingOwners(boardId, shown.id);
+      setFollowBusy(null);
+      if (!r.ok) {
+        setFollowNote({ key: "owners", tone: "error", text: r.error });
+        return;
+      }
+      const others = r.result.told.filter((t) => !t.you);
+      const told =
+        others.length === 0
+          ? "Nobody else to tell — the owners matched are you."
+          : `Told ${others.map((t) => `${t.name} (${plural(t.actions, "action")})`).join(", ")}.`;
+      const missed =
+        r.result.unmatched.length > 0
+          ? ` ${r.result.unmatched.join(", ")} ${r.result.unmatched.length === 1 ? "matches" : "match"} no one who can open this board.`
+          : "";
+      setFollowNote({ key: "owners", tone: "ok", text: told + missed });
+    };
+    const proposeSection = async () => {
+      setFollowBusy("section");
+      setFollowNote(null);
+      const ok = await proposeOps(
+        [
+          {
+            op: "CREATE_GROUP",
+            id: sectionId,
+            label: title.charAt(0).toUpperCase() + title.slice(1),
+            children: ungrouped.map((i) => i.nodeId),
+          },
+        ],
+        `Add a section for ${title}`,
+        `Groups what ${title} decided and left open`,
+      );
+      setFollowBusy(null);
+      setFollowNote(
+        ok
+          ? { key: "section", tone: "ok", text: "Proposed — approve it in the review panel." }
+          : { key: "section", tone: "error", text: "Couldn't propose the section — try again." },
+      );
+    };
+
+    const note = (key: "owners" | "section") =>
+      followNote?.key === key && (
+        <p
+          className={`meet-offer-note ${followNote.tone}`}
+          role={followNote.tone === "error" ? "alert" : "status"}
+        >
+          {followNote.text}
+        </p>
+      );
+
+    return (
+      <section className="meet-brief meet-followup" aria-labelledby="meet-followup-title">
+        <div className="meet-brief-head">
+          <h2 className="meet-h2" id="meet-followup-title">
+            Follow-up
+          </h2>
+        </div>
+        <ul className="meet-offers">
+          {actions.length > 0 && (
+            <li className="meet-offer">
+              <div className="meet-offer-text">
+                <span className="meet-offer-title">Create tasks</span>
+                <span className="meet-offer-body">
+                  {plural(actions.length, "open action")} from this meeting. You see each task
+                  before anything is sent.
+                </span>
+              </div>
+              <div className="meet-offer-actions">
+                {trackers === null ? null : sendTo.length > 0 ? (
+                  sendTo.map((c) => (
+                    <Button key={c.provider} size="sm" onClick={() => setTaskProvider(c.provider)}>
+                      Send to {providerName(c.provider)}
+                    </Button>
+                  ))
+                ) : (
+                  <Button size="sm" variant="quiet" onClick={() => setView("admin")}>
+                    Connect Linear, Jira or GitHub
+                  </Button>
+                )}
+              </div>
+            </li>
+          )}
+          <li className="meet-offer">
+            <div className="meet-offer-text">
+              <span className="meet-offer-title">Schedule the next meeting</span>
+              <span className="meet-offer-body">
+                Invites the people who spoke; its page opens with what&apos;s still open.
+              </span>
+            </div>
+            <div className="meet-offer-actions">
+              <Button
+                size="sm"
+                onClick={() => {
+                  setSchedulePrefill({
+                    title: `Follow-up: ${shown.title ?? "meeting"}`,
+                    names: speakersOf(shown.turns),
+                  });
+                  setScheduling(true);
+                }}
+              >
+                Schedule
+              </Button>
+            </div>
+          </li>
+          {owned.length > 0 && (
+            <li className="meet-offer">
+              <div className="meet-offer-text">
+                <span className="meet-offer-title">Notify owners</span>
+                <span className="meet-offer-body">
+                  Tell each owner what they own from this meeting — {plural(owned.length, "action")}{" "}
+                  with an owner.
+                </span>
+                {note("owners")}
+              </div>
+              <div className="meet-offer-actions">
+                <Button
+                  size="sm"
+                  disabled={followBusy !== null}
+                  onClick={() => void notifyOwners()}
+                >
+                  {followBusy === "owners" ? "Sending…" : "Notify owners"}
+                </Button>
+              </div>
+            </li>
+          )}
+          {ungrouped.length > 0 && !workspace.groups[sectionId] && (
+            <li className="meet-offer">
+              <div className="meet-offer-text">
+                <span className="meet-offer-title">Add a board section</span>
+                <span className="meet-offer-body">
+                  Groups this meeting&apos;s {plural(ungrouped.length, "statement")} under its name,
+                  as a proposal you approve.
+                </span>
+                {note("section")}
+              </div>
+              <div className="meet-offer-actions">
+                <Button
+                  size="sm"
+                  disabled={followBusy !== null || proposal !== null}
+                  title={proposal !== null ? "Decide the pending proposal first" : undefined}
+                  onClick={() => void proposeSection()}
+                >
+                  {followBusy === "section" ? "Proposing…" : "Propose"}
+                </Button>
+              </div>
+            </li>
+          )}
+        </ul>
+        {taskProvider && (
+          <IntegrationPanel
+            provider={taskProvider}
+            connections={trackers ?? []}
+            nodeIds={actions.map((i) => i.nodeId)}
+            onClose={() => setTaskProvider(null)}
+            onLinksChanged={() => undefined}
+          />
+        )}
+      </section>
+    );
+  };
+
   const meetingsList = (compact: boolean): ReactNode =>
     saved.map((m) => {
       const statements = savedStatementCounts.get(m.id) ?? 0;
@@ -2119,9 +2328,16 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
   const scheduleDialog = scheduling && boardId && (
     <ScheduleMeetingDialog
       boardId={boardId}
-      onClose={() => setScheduling(false)}
+      {...(schedulePrefill
+        ? { initialTitle: schedulePrefill.title, initialInviteeNames: schedulePrefill.names }
+        : {})}
+      onClose={() => {
+        setScheduling(false);
+        setSchedulePrefill(null);
+      }}
       onDone={({ meeting, invited }) => {
         setScheduling(false);
+        setSchedulePrefill(null);
         notify(
           invited > 0
             ? `Invites sent to ${invited} ${invited === 1 ? "person" : "people"}`
@@ -2557,6 +2773,7 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
 
           {renderSummary()}
           {renderBrief()}
+          {renderFollowUp()}
 
           {!shown && openQuestions.total > 0 && (
             <section className="meet-open" aria-label="Open questions on this board">

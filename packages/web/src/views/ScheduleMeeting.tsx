@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { NOTE_TEMPLATES, type NoteTemplateId } from "@lucent/ai";
 import { Dialog, Field } from "../ui/primitives.js";
 import { Button } from "../ui/kit.js";
@@ -49,6 +49,8 @@ export function ScheduleMeetingDialog({
   boardId: fixedBoard,
   boards,
   editing,
+  initialTitle,
+  initialInviteeNames,
   onClose,
   onDone,
 }: {
@@ -58,11 +60,15 @@ export function ScheduleMeetingDialog({
   boards?: Array<{ id: string; name: string }>;
   /** A meeting that hasn't started, to change. */
   editing?: MeetingTranscript;
+  /** The next meeting's title, when it follows one (docs/28 S11). */
+  initialTitle?: string;
+  /** People to invite by name — who spoke last time — matched exactly. */
+  initialInviteeNames?: readonly string[];
   onClose: () => void;
   onDone: (result: ScheduledResult) => void;
 }) {
   const start = editing?.schedule ? new Date(editing.schedule.scheduledFor) : nextSlot(Date.now());
-  const [title, setTitle] = useState(editing?.title ?? "");
+  const [title, setTitle] = useState(editing?.title ?? initialTitle ?? "");
   const [date, setDate] = useState(localDate(start));
   const [time, setTime] = useState(localTime(start));
   const [duration, setDuration] = useState(editing?.schedule?.durationMin ?? 30);
@@ -77,6 +83,8 @@ export function ScheduleMeetingDialog({
     () => new Set(editing?.schedule?.invitees ?? []),
   );
   const [people, setPeople] = useState<Invitable[] | null | "loading">("loading");
+  // Who spoke last time, invited once the people list arrives (a follow-up).
+  const prefillNames = useRef(editing ? [] : [...(initialInviteeNames ?? [])]);
   const [filter, setFilter] = useState("");
   const [errors, setErrors] = useState<{ title?: string; when?: string; form?: string }>({});
   const [busy, setBusy] = useState(false);
@@ -95,7 +103,17 @@ export function ScheduleMeetingDialog({
     }
     let alive = true;
     setPeople("loading");
-    void listInvitable(boardId).then((list) => alive && setPeople(list));
+    void listInvitable(boardId).then((list) => {
+      if (!alive) return;
+      setPeople(list);
+      // A follow-up invites the people who spoke, when they're here by name.
+      if (list && prefillNames.current.length > 0) {
+        const names = new Set(prefillNames.current.map((n) => n.trim().toLowerCase()));
+        prefillNames.current = [];
+        const ids = list.filter((p) => names.has(p.name.trim().toLowerCase())).map((p) => p.id);
+        if (ids.length > 0) setInvitees(new Set(ids));
+      }
+    });
     return () => {
       alive = false;
     };
