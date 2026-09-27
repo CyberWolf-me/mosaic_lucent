@@ -5,15 +5,29 @@ import { Ico } from "../ui/icons.js";
 import { Button, EmptyState, Page, PageHeader, SectionLabel } from "../ui/kit.js";
 import { loadOrgs } from "../orgs.js";
 import { hasSession } from "../session.js";
-import { listWorkspaceMeetings, meetingName, type MeetingSummary } from "../meetings.js";
+import {
+  listInvitedMeetings,
+  listWorkspaceMeetings,
+  meetingName,
+  type MeetingSummary,
+} from "../meetings.js";
+import { listBoards } from "../boards.js";
+import { ScheduleMeetingDialog } from "./ScheduleMeeting.js";
 
 /**
  * Meetings — the workspace list (docs/28 S1, ADR 0045). Every meeting on the
- * boards this person can read, across boards: live ones first, then the
- * past, newest first. A row opens the meeting on its own board. Upcoming and
- * needs-review sections arrive with scheduling (A3.4) and the end-of-meeting
- * pass (A3.3); until then they are absent, not empty (docs/28 rule 7).
+ * boards this person can read, across boards: live ones first, then what's
+ * coming up (soonest first), then the past, newest first. A row opens the
+ * meeting on its own board — an upcoming one on its page (S3). Schedule opens
+ * the sheet (S2) with a board picker. Needs-review arrives with the review
+ * center (A2); until then it is absent, not empty (docs/28 rule 7).
  */
+
+/** A scheduled meeting stays under Upcoming until an hour past its planned end. */
+function isUpcomingRow(m: MeetingSummary, now: number): boolean {
+  if (m.status !== "scheduled" || !m.scheduledFor) return false;
+  return m.scheduledFor + (m.durationMin ?? 30) * 60_000 + 60 * 60_000 >= now;
+}
 
 type LoadState =
   | { kind: "loading" }
@@ -25,6 +39,8 @@ export function MeetingsView({ onOpenSettings }: { onOpenSettings: (section?: st
   const { boardId, projectName, openBoard, setView } = useWorkspace();
   const { notify } = useToast();
   const [state, setState] = useState<LoadState>({ kind: "loading" });
+  const [scheduling, setScheduling] = useState<Array<{ id: string; name: string }> | null>(null);
+  const [orgId, setOrgId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setState({ kind: "loading" });
@@ -37,21 +53,52 @@ export function MeetingsView({ onOpenSettings }: { onOpenSettings: (section?: st
       setState({ kind: "signed-out" });
       return;
     }
-    const meetings = await listWorkspaceMeetings(current.id);
-    setState(meetings === null ? { kind: "failed" } : { kind: "ready", meetings });
+    setOrgId(current.id);
+    const [meetings, invited] = await Promise.all([
+      listWorkspaceMeetings(current.id),
+      listInvitedMeetings(),
+    ]);
+    if (meetings === null) {
+      setState({ kind: "failed" });
+      return;
+    }
+    // Meetings you're invited to on boards outside this workspace join the list.
+    const known = new Set(meetings.map((m) => m.id));
+    setState({
+      kind: "ready",
+      meetings: [...meetings, ...invited.filter((m) => !known.has(m.id))],
+    });
   }, []);
 
   useEffect(() => {
     void load();
   }, [load]);
 
-  const { live, past } = useMemo(() => {
+  const { live, upcoming, past } = useMemo(() => {
     const rows = state.kind === "ready" ? state.meetings : [];
+    const now = Date.now();
     return {
       live: rows.filter((m) => m.status === "live"),
-      past: rows.filter((m) => m.status !== "live"),
+      upcoming: rows
+        .filter((m) => isUpcomingRow(m, now))
+        .sort((a, b) => (a.scheduledFor ?? 0) - (b.scheduledFor ?? 0)),
+      past: rows.filter((m) => m.status !== "live" && !isUpcomingRow(m, now)),
     };
   }, [state]);
+
+  const openSchedule = async (): Promise<void> => {
+    if (!orgId) return;
+    const boards = await listBoards(orgId);
+    if (boards.length === 0) {
+      notify("Share a board first — meetings are scheduled on a shared board.");
+      return;
+    }
+    // The board you're on first.
+    const ordered = [...boards].sort((a, b) =>
+      a.id === boardId ? -1 : b.id === boardId ? 1 : b.updatedAt - a.updatedAt,
+    );
+    setScheduling(ordered.map((b) => ({ id: b.id, name: b.name })));
+  };
 
   const open = async (m: MeetingSummary): Promise<void> => {
     if (m.boardId !== boardId && !(await openBoard(m.boardId))) {
@@ -66,9 +113,14 @@ export function MeetingsView({ onOpenSettings }: { onOpenSettings: (section?: st
   };
 
   const startHere = (
-    <Button variant="primary" onClick={() => setView("meeting")}>
-      <Ico.Mic /> {boardId ? `Meet on ${projectName || "this board"}` : "Start a meeting"}
-    </Button>
+    <>
+      <Button onClick={() => void openSchedule()}>
+        <Ico.Plus /> Schedule
+      </Button>
+      <Button variant="primary" onClick={() => setView("meeting")}>
+        <Ico.Mic /> {boardId ? `Meet on ${projectName || "this board"}` : "Start a meeting"}
+      </Button>
+    </>
   );
 
   return (
@@ -85,6 +137,10 @@ export function MeetingsView({ onOpenSettings }: { onOpenSettings: (section?: st
             live.length > 0 ? (
               <>
                 {live.length} <em>live now</em>
+              </>
+            ) : upcoming.length > 0 ? (
+              <>
+                {upcoming.length} <em>coming up</em>
               </>
             ) : (
               <>
@@ -150,6 +206,17 @@ export function MeetingsView({ onOpenSettings }: { onOpenSettings: (section?: st
         </section>
       )}
 
+      {upcoming.length > 0 && (
+        <section className="boards-notif-group" aria-label="Upcoming">
+          <SectionLabel count={upcoming.length}>Upcoming</SectionLabel>
+          <ul className="boards-notif-list">
+            {upcoming.map((m) => (
+              <MeetingRow key={m.id} meeting={m} onOpen={() => void open(m)} />
+            ))}
+          </ul>
+        </section>
+      )}
+
       {past.length > 0 && (
         <section className="boards-notif-group" aria-label="Past">
           <SectionLabel count={past.length}>Past</SectionLabel>
@@ -160,6 +227,23 @@ export function MeetingsView({ onOpenSettings }: { onOpenSettings: (section?: st
           </ul>
         </section>
       )}
+
+      {scheduling && (
+        <ScheduleMeetingDialog
+          boards={scheduling}
+          onClose={() => setScheduling(null)}
+          onDone={({ meeting, invited }) => {
+            setScheduling(null);
+            notify(
+              invited > 0
+                ? `Invites sent to ${invited} ${invited === 1 ? "person" : "people"}`
+                : "Meeting scheduled",
+            );
+            void load();
+            void open({ id: meeting.id, boardId: meeting.boardId } as MeetingSummary);
+          }}
+        />
+      )}
     </Page>
   );
 }
@@ -167,13 +251,28 @@ export function MeetingsView({ onOpenSettings }: { onOpenSettings: (section?: st
 function MeetingRow({ meeting: m, onOpen }: { meeting: MeetingSummary; onOpen: () => void }) {
   const minutes =
     m.endedAt === null ? null : Math.max(1, Math.round((m.endedAt - m.startedAt) / 60_000));
-  const detail = [
-    `${m.turnCount} ${m.turnCount === 1 ? "line" : "lines"}`,
-    m.status === "live" ? "recording now" : minutes !== null ? `${minutes} min` : null,
-    m.status === "summarized" ? "summary ready" : null,
-  ]
-    .filter(Boolean)
-    .join(" · ");
+  const planned = m.scheduledFor !== null && m.scheduledFor !== undefined;
+  const invited = m.inviteeCount ?? 0;
+  const detail =
+    m.status === "scheduled"
+      ? [
+          `${m.durationMin ?? 30} min`,
+          invited > 0 ? `${invited} invited` : null,
+          (m.scheduledFor ?? 0) < Date.now() ? "not started" : null,
+        ]
+          .filter(Boolean)
+          .join(" · ")
+      : m.status === "cancelled"
+        ? "Cancelled"
+        : planned && m.turnCount === 0
+          ? "Didn't take place"
+          : [
+              `${m.turnCount} ${m.turnCount === 1 ? "line" : "lines"}`,
+              m.status === "live" ? "recording now" : minutes !== null ? `${minutes} min` : null,
+              m.status === "summarized" ? "summary ready" : null,
+            ]
+              .filter(Boolean)
+              .join(" · ");
   return (
     <li>
       <button type="button" className="boards-notif-row read" onClick={onOpen}>
@@ -184,6 +283,7 @@ function MeetingRow({ meeting: m, onOpen }: { meeting: MeetingSummary; onOpen: (
           <span className="boards-notif-meta">
             <span className="mono-caps">{m.boardName || "Board"}</span>
             {m.status === "live" && <span className="boards-notif-new">Live</span>}
+            {m.status === "scheduled" && <span className="boards-notif-new">Scheduled</span>}
           </span>
           <span className="boards-notif-title">{meetingName(m)}</span>
           <span className="boards-notif-body">{detail}</span>

@@ -100,9 +100,9 @@ against every file their row cites.
 
 | Screen                             | Spec        |             Today              |
 | ---------------------------------- | ----------- | :----------------------------: |
-| S1 Meetings (workspace list)       | §65, §121   |   ✅ A3.1 (Live now · Past)    |
-| S2 Schedule                        | §16         |               ❌               |
-| S3 Meeting page (upcoming)         | §16, §122   |               ❌               |
+| S1 Meetings (workspace list)       | §65, §121   | ✅ Live now · Upcoming · Past  |
+| S2 Schedule                        | §16         |            ✅ A3.4             |
+| S3 Meeting page (upcoming)         | §16, §122   |            ✅ A3.4             |
 | S4 Lobby                           | §17         |            ✅ A3.2             |
 | S5 Room                            | §18–21      | ✅ A3.2 (captions wait for V8) |
 | S6 Dock (call outside the meeting) | —           |      ✅ with F25, rejoin       |
@@ -130,10 +130,11 @@ against every file their row cites.
 | `ended`      | Record mode                                    | `summarized` (transcript only) | system       |
 | `summarized` | every candidate decided                        | `reviewed`                     | editors      |
 
-**Today:** `open` (`endedAt` null) and `ended` only
-(`server/src/meetings.ts:28–43`). `MeetingEnded` is declared in the outbox
-vocabulary but no code emits it, and the dispatcher has no consumers
-(`server/src/outbox.ts:47–48`, `server/src/main.ts:495–505`).
+**Today:** `scheduled`, `cancelled`, `live`, `ended` and `summarized`, all
+derived from the row (ADR 0045, `server/src/meetings.ts` `meetingStatus`).
+A scheduled meeting goes `live` when the recording that starts in its window
+becomes it; the host ends the call for everyone (A3.2); `MeetingEnded` queues
+the summary (A3.3). `reviewed` waits for the review center (A2).
 
 ### 4.2 A participant's connection
 
@@ -232,7 +233,9 @@ read; a restricted meeting shows only to its invitees (§80).
 
 ### S2 Schedule
 
-**Today ❌.** A sheet: title (required), when (date, time, duration),
+**Today ✅ (A3.4):** `ScheduleMeeting.tsx`, from the Meetings list (with a board
+picker) and from a board's meeting view. Not yet: the policy-refused mode
+picker (the sheet offers every mode). The spec: a sheet: title (required), when (date, time, duration),
 participants (org members; guests wait for A6), boards and/or project,
 template (the six from docs/27: general, 1:1, standup, design review, customer
 call, retro), AI mode (default Assistant). Classification is the strictest
@@ -251,7 +254,8 @@ come later.
 
 ### S3 Meeting page (upcoming)
 
-**Today ❌.** Title, time, participants, linked boards, template agenda, and
+**Today ✅ (A3.4):** `UpcomingMeeting.tsx` — every state below but `refused`
+(an invitee who lost access simply stops seeing it). The spec: title, time, participants, linked boards, template agenda, and
 the **context brief** (§122): earlier decisions, open actions, unresolved
 questions and risks from the linked boards (the J3 index widens this to the
 project later). Its empty state is "No earlier meetings on these boards".
@@ -565,6 +569,25 @@ V8 transport (F4).
   LiveKit project (37/37, four runs in a row). Not yet: live captions (V8),
   "stop transcribing me", the board beside the call, host-restricted sharing,
   a waiting room for guests (A6), background blur, and video recording.
+- **A3.4 — done (2026-09-27): meetings can be scheduled.** The plan lives on
+  the meeting's own row (ADR 0045; migration 0035 adds `scheduled_for`,
+  `duration_min`, `invitees`, `template`, `cancelled_at`, `cancelled_by`),
+  so the id the invites carry is the id the recording keeps: a recording that
+  starts on the board from 15 minutes before to 15 minutes after the planned
+  slot becomes that meeting (exactly once — the store's precondition), and
+  the summary follows the meeting's template. S2 schedules with a title,
+  time, length, invitees (only people who can read the board), notes template
+  and Lucent's mode; each invitee gets a `meeting.invited` notification and,
+  by their preference, a mail carrying an `.ics` (RFC 5545, the meeting id as
+  UID; mail attachments are new on all three transports). S3 shows when, who,
+  the template's agenda and the context brief — open actions (soonest due
+  first), unresolved questions, risks, recent decisions, and what the last
+  summarized meeting on the board ended with — with Join (into the call's
+  lobby), Copy link, Add to calendar, and, for the host, Edit (invitees are told;
+  anyone dropped gets the cancellation) and Cancel (`meeting.cancelled` with a
+  CANCEL `.ics`). S1 lists Upcoming, and meetings you're invited to on boards
+  shared from another org. `scripts/meeting-schedule-check.mjs` 19/19. Not yet:
+  reminders, calendar sync, linking one meeting to several boards, guests (A6).
 - **A3.5, per-participant capture — done (2026-09-27).** In a board call, each
   person is transcribed on their own device while someone records the call,
   and every line lands in ONE transcript under the name LiveKit knows them by

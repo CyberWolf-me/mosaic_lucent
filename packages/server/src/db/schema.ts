@@ -1070,6 +1070,21 @@ export const meetingTranscripts = pgTable(
      * `turns` (and an ended transcript's record) is never rewritten.
      */
     corrections: jsonb("corrections"),
+    /**
+     * docs/28 A3.4: a scheduled meeting — when it starts and how long it
+     * runs. Null for a meeting that began when someone pressed Record. Until
+     * it starts, `started_at` holds this same time and the row has no turns
+     * (the status reads `scheduled`, derived as ADR 0045 says).
+     */
+    scheduledFor: bigint("scheduled_for", { mode: "number" }),
+    durationMin: bigint("duration_min", { mode: "number" }),
+    /** User ids invited; the host is `created_by`. */
+    invitees: jsonb("invitees"),
+    /** The notes template the meeting follows (docs/27 §2.3). */
+    template: text("template"),
+    /** The host called it off before it started. */
+    cancelledAt: bigint("cancelled_at", { mode: "number" }),
+    cancelledBy: text("cancelled_by").references(() => users.id, { onDelete: "set null" }),
     /** Null when the creator has been deleted; the transcript stays. */
     createdBy: text("created_by").references(() => users.id, { onDelete: "set null" }),
     createdAt: bigint("created_at", { mode: "number" }).notNull(),

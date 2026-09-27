@@ -45,6 +45,8 @@ export const NOTIFICATION_KINDS = [
   "board.role_changed",
   "comment.mention",
   "comment.reply",
+  "meeting.invited",
+  "meeting.cancelled",
 ] as const;
 
 export type NotificationKind = (typeof NOTIFICATION_KINDS)[number];
@@ -314,6 +316,8 @@ const KIND_COPY: {
   "board.role_changed": { category: "Access changed", icon: "role" },
   "comment.mention": { category: "Mention", icon: "comment" },
   "comment.reply": { category: "Reply", icon: "comment" },
+  "meeting.invited": { category: "Meeting", icon: "invite" },
+  "meeting.cancelled": { category: "Meeting cancelled", icon: "invite" },
 };
 
 /**

@@ -46,6 +46,7 @@ import {
   correctTurn,
   correctedTurns,
   fetchMeeting,
+  isUpcoming,
   listMeetings,
   promptFromTranscript,
   renameMeeting,
@@ -59,6 +60,8 @@ import {
 import { differentialPrompt, meetingExtractRequest } from "../meeting-extract.js";
 import { createCaptureDurability, type CaptureDurability } from "../meetingCapture.js";
 import { NativeRoom } from "../meeting-room/NativeRoom.js";
+import { ScheduleMeetingDialog } from "./ScheduleMeeting.js";
+import { UpcomingMeeting } from "./UpcomingMeeting.js";
 import {
   applyExtractOutcome,
   createMeetingEngine,
@@ -393,6 +396,10 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
   // joins by itself: the person picks their devices first (docs/28 S4). The
   // parameter stays until they join or put the call away, because the app
   // remounts this view once while it checks the session.
+  // docs/28 S2: the Schedule sheet, from this board.
+  const [scheduling, setScheduling] = useState(false);
+  // A recording that started a scheduled meeting carries its title (A3.4).
+  const [liveTitle, setLiveTitle] = useState<string | null>(null);
   const [callOpen, setCallOpen] = useState(
     () =>
       typeof window !== "undefined" &&
@@ -826,6 +833,7 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
       unsavedCaptureRef.current = null;
       liveMeetingIdRef.current = null;
       setLiveMeetingId(null);
+      setLiveTitle(null);
       const capture = createCaptureDurability({
         startedAt: capturedFrom,
         mode: selectedMode,
@@ -836,6 +844,8 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
           if (captureRef.current !== capture) return;
           liveMeetingIdRef.current = stored.id;
           setLiveMeetingId(stored.id);
+          // It may have started a scheduled meeting: it takes that name.
+          setLiveTitle(stored.title ?? null);
         },
       });
       captureRef.current = capture;
@@ -1396,9 +1406,11 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
   const meetingStart = shown?.startedAt ?? startedAt ?? displayTurns[0]?.at ?? null;
   const title = shown?.title
     ? shown.title
-    : meetingStart !== null
-      ? `Meeting · ${fmtDay(meetingStart)}, ${fmtClock(meetingStart)}`
-      : "Meeting";
+    : !shown && liveTitle
+      ? liveTitle
+      : meetingStart !== null
+        ? `Meeting · ${fmtDay(meetingStart)}, ${fmtClock(meetingStart)}`
+        : "Meeting";
   const shownMode = shown?.mode && isMeetingMode(shown.mode) ? shown.mode : null;
 
   const filteredTurns = useMemo(() => {
@@ -1852,6 +1864,78 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
   }, [callOpen, roomStatus]);
   const showCall = callOpen || roomActive;
 
+  // The page follows ?meeting= (the effect above re-reads it), so moving
+  // between a meeting's page and the call keeps the address in step.
+  const meetingInUrl = (id: string | null): void => {
+    const params = new URLSearchParams(window.location.search);
+    if (id) params.set("meeting", id);
+    else params.delete("meeting");
+    window.history.replaceState(null, "", `?${params.toString()}`);
+  };
+
+  const scheduleDialog = scheduling && boardId && (
+    <ScheduleMeetingDialog
+      boardId={boardId}
+      onClose={() => setScheduling(false)}
+      onDone={({ meeting, invited }) => {
+        setScheduling(false);
+        notify(
+          invited > 0
+            ? `Invites sent to ${invited} ${invited === 1 ? "person" : "people"}`
+            : "Meeting scheduled",
+        );
+        setSaved((prev) => [meeting, ...prev.filter((m) => m.id !== meeting.id)]);
+        meetingInUrl(meeting.id);
+        openMeeting(meeting);
+      }}
+    />
+  );
+
+  // docs/28 S3: a scheduled meeting that hasn't started (or was cancelled)
+  // opens on its own page — when, who, the agenda and the context brief —
+  // not on an empty transcript.
+  if (shown && boardId && (isUpcoming(shown) || shown.cancelledAt !== undefined)) {
+    return (
+      <Page
+        crumbs={[
+          { label: "Boards", view: "dashboard" },
+          { label: projectName || "Untitled board", view: "canvas" },
+          { label: "Meetings", view: "meetings" },
+          { label: shown.title ?? "Meeting", current: true },
+        ]}
+        onOpenSettings={onOpenSettings}
+        width="wide"
+      >
+        <UpcomingMeeting
+          meeting={shown}
+          boardName={projectName}
+          workspace={workspace}
+          pastMeetings={saved}
+          onJoin={() => {
+            // Into the call's lobby; the recording that starts in the
+            // meeting's window becomes this meeting (server side).
+            meetingInUrl(null);
+            openMeeting(null);
+            setCallOpen(true);
+          }}
+          onChanged={(meeting) => {
+            setSaved((prev) => prev.map((m) => (m.id === meeting.id ? meeting : m)));
+            setSelectedMeeting(meeting);
+          }}
+          onOpenMeeting={(id) => {
+            const match = saved.find((m) => m.id === id);
+            if (!match) return;
+            meetingInUrl(id);
+            openMeeting(match);
+          }}
+          onRevealNode={(id) => onCitation({ kind: "node", id })}
+          notify={notify}
+        />
+        {scheduleDialog}
+      </Page>
+    );
+  }
+
   return (
     <Page
       crumbs={[
@@ -1868,6 +1952,7 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
           Esc / Ctrl+Enter globally, and a hidden kept-alive copy (F14) must
           not apply a proposal the user can't see. */}
       {view === "meeting" && <ProposalPanel />}
+      {scheduleDialog}
       {voiceHud && (
         <VoiceStateHud
           snapshot={
@@ -2049,6 +2134,11 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
                     }}
                   >
                     {voiceMuted ? "Unmute voice" : "Mute voice"}
+                  </Button>
+                )}
+                {boardId && !readOnly && (
+                  <Button variant="quiet" size="sm" onClick={() => setScheduling(true)}>
+                    <Ico.Plus /> Schedule
                   </Button>
                 )}
                 <Button

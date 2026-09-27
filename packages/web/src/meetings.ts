@@ -1,3 +1,4 @@
+import type { NoteTemplateId } from "@lucent/ai";
 import { apiFetch } from "./http.js";
 
 /**
@@ -38,6 +39,167 @@ export interface MeetingTranscript {
   recap?: MeetingRecap;
   /** People's corrections to turns (docs/28 S7): an overlay, originals kept. */
   corrections?: Array<{ turn: number; text: string; by: string; at: number }>;
+  /** The plan, for a scheduled meeting (docs/28 A3.4). */
+  schedule?: MeetingSchedule;
+  /** When the host called it off. */
+  cancelledAt?: number;
+  cancelledBy?: string;
+}
+
+/** A scheduled meeting's plan (docs/28 S2) — the server's MeetingSchedule. */
+export interface MeetingSchedule {
+  scheduledFor: number;
+  durationMin: number;
+  invitees: string[];
+  template?: NoteTemplateId;
+}
+
+/** What a person fills in to schedule a meeting (S2). */
+export interface MeetingPlan {
+  title: string;
+  scheduledFor: number;
+  durationMin: number;
+  invitees: string[];
+  template?: NoteTemplateId;
+  mode?: string;
+}
+
+/** Scheduled and not yet started — the meeting page (S3) instead of a transcript. */
+export function isUpcoming(meeting: Pick<MeetingTranscript, "schedule" | "turns" | "endedAt">) {
+  return meeting.schedule !== undefined && meeting.turns.length === 0 && meeting.endedAt === null;
+}
+
+/** Someone who can be invited: they can read the board. */
+export interface Invitable {
+  id: string;
+  name: string;
+  email: string;
+}
+
+export async function listInvitable(boardId: string): Promise<Invitable[] | null> {
+  const res = await apiFetch(`/api/boards/${encodeURIComponent(boardId)}/meetings/invitable`);
+  if (!res.ok) return null;
+  return ((await res.json()) as { people: Invitable[] }).people;
+}
+
+type PlanResult =
+  | { ok: true; meeting: MeetingTranscript; invited: number }
+  | { ok: false; error: string };
+
+async function planResult(res: Response, fallback: string): Promise<PlanResult> {
+  const body = (await res.json().catch(() => ({}))) as {
+    meeting?: MeetingTranscript;
+    invited?: number;
+    error?: string;
+  } & Partial<MeetingTranscript>;
+  if (!res.ok) {
+    return {
+      ok: false,
+      error:
+        res.status === 404
+          ? "You can schedule only on boards you can edit."
+          : (body.error ?? fallback),
+    };
+  }
+  const meeting = body.meeting ?? (body as MeetingTranscript);
+  return { ok: true, meeting, invited: body.invited ?? 0 };
+}
+
+/** Schedule a meeting; invites go out from the server. */
+export async function scheduleMeeting(boardId: string, plan: MeetingPlan): Promise<PlanResult> {
+  try {
+    const res = await apiFetch(`/api/boards/${encodeURIComponent(boardId)}/meetings/schedule`, {
+      method: "POST",
+      body: JSON.stringify(plan),
+    });
+    return await planResult(res, "Couldn't create the meeting.");
+  } catch {
+    return { ok: false, error: "Couldn't reach the server. Try again." };
+  }
+}
+
+/** Change a scheduled meeting's plan (host). */
+export async function rescheduleMeeting(
+  boardId: string,
+  meetingId: string,
+  plan: MeetingPlan,
+): Promise<PlanResult> {
+  try {
+    const res = await apiFetch(
+      `/api/boards/${encodeURIComponent(boardId)}/meetings/${encodeURIComponent(meetingId)}/reschedule`,
+      { method: "POST", body: JSON.stringify(plan) },
+    );
+    return await planResult(res, "Couldn't change the meeting.");
+  } catch {
+    return { ok: false, error: "Couldn't reach the server. Try again." };
+  }
+}
+
+/** Call a scheduled meeting off (host). */
+export async function cancelMeeting(
+  boardId: string,
+  meetingId: string,
+): Promise<{ ok: true; meeting: MeetingTranscript } | { ok: false; error: string }> {
+  const res = await apiFetch(
+    `/api/boards/${encodeURIComponent(boardId)}/meetings/${encodeURIComponent(meetingId)}/cancel`,
+    { method: "POST" },
+  );
+  const body = (await res.json().catch(() => ({}))) as { error?: string };
+  return res.ok
+    ? { ok: true, meeting: body as MeetingTranscript }
+    : { ok: false, error: body.error ?? "Couldn't cancel the meeting." };
+}
+
+/** The host and the invitees, by name. */
+export interface MeetingPeople {
+  host: { id: string; name: string } | null;
+  invitees: Array<{ id: string; name: string }>;
+  cancelledBy: { id: string; name: string } | null;
+  youHost: boolean;
+}
+
+export async function fetchMeetingPeople(
+  boardId: string,
+  meetingId: string,
+): Promise<MeetingPeople | null> {
+  const res = await apiFetch(
+    `/api/boards/${encodeURIComponent(boardId)}/meetings/${encodeURIComponent(meetingId)}/people`,
+  );
+  return res.ok ? ((await res.json()) as MeetingPeople) : null;
+}
+
+/** The meeting's calendar file (Add to calendar). */
+export function calendarFileUrl(boardId: string, meetingId: string): string {
+  return `/api/boards/${encodeURIComponent(boardId)}/meetings/${encodeURIComponent(meetingId)}/calendar.ics`;
+}
+
+/** "Tue 3 Oct, 14:00–14:45" in the reader's own time zone. */
+export function meetingTimeRange(scheduledFor: number, durationMin: number): string {
+  const start = new Date(scheduledFor);
+  const end = new Date(scheduledFor + durationMin * 60_000);
+  const day = start.toLocaleDateString(undefined, {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+  });
+  const time = (d: Date) => d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  return `${day}, ${time(start)}–${time(end)}`;
+}
+
+/** "in 2 h", "in 5 min", "now", "started 10 min ago" — relative to `now`. */
+export function startsIn(scheduledFor: number, now: number): string {
+  const diff = scheduledFor - now;
+  const minutes = Math.round(Math.abs(diff) / 60_000);
+  const span =
+    minutes < 1
+      ? null
+      : minutes < 60
+        ? `${minutes} min`
+        : minutes < 48 * 60
+          ? `${Math.round(minutes / 60)} h`
+          : `${Math.round(minutes / (24 * 60))} days`;
+  if (span === null) return "now";
+  return diff > 0 ? `in ${span}` : `started ${span} ago`;
 }
 
 /** A turn as a reader sees it: corrected, with the original words kept aside. */
@@ -130,12 +292,16 @@ export interface MeetingSummary {
   boardId: string;
   boardName: string;
   title: string | null;
-  status: "live" | "ended" | "summarized";
+  status: "scheduled" | "cancelled" | "live" | "ended" | "summarized";
   startedAt: number;
   endedAt: number | null;
   turnCount: number;
   mode: string | null;
   createdBy: string | null;
+  /** The plan, for a scheduled meeting (A3.4). */
+  scheduledFor?: number | null;
+  durationMin?: number | null;
+  inviteeCount?: number;
 }
 
 /**
@@ -163,6 +329,22 @@ export async function listWorkspaceMeetings(orgId: string): Promise<MeetingSumma
   if (!res.ok) return null;
   const body = (await res.json()) as { meetings?: MeetingSummary[] };
   return Array.isArray(body.meetings) ? body.meetings : [];
+}
+
+/**
+ * Scheduled meetings that invite this person, on any board they can read —
+ * including boards another org shared with them (docs/28 A3.4). Empty when
+ * the call fails: the workspace list still stands on its own.
+ */
+export async function listInvitedMeetings(): Promise<MeetingSummary[]> {
+  try {
+    const res = await apiFetch("/api/meetings/invited");
+    if (!res.ok) return [];
+    const body = (await res.json()) as { meetings?: MeetingSummary[] };
+    return Array.isArray(body.meetings) ? body.meetings : [];
+  } catch {
+    return [];
+  }
 }
 
 /** Name a meeting; an empty title makes it untitled again. Null on failure. */

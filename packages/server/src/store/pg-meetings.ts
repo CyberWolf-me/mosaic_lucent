@@ -5,7 +5,10 @@ import {
   MEETING_LIST_LIMIT,
   lastActivity,
   newMeetingId,
+  notStarted,
+  type MeetingMode,
   type MeetingRecap,
+  type MeetingSchedule,
   type MeetingStore,
   type MeetingTranscript,
   type MeetingTurn,
@@ -37,11 +40,91 @@ export class PostgresMeetingStore implements MeetingStore {
         turns: input.turns,
         ...(input.mode !== undefined ? { mode: input.mode } : {}),
         ...(input.title ? { title: input.title } : {}),
+        ...(input.schedule ? scheduleColumns(input.schedule) : {}),
         createdBy: input.createdBy,
         createdAt: input.createdAt,
       })
       .returning();
     return toRow(rows[0]!);
+  }
+
+  /**
+   * The three moves a scheduled meeting makes before it starts all carry the
+   * same precondition in the WHERE — scheduled, no turns, open, not called
+   * off — so of two concurrent callers exactly one moves the row (the second
+   * recording to "start" it gets undefined and opens its own transcript).
+   */
+  private notStartedWhere(boardId: string, id: string) {
+    return and(
+      eq(meetingTranscripts.boardId, boardId),
+      eq(meetingTranscripts.id, id),
+      isNotNull(meetingTranscripts.scheduledFor),
+      isNull(meetingTranscripts.endedAt),
+      isNull(meetingTranscripts.cancelledAt),
+      sql`${meetingTranscripts.turns} = '[]'::jsonb`,
+    );
+  }
+
+  async invitedTo(userId: string, limit = MEETING_LIST_LIMIT): Promise<MeetingTranscript[]> {
+    const rows = await this.target.db
+      .select()
+      .from(meetingTranscripts)
+      .where(sql`${meetingTranscripts.invitees} @> ${JSON.stringify([userId])}::jsonb`)
+      .orderBy(desc(meetingTranscripts.startedAt), desc(meetingTranscripts.id))
+      .limit(limit);
+    return rows.map(toRow);
+  }
+
+  async reschedule(
+    boardId: string,
+    id: string,
+    schedule: MeetingSchedule,
+    title: string | null,
+  ): Promise<MeetingTranscript | undefined> {
+    const rows = await this.target.db
+      .update(meetingTranscripts)
+      .set({ ...scheduleColumns(schedule), startedAt: schedule.scheduledFor, title })
+      .where(this.notStartedWhere(boardId, id))
+      .returning();
+    return rows[0] ? toRow(rows[0]) : undefined;
+  }
+
+  async cancel(
+    boardId: string,
+    id: string,
+    by: string,
+    at: number,
+  ): Promise<MeetingTranscript | undefined> {
+    const rows = await this.target.db
+      .update(meetingTranscripts)
+      .set({
+        cancelledAt: at,
+        cancelledBy: by,
+        endedAt: sql`GREATEST(${at}::bigint, ${meetingTranscripts.startedAt})`,
+      })
+      .where(this.notStartedWhere(boardId, id))
+      .returning();
+    if (rows[0]) return toRow(rows[0]);
+    // Idempotent: an already-cancelled meeting answers with itself.
+    const existing = await this.get(boardId, id);
+    return existing?.cancelledAt !== undefined ? existing : undefined;
+  }
+
+  async start(
+    boardId: string,
+    id: string,
+    input: { startedAt: number; turns: MeetingTurn[]; mode?: MeetingMode },
+  ): Promise<MeetingTranscript | undefined> {
+    const rows = await this.target.db
+      .update(meetingTranscripts)
+      .set({
+        startedAt: input.startedAt,
+        turns: input.turns,
+        ...(input.mode !== undefined ? { mode: input.mode } : {}),
+      })
+      .where(this.notStartedWhere(boardId, id))
+      .returning();
+    return rows[0] ? toRow(rows[0]) : undefined;
   }
 
   async forBoard(boardId: string, limit = MEETING_LIST_LIMIT): Promise<MeetingTranscript[]> {
@@ -138,6 +221,8 @@ export class PostgresMeetingStore implements MeetingStore {
   ): Promise<MeetingTranscript | undefined> {
     const existing = await this.get(boardId, id);
     if (!existing || existing.endedAt !== null) return undefined;
+    // A scheduled meeting starts through `start`, which also sets the real start.
+    if (notStarted(existing)) return undefined;
     const merged = [...existing.turns, ...turns];
     const rows = await this.target.db
       .update(meetingTranscripts)
@@ -268,5 +353,31 @@ function toRow(row: typeof meetingTranscripts.$inferSelect): MeetingTranscript {
     ...(Array.isArray(row.corrections) && row.corrections.length > 0
       ? { corrections: row.corrections as TurnCorrection[] }
       : {}),
+    // Not scheduled reads NULL (docs/28 A3.4).
+    ...(row.scheduledFor !== null && row.scheduledFor !== undefined
+      ? {
+          schedule: {
+            scheduledFor: row.scheduledFor,
+            durationMin: row.durationMin ?? 30,
+            invitees: Array.isArray(row.invitees) ? (row.invitees as string[]) : [],
+            ...(row.template ? { template: row.template as MeetingSchedule["template"] } : {}),
+          },
+        }
+      : {}),
+    ...(row.cancelledAt !== null && row.cancelledAt !== undefined
+      ? {
+          cancelledAt: row.cancelledAt,
+          ...(row.cancelledBy ? { cancelledBy: row.cancelledBy } : {}),
+        }
+      : {}),
+  };
+}
+
+function scheduleColumns(schedule: MeetingSchedule) {
+  return {
+    scheduledFor: schedule.scheduledFor,
+    durationMin: schedule.durationMin,
+    invitees: schedule.invitees,
+    template: schedule.template ?? null,
   };
 }

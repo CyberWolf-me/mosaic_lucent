@@ -113,6 +113,14 @@ export class HttpMailer implements Mailer {
     // Category/tag naming differs per provider; `tags` is the Resend spelling
     // and unknown fields are ignored by the others rather than rejected.
     if (msg.category) body.tags = [{ name: "category", value: msg.category }];
+    // Resend's spelling: base64 content with a filename.
+    if (msg.attachments && msg.attachments.length > 0) {
+      body.attachments = msg.attachments.map((a) => ({
+        filename: a.filename,
+        content: Buffer.from(a.content, "utf8").toString("base64"),
+        content_type: a.contentType,
+      }));
+    }
     return body;
   }
 }

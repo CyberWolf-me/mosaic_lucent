@@ -112,6 +112,28 @@ export interface NotificationPayloads {
     body: string;
     commentId: string;
   };
+  /** You were invited to a scheduled meeting, or its plan changed (docs/28 A3.4). */
+  "meeting.invited": {
+    boardId: string;
+    boardName: string;
+    meetingId: string;
+    title: string;
+    scheduledFor: number;
+    durationMin: number;
+    hostName: string;
+    /** True when this is a change to a meeting you were already invited to. */
+    updated: boolean;
+  };
+  /** A meeting you were invited to was called off. */
+  "meeting.cancelled": {
+    boardId: string;
+    boardName: string;
+    meetingId: string;
+    title: string;
+    scheduledFor: number;
+    durationMin: number;
+    byName: string;
+  };
 }
 
 export type NotificationKind = keyof NotificationPayloads;
@@ -130,6 +152,8 @@ export const NOTIFICATION_KINDS = [
   "board.role_changed",
   "comment.mention",
   "comment.reply",
+  "meeting.invited",
+  "meeting.cancelled",
 ] as const;
 
 type ListedKind = (typeof NOTIFICATION_KINDS)[number];
@@ -184,6 +208,29 @@ interface NotificationSpec<Payload> {
  */
 function boardPath(boardId: string): string {
   return `/?board=${encodeURIComponent(boardId)}`;
+}
+
+/** A meeting's own page (docs/28 S3) on its board. */
+export function meetingPath(boardId: string, meetingId: string): string {
+  return `/?board=${encodeURIComponent(boardId)}&view=meeting&meeting=${encodeURIComponent(meetingId)}`;
+}
+
+/**
+ * A meeting's time in words for a tray line or a mail. The server can't know
+ * the reader's time zone, so it says UTC; the attached invite carries the
+ * exact instant and every calendar shows it in local time.
+ */
+export function meetingWhen(scheduledFor: number, durationMin: number): string {
+  const when = new Date(scheduledFor).toLocaleString("en-GB", {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "UTC",
+  });
+  return `${when} UTC · ${durationMin} min`;
 }
 
 /** Comment bodies run to 2 000 characters; a tray line does not. */
@@ -290,6 +337,30 @@ export const NOTIFICATION_CATALOGUE: {
       title: `${p.authorName} replied in "${p.boardName}"`,
       body: excerpt(p.body),
       link: boardPath(p.boardId),
+    }),
+  },
+  "meeting.invited": {
+    label: "Meeting invitations",
+    description: "When you are invited to a meeting, or its time changes.",
+    // An invite nobody sees is a meeting nobody comes to; the mail carries
+    // the calendar invite.
+    defaults: { inApp: "on", email: "on" },
+    compose: (p) => ({
+      title: p.updated
+        ? `"${p.title}" changed — ${meetingWhen(p.scheduledFor, p.durationMin)}`
+        : `${p.hostName} invited you to "${p.title}"`,
+      body: `${meetingWhen(p.scheduledFor, p.durationMin)} · on "${p.boardName}"`,
+      link: meetingPath(p.boardId, p.meetingId),
+    }),
+  },
+  "meeting.cancelled": {
+    label: "Cancelled meetings",
+    description: "When a meeting you were invited to is called off.",
+    defaults: { inApp: "on", email: "on" },
+    compose: (p) => ({
+      title: `${p.byName} cancelled "${p.title}"`,
+      body: `It was set for ${meetingWhen(p.scheduledFor, p.durationMin)}.`,
+      link: meetingPath(p.boardId, p.meetingId),
     }),
   },
 };
@@ -674,6 +745,8 @@ export interface NotifyEvent<K extends NotificationKind> {
   id?: string;
   /** Overrides `deps.now`, for a route that already has a request timestamp. */
   at?: number;
+  /** Files the mail carries — a meeting's calendar invite (docs/28 A3.4). */
+  attachments?: import("./email/mailer.js").MailAttachment[];
 }
 
 /** Why no email went out. Diagnostic only — none of these is an error. */
@@ -825,6 +898,9 @@ export async function notify<K extends NotificationKind>(
       subject: mail.subject,
       text: mail.text,
       html: mail.html,
+      ...(event.attachments && event.attachments.length > 0
+        ? { attachments: event.attachments }
+        : {}),
     });
     outcome.emailed = true;
   } catch (err) {

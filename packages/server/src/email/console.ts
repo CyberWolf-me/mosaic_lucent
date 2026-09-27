@@ -24,10 +24,11 @@ export class ConsoleMailer implements Mailer {
     const singleLine = bodyPreview.replace(/\n+/g, " ");
     const urls = uniqueUrls(msg.text).filter((url) => !singleLine.includes(url));
 
+    const files = (msg.attachments ?? []).map((a) => `${a.filename} (${a.content.length} chars)`);
     console.log(
       `[${prefix}] to=${msg.to} subject=${JSON.stringify(msg.subject)} body=${JSON.stringify(singleLine)}${
         urls.length > 0 ? ` urls=${JSON.stringify(urls)}` : ""
-      }`,
+      }${files.length > 0 ? ` attachments=${JSON.stringify(files)}` : ""}`,
     );
   }
 }

@@ -267,7 +267,7 @@ describe("GET /api/notifications", () => {
     };
     expect(body.notifications).toHaveLength(NOTIFICATION_KINDS.length);
     // newest-first; ids were created with createdAt = 1000 + n ascending.
-    expect(body.notifications[0]!.id).toBe(`list1_${u.userId}_6`);
+    expect(body.notifications[0]!.id).toBe(`list1_${u.userId}_${NOTIFICATION_KINDS.length - 1}`);
     expect(body.notifications[body.notifications.length - 1]!.id).toBe(`list1_${u.userId}_0`);
     expect(body.unread).toBe(NOTIFICATION_KINDS.length);
     // First page (default size 30) covers every seeded row, so no next cursor.

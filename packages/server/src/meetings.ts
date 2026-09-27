@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import type { EnhancedNote } from "@lucent/ai";
+import { isNoteTemplateId, type EnhancedNote, type NoteTemplateId } from "@lucent/ai";
 
 /**
  * Meeting transcripts (E3 / R3): the diarised record of one meeting held on
@@ -93,6 +93,118 @@ export interface MeetingTranscript {
   recap?: MeetingRecap;
   /** People's corrections to turns (docs/28 S7): an overlay on `turns`. */
   corrections?: TurnCorrection[];
+  /**
+   * The plan, when the meeting was scheduled (docs/28 A3.4). Until it starts
+   * the row has no turns and `startedAt` is the planned start; the recording
+   * that starts it keeps this row — and so its id — and sets the real start.
+   */
+  schedule?: MeetingSchedule;
+  /** When the host called it off, and who; a cancelled meeting is closed. */
+  cancelledAt?: number;
+  cancelledBy?: string;
+}
+
+/** A scheduled meeting's plan (docs/28 S2). */
+export interface MeetingSchedule {
+  scheduledFor: number;
+  durationMin: number;
+  /** User ids invited; the host is the meeting's `createdBy`. */
+  invitees: string[];
+  /** The notes template it follows (docs/27 §2.3); the summary uses it too. */
+  template?: NoteTemplateId;
+}
+
+export const MIN_MEETING_MINUTES = 5;
+export const MAX_MEETING_MINUTES = 8 * 60;
+export const MAX_INVITEES = 100;
+/** A meeting may be scheduled at most this far ahead. */
+export const MAX_SCHEDULE_AHEAD_MS = 366 * 24 * 60 * 60 * 1000;
+
+/**
+ * A plan from the wire (S2): a time from now on (a minute of slack for the
+ * clock in the browser), a sane length, and account ids. Whether the invitees
+ * may read the board is the route's to check — it needs the stores.
+ */
+export function validateSchedule(
+  input: Record<string, unknown>,
+  now: number,
+): { ok: true; schedule: MeetingSchedule } | { ok: false; error: string } {
+  const at = input.scheduledFor;
+  if (typeof at !== "number" || !Number.isFinite(at)) {
+    return { ok: false, error: "Pick a date and time." };
+  }
+  if (at < now - 60_000) return { ok: false, error: "Pick a time in the future." };
+  if (at > now + MAX_SCHEDULE_AHEAD_MS) {
+    return { ok: false, error: "Pick a time within the next year." };
+  }
+  const minutes = input.durationMin;
+  if (
+    typeof minutes !== "number" ||
+    !Number.isInteger(minutes) ||
+    minutes < MIN_MEETING_MINUTES ||
+    minutes > MAX_MEETING_MINUTES
+  ) {
+    return {
+      ok: false,
+      error: `A meeting runs ${MIN_MEETING_MINUTES} minutes to ${MAX_MEETING_MINUTES / 60} hours.`,
+    };
+  }
+  const raw = input.invitees ?? [];
+  if (!Array.isArray(raw) || raw.some((v) => typeof v !== "string" || !/^[\w-]{1,128}$/.test(v))) {
+    return { ok: false, error: "invitees must be a list of account ids" };
+  }
+  const invitees = [...new Set(raw as string[])];
+  if (invitees.length > MAX_INVITEES) {
+    return { ok: false, error: `Invite at most ${MAX_INVITEES} people.` };
+  }
+  const template = input.template;
+  if (template !== undefined && template !== null && !isNoteTemplateId(template)) {
+    return { ok: false, error: "template must be one of the meeting templates" };
+  }
+  return {
+    ok: true,
+    schedule: {
+      scheduledFor: Math.round(at),
+      durationMin: minutes,
+      invitees,
+      ...(template ? { template } : {}),
+    },
+  };
+}
+
+/** Scheduled and not yet started: no turns, still open, not called off. */
+export function notStarted(
+  meeting: Pick<MeetingTranscript, "schedule" | "turns" | "endedAt" | "cancelledAt">,
+): boolean {
+  return (
+    meeting.schedule !== undefined &&
+    meeting.turns.length === 0 &&
+    meeting.endedAt === null &&
+    meeting.cancelledAt === undefined
+  );
+}
+
+/**
+ * The scheduled meeting a recording on this board should become (docs/28
+ * §9.6): one not yet started whose window — from 15 minutes before its start
+ * to 15 minutes after its planned end — contains `now`; the one starting
+ * nearest to now when several do.
+ */
+export function scheduledMeetingAt(
+  meetings: readonly MeetingTranscript[],
+  now: number,
+): MeetingTranscript | undefined {
+  const margin = 15 * 60_000;
+  return meetings
+    .filter((m) => {
+      if (!notStarted(m) || !m.schedule) return false;
+      const start = m.schedule.scheduledFor;
+      const end = start + m.schedule.durationMin * 60_000;
+      return now >= start - margin && now <= end + margin;
+    })
+    .sort(
+      (a, b) => Math.abs(a.schedule!.scheduledFor - now) - Math.abs(b.schedule!.scheduledFor - now),
+    )[0];
 }
 
 /**
@@ -129,6 +241,8 @@ export interface NewMeetingTranscript {
   createdAt: number;
   mode?: MeetingMode;
   title?: string;
+  /** A scheduled meeting (A3.4): no turns, `startedAt` the planned start. */
+  schedule?: MeetingSchedule;
 }
 
 /** How long a meeting title may be. */
@@ -151,15 +265,19 @@ export function validateMeetingTitle(
 }
 
 /**
- * Where a meeting is in its life (ADR 0045): derived from `endedAt` until a
- * feature needs a stored lifecycle — scheduling adds `scheduled`, the
- * end-of-meeting pass `summarized`, the review center `reviewed`.
+ * Where a meeting is in its life (ADR 0045), derived from what is stored:
+ * `scheduled` until its recording starts (A3.4), `cancelled` when the host
+ * called it off, `live` while it records, then `ended` and — once the
+ * end-of-meeting pass writes the summary (A3.3) — `summarized`. The review
+ * center (A2) adds `reviewed`.
  */
-export type MeetingStatus = "live" | "ended" | "summarized";
+export type MeetingStatus = "scheduled" | "cancelled" | "live" | "ended" | "summarized";
 
 export function meetingStatus(
-  meeting: Pick<MeetingTranscript, "endedAt" | "recap">,
+  meeting: Pick<MeetingTranscript, "endedAt" | "recap" | "schedule" | "turns" | "cancelledAt">,
 ): MeetingStatus {
+  if (meeting.cancelledAt !== undefined) return "cancelled";
+  if (notStarted(meeting)) return "scheduled";
   if (meeting.endedAt === null) return "live";
   return meeting.recap ? "summarized" : "ended";
 }
@@ -176,6 +294,10 @@ export interface MeetingSummary {
   turnCount: number;
   mode: MeetingMode | null;
   createdBy: string | null;
+  /** The plan, for a scheduled meeting (A3.4). */
+  scheduledFor: number | null;
+  durationMin: number | null;
+  inviteeCount: number;
 }
 
 export function summarizeMeeting(meeting: MeetingTranscript, boardName: string): MeetingSummary {
@@ -190,6 +312,9 @@ export function summarizeMeeting(meeting: MeetingTranscript, boardName: string):
     turnCount: meeting.turns.length,
     mode: meeting.mode ?? null,
     createdBy: meeting.createdBy,
+    scheduledFor: meeting.schedule?.scheduledFor ?? null,
+    durationMin: meeting.schedule?.durationMin ?? null,
+    inviteeCount: meeting.schedule?.invitees.length ?? 0,
   };
 }
 
@@ -294,6 +419,46 @@ export interface MeetingStore {
    * when the sweep noticed. Returns how many it ended.
    */
   endIdle(idleBefore: number, limit: number): Promise<number>;
+  /**
+   * Change a scheduled meeting's plan (and title) before it starts (A3.4).
+   * Undefined once it started or was cancelled — a meeting that happened
+   * isn't rescheduled.
+   */
+  reschedule(
+    boardId: string,
+    id: string,
+    schedule: MeetingSchedule,
+    title: string | null,
+  ): Promise<MeetingTranscript | undefined>;
+  /**
+   * Call a scheduled meeting off before it starts: it closes (`endedAt`) and
+   * reads `cancelled`. Idempotent; undefined once it started.
+   */
+  cancel(
+    boardId: string,
+    id: string,
+    by: string,
+    at: number,
+  ): Promise<MeetingTranscript | undefined>;
+  /**
+   * The recording that starts a scheduled meeting (A3.4): its first turns,
+   * the real start, and the capture profile land on the scheduled row, whose
+   * id the invites already carry. Exactly one recording can start it: the
+   * store only moves a meeting that has not started, so a second caller gets
+   * undefined and opens its own transcript.
+   */
+  start(
+    boardId: string,
+    id: string,
+    input: { startedAt: number; turns: MeetingTurn[]; mode?: MeetingMode },
+  ): Promise<MeetingTranscript | undefined>;
+  /**
+   * Scheduled meetings that invite this person, on any board, newest first
+   * (A3.4): an invite can come from a board in another org, which the
+   * workspace list (`forBoards`) never reaches. The route re-checks that the
+   * person can still read each board.
+   */
+  invitedTo(userId: string, limit?: number): Promise<MeetingTranscript[]>;
 }
 
 /** When a capture was last heard from: its last turn, or its start if silent. */
@@ -369,6 +534,17 @@ export function validateTurns(
   return { ok: true, turns };
 }
 
+/** A copy the caller can't reach back into the store through. */
+function copyMeeting(row: MeetingTranscript): MeetingTranscript {
+  return {
+    ...row,
+    turns: [...row.turns],
+    ...(row.schedule
+      ? { schedule: { ...row.schedule, invitees: [...row.schedule.invitees] } }
+      : {}),
+  };
+}
+
 export class InMemoryMeetingStore implements MeetingStore {
   private readonly rows = new Map<string, MeetingTranscript>();
 
@@ -384,9 +560,64 @@ export class InMemoryMeetingStore implements MeetingStore {
       createdAt: input.createdAt,
       ...(input.mode !== undefined ? { mode: input.mode } : {}),
       ...(input.title ? { title: input.title } : {}),
+      ...(input.schedule
+        ? { schedule: { ...input.schedule, invitees: [...input.schedule.invitees] } }
+        : {}),
     };
     this.rows.set(row.id, row);
-    return { ...row, turns: [...row.turns] };
+    return copyMeeting(row);
+  }
+
+  async reschedule(
+    boardId: string,
+    id: string,
+    schedule: MeetingSchedule,
+    title: string | null,
+  ): Promise<MeetingTranscript | undefined> {
+    const row = this.rows.get(id);
+    if (!row || row.boardId !== boardId || !notStarted(row)) return undefined;
+    row.schedule = { ...schedule, invitees: [...schedule.invitees] };
+    row.startedAt = schedule.scheduledFor;
+    if (title === null) delete row.title;
+    else row.title = title;
+    return copyMeeting(row);
+  }
+
+  async cancel(
+    boardId: string,
+    id: string,
+    by: string,
+    at: number,
+  ): Promise<MeetingTranscript | undefined> {
+    const row = this.rows.get(id);
+    if (!row || row.boardId !== boardId) return undefined;
+    if (row.cancelledAt !== undefined) return copyMeeting(row);
+    if (!notStarted(row)) return undefined;
+    row.cancelledAt = at;
+    row.cancelledBy = by;
+    row.endedAt = Math.max(at, row.startedAt);
+    return copyMeeting(row);
+  }
+
+  async invitedTo(userId: string, limit = MEETING_LIST_LIMIT): Promise<MeetingTranscript[]> {
+    return [...this.rows.values()]
+      .filter((r) => r.schedule?.invitees.includes(userId))
+      .sort((a, b) => b.startedAt - a.startedAt || (a.id < b.id ? -1 : 1))
+      .slice(0, limit)
+      .map(copyMeeting);
+  }
+
+  async start(
+    boardId: string,
+    id: string,
+    input: { startedAt: number; turns: MeetingTurn[]; mode?: MeetingMode },
+  ): Promise<MeetingTranscript | undefined> {
+    const row = this.rows.get(id);
+    if (!row || row.boardId !== boardId || !notStarted(row)) return undefined;
+    row.startedAt = input.startedAt;
+    row.turns = input.turns.map((t) => ({ ...t }));
+    if (input.mode !== undefined) row.mode = input.mode;
+    return copyMeeting(row);
   }
 
   async forBoard(boardId: string, limit = MEETING_LIST_LIMIT): Promise<MeetingTranscript[]> {
@@ -453,6 +684,8 @@ export class InMemoryMeetingStore implements MeetingStore {
     const row = this.rows.get(id);
     if (!row || row.boardId !== boardId) return undefined;
     if (row.endedAt !== null) return undefined; // ended minutes are immutable
+    // A scheduled meeting starts through `start`, which also sets the real start.
+    if (notStarted(row)) return undefined;
     if (row.turns.length + turns.length > MAX_TURNS_PER_TRANSCRIPT) return undefined;
     row.turns = [...row.turns, ...turns.map((t) => ({ ...t }))];
     return { ...row, turns: [...row.turns] };

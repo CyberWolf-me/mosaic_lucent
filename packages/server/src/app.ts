@@ -119,6 +119,7 @@ import { registerNotificationRoutes } from "./routes/notifications.js";
 import { registerInviteRoutes } from "./routes/invites.js";
 import { registerBoardOpsRoutes } from "./routes/boardOps.js";
 import { registerMeetingRoutes } from "./routes/meetings.js";
+import { registerMeetingScheduleRoutes } from "./routes/meetingSchedule.js";
 import { registerMeetingNotesRoutes } from "./routes/meetingNotes.js";
 import { registerThemesRoutes } from "./routes/themes.js";
 import { InMemoryMeetingNotesStore } from "./meetingNotes.js";
@@ -1934,7 +1935,8 @@ export function createApp(deps: AppDeps): App {
     const { assembleNotes, fallbackNotesDraft } = await import("@lucent/ai");
     const { correctedTurns } = await import("./meetings.js");
     const request: import("@lucent/ai").NotesRequest = {
-      template: "general",
+      // A scheduled meeting follows the template it was planned with (A3.4).
+      template: meeting.schedule?.template ?? "general",
       ...(meeting.title ? { title: meeting.title } : {}),
       today: new Date(meeting.startedAt).toISOString().slice(0, 10),
       // The words as corrected (docs/28 S7): a summary quotes what was meant.
@@ -2104,6 +2106,8 @@ export function createApp(deps: AppDeps): App {
   registerNotificationRoutes(router, services);
   registerInviteRoutes(router, services);
   registerBoardOpsRoutes(router, services);
+  // Before the meeting routes: /meetings/invitable must win over /meetings/:mid.
+  registerMeetingScheduleRoutes(router, services);
   registerMeetingRoutes(router, services);
   registerMeetingNotesRoutes(router, services);
   registerThemesRoutes(router, services);

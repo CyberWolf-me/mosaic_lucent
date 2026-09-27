@@ -1,0 +1,216 @@
+/* ============================================================
+   Scheduled meetings (docs/28 A3.4): the Schedule sheet (S2) and a
+   scheduled meeting's page (S3). Built from the kit's field and
+   dialog classes; these rules only lay them out.
+   ============================================================ */
+
+/* ------------------------------------------------------------ S2 sheet */
+
+.sched-dialog {
+  width: min(560px, calc(100vw - 32px));
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+}
+.sched-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.sched-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px;
+}
+.sched-error {
+  margin: -6px 0 0;
+  color: var(--sig-red);
+  font-size: 12.5px;
+}
+.sched-people {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  border: none;
+  min-width: 0;
+}
+.sched-note {
+  margin: 0;
+  color: var(--ink-2);
+  font-size: 12.5px;
+}
+.sched-list {
+  list-style: none;
+  margin: 0;
+  padding: 4px;
+  max-height: 200px;
+  overflow-y: auto;
+  border: 1px solid var(--stroke-1);
+  border-radius: 10px;
+}
+.sched-list label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  min-width: 0;
+}
+.sched-list label:hover {
+  background: oklch(from var(--ink-0) l c h / 0.05);
+}
+.sched-name {
+  color: var(--ink-0);
+  font-size: 13px;
+}
+.sched-email {
+  margin-left: auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink-2);
+  font-size: 12px;
+}
+
+/* -------------------------------------------------------- S3 the page */
+
+.upc {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  max-width: 1040px;
+}
+.upc-head {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.upc-eyebrow {
+  margin: 0;
+  color: var(--ink-2);
+}
+.upc-title {
+  margin: 0;
+  font-size: 30px;
+  font-weight: 500;
+  color: var(--ink-0);
+}
+.upc-when {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: var(--ink-1);
+  font-size: 14px;
+}
+.upc-soon {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: oklch(from var(--bloom-2) l c h / 0.12);
+  color: var(--bloom-2);
+  font-size: 12px;
+}
+.upc-cancelled {
+  margin: 0;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: oklch(from var(--sig-red) l c h / 0.12);
+  color: var(--ink-0);
+  width: fit-content;
+}
+.upc-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 6px;
+}
+.upc-actions a {
+  text-decoration: none;
+}
+.upc-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr);
+  gap: 32px;
+}
+@media (max-width: 760px) {
+  .upc-grid {
+    grid-template-columns: 1fr;
+  }
+}
+.upc-col {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-width: 0;
+}
+.upc-brief-title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 500;
+  color: var(--ink-0);
+}
+.upc-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.upc-h {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-2);
+}
+.upc-list,
+.upc-people,
+.upc-agenda {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--ink-0);
+  font-size: 14px;
+}
+.upc-people {
+  list-style: none;
+  padding-left: 0;
+}
+.upc-agenda li {
+  display: flex;
+  flex-direction: column;
+}
+.upc-muted {
+  color: var(--ink-2);
+  font-size: 12.5px;
+}
+.upc-item,
+.upc-link {
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.upc-item:hover,
+.upc-link {
+  color: var(--bloom-2);
+}
+.upc-link {
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 500;
+}
+.upc-list li {
+  display: flex;
+  flex-direction: column;
+}

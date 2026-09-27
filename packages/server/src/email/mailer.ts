@@ -24,6 +24,17 @@ export interface MailMessage {
   headers?: Record<string, string>;
   /** Optional category for analytics (templated-name, e.g. "verify"). */
   category?: string;
+  /** Files sent with the mail — a meeting invite's `.ics` (docs/28 A3.4). */
+  attachments?: MailAttachment[];
+}
+
+/** A small text file carried by a mail. */
+export interface MailAttachment {
+  filename: string;
+  /** e.g. `text/calendar; charset=utf-8; method=REQUEST`. */
+  contentType: string;
+  /** The file's text; transports encode it for the wire. */
+  content: string;
 }
 
 export interface Mailer {

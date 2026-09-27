@@ -288,16 +288,49 @@ class SmtpSession {
  * eaten by the server (RFC 5321 §4.5.2).
  */
 function dataPayload(msg: MailMessage, from: string): string {
+  const bodyType = msg.html
+    ? `Content-Type: text/html; charset=utf-8`
+    : `Content-Type: text/plain; charset=utf-8`;
+  const attachments = msg.attachments ?? [];
+  // With attachments (a calendar invite), the body and each file are parts of
+  // one multipart/mixed message; the file travels base64 so no line of it can
+  // be read as the end of the message.
+  const boundary = `lucent-${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
   const headers = [
     `From: ${from}`,
     `To: ${msg.to}`,
     `Subject: ${msg.subject}`,
     `MIME-Version: 1.0`,
-    msg.html ? `Content-Type: text/html; charset=utf-8` : `Content-Type: text/plain; charset=utf-8`,
-    `Content-Transfer-Encoding: 8bit`,
+    ...(attachments.length > 0
+      ? [`Content-Type: multipart/mixed; boundary="${boundary}"`]
+      : [bodyType, `Content-Transfer-Encoding: 8bit`]),
     ...Object.entries(msg.headers ?? {}).map(([name, value]) => `${name}: ${value}`),
   ].join("\r\n");
-  const body = msg.html ?? msg.text;
+  const text = msg.html ?? msg.text;
+  const body =
+    attachments.length === 0
+      ? text
+      : [
+          `--${boundary}`,
+          bodyType,
+          `Content-Transfer-Encoding: 8bit`,
+          ``,
+          text,
+          ...attachments.flatMap((a) => {
+            assertNoCrlf("attachment filename", a.filename);
+            assertNoCrlf("attachment type", a.contentType);
+            const encoded = Buffer.from(a.content, "utf8").toString("base64");
+            return [
+              `--${boundary}`,
+              `Content-Type: ${a.contentType}; name="${a.filename}"`,
+              `Content-Disposition: attachment; filename="${a.filename}"`,
+              `Content-Transfer-Encoding: base64`,
+              ``,
+              ...(encoded.match(/.{1,76}/g) ?? []),
+            ];
+          }),
+          `--${boundary}--`,
+        ].join("\r\n");
   const wire = `${headers}\r\n\r\n${body}`.replace(/\r\n|\r|\n/g, "\r\n").replace(/^\./gm, "..");
   return `${wire}\r\n.\r\n`;
 }

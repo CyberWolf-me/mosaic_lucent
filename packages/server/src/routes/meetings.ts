@@ -94,6 +94,23 @@ export const registerMeetingRoutes: RegisterRoutes = (router, s) => {
       return;
     }
 
+    // docs/28 A3.4 (§9.6): a recording that starts in a scheduled meeting's
+    // window becomes that meeting — its invites already carry the id. Only
+    // one recording can start it (the store's precondition); another opens
+    // its own transcript below.
+    if (endedAt === null) {
+      const { scheduledMeetingAt } = await import("../meetings.js");
+      const due = scheduledMeetingAt(await meetings.forBoard(boardId, 200), Date.now());
+      const started = due
+        ? await meetings.start(boardId, due.id, {
+            startedAt,
+            turns: checked.turns,
+            ...(modeChecked.mode !== undefined ? { mode: modeChecked.mode } : {}),
+          })
+        : undefined;
+      if (started) return send(res, 201, started);
+    }
+
     const saved = await meetings.insert({
       boardId,
       orgId: guard.board.orgId,

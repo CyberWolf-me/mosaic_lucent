@@ -124,6 +124,81 @@ describeIf("meeting store parity: titles and the workspace list", () => {
     expect(results[1]).toEqual(results[0]);
   });
 
+  it("keeps a plan, moves it, starts it once and can't cancel it after (docs/28 A3.4)", async () => {
+    const results: unknown[] = [];
+    for (const store of [new PostgresMeetingStore(db), new InMemoryMeetingStore()] as const) {
+      const planned = await store.insert({
+        boardId: boardA,
+        orgId,
+        startedAt: 50_000,
+        endedAt: null,
+        turns: [],
+        createdBy: userId,
+        createdAt: 1,
+        title: "Plan",
+        schedule: { scheduledFor: 50_000, durationMin: 30, invitees: [userId], template: "retro" },
+      });
+      const invitedBefore = (await store.invitedTo(userId)).some((m) => m.id === planned.id);
+      const moved = await store.reschedule(
+        boardA,
+        planned.id,
+        { scheduledFor: 60_000, durationMin: 45, invitees: [] },
+        "Moved",
+      );
+      const earlyAppend = await store.appendTo(boardA, planned.id, [
+        { speaker: "A", at: 1, text: "x" },
+      ]);
+      const started = await store.start(boardA, planned.id, {
+        startedAt: 61_000,
+        turns: [{ speaker: "A", at: 61_000, text: "go" }],
+        mode: "record",
+      });
+      const startedAgain = await store.start(boardA, planned.id, {
+        startedAt: 62_000,
+        turns: [{ speaker: "B", at: 62_000, text: "no" }],
+      });
+      const lateCancel = await store.cancel(boardA, planned.id, userId, 63_000);
+
+      const other = await store.insert({
+        boardId: boardA,
+        orgId,
+        startedAt: 70_000,
+        turns: [],
+        createdBy: userId,
+        createdAt: 1,
+        schedule: { scheduledFor: 70_000, durationMin: 30, invitees: [] },
+      });
+      const cancelled = await store.cancel(boardA, other.id, userId, 65_000);
+      const cancelledAgain = await store.cancel(boardA, other.id, userId, 66_000);
+      const invitedAfter = (await store.invitedTo(userId)).some((m) => m.id === planned.id);
+      results.push({
+        invited: [invitedBefore, invitedAfter],
+        plan: planned.schedule,
+        moved: [moved?.startedAt, moved?.title, moved?.schedule],
+        earlyAppend,
+        started: [started?.startedAt, started?.turns.map((t) => t.text), started?.mode],
+        startedAgain,
+        lateCancel,
+        cancelled: [cancelled?.cancelledAt, cancelled?.cancelledBy === userId, cancelled?.endedAt],
+        cancelledAgain: cancelledAgain?.cancelledAt,
+      });
+    }
+    expect(results[0]).toEqual({
+      // Invited as planned; rescheduled to no invitees, not any more.
+      invited: [true, false],
+      plan: { scheduledFor: 50_000, durationMin: 30, invitees: [userId], template: "retro" },
+      moved: [60_000, "Moved", { scheduledFor: 60_000, durationMin: 45, invitees: [] }],
+      earlyAppend: undefined,
+      started: [61_000, ["go"], "record"],
+      startedAgain: undefined,
+      lateCancel: undefined,
+      // Cancelling closes it, never before its planned start.
+      cancelled: [65_000, true, 70_000],
+      cancelledAgain: 65_000,
+    });
+    expect(results[1]).toEqual(results[0]);
+  });
+
   it("appends corrections atomically: two at once both land (docs/28 S7)", async () => {
     const pg = new PostgresMeetingStore(db);
     const m = await seed(pg, boardA, 8_000);

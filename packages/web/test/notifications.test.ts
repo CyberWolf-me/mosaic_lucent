@@ -228,7 +228,7 @@ describe("notification presentation", () => {
       expect(view.category).not.toBe("Notification");
       expect(view.icon).not.toBe("bell");
     }
-    expect(NOTIFICATION_KINDS).toHaveLength(7);
+    expect(NOTIFICATION_KINDS).toHaveLength(9);
   });
 
   it("still renders a kind this build has never heard of", () => {

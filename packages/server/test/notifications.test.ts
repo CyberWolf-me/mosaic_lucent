@@ -772,6 +772,25 @@ const SAMPLE_PAYLOADS: { [K in NotificationKind]: NotificationPayloads[K] } = {
     body: "agreed",
     commentId: "c2",
   },
+  "meeting.invited": {
+    boardId: "brd_1",
+    boardName: "Roadmap",
+    meetingId: "mtg_1",
+    title: "Launch sync",
+    scheduledFor: Date.UTC(2026, 9, 3, 14, 0),
+    durationMin: 30,
+    hostName: "Ada",
+    updated: false,
+  },
+  "meeting.cancelled": {
+    boardId: "brd_1",
+    boardName: "Roadmap",
+    meetingId: "mtg_1",
+    title: "Launch sync",
+    scheduledFor: Date.UTC(2026, 9, 3, 14, 0),
+    durationMin: 30,
+    byName: "Ada",
+  },
 };
 
 function samplePayload<K extends NotificationKind>(kind: K): NotificationPayloads[K] {
@@ -801,6 +820,9 @@ describe("notification catalogue", () => {
       "board.role_changed": { inApp: "on", email: "on" },
       "comment.mention": { inApp: "on", email: "on" },
       "comment.reply": { inApp: "on", email: "off" },
+      // docs/28 A3.4: the mail carries the calendar invite.
+      "meeting.invited": { inApp: "on", email: "on" },
+      "meeting.cancelled": { inApp: "on", email: "on" },
     };
     for (const kind of NOTIFICATION_KINDS) expect(defaultPreference(kind)).toEqual(expected[kind]);
     // In-app is on everywhere: the tray is the cheap, pull-based channel.
@@ -812,6 +834,8 @@ describe("notification catalogue", () => {
       "board.invited",
       "board.role_changed",
       "comment.mention",
+      "meeting.invited",
+      "meeting.cancelled",
     ]);
   });
 

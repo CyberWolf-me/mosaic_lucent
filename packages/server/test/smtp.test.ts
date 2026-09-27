@@ -219,6 +219,36 @@ describe("SmtpMailer", () => {
     }
   });
 
+  it("carries an attachment as a base64 part of a multipart message (a meeting invite)", async () => {
+    const fake = await startFakeSmtp();
+    const ics = "BEGIN:VCALENDAR\nMETHOD:REQUEST\n.\nEND:VCALENDAR\n";
+    try {
+      await mailerFor(fake).send({
+        to: "ana@example.com",
+        subject: "Invitation: Planning",
+        text: "You're invited",
+        attachments: [
+          { filename: "invite.ics", contentType: "text/calendar; method=REQUEST", content: ics },
+        ],
+      });
+      const boundary = /boundary="([^"]+)"/.exec(fake.payload)?.[1];
+      expect(boundary).toBeTruthy();
+      expect(fake.payload).toContain(`--${boundary}\r\nContent-Type: text/plain; charset=utf-8`);
+      expect(fake.payload).toContain("You're invited");
+      expect(fake.payload).toContain(
+        'Content-Type: text/calendar; method=REQUEST; name="invite.ics"',
+      );
+      expect(fake.payload).toContain('Content-Disposition: attachment; filename="invite.ics"');
+      expect(fake.payload).toContain(`--${boundary}--`);
+      // The file's own lone "." can't end the message: it travels base64.
+      const encoded = fake.payload.split("Content-Transfer-Encoding: base64\r\n\r\n")[1]!;
+      const base64 = encoded.split(`\r\n--${boundary}--`)[0]!.replace(/\r\n/g, "");
+      expect(Buffer.from(base64, "base64").toString("utf8")).toBe(ics);
+    } finally {
+      await fake.close();
+    }
+  });
+
   it("stuffs leading dots and writes CRLF line endings only", async () => {
     const fake = await startFakeSmtp();
     try {

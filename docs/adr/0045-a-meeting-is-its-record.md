@@ -54,3 +54,15 @@ A3.1 adds exactly what the workspace list and the past-meeting page need:
 - The shape grows in steps, and each step says which feature pays for it. A
   reader looking for a field J1 names and not finding it should look at the
   roadmap slice that brings it (docs/28 §8), not assume it was forgotten.
+
+## Follow-up (2026-09-27)
+
+- **A3.3** stored the summary (`summary`, migration 0033); `summarized` is
+  derived from it.
+- **A3.4** stored the plan (`scheduled_for`, `duration_min`, `invitees`,
+  `template`, `cancelled_at`, `cancelled_by`; migration 0035). The status
+  stayed derived rather than stored, as with `summarized`: `scheduled` is
+  "has a plan, no turns, still open", `cancelled` is "has `cancelled_at`". A
+  scheduled row carries its planned start in `started_at` until the recording
+  that starts it sets the real one — on the same row, so the id the invites
+  carry is the id the transcript keeps.
