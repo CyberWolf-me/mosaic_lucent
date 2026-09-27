@@ -340,7 +340,8 @@ describe("ingest — the verified change into the human-gated queue", () => {
       { provider: "linear", externalId: "LIN-1", status: "Done" },
       ORG_A,
     );
-    expect(outcome).toEqual({ outcome: "queued", count: 2 });
+    expect(outcome).toMatchObject({ outcome: "queued", count: 2 });
+    expect(outcome.records).toHaveLength(2);
     const records = await h.inbound.forBoard("brd_1");
     expect(records).toHaveLength(1);
     expect(records[0]).toMatchObject({
@@ -362,7 +363,7 @@ describe("ingest — the verified change into the human-gated queue", () => {
       { provider: "linear", externalId: "LIN-1", status: "Done" },
       ORG_A,
     );
-    expect(outcome).toEqual({ outcome: "queued", count: 0 });
+    expect(outcome).toEqual({ outcome: "queued", count: 0, records: [] });
     expect(await h.inbound.forBoard("brd_1")).toHaveLength(0);
   });
 
@@ -413,7 +414,7 @@ describe("ingest — the verified change into the human-gated queue", () => {
       { provider: "linear", externalId: "LIN-999", status: "Done" },
       ORG_A,
     );
-    expect(outcome).toEqual({ outcome: "unlinked", count: 0 });
+    expect(outcome).toEqual({ outcome: "unlinked", count: 0, records: [] });
   });
 
   it("a webhook resolved to one org never writes another org's board", async () => {

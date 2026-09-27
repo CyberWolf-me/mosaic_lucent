@@ -69,6 +69,13 @@ describe("org settings policy (unit)", () => {
       serverTtsDisabled: false,
       retention: { transcriptDays: null },
       providerPolicy: { mode: "any", allow: null },
+      // docs/26 A5: only the overdue reminder runs unasked.
+      automation: {
+        meetingExtract: false,
+        decisionPlan: false,
+        overdueNotify: true,
+        externalClose: false,
+      },
     });
     expect(effectiveSettings({}).classificationFloor).toBe("internal");
   });

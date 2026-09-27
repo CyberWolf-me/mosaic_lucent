@@ -2,6 +2,7 @@ import type { IncomingMessage, Server, ServerResponse } from "node:http";
 import { createServer } from "node:http";
 import type { LLMProvider, ImageProvider, VectorProvider } from "@lucent/ai";
 import { handleGenerate, handleGenerateStream } from "./generate.js";
+import { createAutomations } from "./automation.js";
 import { readByoHeaders, resolveProvider, providerFact } from "./modelRouter.js";
 import {
   checkOutboundFor,
@@ -404,6 +405,8 @@ export interface App {
     meetingId: string,
     options?: { replace?: boolean; by?: string },
   ): Promise<import("./meetings.js").RecapOutcome>;
+  /** docs/26 A5: the org's automation rules, for their jobs (main.ts). */
+  automations: import("./automation.js").Automations;
   close(): Promise<void>;
 }
 
@@ -2227,6 +2230,25 @@ export function createApp(deps: AppDeps): App {
       });
   }
 
+  /** docs/26 A5: tell the outbox decisions were approved; its consumer queues their plan. */
+  function announceDecisionApproved(ref: {
+    boardId: string;
+    orgId: string;
+    nodeIds: string[];
+    by: string;
+  }): void {
+    void deps.outbox
+      ?.append({
+        type: "DecisionApproved",
+        boardId: ref.boardId,
+        orgId: ref.orgId,
+        payload: { nodeIds: ref.nodeIds, by: ref.by },
+      })
+      .catch(() => {
+        // Best-effort, like MeetingEnded: the plan can still be asked for.
+      });
+  }
+
   const services: RouteServices = {
     config,
     logger,
@@ -2250,6 +2272,7 @@ export function createApp(deps: AppDeps): App {
     meetings,
     writeMeetingRecap,
     announceMeetingEnded,
+    announceDecisionApproved,
     // Notes live beside transcripts: with a meeting store and no notes store
     // (tests, in-memory dev), keep notes in memory rather than refusing them.
     meetingNotes: deps.meetingNotes ?? (meetings ? new InMemoryMeetingNotesStore() : undefined),
@@ -2345,6 +2368,113 @@ export function createApp(deps: AppDeps): App {
       realtime.commitForBoard(boardId, userId, ops, label, meta),
     broadcastProposal: (boardId, event) => realtime.broadcastProposal(boardId, event),
   };
+
+  // docs/26 A5: automation v1 — the org's rules, run by jobs (main.ts) and
+  // after an inbound change is queued (below). Built after the services: an
+  // external close commits through the same seams a person's accept uses.
+  const automations = createAutomations({
+    boardStore,
+    ...(meetings ? { meetings } : {}),
+    ...(proposalStore ? { proposals: proposalStore } : {}),
+    index: intelligence.store,
+    freshen: (boards) => intelligence.freshen(boards),
+    ...(orgStore ? { orgs: orgStore } : {}),
+    settingsFor: (orgId) => orgPolicy(orgId),
+    generate: async (board, request) => {
+      // The gates every model call passes, in the order the routes check them.
+      if (await outboundRefusal(board, "ai", { provider })) return { ok: false, reason: "refused" };
+      const refusedByPolicy = providerPolicyRefusal(
+        (await orgPolicy(board.orgId)).providerPolicy,
+        providerFact({ provider, byok: false }, config.aiSelfHosted),
+      );
+      if (refusedByPolicy) return { ok: false, reason: "refused" };
+      const allowance = entitlements
+        ? await entitlements.checkMonthly(board.orgId, "ai.generationsPerMonth", 1)
+        : null;
+      if (allowance && !allowance.allowed) return { ok: false, reason: "limit" };
+      const result = await handleGenerate(provider, { ...request, boardId: board.id }, undefined, {
+        boardId: board.id,
+        store: boardStore,
+      });
+      if (result.status >= 400) {
+        return {
+          ok: false,
+          reason: "failed",
+          detail: JSON.stringify(result.body).slice(0, 300),
+        };
+      }
+      const body = result.body as {
+        operations: import("@lucent/core").Operation[];
+        explanation?: string | null;
+      };
+      meterUsage(board.orgId, "ai.generation", 1, {
+        boardId: board.id,
+        provider: provider.name,
+        mode: "automation",
+        operations: body.operations.length,
+        model: result.completion?.model ?? null,
+        inputTokens: result.completion?.usage?.inputTokens ?? null,
+        outputTokens: result.completion?.usage?.outputTokens ?? null,
+      });
+      return {
+        ok: true,
+        operations: body.operations,
+        explanation: body.explanation ?? null,
+        provider: provider.name,
+        model: result.completion?.model ?? null,
+      };
+    },
+    recordRun,
+    linkRunProposal: (runId, proposalId) => aiRuns.linkProposal(runId, proposalId),
+    broadcast: (boardId, event) => realtime.broadcastProposal(boardId, event),
+    notify: async (event) => {
+      if (!notifyDeps) return;
+      await notify(notifyDeps, event);
+    },
+    peopleFor: async (board) => {
+      const people = new Map<string, { id: string; name: string; email: string }>();
+      const owner = await userStore.findById(board.ownerId);
+      if (owner) people.set(owner.id, { id: owner.id, email: owner.email, name: owner.name });
+      for (const m of (await orgStore?.membersOf(board.orgId)) ?? []) {
+        if (m.email) people.set(m.userId, { id: m.userId, email: m.email, name: m.name });
+      }
+      return [...people.values()];
+    },
+    findUser: async (id) => {
+      const user = await userStore.findById(id);
+      return user ? { id: user.id, name: user.name, email: user.email } : undefined;
+    },
+    applyInbound: async (board, record) => {
+      if (!integrations?.inbound || record.mappedValue === undefined) return false;
+      // The integration boundary a person's accept checks (docs/23 S1/S2).
+      if (await outboundRefusal(board, "integration")) return false;
+      const { applyInboundChange } = await import("./integrations/applyInbound.js");
+      const outcome = await applyInboundChange(
+        services,
+        board,
+        { ...record, mappedValue: record.mappedValue },
+        {
+          by: "system",
+          decidedBy: "automation",
+          label: `closed in ${record.provider} (automation)`,
+        },
+      );
+      return outcome.ok;
+    },
+    audit: async (entry) => {
+      await orgStore?.audit({
+        orgId: entry.orgId,
+        actorId: null,
+        action: entry.action,
+        subject: entry.subject,
+        targetType: "automation",
+        ip: null,
+        metadata: entry.metadata,
+        at: Date.now(),
+      });
+    },
+    logger,
+  });
 
   const router = new Router<EmptyState>({
     maxBodyBytes: MAX_BODY_BYTES,
@@ -2500,7 +2630,7 @@ export function createApp(deps: AppDeps): App {
           const resolved = integrations.providers.get(provider);
           const connection = connections.find((c) => c.orgId === orgId);
           if (!resolved || !connection) return;
-          await ingestInboundChange(
+          const ingested = await ingestInboundChange(
             {
               linksForExternalId: (p, externalId) =>
                 integrations.store.linksForExternalId(p, externalId),
@@ -2516,6 +2646,9 @@ export function createApp(deps: AppDeps): App {
             change,
             orgId,
           );
+          // docs/26 A5: "done" in the tracker closes the work, where the org
+          // turned that on; everything else waits for a person's accept.
+          await automations.closeFromTracker(ingested.records);
         },
       });
       // The scheme owns the header name — GitHub signs X-Hub-Signature-256,
@@ -5074,6 +5207,7 @@ export function createApp(deps: AppDeps): App {
     realtime,
     metrics,
     writeMeetingRecap,
+    automations,
     async close(): Promise<void> {
       await new Promise<void>((resolve) => server.close(() => resolve()));
       realtime.close();

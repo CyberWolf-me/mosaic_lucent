@@ -162,6 +162,23 @@ export interface NotificationPayloads {
     boardName: string;
     count: number;
   };
+  /** Work you own is past its due date (docs/26 A5, the overdue automation). */
+  "work.overdue": {
+    boardId: string;
+    boardName: string;
+    nodeId: string;
+    label: string;
+    dueDate: string;
+  };
+  /** An automation proposed changes on your board (docs/26 A5). */
+  "automation.proposed": {
+    boardId: string;
+    boardName: string;
+    /** What started it: the meeting that ended, or the decision approved. */
+    rule: "meetingExtract" | "decisionPlan";
+    subject: string;
+    ops: number;
+  };
 }
 
 export type NotificationKind = keyof NotificationPayloads;
@@ -185,7 +202,9 @@ export const NOTIFICATION_KINDS = [
   "meeting.summarized",
   "work.assigned",
   "work.blocked",
+  "work.overdue",
   "review.pending",
+  "automation.proposed",
 ] as const;
 
 type ListedKind = (typeof NOTIFICATION_KINDS)[number];
@@ -439,6 +458,30 @@ export const NOTIFICATION_CATALOGUE: {
           : `${p.count} suggestions on ${p.boardName} wait for review`,
       body: "Approve, edit or reject what the AI extracted — nothing it suggested is trusted until a person looks.",
       link: "/?view=review",
+    }),
+  },
+  "work.overdue": {
+    label: "Your work is overdue",
+    description: "When work you own passes its due date — once per due date.",
+    // A direct address about a commitment, like an assignment.
+    defaults: { inApp: "on", email: "on" },
+    compose: (p) => ({
+      title: `"${p.label}" was due ${p.dueDate}`,
+      body: `On ${p.boardName}. Finish it, move the date, or hand it on.`,
+      link: `${boardPath(p.boardId)}&reveal=${encodeURIComponent(p.nodeId)}`,
+    }),
+  },
+  "automation.proposed": {
+    label: "Automation proposals",
+    description: "When one of your workspace's automations proposes changes to your board.",
+    defaults: { inApp: "on", email: "off" },
+    compose: (p) => ({
+      title:
+        p.rule === "meetingExtract"
+          ? `What "${p.subject}" left unextracted is ready to review`
+          : `A plan for "${p.subject}" is ready to review`,
+      body: `${p.ops} ${p.ops === 1 ? "change" : "changes"} proposed on ${p.boardName} — nothing lands until someone approves.`,
+      link: boardPath(p.boardId),
     }),
   },
 };

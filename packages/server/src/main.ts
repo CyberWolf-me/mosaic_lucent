@@ -541,6 +541,33 @@ outboxDispatcher.subscribe("MeetingEnded", async (event) => {
     payload: { boardId: event.boardId, meetingId },
     dedupeKey: `meeting.recap:${meetingId}`,
   });
+  // docs/26 A5: the turns nobody extracted, proposed — when the org's rule
+  // is on (the job reads it when it runs, so turning it off stops this).
+  await jobQueue.enqueue({
+    type: "meeting.extract",
+    family: "ai",
+    payload: { boardId: event.boardId, meetingId },
+    dedupeKey: `meeting.extract:${meetingId}`,
+  });
+});
+
+// docs/26 A5: decisions approved in Review may plan themselves (the org's rule).
+outboxDispatcher.subscribe("DecisionApproved", async (event) => {
+  const { nodeIds, by } = event.payload as { nodeIds?: unknown; by?: unknown };
+  if (
+    !event.boardId ||
+    typeof by !== "string" ||
+    !Array.isArray(nodeIds) ||
+    !nodeIds.every((id) => typeof id === "string")
+  ) {
+    return;
+  }
+  await jobQueue.enqueue({
+    type: "decision.plan",
+    family: "ai",
+    payload: { boardId: event.boardId, nodeIds, by },
+    dedupeKey: `decision.plan:${event.id}`,
+  });
 });
 
 // M7 / M4 storage: the asset gateway. Stage B6 closes the deferred gap: the
@@ -598,7 +625,7 @@ const imageProvider = selectImageProvider();
 const vectorProvider = selectVectorProvider();
 console.log(`[lucent] vector: ${vectorProvider ? vectorProvider.name : "off"}`);
 
-const { server, realtime, writeMeetingRecap } = createApp({
+const { server, realtime, writeMeetingRecap, automations } = createApp({
   config,
   provider,
   imageProvider,
@@ -876,7 +903,7 @@ async function sweepIntegration(): Promise<void> {
         if (!factory) continue;
         const provider = factory(connection);
         const task = await provider.getTask(row.externalId);
-        await ingestInboundChange(
+        const ingested = await ingestInboundChange(
           {
             linksForExternalId: (p, externalId) =>
               stores.integrations.store.linksForExternalId(p, externalId),
@@ -891,6 +918,8 @@ async function sweepIntegration(): Promise<void> {
           { provider: row.provider, externalId: row.externalId, status: task.status },
           row.orgId,
         );
+        // docs/26 A5: "done" in the tracker closes the work where the org allows it.
+        await automations.closeFromTracker(ingested.records);
         await stores.integrations.webhookEvents.markProcessed(row.id, row.orgId, Date.now());
       } catch (err) {
         await stores.integrations.webhookEvents.markFailed(
@@ -1059,6 +1088,29 @@ const jobRunner = runsJobs(role)
           if (typeof boardId !== "string" || typeof meetingId !== "string") return;
           const result = await writeMeetingRecap(boardId, meetingId);
           logger.info("meetings.recap", { meetingId, outcome: result.outcome });
+        },
+        // docs/26 A5, automation v1. Each reads the org's rule when it runs.
+        "meeting.extract": async (job) => {
+          const { boardId, meetingId } = job.payload as { boardId?: unknown; meetingId?: unknown };
+          if (typeof boardId !== "string" || typeof meetingId !== "string") return;
+          const result = await automations.extractMeetingRest(boardId, meetingId);
+          logger.info("automation.meeting-extract", { meetingId, outcome: result.outcome });
+        },
+        "decision.plan": async (job) => {
+          const { boardId, nodeIds, by } = job.payload as {
+            boardId?: unknown;
+            nodeIds?: unknown;
+            by?: unknown;
+          };
+          if (typeof boardId !== "string" || typeof by !== "string" || !Array.isArray(nodeIds)) {
+            return;
+          }
+          const result = await automations.planDecisions(boardId, nodeIds as string[], by);
+          logger.info("automation.decision-plan", { boardId, outcome: result.outcome });
+        },
+        "sweep-overdue": async () => {
+          const { told } = await automations.sweepOverdue();
+          if (told > 0) logger.info("automation.overdue-told", { told });
         },
       },
       ...(familiesFor(role, process.env.LUCENT_JOB_FAMILIES)

@@ -104,6 +104,17 @@ export const registerOrgSettingsRoutes: RegisterRoutes = (router, s) => {
       if (sub.transcriptDays === null || sub.transcriptDays === undefined) delete merged.retention;
       else merged.retention = sub;
     }
+    // `automation` too (docs/26 A5): one rule per PATCH leaves the others as
+    // they were; `null` returns a rule to its default by dropping it.
+    if (parsed.settings.automation) {
+      const sub: Record<string, boolean | null | undefined> = {
+        ...before.automation,
+        ...parsed.settings.automation,
+      };
+      for (const [rule, on] of Object.entries(sub)) if (on === null) delete sub[rule];
+      if (Object.keys(sub).length === 0) delete merged.automation;
+      else merged.automation = sub as import("../classification.js").OrgAutomation;
+    }
     await orgStore.setSettings(id, merged);
 
     // Audit names the CHANGED KEYS with from→to (docs/24 §4 acceptance):

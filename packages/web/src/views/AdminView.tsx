@@ -13,6 +13,14 @@ import {
   SectionLabel,
 } from "../ui/kit.js";
 import { loadOrgRuns, type AiRunView } from "../review.js";
+import {
+  AUTOMATION_COPY,
+  AUTOMATION_RULES,
+  loadAutomation,
+  setAutomationRule,
+  type AutomationRule,
+  type AutomationSettings,
+} from "../automation.js";
 import { getCurrentOrgId } from "../orgs.js";
 import { useWorkspace } from "../workspace.js";
 
@@ -355,6 +363,9 @@ export function AdminView({ onBack }: { onBack: () => void }) {
       <SectionLabel>AI activity</SectionLabel>
       <AiActivitySection org={org} />
 
+      <SectionLabel>Automation</SectionLabel>
+      <AutomationSection org={org} />
+
       <SectionLabel>Single sign-on</SectionLabel>
       <SsoSection state={sso} hasOrg={org !== null} />
     </Page>
@@ -456,6 +467,80 @@ function AiActivitySection({ org }: { org: OrgSummary | null }) {
           );
         })}
       </ol>
+    </Card>
+  );
+}
+
+/**
+ * The org's automation rules (docs/26 A5): what Lucent does on its own.
+ * Owners only — the settings route's floor. A switch moves when clicked and
+ * then settles on what the server now enforces; a failed save puts it back.
+ */
+function AutomationSection({ org }: { org: OrgSummary | null }) {
+  const [rules, setRules] = useState<AutomationSettings | null | "failed">(null);
+  const [saving, setSaving] = useState<AutomationRule | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    if (!org || org.role !== "owner") return;
+    void loadAutomation(org.id).then((r) => setRules(r ?? "failed"));
+  }, [org]);
+  if (!org) return null;
+  if (org.role !== "owner") {
+    return <EmptyState compact title="Automation is set by workspace owners" />;
+  }
+  if (rules === null) {
+    return (
+      <p className="boards-admin-muted" role="status">
+        Loading automation…
+      </p>
+    );
+  }
+  if (rules === "failed") {
+    return (
+      <p className="boards-admin-muted" role="alert">
+        Couldn&apos;t load automation.
+      </p>
+    );
+  }
+  const toggle = async (rule: AutomationRule, on: boolean) => {
+    const before = rules;
+    setRules({ ...before, [rule]: on });
+    setSaving(rule);
+    setError(null);
+    const next = await setAutomationRule(org.id, rule, on);
+    setSaving(null);
+    if (next) {
+      setRules(next);
+    } else {
+      setRules(before);
+      setError("Couldn't save that — the rule is unchanged.");
+    }
+  };
+  return (
+    <Card className="boards-admin-card">
+      <ul className="automation-rules" aria-label="Automation rules">
+        {AUTOMATION_RULES.map((rule) => (
+          <li key={rule}>
+            <label className="automation-rule">
+              <input
+                type="checkbox"
+                checked={rules[rule]}
+                disabled={saving !== null}
+                onChange={(e) => void toggle(rule, e.target.checked)}
+              />
+              <span>
+                <span className="automation-rule-title">{AUTOMATION_COPY[rule].title}</span>
+                <span className="automation-rule-body">{AUTOMATION_COPY[rule].body}</span>
+              </span>
+            </label>
+          </li>
+        ))}
+      </ul>
+      {error && (
+        <p className="boards-admin-muted" role="alert">
+          {error}
+        </p>
+      )}
     </Card>
   );
 }

@@ -396,8 +396,15 @@ export const REQUEST_LIMITS = {
    */
   idChars: SUMMARY_LIMITS.shapeTextChars,
   textChars: SUMMARY_LIMITS.historyChars,
-  /** The live request — the one string the user is actually writing. */
-  messageChars: 4_000,
+  /**
+   * The live request. Usually what a person typed or said, but not always:
+   * a meeting extraction's message is the app's differential prompt (~3.5k
+   * of instructions) wrapped around the new turns, and at 4k it left room for
+   * about 500 characters of speech — a longer batch was refused whole, so the
+   * live loop dropped exactly the busy stretches (found in docs/26 A5). 12k
+   * holds a real batch and still bounds the prompt (~3k tokens).
+   */
+  messageChars: 12_000,
   /** Attachments: the browser extracts document text, so no parser sees bytes. */
   documents: 4,
   documentNameChars: 200,

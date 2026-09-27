@@ -55,3 +55,4 @@ back to it.
 | [0046](0046-projects-link-boards-intelligence-is-an-index.md)     | Projects link boards and grant nothing; intelligence is a rebuildable index (docs/26 J2/J3)                                        | Accepted |
 | [0047](0047-trust-is-stamped-where-the-actor-is-known.md)         | Trust is stamped where the actor is known; the model never sets it (docs/26 J5/J6)                                                 | Accepted |
 | [0048](0048-scoped-reads-and-per-person-threads.md)               | Search and Ask read scopes the caller can open; a conversation is a person's thread (J4/J7)                                        | Accepted |
+| [0049](0049-automation-proposes-or-is-reversible.md)              | Automation proposes; the one rule that applies is opt-in and reversible (docs/26 A5)                                               | Accepted |

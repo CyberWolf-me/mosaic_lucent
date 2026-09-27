@@ -79,7 +79,6 @@ export const registerIntegrationRoutes: RegisterRoutes = (router, s) => {
     requireCsrf,
     meter,
     trace,
-    commitForBoard,
     broadcastProposal,
     auditRow,
     provider: llmProvider,
@@ -985,102 +984,31 @@ export const registerIntegrationRoutes: RegisterRoutes = (router, s) => {
       return;
     }
 
-    // Apply the REVIEWED SNAPSHOT: a SET_ISSUE carrying the mapped value on
-    // the record's fields. The system actor's first use — the timeline
-    // honestly shows "Lucent ← the provider, accepted by <user>".
-    const node = guard.board.workspace.nodes[record.nodeId];
-    const currentIssue = node?.issue;
-    const ops: import("@lucent/core").Operation[] = [
-      {
-        op: "SET_ISSUE",
-        id: record.nodeId,
-        issue: currentIssue
-          ? { ...currentIssue, status: record.mappedValue }
-          : { type: "task", status: record.mappedValue },
-      },
-    ];
-    const { validateOperations, applyOperations } = await import("@lucent/core");
-    const errors = validateOperations(guard.board.workspace, ops);
-    if (errors.length > 0) {
-      send(res, 422, {
-        error: "the inbound change no longer applies to this board",
-        detail: errors.map((e) => `${e.op}: ${e.message}`).join("; "),
+    // Apply the REVIEWED SNAPSHOT — the same helper the external-close
+    // automation uses (docs/26 A5), so both land identically.
+    const { applyInboundChange } = await import("../integrations/applyInbound.js");
+    const outcome = await applyInboundChange(
+      s,
+      guard.board,
+      { ...record, mappedValue: record.mappedValue },
+      { by: user.id, decidedBy: user.id, initiatedBy: user.id },
+    );
+    if (!outcome.ok) {
+      send(res, outcome.status, {
+        error: outcome.error,
+        ...(outcome.detail !== undefined ? { detail: outcome.detail } : {}),
+        ...(outcome.reason !== undefined ? { reason: outcome.reason } : {}),
+        ...(outcome.head !== undefined ? { head: outcome.head } : {}),
       });
       return;
     }
-
-    const requestId = `inb_${record.id}`;
-    const actor: import("../boards.js").OperationActor = {
-      actorType: "system",
-      actorId: record.provider,
-      initiatedBy: user.id,
-    };
-    let seq: number;
-    let persistedByRoom = false;
-    const roomResult = await commitForBoard(boardId, user.id, ops, `sync from ${record.provider}`, {
-      requestId,
-      actor,
-    });
-    if (roomResult?.ok && roomResult.entry) {
-      seq = roomResult.entry.seq;
-      persistedByRoom = true;
-      for (const absorbed of roomResult.absorbed ?? []) {
-        broadcastProposal(boardId, { type: "op", entry: absorbed });
-      }
-      broadcastProposal(boardId, { type: "op", entry: roomResult.entry });
-    } else {
-      const append = await s.boardStore.appendOp({
-        boardId,
-        ops,
-        by: user.id,
-        label: `sync from ${record.provider}`,
-        at: Date.now(),
-        requestId,
-        actor,
-      });
-      if (!append.ok) {
-        send(res, 409, { error: "stale board", reason: append.reason, head: append.head });
-        return;
-      }
-      seq = append.seq;
-      persistedByRoom = append.duplicate === true;
-      if (!persistedByRoom) {
-        const updated = applyOperations(guard.board.workspace, ops);
-        await s.boardStore.put({ ...guard.board, workspace: updated, updatedAt: Date.now() });
-      }
-    }
-
-    // The link's lastSyncedStatus is a fact about the provider: accept
-    // records it (the board now agrees with the provider).
-    const link = (await integrations.store.linksForNode(boardId, record.nodeId)).find(
-      (l) => l.provider === record.provider,
-    );
-    if (link) {
-      await integrations.store.linkTask(
-        {
-          orgId: guard.board.orgId,
-          boardId,
-          nodeId: record.nodeId,
-          provider: record.provider,
-          externalId: link.externalId,
-          ...(link.url !== undefined ? { url: link.url } : {}),
-          lastSyncedStatus: record.externalValue,
-        },
-        Date.now(),
-      );
-    }
-
-    const decided = await inbound.decide(boardId, changeId, "applied", user.id, Date.now(), {
-      appliedSeq: seq,
-    });
-    broadcastProposal(boardId, {
-      type: "integrations-inbound",
-      id: changeId,
-      status: "applied",
-      by: user.id,
-    });
     void auditRow(req, user.id, guard.board.orgId, "integration.inbound.accept", changeId);
-    send(res, 200, { change: decided, applied: ops.length, seq, persistedByRoom });
+    send(res, 200, {
+      change: outcome.change,
+      applied: outcome.applied,
+      seq: outcome.seq,
+      persistedByRoom: outcome.persistedByRoom,
+    });
   });
 
   router.post("/api/boards/:id/integrations/inbound/:changeId/dismiss", async (ctx) => {

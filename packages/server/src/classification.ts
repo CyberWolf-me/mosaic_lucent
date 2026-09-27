@@ -211,6 +211,43 @@ export interface OrgRetentionPolicy {
   transcriptDays?: number | null;
 }
 
+/**
+ * What Lucent does on its own when something happens (docs/26 A5). Each
+ * rule's output is reviewable or reversible: the two that write the board
+ * make a PROPOSAL a person approves; the reminder is a notification; the
+ * one that applies directly (an external tracker closing linked work) is off
+ * until an owner turns it on, and every such apply is on the op log and in
+ * the audit trail, undoable like any edit.
+ *
+ * - `meetingExtract` — a meeting ends → the turns nobody extracted become a
+ *   proposal on its board.
+ * - `decisionPlan` — a decision is approved in Review → its plan (the work it
+ *   drives, gated to creation ops) becomes a proposal.
+ * - `overdueNotify` — work past its due date → its owner is told, once.
+ * - `externalClose` — Linear/Jira/GitHub marks linked work done → the board
+ *   marks it completed, as the integration, without waiting for accept.
+ */
+export const AUTOMATION_RULES = [
+  "meetingExtract",
+  "decisionPlan",
+  "overdueNotify",
+  "externalClose",
+] as const;
+export type AutomationRule = (typeof AUTOMATION_RULES)[number];
+/** Stored form: absent rules take their default; `null` in a PATCH clears one. */
+export type OrgAutomation = Partial<Record<AutomationRule, boolean>>;
+/** The reminder is on by default; everything that acts on the board is off. */
+export const AUTOMATION_DEFAULTS: Readonly<Record<AutomationRule, boolean>> = {
+  meetingExtract: false,
+  decisionPlan: false,
+  overdueNotify: true,
+  externalClose: false,
+};
+
+function isAutomationRule(key: string): key is AutomationRule {
+  return (AUTOMATION_RULES as readonly string[]).includes(key);
+}
+
 export interface OrgSettings {
   /**
    * The floor every board's tier is raised to (`stricterOf`): a board in a
@@ -259,6 +296,8 @@ export interface OrgSettings {
    * floor rule, and stated so nobody "fixes" it.
    */
   providerPolicy?: OrgProviderPolicy;
+  /** Automation rules (docs/26 A5); absent means every rule's default. */
+  automation?: OrgAutomation;
 }
 
 /** Anything a gate can read an org's settings through (undefined = no policy). */
@@ -275,6 +314,28 @@ export interface EffectiveOrgSettings {
   serverTtsDisabled: boolean;
   retention: { transcriptDays: number | null };
   providerPolicy: EffectiveProviderPolicy;
+  automation: Record<AutomationRule, boolean>;
+}
+
+/**
+ * Each rule resolved. Fail QUIET rather than closed-by-restriction: a rule
+ * whose stored value is not a boolean does not run — for automation the
+ * restrictive answer is "Lucent does nothing on its own".
+ */
+export function effectiveAutomation(raw: unknown): Record<AutomationRule, boolean> {
+  const stored =
+    typeof raw === "object" && raw !== null && !Array.isArray(raw)
+      ? (raw as Record<string, unknown>)
+      : raw === undefined
+        ? {}
+        : null;
+  const out = { ...AUTOMATION_DEFAULTS };
+  for (const rule of AUTOMATION_RULES) {
+    if (stored === null) out[rule] = false;
+    else if (stored[rule] === undefined) continue;
+    else out[rule] = stored[rule] === true;
+  }
+  return out;
 }
 
 /**
@@ -317,6 +378,7 @@ export function effectiveSettings(org: OrgPolicySource): EffectiveOrgSettings {
           : raw.serverTts !== "allowed",
     retention: effectiveRetention(raw.retention),
     providerPolicy: effectiveProviderPolicy(raw.providerPolicy),
+    automation: effectiveAutomation(raw.automation),
   };
 }
 
@@ -438,6 +500,27 @@ export function parseOrgSettings(
           }
         }
         settings.providerPolicy = policy as OrgProviderPolicy;
+        break;
+      }
+      case "automation": {
+        if (typeof value !== "object" || value === null || Array.isArray(value)) {
+          return { ok: false, error: "automation must be an object" };
+        }
+        const rules: Record<string, boolean | null> = {};
+        for (const [rule, on] of Object.entries(value as Record<string, unknown>)) {
+          if (!isAutomationRule(rule)) {
+            return {
+              ok: false,
+              error: `unknown automation rule "${rule}" (one of: ${AUTOMATION_RULES.join(", ")})`,
+            };
+          }
+          // null clears the rule back to its default (the route's merge drops it).
+          if (on !== null && typeof on !== "boolean") {
+            return { ok: false, error: `automation.${rule} must be a boolean or null` };
+          }
+          rules[rule] = on;
+        }
+        settings.automation = rules as OrgAutomation;
         break;
       }
       default:

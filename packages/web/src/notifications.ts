@@ -50,7 +50,9 @@ export const NOTIFICATION_KINDS = [
   "meeting.summarized",
   "work.assigned",
   "work.blocked",
+  "work.overdue",
   "review.pending",
+  "automation.proposed",
 ] as const;
 
 export type NotificationKind = (typeof NOTIFICATION_KINDS)[number];
@@ -333,7 +335,9 @@ const KIND_COPY: {
   "meeting.summarized": { category: "Meeting summary", icon: "meeting" },
   "work.assigned": { category: "Assigned to you", icon: "work" },
   "work.blocked": { category: "Blocked", icon: "work" },
+  "work.overdue": { category: "Overdue", icon: "work" },
   "review.pending": { category: "To review", icon: "review" },
+  "automation.proposed": { category: "Proposed for review", icon: "review" },
 };
 
 /**

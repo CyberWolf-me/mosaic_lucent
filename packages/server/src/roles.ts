@@ -131,6 +131,14 @@ export const RECURRING_JOBS: RecurringJob[] = [
     type: "sweep-idle-captures",
     everyMs: 15 * 60_000,
   },
+  // docs/26 A5: due dates are calendar days, so an hourly look is prompt
+  // enough; each reminder is sent once per due date.
+  {
+    key: "sweep-overdue",
+    family: "maintenance",
+    type: "sweep-overdue",
+    everyMs: 60 * 60_000,
+  },
 ];
 
 /**

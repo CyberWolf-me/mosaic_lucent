@@ -56,6 +56,8 @@ export const OUTBOX_EVENT_TYPES = [
   "StripeEventApplied",
   /** An asset finished uploading and its metadata committed. */
   "AssetStored",
+  /** A person approved decisions in Review (docs/26 A5): `{nodeIds, by}`. */
+  "DecisionApproved",
 ] as const;
 
 export type OutboxEventType = (typeof OUTBOX_EVENT_TYPES)[number];

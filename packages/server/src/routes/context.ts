@@ -107,6 +107,13 @@ export interface RouteServices {
   ): Promise<import("../meetings.js").RecapOutcome>;
   /** docs/28 A3.3: announce MeetingEnded to the outbox (a no-op without one). */
   announceMeetingEnded(ref: { boardId: string; orgId: string; meetingId: string }): void;
+  /** docs/26 A5: announce decisions approved in Review (a no-op without an outbox). */
+  announceDecisionApproved(ref: {
+    boardId: string;
+    orgId: string;
+    nodeIds: string[];
+    by: string;
+  }): void;
   /** docs/27 N1: one person's notes per meeting; undefined → the notes routes answer 503. */
   readonly meetingNotes: import("../meetingNotes.js").MeetingNotesStore | undefined;
   /** docs/26 J2 (ADR 0046): projects — org records that link boards and grant nothing. */

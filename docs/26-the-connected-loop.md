@@ -673,6 +673,53 @@ a much better product — not rewriting the layout engine.
   - Not yet: embeddings (keyword first, per ADR 0024), a Postgres full-text
     index (not needed at today's sizes), and "Ask → canvas views" beyond
     selection (a generated view of the cited architecture).
+- **A5 — in progress (2026-09-27).** Execution and automation.
+
+  - _The project dashboard (§8)._ A project's page shows its execution across
+    the boards the caller can read (`GET /api/orgs/:id/projects/:pid/execution`,
+    core `projectExecution`):
+
+    - progress: done, blocked (by hand or waiting on blocked work), late;
+    - each workstream (a board's groups, or the board);
+    - every blocker told as a story: what it waits on and who owns each
+      step, the decision that drove it, the meeting and turn where that was
+      decided;
+    - late work.
+
+    Each piece opens where it lives: a node selected on its board, a meeting
+    at its turn.
+
+  - _Automation v1, per ADR 0049._ Four org rules (Admin → Automation):
+
+    - a meeting ends → the turns nobody extracted are proposed;
+    - a decision approved in Review → its plan (plan-gated) is proposed;
+    - work past its due date → its owner is told once (on by default);
+    - a tracker marks linked work done → the board completes it as the
+      integration (off by default; op-logged, audited, undoable).
+
+    The proposal rules never displace a person's pending proposal. Each rule
+    is read when its job runs, and a model call passes a person's gates.
+
+  - Found on the way: the live meeting loop's prompt is ~3.5k characters of
+    instructions, and the message cap was 4k. A batch with more than about
+    500 characters of speech was refused whole, so the busiest stretches of
+    a meeting never reached the board. The cap is now 12k, and the prompt is
+    shared from `@lucent/ai`.
+  - Evidence:
+    - core `project-execution.test.ts`;
+    - server `project-execution-route.test.ts` and `automation.test.ts` (the
+      settings, each rule on and off, busy and covered, the gates, the
+      message cap);
+    - `scripts/project-execution-check.mjs` (9/9) and
+      `scripts/automation-check.mjs` (8/8: a rule turned on in Admin, a
+      decision approved in Review, its plan a pending proposal from the job
+      runner, the owner told) in the running app.
+  - Not yet (A5.3/A5.4):
+    - integration connection states and a connect UI;
+    - inbound assignee and due date;
+    - Jira inbound through the poll job;
+    - OAuth connect for Linear/Jira;
+    - Slack outbound.
 
 ## 12. Decisions (locked 2026-09-24)
 

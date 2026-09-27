@@ -805,7 +805,21 @@ const SAMPLE_PAYLOADS: { [K in NotificationKind]: NotificationPayloads[K] } = {
     dueDate: "2026-10-01",
   },
   "work.blocked": { boardId: "brd_1", boardName: "Roadmap", nodeId: "n1", label: "Ship it" },
+  "work.overdue": {
+    boardId: "brd_1",
+    boardName: "Roadmap",
+    nodeId: "n1",
+    label: "Write the announcement",
+    dueDate: "2026-09-01",
+  },
   "review.pending": { boardId: "brd_1", boardName: "Roadmap", count: 3 },
+  "automation.proposed": {
+    boardId: "brd_1",
+    boardName: "Roadmap",
+    rule: "meetingExtract",
+    subject: "Pricing sync",
+    ops: 4,
+  },
 };
 
 function samplePayload<K extends NotificationKind>(kind: K): NotificationPayloads[K] {
@@ -844,7 +858,11 @@ describe("notification catalogue", () => {
       "meeting.summarized": { inApp: "on", email: "off" },
       "work.assigned": { inApp: "on", email: "on" },
       "work.blocked": { inApp: "on", email: "off" },
+      // docs/26 A5: overdue work is addressed to its owner, like an
+      // assignment; an automation's proposal waits in the app.
+      "work.overdue": { inApp: "on", email: "on" },
       "review.pending": { inApp: "on", email: "off" },
+      "automation.proposed": { inApp: "on", email: "off" },
     };
     for (const kind of NOTIFICATION_KINDS) expect(defaultPreference(kind)).toEqual(expected[kind]);
     // In-app is on everywhere: the tray is the cheap, pull-based channel.
@@ -859,6 +877,7 @@ describe("notification catalogue", () => {
       "meeting.invited",
       "meeting.cancelled",
       "work.assigned",
+      "work.overdue",
     ]);
   });
 

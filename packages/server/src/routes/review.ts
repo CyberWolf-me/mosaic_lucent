@@ -282,6 +282,21 @@ export const registerReviewRoutes: RegisterRoutes = (router, s) => {
       nodes: nodeIds.length,
       seq: outcome.seq,
     });
+    // docs/26 A5: approved (or reworded) decisions may plan themselves — the
+    // org's rule decides, when the job runs.
+    if (action === "approve" || action === "edit") {
+      const decisions = nodeIds.filter(
+        (id) => guard.board.workspace.nodes[id]?.statement?.kind === "decision",
+      );
+      if (decisions.length > 0) {
+        s.announceDecisionApproved({
+          boardId,
+          orgId: guard.board.orgId,
+          nodeIds: decisions,
+          by: guard.user.id,
+        });
+      }
+    }
     send(res, 200, { seq: outcome.seq, applied: operations.length });
   });
 

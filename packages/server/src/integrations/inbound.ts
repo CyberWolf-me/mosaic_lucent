@@ -269,6 +269,8 @@ export interface IngestOutcome {
   outcome: "queued" | "resolved" | "unlinked";
   /** How many pending records the ingest touched (0 for unlinked). */
   count: number;
+  /** Those records as queued — what an automation may act on (docs/26 A5). */
+  records: InboundChangeRecord[];
 }
 
 export async function ingestInboundChange(
@@ -279,9 +281,9 @@ export async function ingestInboundChange(
   const now = (deps.now ?? Date.now)();
   const links = await deps.linksForExternalId(change.provider, change.externalId);
   if (links.length === 0) {
-    return { outcome: "unlinked", count: 0 };
+    return { outcome: "unlinked", count: 0, records: [] };
   }
-  let queued = 0;
+  const records: InboundChangeRecord[] = [];
   for (const link of links) {
     // Org scoping: a webhook resolved to one org never writes another
     // org's board, even if two orgs somehow link the same external task.
@@ -295,7 +297,7 @@ export async function ingestInboundChange(
       // that has nothing to decide.
       continue;
     }
-    await deps.store.put(
+    const record = await deps.store.put(
       {
         orgId,
         boardId: link.boardId,
@@ -309,7 +311,11 @@ export async function ingestInboundChange(
       "webhook",
       now,
     );
-    queued += 1;
+    records.push(record);
   }
-  return { outcome: links.some((l) => l.orgId === orgId) ? "queued" : "unlinked", count: queued };
+  return {
+    outcome: links.some((l) => l.orgId === orgId) ? "queued" : "unlinked",
+    count: records.length,
+    records,
+  };
 }

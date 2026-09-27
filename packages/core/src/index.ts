@@ -24,6 +24,7 @@ export * from "./authorship.js";
 export * from "./partial.js";
 export * from "./topicFold.js";
 export * from "./statementIndex.js";
+export * from "./planGate.js";
 export * from "./trust.js";
 export * from "./projectExecution.js";
 export * from "./routing.js";
