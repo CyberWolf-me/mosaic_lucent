@@ -57,6 +57,8 @@ export interface ScimRoutesDeps {
    * back to the resource. Defaults to the request's `Host` header.
    */
   baseUrl?: string;
+  /** docs/26 A6: SCIM Groups → the teams of one workspace, when configured. */
+  groups?: Omit<import("../scimGroups.js").ScimGroupsDeps, "now" | "idp" | "identities">;
 }
 
 function defaultBaseUrl(req: IncomingMessage): string {
@@ -343,6 +345,17 @@ export function registerScimRoutes(
     // memberships is out of scope; we return an empty list so the IdP does
     // not treat "no group support" as a fatal error.
     if (url === `${SCIM_BASE}/Groups` || url.startsWith(`${SCIM_BASE}/Groups/`)) {
+      // docs/26 A6: with a workspace named, Groups are its teams.
+      if (deps.groups) {
+        const { handleScimGroups } = await import("../scimGroups.js");
+        await handleScimGroups(req, res, url, baseUrl, {
+          ...deps.groups,
+          idp: deps.config.idp,
+          identities: deps.identities,
+          now,
+        });
+        return true;
+      }
       if (req.method === "GET") {
         const body: ScimListResponse<Record<string, unknown>> = {
           schemas: ["urn:ietf:params:scim:api:messages:2.0:ListResponse"],

@@ -1417,6 +1417,59 @@ export const integrationWebhookEvents = pgTable(
 );
 
 /**
+ * docs/26 A6: teams inside an org (teams.ts) — groups of members a board can
+ * be shared with; SCIM Groups sync into them (`external_id`).
+ */
+export const teams = pgTable(
+  "teams",
+  {
+    id: text("id").primaryKey(),
+    orgId: text("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    externalId: text("external_id"),
+    createdAt: bigint("created_at", { mode: "number" }).notNull(),
+  },
+  (t) => ({
+    orgIdx: index("teams_org_idx").on(t.orgId),
+    externalIdx: uniqueIndex("teams_org_external_idx").on(t.orgId, t.externalId),
+  }),
+);
+
+export const teamMembers = pgTable(
+  "team_members",
+  {
+    teamId: text("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.teamId, t.userId] }),
+    userIdx: index("team_members_user_idx").on(t.userId),
+  }),
+);
+
+export const boardTeamGrants = pgTable(
+  "board_team_grants",
+  {
+    boardId: text("board_id")
+      .notNull()
+      .references(() => boards.id, { onDelete: "cascade" }),
+    teamId: text("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "cascade" }),
+    role: text("role").notNull(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.boardId, t.teamId] }),
+  }),
+);
+
+/**
  * docs/26 A5: OAuth tokens for integration connections, sealed with
  * LUCENT_TOKEN_KEY (integrations/tokenBox.ts) — never stored in the clear.
  */

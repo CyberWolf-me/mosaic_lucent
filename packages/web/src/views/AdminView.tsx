@@ -35,6 +35,14 @@ import {
   type ConnectionView,
 } from "../integrationsAdmin.js";
 import {
+  addTeamMember,
+  createTeam,
+  deleteTeam,
+  listTeams,
+  removeTeamMember,
+  type TeamView,
+} from "../teams.js";
+import {
   getCurrentOrgId,
   listOrgGuests,
   removeOrgGuest,
@@ -418,6 +426,9 @@ export function AdminView({ onBack }: { onBack: () => void }) {
         </>
       ) : null}
 
+      <SectionLabel>Teams</SectionLabel>
+      <TeamsSection org={org} />
+
       <SectionLabel>Guests</SectionLabel>
       <GuestsSection org={org} />
 
@@ -591,6 +602,166 @@ function AiActivitySection({ org }: { org: OrgSummary | null }) {
           );
         })}
       </ol>
+    </Card>
+  );
+}
+
+/**
+ * Teams (docs/26 A6): groups of the workspace's members that boards can be
+ * shared with. Owners create them and choose their members; a team your
+ * identity provider manages is shown, and changed there.
+ */
+function TeamsSection({ org }: { org: OrgSummary | null }) {
+  const [teams, setTeams] = useState<TeamView[] | null | "failed">(null);
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState<string | null>(null);
+  const reload = async (orgId: string) => setTeams((await listTeams(orgId)) ?? "failed");
+  useEffect(() => {
+    if (org) void reload(org.id);
+  }, [org]);
+  if (!org) return null;
+  if (teams === null) {
+    return (
+      <p className="boards-admin-muted" role="status">
+        Loading teams…
+      </p>
+    );
+  }
+  if (teams === "failed") {
+    return (
+      <p className="boards-admin-muted" role="alert">
+        Couldn&apos;t load teams.
+      </p>
+    );
+  }
+  const owner = org.role === "owner";
+  const run = async (action: () => Promise<{ ok: boolean; error?: string }>) => {
+    setBusy(true);
+    setError(null);
+    const result = await action();
+    setBusy(false);
+    if (!result.ok) setError(result.error ?? "That didn't work.");
+    await reload(org.id);
+    return result.ok;
+  };
+  return (
+    <Card className="boards-admin-card">
+      {teams.length === 0 && (
+        <p className="boards-admin-muted">
+          No teams yet. A team is a group of members a board can be shared with — the design team
+          edits the design boards.
+        </p>
+      )}
+      <ul className="team-list" aria-label="Teams">
+        {teams.map((team) => {
+          const outside = org.members.filter(
+            (m) => !team.members.some((t) => t.userId === m.userId),
+          );
+          return (
+            <li key={team.id} className="team-row">
+              <div className="team-head">
+                <span className="team-name">{team.name}</span>
+                {team.managed && (
+                  <span className="team-managed">Managed by your identity provider</span>
+                )}
+                <span className="team-count">
+                  {team.members.length} {team.members.length === 1 ? "member" : "members"}
+                </span>
+                {owner &&
+                  !team.managed &&
+                  (confirming === team.id ? (
+                    <span className="team-actions">
+                      <Button
+                        size="sm"
+                        variant="danger"
+                        disabled={busy}
+                        onClick={() => void run(() => deleteTeam(org.id, team.id))}
+                      >
+                        Delete {team.name}
+                      </Button>
+                      <Button size="sm" onClick={() => setConfirming(null)}>
+                        Keep
+                      </Button>
+                    </span>
+                  ) : (
+                    <span className="team-actions">
+                      <Button size="sm" disabled={busy} onClick={() => setConfirming(team.id)}>
+                        Delete
+                      </Button>
+                    </span>
+                  ))}
+              </div>
+              <div className="team-members">
+                {team.members.map((m) => (
+                  <span key={m.userId} className="team-member">
+                    {m.name || m.email}
+                    {owner && !team.managed && (
+                      <button
+                        type="button"
+                        aria-label={`Remove ${m.name || m.email} from ${team.name}`}
+                        disabled={busy}
+                        onClick={() => void run(() => removeTeamMember(org.id, team.id, m.userId))}
+                      >
+                        ×
+                      </button>
+                    )}
+                  </span>
+                ))}
+                {owner && !team.managed && outside.length > 0 && (
+                  <select
+                    className="boards-admin-role-select"
+                    aria-label={`Add someone to ${team.name}`}
+                    value=""
+                    disabled={busy}
+                    onChange={(e) => {
+                      const userId = e.target.value;
+                      if (userId) void run(() => addTeamMember(org.id, team.id, userId));
+                    }}
+                  >
+                    <option value="">Add someone…</option>
+                    {outside.map((m) => (
+                      <option key={m.userId} value={m.userId}>
+                        {m.name || m.email}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+      {owner && (
+        <form
+          className="team-new"
+          aria-label="New team"
+          onSubmit={(e) => {
+            e.preventDefault();
+            const trimmed = name.trim();
+            if (!trimmed) return;
+            void run(() => createTeam(org.id, trimmed)).then((ok) => {
+              if (ok) setName("");
+            });
+          }}
+        >
+          <input
+            value={name}
+            placeholder="New team — e.g. Design"
+            aria-label="Team name"
+            onChange={(e) => setName(e.target.value)}
+          />
+          <Button size="sm" variant="primary" type="submit" disabled={busy || !name.trim()}>
+            Create team
+          </Button>
+        </form>
+      )}
+      {error && (
+        <p className="boards-admin-error" role="alert">
+          {error}
+        </p>
+      )}
     </Card>
   );
 }

@@ -295,6 +295,13 @@
       "when": 1790527397506,
       "tag": "0041_powerful_vargas",
       "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1790530964314,
+      "tag": "0042_milky_betty_brant",
+      "breakpoints": true
     }
   ]
 }

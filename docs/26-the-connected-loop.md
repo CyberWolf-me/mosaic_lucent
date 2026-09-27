@@ -801,7 +801,27 @@ a much better product — not rewriting the layout engine.
     Admin → Guests lists everyone outside with a board and which boards.
     "End access" removes every grant at once and detaches any open socket.
 
-  - Evidence: server `org-members.test.ts` (3), `guests.test.ts` (4);
+  - _Teams._ A team is a named group of a workspace's members; a board can
+    be shared with it at a role (Admin → Teams; the Share dialog's Teams).
+    Every member already reads every board at their workspace role, so a
+    team grant raises what a group can do on particular boards.
+
+    It's resolved when access is checked, never copied onto people: joining
+    or leaving the team changes access at once (a board already open keeps
+    its role until the room is rejoined). The board store is wrapped once,
+    so every guard, the realtime room and every workspace read agree. Only
+    members can be in a team; a guest is never lifted by one.
+
+    SCIM Groups become the teams of the workspace `LUCENT_SCIM_ORG_ID`
+    names: create, rename, membership by PATCH or PUT, delete. A group's
+    members join as editors if they aren't in the workspace. A managed team
+    is changed at the provider (Lucent's edits answer 409), but Lucent
+    decides its board grants. Migration 0042 (teams, team_members,
+    board_team_grants; RLS on).
+
+  - Evidence: server `org-members.test.ts` (3), `guests.test.ts` (4),
+    `teams.test.ts` (3, with SCIM Groups), `pg-teams.test.ts`;
+    `scripts/teams-check.mjs` (6/6);
     `scripts/guests-check.mjs` (6/6); `scripts/org-members-check.mjs`
     in the running app (6/6, with `LUCENT_DEV_PLAN=team` — a free workspace
     has one seat).

@@ -98,6 +98,7 @@ export const registerOrgMemberRoutes: RegisterRoutes = (router, s) => {
     }
 
     await s.memberships.remove(orgId, targetId);
+    await s.teams.removeUserFromOrg(orgId, targetId);
     // Their direct grants on the org's boards go too, and any board they have
     // open stops accepting their edits now.
     let boardsLost = 0;

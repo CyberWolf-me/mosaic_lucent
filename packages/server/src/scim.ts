@@ -45,6 +45,11 @@ export interface ScimConfig {
   tokenDigest?: string;
   /** Deployment secret used to verify the token digest. */
   secret?: string;
+  /**
+   * docs/26 A6: the workspace SCIM Groups become teams of
+   * (`LUCENT_SCIM_ORG_ID`). Absent, Groups stays an empty, read-only list.
+   */
+  orgId?: string;
 }
 
 /**
@@ -61,11 +66,13 @@ export function readScimConfig(
   const token = env.LUCENT_SCIM_TOKEN?.trim() ?? "";
   const digest = env.LUCENT_SCIM_TOKEN_DIGEST?.trim() ?? "";
   if (!token && !digest) return null;
+  const orgId = env.LUCENT_SCIM_ORG_ID?.trim();
   return {
     idp,
     token,
     ...(digest ? { tokenDigest: digest } : {}),
     ...(secret ? { secret } : {}),
+    ...(orgId ? { orgId } : {}),
   };
 }
 

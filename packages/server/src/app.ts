@@ -130,6 +130,8 @@ import { registerProposalRoutes } from "./routes/proposals.js";
 import { registerIntegrationOAuthRoutes } from "./routes/integrationOAuth.js";
 import { registerOrgMemberRoutes } from "./routes/orgMembers.js";
 import { registerGuestRoutes } from "./routes/guests.js";
+import { registerTeamRoutes } from "./routes/teams.js";
+import { InMemoryTeamStore, withTeamGrants } from "./teams.js";
 import { registerSsoRoutes } from "./routes/sso.js";
 import { registerHistoryRoutes } from "./routes/history.js";
 import { registerAskRoutes } from "./routes/ask.js";
@@ -312,6 +314,8 @@ export interface AppDeps {
   aiRuns?: import("./aiRuns.js").AiRunStore;
   /** docs/26 J7 (ADR 0048): conversation threads. Defaults to in-memory. */
   threads?: import("./threads.js").ThreadStore;
+  /** docs/26 A6: teams and their board grants (in-memory when absent). */
+  teams?: import("./teams.js").TeamStore;
   /**
    * P2's outbox. When present, ending a meeting announces `MeetingEnded`
    * (docs/28 A3.3) and main.ts's consumer queues its summary. Absent in most
@@ -606,7 +610,10 @@ export function createApp(deps: AppDeps): App {
         logger.warn("statement_index_failed", { boardId, error: (err as Error).message }),
     },
   );
-  const boardStore = intelligence.observe(rawBoardStore);
+  // docs/26 A6: a board's effective roles include team grants. Wrapped once,
+  // here, so every guard, the realtime room and every workspace read agree.
+  const teamStore = deps.teams ?? new InMemoryTeamStore();
+  const boardStore = withTeamGrants(intelligence.observe(rawBoardStore), teamStore);
 
   // docs/26 J6 (ADR 0047): a record of every AI run. Writing one never fails
   // the request it describes — governance is kept, not enforced, here.
@@ -2357,6 +2364,7 @@ export function createApp(deps: AppDeps): App {
     aiRuns,
     recordRun,
     threads: deps.threads ?? new InMemoryThreadStore(),
+    teams: teamStore,
     readableBoards: async (userId, orgId, req) => {
       // The two scopes of GET /api/boards (ADR 0045, 0046): an org member
       // reads every board in the org; an outside collaborator only the
@@ -2585,6 +2593,7 @@ export function createApp(deps: AppDeps): App {
   registerIntegrationOAuthRoutes(router, services);
   registerOrgMemberRoutes(router, services);
   registerGuestRoutes(router, services);
+  registerTeamRoutes(router, services);
   registerOrgSettingsRoutes(router, services);
   registerSttRoutes(router, services);
   registerCallRoutes(router, services);
@@ -2637,6 +2646,24 @@ export function createApp(deps: AppDeps): App {
           identities: deps.scim.identities,
           users: scimUsersAccess,
           hashPassword: deps.scim.hashPassword,
+          // docs/26 A6: Groups become the named workspace's teams.
+          ...(deps.scim.config.orgId
+            ? {
+                groups: {
+                  orgId: deps.scim.config.orgId,
+                  teams: teamStore,
+                  ensureMember: async (userId: string) => {
+                    if (!(await orgRoleFor(userId, deps.scim!.config.orgId!))) {
+                      await memberships.set({
+                        userId,
+                        orgId: deps.scim!.config.orgId!,
+                        role: "editor",
+                      });
+                    }
+                  },
+                },
+              }
+            : {}),
         })
       : null;
 

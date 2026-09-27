@@ -1,3 +1,4 @@
+import { boardTeams, grantTeam, removeTeamGrant, type TeamRole } from "../teams.js";
 import { useEffect, useState, type SVGProps } from "react";
 import { createPortal } from "react-dom";
 import { Ico, ToolIco } from "./icons.js";
@@ -162,6 +163,102 @@ export function TopBar({
         </>
       </div>
       {share && <ShareDialog onClose={() => setShare(false)} />}
+    </div>
+  );
+}
+
+/**
+ * Teams with access to the board (docs/26 A6): each at a role, resolved when
+ * access is checked — who's in the team is the workspace's business. The
+ * board's owner adds and removes them.
+ */
+function TeamAccess({ boardId, canEdit }: { boardId: string; canEdit: boolean }) {
+  const [state, setState] = useState<Awaited<ReturnType<typeof boardTeams>>>(null);
+  const [pick, setPick] = useState("");
+  const [role, setRole] = useState<TeamRole>("editor");
+  const [error, setError] = useState<string | null>(null);
+  const reload = async () => setState(await boardTeams(boardId));
+  useEffect(() => {
+    void reload();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [boardId]);
+  if (!state) return null;
+  const unused = state.available.filter((a) => !state.teams.some((t) => t.teamId === a.teamId));
+  if (state.teams.length === 0 && (!canEdit || unused.length === 0)) return null;
+  const act = async (result: Promise<{ ok: boolean; error?: string }>) => {
+    const r = await result;
+    setError(r.ok ? null : (r.error ?? "That didn't work."));
+    await reload();
+  };
+  return (
+    <div className="share-teams" aria-label="Teams with access">
+      <div className="share-invite-label">Teams</div>
+      {state.teams.map((t) => (
+        <div key={t.teamId} className="share-team-row">
+          <span className="share-team-name">
+            {t.name} <span className="share-team-count">· {t.members}</span>
+          </span>
+          {canEdit ? (
+            <>
+              <select
+                value={t.role}
+                aria-label={`What ${t.name} can do`}
+                onChange={(e) => void act(grantTeam(boardId, t.teamId, e.target.value as TeamRole))}
+              >
+                <option value="editor">Can edit</option>
+                <option value="commenter">Can comment</option>
+                <option value="viewer">Can view</option>
+              </select>
+              <button
+                type="button"
+                aria-label={`Remove ${t.name}`}
+                onClick={() => void act(removeTeamGrant(boardId, t.teamId))}
+              >
+                <Ico.X />
+              </button>
+            </>
+          ) : (
+            <span className="share-team-count">{t.role}</span>
+          )}
+        </div>
+      ))}
+      {canEdit && unused.length > 0 && (
+        <div className="share-invite-row">
+          <select value={pick} aria-label="Team" onChange={(e) => setPick(e.target.value)}>
+            <option value="">Add a team…</option>
+            {unused.map((a) => (
+              <option key={a.teamId} value={a.teamId}>
+                {a.name}
+              </option>
+            ))}
+          </select>
+          <select
+            value={role}
+            aria-label="What the team can do"
+            onChange={(e) => setRole(e.target.value as TeamRole)}
+          >
+            <option value="editor">Can edit</option>
+            <option value="commenter">Can comment</option>
+            <option value="viewer">Can view</option>
+          </select>
+          <button
+            type="button"
+            className="btn-atelier primary sm"
+            disabled={!pick}
+            onClick={() => {
+              void act(grantTeam(boardId, pick, role));
+              setPick("");
+            }}
+          >
+            Add
+          </button>
+        </div>
+      )}
+      {error && (
+        <p className="share-invite-note error" role="alert">
+          {error}
+        </p>
+      )}
     </div>
   );
 }
@@ -635,6 +732,7 @@ function ShareDialog({ onClose }: { onClose: () => void }) {
             {isOwner && boardId && (
               <InviteByEmail boardId={boardId} onInvited={() => void refreshMembers()} />
             )}
+            {boardId && <TeamAccess boardId={boardId} canEdit={isOwner} />}
 
             {members.length > 0 && (
               <div

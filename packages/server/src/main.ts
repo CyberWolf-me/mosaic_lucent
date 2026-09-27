@@ -35,6 +35,8 @@ import { oauthFromEnv, withCredential } from "./integrations/oauth.js";
 import { tokenBox } from "./integrations/tokenBox.js";
 import { InMemoryIntegrationCredentialStore } from "./integrations/credentials.js";
 import { PostgresIntegrationCredentialStore } from "./store/pg-integration-credentials.js";
+import { InMemoryTeamStore } from "./teams.js";
+import { PostgresTeamStore } from "./store/pg-teams.js";
 
 /**
  * docs/26 A5: OAuth connect for Linear/Jira — only with a token key
@@ -224,6 +226,7 @@ function makeStores(databaseUrl: string | undefined): {
   statementIndex: import("./statementIndex.js").StatementIndexStore;
   aiRuns: import("./aiRuns.js").AiRunStore;
   threads: import("./threads.js").ThreadStore;
+  teams: import("./teams.js").TeamStore;
   /** F1: SSO connections + domain claims, on the same store-per-database rule. */
   ssoStore: import("./ssoStore.js").SsoStore;
   /** Stage B3: review-gate proposals — in-memory for dev, Postgres when set. */
@@ -269,6 +272,7 @@ function makeStores(databaseUrl: string | undefined): {
       statementIndex: new InMemoryStatementIndexStore(),
       aiRuns: new InMemoryAiRunStore(),
       threads: new InMemoryThreadStore(),
+      teams: new InMemoryTeamStore(),
       ssoStore: new InMemorySsoStore(),
       integrations: {
         store: new InMemoryIntegrationStore(),
@@ -322,6 +326,7 @@ function makeStores(databaseUrl: string | undefined): {
     statementIndex: new PostgresStatementIndexStore(target),
     aiRuns: new PostgresAiRunStore(target),
     threads: new PostgresThreadStore(target),
+    teams: new PostgresTeamStore(target.db),
     ssoStore: new PostgresSsoStore(target),
     proposals: new PostgresProposalStore(target),
     assetStore: new PostgresAssetStore(target),
@@ -719,6 +724,7 @@ const { server, realtime, writeMeetingRecap, automations } = createApp({
   statementIndex: stores.statementIndex,
   aiRuns: stores.aiRuns,
   threads: stores.threads,
+  teams: stores.teams,
   // docs/28 A3.3: ending a meeting announces MeetingEnded here.
   outbox,
   // docs/28 A3.2: host powers in the board call, over the same LiveKit project.

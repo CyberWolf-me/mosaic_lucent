@@ -126,6 +126,8 @@ export interface RouteServices {
   recordRun(run: import("../aiRuns.js").NewAiRun): Promise<string | null>;
   /** docs/26 J7 (ADR 0048): one person's conversation per scope. */
   readonly threads: import("../threads.js").ThreadStore;
+  /** docs/26 A6: teams inside an org, and their board grants. */
+  readonly teams: import("../teams.js").TeamStore;
   /**
    * The boards a user can read in an org — every board for a member, only
    * the boards shared with them for an outside collaborator. Every
