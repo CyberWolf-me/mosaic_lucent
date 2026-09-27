@@ -89,6 +89,7 @@ import type { Config } from "./config.js";
 import { newRequestId, silentLogger, type Logger } from "./obs/logger.js";
 import { AI_DURATION_BUCKETS, MetricsRegistry } from "./obs/metrics.js";
 import {
+  meetingPath,
   notify,
   type NotificationKind,
   type NotificationStore,
@@ -361,6 +362,8 @@ export interface AppDeps {
      * absent the webhook route answers 503 — the fail-closed bundle rule. */
     webhookEvents?: import("./integrations/webhook.js").IntegrationWebhookEventStore;
     inbound?: import("./integrations/inbound.js").InboundChangeStore;
+    /** docs/26 A5: Slack, outbound (meeting summaries); absent = no Slack. */
+    slack?: import("./integrations/slack.js").SlackPoster;
   };
   /**
    * M4.3: Stripe billing integration — the REST client, the endpoint signing
@@ -2192,6 +2195,8 @@ export function createApp(deps: AppDeps): App {
       }
     }
     const saved = await meetings.setRecap(boardId, meetingId, recap);
+    // docs/26 A5: the org's Slack channel hears about it, where connected.
+    if (saved) void postRecapToSlack(board, saved);
     // ADR 0047: tell whoever recorded it — unless they just asked for it and
     // are looking at it.
     if (saved && meeting.createdBy && meeting.createdBy !== options.by) {
@@ -2214,6 +2219,55 @@ export function createApp(deps: AppDeps): App {
       }
     }
     return saved ? { outcome: "written", meeting: saved } : { outcome: "not-found" };
+  }
+
+  /**
+   * docs/26 A5: post a meeting's summary to the org's Slack channel. Nothing
+   * when Slack isn't connected, or the board's tier keeps content inside
+   * Lucent (the integration boundary, docs/23 S1). Best-effort: the summary
+   * is written either way; how Slack answered is the connection's health.
+   */
+  async function postRecapToSlack(
+    board: import("./boards.js").StoredBoard,
+    meeting: import("./meetings.js").MeetingTranscript,
+  ): Promise<void> {
+    const slack = integrations?.slack;
+    if (!slack || !integrations || !meeting.recap) return;
+    try {
+      const connection = await integrations.store.connection(board.orgId, "slack");
+      if (!connection || connection.status !== "active") return;
+      if (await outboundRefusal(board, "integration")) return;
+      const { slackWebhookUrl, recapMessage } = await import("./integrations/slack.js");
+      const { connectionFailure } = await import("./integrations/health.js");
+      let outcome: import("./integrations/health.js").CallOutcome = { ok: true };
+      try {
+        await slack.post(
+          slackWebhookUrl(process.env[connection.credentialRef], connection.credentialRef),
+          recapMessage({
+            title:
+              meeting.title ??
+              `Meeting on ${new Date(meeting.startedAt).toISOString().slice(0, 10)}`,
+            boardName: board.name,
+            link: `${config.webOrigin}${meetingPath(board.id, meeting.id)}`,
+            sections: meeting.recap.sections,
+          }),
+        );
+      } catch (err) {
+        outcome = connectionFailure(err) ?? {
+          ok: false,
+          error: (err as Error).message,
+          auth: false,
+        };
+        logger.warn("slack.recap_failed", {
+          boardId: board.id,
+          meetingId: meeting.id,
+          error: (err as Error).message,
+        });
+      }
+      await integrations.store.recordCall(board.orgId, "slack", outcome, Date.now());
+    } catch (err) {
+      logger.warn("slack.recap_failed", { boardId: board.id, error: (err as Error).message });
+    }
   }
 
   /** docs/28 A3.3: tell the outbox a meeting ended; its consumer queues the summary. */

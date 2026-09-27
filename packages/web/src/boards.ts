@@ -543,6 +543,8 @@ export interface IntegrationConnectionView {
   status: "active" | "disabled";
   /** docs/26 A5: how it has been answering (servers before A5 omit it). */
   state?: "active" | "degraded" | "needs-reauth" | "revoked";
+  /** docs/26 A5: a channel Lucent posts to (Slack) rather than a tracker. */
+  kind?: "tracker" | "notifier";
   updatedAt: number;
 }
 
@@ -605,15 +607,16 @@ export async function fetchIntegrationLinks(boardId: string): Promise<Integratio
 }
 
 /**
- * The org's integration connections (the admin list). Returns [] offline or
- * on failure — a missing connection state renders the honest "not connected"
- * UX rather than an error.
+ * The org's trackers — the connections work syncs with (the Sync buttons).
+ * Returns [] offline or on failure — a missing connection state renders the
+ * honest "not connected" UX rather than an error. A channel Lucent only
+ * posts to (Slack, docs/26 A5) is not a sync target, so it isn't listed.
  */
 export async function fetchOrgIntegrations(orgId: string): Promise<IntegrationConnectionView[]> {
   const res = await authed(`/api/orgs/${encodeURIComponent(orgId)}/integrations`);
   if (!res || !res.ok) return [];
   const body = (await res.json()) as { integrations?: IntegrationConnectionView[] };
-  return body.integrations ?? [];
+  return (body.integrations ?? []).filter((c) => c.kind !== "notifier");
 }
 
 export async function proposeIntegration(

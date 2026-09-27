@@ -346,8 +346,10 @@ export function connectionView(c: IntegrationConnection): Record<string, unknown
     ...(c.config ? { config: c.config } : {}),
     scopes: c.scopes,
     status: c.status,
-    // docs/26 A5: the derived state and what it's based on.
+    // docs/26 A5: the derived state and what it's based on; Slack is a
+    // channel Lucent posts to, not a tracker work syncs with.
     state: connectionState(c),
+    kind: c.provider === "slack" ? "notifier" : "tracker",
     ...(c.health ? { health: c.health } : {}),
     createdBy: c.createdBy,
     createdAt: c.createdAt,

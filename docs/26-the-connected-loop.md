@@ -746,8 +746,16 @@ a much better product — not rewriting the layout engine.
       the owner moves only the owner) in the running app;
     - server `integration-health.test.ts`, `inbound-fields.test.ts` and
       `pg-integrations` (health, the link baseline).
+  - _Slack, outbound (A5.4)._ Connect Slack in Admin with a server variable
+    holding an incoming-webhook URL (only https on hooks.slack.com is
+    accepted). Checking says hello in the channel. Every written meeting
+    summary is posted there: the title linking to the meeting, the first
+    lines of each section, the board. A board whose tier keeps content in
+    Lucent posts nothing. A webhook Slack refuses (403/404/410) marks the
+    connection as needing a new one. Slack is a channel, not a tracker, so
+    it never appears as a Sync target.
   - Not yet (A5.4): OAuth connect for Linear and Jira (keys are still server
-    variables), and Slack outbound.
+    variables).
 
 ## 12. Decisions (locked 2026-09-24)
 

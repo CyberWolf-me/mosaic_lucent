@@ -88,6 +88,11 @@ export const PROVIDER_FORMS: Record<string, ProviderForm> = {
       { ...WEBHOOK_FIELD, placeholder: "GITHUB_WEBHOOK_SECRET" },
     ],
   },
+  slack: {
+    label: "Slack",
+    credential: "a Slack incoming-webhook URL (https://hooks.slack.com/services/…)",
+    fields: [],
+  },
   fake: {
     label: "Test tracker",
     credential: "anything (the test tracker checks nothing)",

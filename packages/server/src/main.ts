@@ -30,6 +30,7 @@ import { buildAiHandlers } from "./workers/ai.js";
 import { buildMediaHandlers } from "./workers/media.js";
 import { buildIntegrationHandlers } from "./workers/integration.js";
 import { connectionFailure } from "./integrations/health.js";
+import { httpSlackPoster } from "./integrations/slack.js";
 import { boardNodeIssue, pollInbound } from "./integrations/poll.js";
 import { createStaticHandler } from "./static.js";
 import { resolve as resolvePath } from "node:path";
@@ -192,6 +193,7 @@ function makeStores(databaseUrl: string | undefined): {
     /** Stage D7: the webhook delivery ledger + the inbound queue. */
     webhookEvents: import("./integrations/webhook.js").IntegrationWebhookEventStore;
     inbound: import("./integrations/inbound.js").InboundChangeStore;
+    slack: import("./integrations/slack.js").SlackPoster;
   };
   /** Stage B6: asset metadata — in-memory for dev, Postgres when set. */
   assetStore: import("./assets.js").AssetStore;
@@ -245,6 +247,7 @@ function makeStores(databaseUrl: string | undefined): {
         // Stage D7: the webhook delivery ledger + the inbound queue.
         webhookEvents: new InMemoryIntegrationWebhookEventStore(),
         inbound: new InMemoryInboundChangeStore(),
+        slack: httpSlackPoster(),
       },
       proposals: new InMemoryProposalStore(),
       assetStore: new InMemoryAssetStore(),
@@ -297,6 +300,8 @@ function makeStores(databaseUrl: string | undefined): {
       // pairs, migration 0021).
       webhookEvents: new PostgresIntegrationWebhookEventStore(target.db),
       inbound: new PostgresInboundChangeStore(target.db),
+      // docs/26 A5: Slack, outbound — meeting summaries to a channel.
+      slack: httpSlackPoster(),
     },
     db: target,
   };

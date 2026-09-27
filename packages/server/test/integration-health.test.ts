@@ -153,7 +153,9 @@ describe("connection health (routes)", () => {
   it("lists what can be connected, checks a connection, and follows its state", async () => {
     const h = await harness();
     const listed = await h.api(`/api/orgs/${h.orgId}/integrations`, { token: h.token });
-    expect(listed.body.available).toEqual([{ provider: "fake", supportsInbound: true }]);
+    expect(listed.body.available).toEqual([
+      { provider: "fake", kind: "tracker", supportsInbound: true },
+    ]);
 
     const put = await h.api(`/api/orgs/${h.orgId}/integrations/fake`, {
       method: "PUT",

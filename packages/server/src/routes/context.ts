@@ -166,6 +166,8 @@ export interface RouteServices {
         executionTimeoutMs?: number;
         /** Stage D7: the inbound queue (undefined → the inbound routes answer 503). */
         inbound?: import("../integrations/inbound.js").InboundChangeStore;
+        /** docs/26 A5: Slack, outbound — meeting summaries to a channel. */
+        slack?: import("../integrations/slack.js").SlackPoster;
       }
     | undefined;
   /**

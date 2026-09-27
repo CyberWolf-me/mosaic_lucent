@@ -130,10 +130,16 @@ export const registerIntegrationRoutes: RegisterRoutes = (router, s) => {
         supportsInbound: webhookSchemes.has(c.provider),
       })),
       // docs/26 A5: what this deployment can connect to, for the connect UI.
-      available: [...integrations.providers.keys()].map((name) => ({
-        provider: name,
-        supportsInbound: webhookSchemes.has(name),
-      })),
+      available: [
+        ...[...integrations.providers.keys()].map((name) => ({
+          provider: name,
+          kind: "tracker",
+          supportsInbound: webhookSchemes.has(name),
+        })),
+        ...(integrations.slack
+          ? [{ provider: "slack", kind: "notifier", supportsInbound: false }]
+          : []),
+      ],
     });
   });
 
@@ -150,8 +156,9 @@ export const registerIntegrationRoutes: RegisterRoutes = (router, s) => {
     if (!integrations) return send(res, 503, { error: "integrations are not configured" });
     const provider = ctx.param("provider");
     // The provider must be a store-known name AND a mapped implementation —
-    // configuring a provider nothing implements is a dead connection.
-    if (!integrations.providers.has(provider)) {
+    // configuring a provider nothing implements is a dead connection. Slack
+    // is implemented by the poster, when the server has one (docs/26 A5).
+    if (!integrations.providers.has(provider) && !(provider === "slack" && integrations.slack)) {
       send(res, 400, { error: `no provider implementation named "${provider}" is loaded` });
       return;
     }
@@ -249,8 +256,30 @@ export const registerIntegrationRoutes: RegisterRoutes = (router, s) => {
       send(res, 409, { error: `the ${provider} connection is disconnected` });
       return;
     }
-    const resolved = resolveProvider(integrations, provider, connection);
     let detail: string | null = null;
+    // Slack: checking is saying hello in the channel — the one call there is.
+    if (provider === "slack" && integrations.slack) {
+      const { slackWebhookUrl } = await import("../integrations/slack.js");
+      let outcome: import("../integrations/health.js").CallOutcome = { ok: true };
+      try {
+        await integrations.slack.post(
+          slackWebhookUrl(process.env[connection.credentialRef], connection.credentialRef),
+          { text: "Lucent is connected. Meeting summaries will be posted here." },
+        );
+      } catch (err) {
+        detail = (err as Error).message;
+        outcome = connectionFailure(err) ?? { ok: false, error: detail, auth: false };
+      }
+      await integrations.store.recordCall(orgId, provider, outcome, Date.now());
+      const fresh = (await integrations.store.connection(orgId, provider)) ?? connection;
+      send(res, 200, {
+        integration: { ...connectionView(fresh), supportsInbound: false },
+        ok: detail === null,
+        ...(detail !== null ? { detail } : {}),
+      });
+      return;
+    }
+    const resolved = resolveProvider(integrations, provider, connection);
     if (resolved.ok) {
       try {
         await resolved.provider.searchTasks("lucent-connection-check");
