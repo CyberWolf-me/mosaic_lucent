@@ -40,6 +40,48 @@ export interface BoardMemberSummary {
   /** Joined by the server so a member reads as a person, not an id. */
   name?: string;
   email?: string;
+  /** docs/26 A6: outside the workspace — here on this board only. */
+  guest?: boolean;
+}
+
+/**
+ * Give someone this board by email (owner; docs/26 A6). A teammate gets it
+ * at once; someone outside the workspace comes in as a guest on this board
+ * only — straight away if they have an account, through an emailed link if
+ * not. The server answers the same either way, so this never tells anyone
+ * who uses Lucent.
+ */
+export async function inviteToBoard(
+  boardId: string,
+  email: string,
+  role: "editor" | "commenter" | "viewer",
+): Promise<{ ok: true; guest: boolean } | { ok: false; error: string }> {
+  const res = await authed(`/api/boards/${encodeURIComponent(boardId)}/members`, {
+    method: "POST",
+    body: JSON.stringify({ email, role }),
+  });
+  if (!res) return { ok: false, error: "Sign in to share this board." };
+  const body = (await res.json().catch(() => ({}))) as { error?: string; guest?: boolean };
+  if (!res.ok) return { ok: false, error: body.error ?? "Couldn't share it with that address." };
+  return { ok: true, guest: body.guest === true };
+}
+
+/** A board someone in another workspace gave you (docs/26 A6). */
+export interface SharedWithMeBoard {
+  id: string;
+  name: string;
+  orgId: string;
+  orgName: string;
+  role: BoardRole;
+  updatedAt: number;
+  nodes: number;
+}
+
+/** Boards in other workspaces shared with you — a guest's way back to them. */
+export async function listSharedWithMe(): Promise<SharedWithMeBoard[]> {
+  const res = await authed("/api/boards/shared-with-me");
+  if (!res || !res.ok) return [];
+  return ((await res.json()) as { boards?: SharedWithMeBoard[] }).boards ?? [];
 }
 
 /**

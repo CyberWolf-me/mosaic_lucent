@@ -129,6 +129,7 @@ import { registerOrgSettingsRoutes } from "./routes/settings.js";
 import { registerProposalRoutes } from "./routes/proposals.js";
 import { registerIntegrationOAuthRoutes } from "./routes/integrationOAuth.js";
 import { registerOrgMemberRoutes } from "./routes/orgMembers.js";
+import { registerGuestRoutes } from "./routes/guests.js";
 import { registerSsoRoutes } from "./routes/sso.js";
 import { registerHistoryRoutes } from "./routes/history.js";
 import { registerAskRoutes } from "./routes/ask.js";
@@ -2583,6 +2584,7 @@ export function createApp(deps: AppDeps): App {
   registerIntegrationRoutes(router, services);
   registerIntegrationOAuthRoutes(router, services);
   registerOrgMemberRoutes(router, services);
+  registerGuestRoutes(router, services);
   registerOrgSettingsRoutes(router, services);
   registerSttRoutes(router, services);
   registerCallRoutes(router, services);
@@ -4416,6 +4418,7 @@ export function createApp(deps: AppDeps): App {
           createdAt: number;
           name: string;
           email: string;
+          guest: boolean;
         }> = [];
         for (const m of members) {
           const u = await userStore.findById(m.userId);
@@ -4428,6 +4431,8 @@ export function createApp(deps: AppDeps): App {
             // crash, so a stale membership can't break the UI.
             name: u?.name ?? "(removed)",
             email: u?.email ?? "",
+            // docs/26 A6: someone outside the workspace, here on this board only.
+            guest: !(await orgRoleFor(m.userId, guard.board.orgId)),
           });
         }
         send(res, 200, { members: out, role: callerRole });
@@ -4513,10 +4518,82 @@ export function createApp(deps: AppDeps): App {
             });
             return;
           }
-          const target = await userStore.findByEmail(body.email.toLowerCase().trim());
+          const email = body.email.toLowerCase().trim();
+          const target = await userStore.findByEmail(email);
           const inOrg = target ? await orgRoleFor(target.id, board.orgId) : undefined;
           if (!target || !inOrg) {
-            send(res, 404, { error: "no member of this workspace has that address" });
+            // docs/26 A6: someone outside the workspace comes in as a GUEST —
+            // this board only — unless its tier or the org keeps boards
+            // inside (the sharing boundary a share link answers to). The
+            // answer is the same whether or not the address has an account,
+            // so this never tells anyone who uses Lucent.
+            const refusal = await outboundRefusal(board, "sharing");
+            if (refusal) {
+              send(res, 403, {
+                error: "this board can't be shared outside the workspace",
+                classification: refusal.classification,
+                boundary: refusal.boundary,
+              });
+              return;
+            }
+            const role = body.role as ShareRole;
+            if (target) {
+              const existing = await boardStore.memberRole(id, target.id);
+              if (!existing) {
+                await boardStore.setMember({
+                  boardId: id,
+                  userId: target.id,
+                  role,
+                  invitedBy: user.id,
+                  createdAt: Date.now(),
+                });
+                notifyUser({
+                  kind: "board.invited",
+                  to: { userId: target.id, email: target.email },
+                  orgId: board.orgId,
+                  payload: {
+                    boardId: id,
+                    boardName: board.name,
+                    inviterName: user.name || user.email,
+                    role,
+                  },
+                });
+              }
+            } else if (authCtx.mailer) {
+              // No account yet: a link for this board, mailed to them.
+              const link: ShareLink = {
+                token: newShareToken(),
+                boardId: id,
+                role,
+                createdBy: user.id,
+                createdAt: Date.now(),
+                expiresAt: Date.now() + 14 * 24 * 3_600_000,
+                revokedAt: null,
+              };
+              await boardStore.createShareLink(link);
+              const { boardShareEmail } = await import("./email/templates.js");
+              const tpl = boardShareEmail(
+                { siteOrigin: config.webOrigin },
+                {
+                  inviterName: user.name || user.email,
+                  boardName: board.name,
+                  url: `${config.webOrigin}/?board=${encodeURIComponent(id)}&invite=${encodeURIComponent(link.token)}`,
+                  role,
+                },
+              );
+              await authCtx.mailer
+                .send({ to: email, subject: tpl.subject, text: tpl.text, html: tpl.html })
+                .catch((err: unknown) =>
+                  logger.warn("guest_invite_mail_failed", {
+                    boardId: id,
+                    message: err instanceof Error ? err.message : String(err),
+                  }),
+                );
+            }
+            void services.auditRow(req, user.id, board.orgId, "board.guest.invited", id, {
+              role,
+            });
+            send(res, 202, { invited: email, role, guest: true });
             return;
           }
           if (target.id === board.ownerId) {

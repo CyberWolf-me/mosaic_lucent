@@ -121,6 +121,35 @@ export function boardInviteEmail(
 }
 
 /**
+ * docs/26 A6: a board shared with someone outside the workspace who has no
+ * account yet — the link redeems as a guest grant on this board only.
+ */
+export function boardShareEmail(
+  ctx: TemplateContext,
+  params: { inviterName: string; boardName: string; url: string; role: string },
+): VerificationTemplate {
+  const product = ctx.productName ?? "Lucent";
+  const who = escapeText(params.inviterName);
+  const what = escapeText(params.boardName);
+  const role = escapeText(params.role);
+  const subject = `${who} shared "${what}" with you`;
+  const can = role === "viewer" ? "view" : role === "commenter" ? "comment on" : "edit";
+  const text =
+    `Hi,\n\n` +
+    `${who} shared the "${what}" board in ${product} with you (you can ${can} it). ` +
+    `Open it here — you'll create an account the first time:\n\n` +
+    `  ${params.url}\n\n` +
+    `This link expires in 14 days.\n`;
+  const html =
+    "<p>Hi,</p>" +
+    `<p>${escapeHtml(params.inviterName)} shared the <strong>${escapeHtml(params.boardName)}</strong> ` +
+    `board in ${escapeHtml(product)} with you.</p>` +
+    `<p><a href="${escapeHtml(params.url)}">Open the board</a></p>` +
+    "<p>This link expires in 14 days.</p>";
+  return { subject, text, html };
+}
+
+/**
  * M2.4's org invite had no template at all: the route hand-rolled a text-only
  * body with no inviter, no workspace name and a hard-coded product name, so the
  * one mail a new teammate ever receives was the least finished mail we send.

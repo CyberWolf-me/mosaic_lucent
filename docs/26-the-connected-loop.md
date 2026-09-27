@@ -785,7 +785,24 @@ a much better product — not rewriting the layout engine.
     Postgres, two in memory, where an invited member used to be missing
     from the list). The Share dialog names members instead of showing ids.
 
-  - Evidence: server `org-members.test.ts` (3); `scripts/org-members-check.mjs`
+  - _Guests._ Someone outside the workspace can be given a board, and only
+    that board. Share by email in the Share dialog: a teammate gets it at
+    once; anyone else comes in as a guest. An existing account is granted
+    straight away; an address with no account is mailed a link. The answer
+    is the same either way, so it never reveals who uses Lucent. A workspace
+    that keeps boards inside (or a confidential board) refuses guests.
+
+    A guest finds their boards under "Shared with me" (a new cross-workspace
+    list, `GET /api/boards/shared-with-me`) and is marked Guest in the
+    Share dialog. They still can't read the workspace: the member list and
+    its board list refuse them, and every workspace read is scoped to the
+    boards they can open (ADR 0046).
+
+    Admin → Guests lists everyone outside with a board and which boards.
+    "End access" removes every grant at once and detaches any open socket.
+
+  - Evidence: server `org-members.test.ts` (3), `guests.test.ts` (4);
+    `scripts/guests-check.mjs` (6/6); `scripts/org-members-check.mjs`
     in the running app (6/6, with `LUCENT_DEV_PLAN=team` — a free workspace
     has one seat).
 

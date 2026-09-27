@@ -218,6 +218,12 @@ export interface BoardStore {
    */
   listForUser(orgId: string, userId: string): Promise<StoredBoard[]>;
   /**
+   * docs/26 A6: every board, in any org, this person holds a direct grant on
+   * (a `board_members` row) — how someone outside a workspace (a guest)
+   * finds what was shared with them. Most recent first, bounded.
+   */
+  listGrantedTo(userId: string, limit?: number): Promise<Array<{ board: StoredBoard; role: Role }>>;
+  /**
    * How many boards the org holds. Separate from `listForOrg().length` because
    * M4's `boards` entitlement is checked on every board create, and the row
    * this count lives in carries the whole workspace JSONB: counting by listing
@@ -368,6 +374,19 @@ export class InMemoryBoardStore implements BoardStore {
           (b.ownerId === userId || this.memberRows.has(memberKey(b.id, userId))),
       )
       .sort((a, b) => b.updatedAt - a.updatedAt);
+  }
+
+  async listGrantedTo(
+    userId: string,
+    limit = 200,
+  ): Promise<Array<{ board: StoredBoard; role: Role }>> {
+    const out: Array<{ board: StoredBoard; role: Role }> = [];
+    for (const member of this.memberRows.values()) {
+      if (member.userId !== userId) continue;
+      const board = this.boards.get(member.boardId);
+      if (board) out.push({ board, role: member.role });
+    }
+    return out.sort((a, b) => b.board.updatedAt - a.board.updatedAt).slice(0, limit);
   }
 
   async put(board: StoredBoard): Promise<void> {

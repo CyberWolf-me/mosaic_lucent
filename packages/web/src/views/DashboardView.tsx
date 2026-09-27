@@ -34,7 +34,7 @@ import {
 import { useToast } from "../ui/Toast.js";
 import { hasSession } from "../session.js";
 import { loadOrgs, setCurrentOrgId, type OrgSummary } from "../orgs.js";
-import { listBoards, type BoardSummary } from "../boards.js";
+import { listBoards, listSharedWithMe, type BoardSummary } from "../boards.js";
 import { KIND_TINT, statementIsHistory } from "../statementUi.js";
 import { TEMPLATES, type Template } from "../templates.js";
 
@@ -114,6 +114,17 @@ export function DashboardView({ onOpenSettings }: { onOpenSettings: (section?: s
   const [currentOrg, setCurrentOrg] = useState<OrgSummary | null>(null);
   const [cloudBoards, setCloudBoards] = useState<BoardSummary[]>([]);
   const [sharedBoards, setSharedBoards] = useState<BoardSummary[]>([]);
+  /** docs/26 A6: boards other workspaces gave you — a guest's way back to them. */
+  const [guestBoards, setGuestBoards] = useState<BoardSummary[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    void listSharedWithMe().then((boards) => {
+      if (!cancelled) setGuestBoards(boards);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   // "idle" when signed out: there is no server list to wait for.
   const [cloudState, setCloudState] = useState<"idle" | "loading" | "ready" | "offline">(() =>
     hasSession() ? "loading" : "idle",
@@ -284,8 +295,9 @@ export function DashboardView({ onOpenSettings }: { onOpenSettings: (section?: s
     };
     for (const b of cloudBoards) add(b, "team");
     for (const b of sharedBoards) add(b, "shared");
+    for (const b of guestBoards) add(b, "shared");
     return list;
-  }, [cloudBoards, sharedBoards]);
+  }, [cloudBoards, sharedBoards, guestBoards]);
 
   const boards: BoardEntry[] = useMemo(() => {
     const serverIds = new Set(serverBoards.map((b) => b.id));

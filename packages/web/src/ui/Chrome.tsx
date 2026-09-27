@@ -13,6 +13,7 @@ import {
   listMembers,
   readShareLinkError,
   removeMember,
+  inviteToBoard,
   revokeShareLinks,
   setMemberRole,
   type BoardMemberSummary,
@@ -162,6 +163,83 @@ export function TopBar({
       </div>
       {share && <ShareDialog onClose={() => setShare(false)} />}
     </div>
+  );
+}
+
+/**
+ * Give someone the board by email (docs/26 A6). Someone outside the
+ * workspace becomes a guest on this board only; the note says so.
+ */
+function InviteByEmail({ boardId, onInvited }: { boardId: string; onInvited: () => void }) {
+  const [email, setEmail] = useState("");
+  const [role, setRole] = useState<ShareRole>("editor");
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState<{ text: string; tone: "ok" | "error" } | null>(null);
+  const submit = async () => {
+    const address = email.trim();
+    if (!address.includes("@")) {
+      setNote({ text: "Enter an email address.", tone: "error" });
+      return;
+    }
+    setBusy(true);
+    const result = await inviteToBoard(boardId, address, role);
+    setBusy(false);
+    if (!result.ok) {
+      setNote({ text: result.error, tone: "error" });
+      return;
+    }
+    setEmail("");
+    setNote({
+      text: result.guest
+        ? `Shared with ${address} as a guest — this board only. If they're new to Lucent, they'll get a link.`
+        : `Shared with ${address}.`,
+      tone: "ok",
+    });
+    onInvited();
+  };
+  return (
+    <form
+      className="share-invite"
+      aria-label="Share by email"
+      onSubmit={(e) => {
+        e.preventDefault();
+        void submit();
+      }}
+    >
+      <div className="share-invite-label">Share by email</div>
+      <div className="share-invite-row">
+        <input
+          type="email"
+          value={email}
+          placeholder="name@company.com"
+          aria-label="Email address"
+          onChange={(e) => {
+            setEmail(e.target.value);
+            setNote(null);
+          }}
+        />
+        <select
+          value={role}
+          aria-label="What they can do"
+          onChange={(e) => setRole(e.target.value as ShareRole)}
+        >
+          <option value="editor">Can edit</option>
+          <option value="commenter">Can comment</option>
+          <option value="viewer">Can view</option>
+        </select>
+        <button type="submit" className="btn-atelier primary sm" disabled={busy}>
+          Share
+        </button>
+      </div>
+      {note && (
+        <p
+          className={`share-invite-note ${note.tone}`}
+          role={note.tone === "error" ? "alert" : "status"}
+        >
+          {note.text}
+        </p>
+      )}
+    </form>
   );
 }
 
@@ -554,6 +632,10 @@ function ShareDialog({ onClose }: { onClose: () => void }) {
               </div>
             )}
 
+            {isOwner && boardId && (
+              <InviteByEmail boardId={boardId} onInvited={() => void refreshMembers()} />
+            )}
+
             {members.length > 0 && (
               <div
                 style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid var(--stroke-1)" }}
@@ -584,15 +666,23 @@ function ShareDialog({ onClose }: { onClose: () => void }) {
                       style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 11.5 }}
                     >
                       <span
-                        className="mono"
                         style={{
                           flex: 1,
                           color: "var(--ink-2)",
                           overflow: "hidden",
                           textOverflow: "ellipsis",
                         }}
+                        title={m.email || undefined}
                       >
                         {m.name || m.email || m.userId}
+                        {m.guest && (
+                          <span
+                            className="share-guest-chip"
+                            title="Outside this workspace — this board only"
+                          >
+                            Guest
+                          </span>
+                        )}
                       </span>
                       {isOwner ? (
                         <>

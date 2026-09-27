@@ -34,7 +34,14 @@ import {
   type AvailableProvider,
   type ConnectionView,
 } from "../integrationsAdmin.js";
-import { getCurrentOrgId, removeOrgMember, setOrgMemberRole } from "../orgs.js";
+import {
+  getCurrentOrgId,
+  listOrgGuests,
+  removeOrgGuest,
+  removeOrgMember,
+  setOrgMemberRole,
+  type OrgGuest,
+} from "../orgs.js";
 import { useWorkspace } from "../workspace.js";
 
 /**
@@ -411,6 +418,9 @@ export function AdminView({ onBack }: { onBack: () => void }) {
         </>
       ) : null}
 
+      <SectionLabel>Guests</SectionLabel>
+      <GuestsSection org={org} />
+
       <SectionLabel count={auditState === "ready" ? audit.length : undefined}>
         Recent activity
       </SectionLabel>
@@ -581,6 +591,83 @@ function AiActivitySection({ org }: { org: OrgSummary | null }) {
           );
         })}
       </ol>
+    </Card>
+  );
+}
+
+/**
+ * People outside the workspace with some of its boards (docs/26 A6) — who
+ * they are, which boards, and a way to end all of it at once. Owners only.
+ */
+function GuestsSection({ org }: { org: OrgSummary | null }) {
+  const [guests, setGuests] = useState<OrgGuest[] | null | "failed">(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    if (!org || org.role !== "owner") return;
+    void listOrgGuests(org.id).then((g) => setGuests(g ?? "failed"));
+  }, [org]);
+  if (!org) return null;
+  if (org.role !== "owner") {
+    return <EmptyState compact title="Guests are visible to workspace owners" />;
+  }
+  if (guests === null) {
+    return (
+      <p className="boards-admin-muted" role="status">
+        Loading guests…
+      </p>
+    );
+  }
+  if (guests === "failed") {
+    return (
+      <p className="boards-admin-muted" role="alert">
+        Couldn&apos;t load guests.
+      </p>
+    );
+  }
+  if (guests.length === 0) {
+    return (
+      <EmptyState
+        compact
+        title="No guests"
+        body="People outside the workspace you share a board with appear here, with every board they can open."
+      />
+    );
+  }
+  const end = async (userId: string) => {
+    setBusy(userId);
+    setError(null);
+    const result = await removeOrgGuest(org.id, userId);
+    setBusy(null);
+    if (!result.ok) return setError(result.error);
+    setGuests(guests.filter((g) => g.userId !== userId));
+  };
+  return (
+    <Card className="boards-admin-card">
+      <ul className="guest-list" aria-label="Guests">
+        {guests.map((g) => (
+          <li key={g.userId} className="guest-row">
+            <span className="boards-admin-person">
+              <Avatar name={g.name || g.email || "?"} size={24} />
+              <span>
+                <span className="guest-name">{g.name}</span>
+                <span className="guest-email mono">{g.email}</span>
+              </span>
+            </span>
+            <span className="guest-boards">
+              {g.boards.map((b) => `${b.name} (${roleLabel(b.role).toLowerCase()})`).join(" · ")}
+            </span>
+            <Button size="sm" disabled={busy !== null} onClick={() => void end(g.userId)}>
+              End access
+            </Button>
+          </li>
+        ))}
+      </ul>
+      {error && (
+        <p className="boards-admin-error" role="alert">
+          {error}
+        </p>
+      )}
     </Card>
   );
 }
@@ -1068,6 +1155,7 @@ function roleLabel(role: string): string {
   if (role === "owner") return "Owner";
   if (role === "editor") return "Editor";
   if (role === "viewer") return "Viewer";
+  if (role === "commenter") return "Commenter";
   return role;
 }
 

@@ -97,6 +97,20 @@ export class PostgresBoardStore implements BoardStore {
     return rows.map(rowToStoredBoard);
   }
 
+  async listGrantedTo(
+    userId: string,
+    limit = 200,
+  ): Promise<Array<{ board: StoredBoard; role: Role }>> {
+    const rows = await this.target.db
+      .select({ board: boards, role: boardMembers.role })
+      .from(boardMembers)
+      .innerJoin(boards, eq(boards.id, boardMembers.boardId))
+      .where(eq(boardMembers.userId, userId))
+      .orderBy(desc(boards.updatedAt))
+      .limit(limit);
+    return rows.map((r) => ({ board: rowToStoredBoard(r.board), role: r.role as Role }));
+  }
+
   async put(board: StoredBoard): Promise<void> {
     await this.target.db
       .insert(boards)

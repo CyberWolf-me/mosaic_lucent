@@ -182,6 +182,31 @@ export async function removeOrgMember(orgId: string, userId: string): Promise<Or
   return { ok: true, value: null };
 }
 
+/** Someone outside the workspace with some of its boards (docs/26 A6). */
+export interface OrgGuest {
+  userId: string;
+  name: string;
+  email: string;
+  boards: Array<{ id: string; name: string; role: string }>;
+}
+
+/** The workspace's guests (owner only; empty for anyone else). */
+export async function listOrgGuests(orgId: string): Promise<OrgGuest[] | null> {
+  const res = await authed(`/api/orgs/${encodeURIComponent(orgId)}/guests`);
+  if (!res || !res.ok) return null;
+  return ((await res.json()) as { guests?: OrgGuest[] }).guests ?? [];
+}
+
+/** End a guest's access to every board in the workspace (owner only). */
+export async function removeOrgGuest(orgId: string, userId: string): Promise<OrgResult<null>> {
+  const res = await authed(
+    `/api/orgs/${encodeURIComponent(orgId)}/guests/${encodeURIComponent(userId)}`,
+    { method: "DELETE" },
+  );
+  if (!res || !res.ok) return refusal(res, "Could not end that guest's access.");
+  return { ok: true, value: null };
+}
+
 /* --------------------------------- invites -------------------------------- */
 
 /** A pending invite as the owner-only list returns it (token hash never leaves). */
