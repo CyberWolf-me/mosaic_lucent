@@ -54,11 +54,13 @@ export function MeetingNotes({
   const [offline, setOffline] = useState<Offline | null>(null);
   const [editing, setEditing] = useState<{ s: number; i: number } | null>(null);
   const [copied, setCopied] = useState(false);
-  // True while a meeting's stored notes are on their way. The pad is
-  // read-only meanwhile: lines typed before the answer landed were replaced
-  // by it (an empty stored copy wiped them from the screen, and the note that
-  // writes itself at the end had nothing to work from).
+  // True while a meeting's stored notes are on their way (the pad reads busy).
   const [loading, setLoading] = useState(false);
+  // Typed while those notes were on their way. The answer used to replace
+  // the pad, so lines typed before it landed vanished from the screen (an
+  // empty stored copy wiped them) and the note written at the meeting's end
+  // had nothing to work from. Now they are kept, after anything stored.
+  const typedSinceLoad = useRef(false);
   const editCancelled = useRef(false);
   const saveTimer = useRef<number | null>(null);
   const saveFlight = useRef<Promise<unknown> | null>(null);
@@ -112,6 +114,7 @@ export function MeetingNotes({
     setView("notes");
     if (carried.length === 0) setLines([]);
     let alive = true;
+    typedSinceLoad.current = false;
     setLoading(true);
     void getNotes(boardId, meetingId).then(async (n) => {
       if (!alive) return;
@@ -120,16 +123,28 @@ export function MeetingNotes({
       // mid-fetch) dropped the first answer and then skipped loading, so a
       // reopened meeting showed an empty notepad.
       lastId.current = meetingId;
-      if (carried.length > 0 && (!n || n.lines.every((l) => !l.text.trim()))) {
-        // Lines typed before this meeting had an id become its notes.
-        await saveNotes(boardId, meetingId, { lines: linesRef.current, template });
-      } else if (n) {
-        setLines(n.lines);
+      setLoading(false);
+      const stored = (n?.lines ?? []).filter((l) => l.text.trim());
+      // Lines on the pad that aren't stored: carried from before the meeting
+      // had an id, or typed while its notes loaded. They are this person's
+      // notes on this meeting — kept after what was stored, then saved.
+      const local =
+        carried.length > 0 || typedSinceLoad.current
+          ? linesRef.current.filter((l) => l.text.trim())
+          : [];
+      const extra = local.filter((l) => !stored.some((s) => s.text === l.text));
+      if (n) {
         setTemplate(n.template);
         setEnhanced(n.enhanced);
+      }
+      if (extra.length > 0) {
+        const merged = [...stored, ...extra];
+        setLines(merged);
+        await saveNotes(boardId, meetingId, { lines: merged, template: n?.template ?? template });
+      } else if (n) {
+        setLines(n.lines);
         if (n.enhanced && n.lines.length === 0) setView("enhanced");
       }
-      if (alive) setLoading(false);
       if (ended && alive) {
         justEnded.current = false;
         setAutoEnhance((x) => x + 1);
@@ -164,6 +179,7 @@ export function MeetingNotes({
   );
 
   const onType = (text: string) => {
+    typedSinceLoad.current = true;
     const next = restamp(lines, text, turns.length);
     setLines(next);
     persist({ lines: next });
@@ -299,7 +315,6 @@ export function MeetingNotes({
                 : "Your notes on this meeting. Enhance them into a full note, with every added line tied to what was said."
             }
             value={lines.map((l) => l.text).join("\n")}
-            readOnly={loading}
             aria-busy={loading}
             onChange={(e) => onType(e.target.value)}
             onKeyDown={(e) => e.stopPropagation()}

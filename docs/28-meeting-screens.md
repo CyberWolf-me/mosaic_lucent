@@ -642,8 +642,10 @@ V8 transport (F4).
   meeting as loaded before its notes arrived, and React's second effect run
   then skipped the load. The load could also land after the first keystroke
   and replace the typed lines with the stored (empty) copy, so the note the
-  meeting's end writes had nothing to work from; the pad is now read-only
-  until the load lands. And the meeting's proposal review floated over the
+  meeting's end writes had nothing to work from. Lines typed while the load is
+  in flight are now kept after the stored ones and saved (a read-only pad
+  during the load wasn't enough: it didn't hold under a slow load). And the
+  meeting's proposal review floated over the
   Notes tab; it now docks at the top of the side pane and shows the meeting
   lines it came from, not the internal extraction prompt.
 
