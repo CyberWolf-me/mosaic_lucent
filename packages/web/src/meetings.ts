@@ -16,6 +16,8 @@ export interface MeetingTurn {
   at: number;
   text: string;
   kind?: "problem" | "hypothesis" | "solution" | "decision" | "action" | "requirement";
+  /** The account that said it, when the capture knows (a call participant, docs/28 A3.5). */
+  speakerId?: string;
 }
 
 /** One saved meeting, from the server. */

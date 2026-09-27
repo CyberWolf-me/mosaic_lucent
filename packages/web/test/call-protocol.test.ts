@@ -2,7 +2,14 @@ import { describe, expect, it } from "vitest";
 import {
   appendChat,
   captureFrom,
+  captureSince,
+  createLineGate,
   decodeChat,
+  decodeLine,
+  encodeLine,
+  MAX_LINE_CHARS,
+  optedOutFrom,
+  transcriberOf,
   decodeReaction,
   describeDisconnect,
   describeJoinFailure,
@@ -100,6 +107,50 @@ describe("chat and reactions on the data channel", () => {
   });
 });
 
+describe("one transcript per call, everyone in it (docs/28 A3.5)", () => {
+  it("files lines with the device that started transcribing first", () => {
+    expect(transcriberOf([])).toBeNull();
+    expect(
+      transcriberOf([
+        { identity: "b", captureAt: 20 },
+        { identity: "a", captureAt: null },
+        { identity: "c", captureAt: 10 },
+      ]),
+    ).toBe("c");
+    // A tie can't split the call in two: every device picks the same one.
+    expect(
+      transcriberOf([
+        { identity: "z", captureAt: 5 },
+        { identity: "y", captureAt: 5 },
+      ]),
+    ).toBe("y");
+    expect(captureSince({ "lucent.capture": "on" })).toBe(1);
+    expect(captureSince({ "lucent.capture": "123" })).toBe(123);
+    expect(captureSince({})).toBeNull();
+    expect(optedOutFrom({ "lucent.optout": "1" })).toBe(true);
+    expect(optedOutFrom({})).toBe(false);
+  });
+
+  it("carries only the words — who said it is the sender LiveKit names", () => {
+    const bytes = encodeLine("  We ship Friday. ", 7)!;
+    expect(decodeLine(bytes)).toEqual({ text: "We ship Friday.", at: 7 });
+    expect(encodeLine("   ", 1)).toBeNull();
+    expect(encodeLine("x".repeat(MAX_LINE_CHARS + 1), 1)).toBeNull();
+    const spoofed = new TextEncoder().encode(
+      JSON.stringify({ v: 1, text: "hi", at: 1, speaker: "The CEO" }),
+    );
+    expect(decodeLine(spoofed)).toEqual({ text: "hi", at: 1 });
+    expect(decodeLine(new TextEncoder().encode("nope"))).toBeNull();
+  });
+
+  it("drops a flood from one device and lets everyone else through", () => {
+    const gate = createLineGate(3, 1000);
+    expect([0, 1, 2, 3].map((t) => gate("a", t))).toEqual([true, true, true, false]);
+    expect(gate("b", 3)).toBe(true);
+    expect(gate("a", 1001)).toBe(true);
+  });
+});
+
 describe("why a call ended, and why a join failed (docs/28 §4.2, S4)", () => {
   it("names each disconnect reason in words, and leaving is not an event", () => {
     expect(describeDisconnect("CLIENT_INITIATED")).toEqual({ kind: "left" });
@@ -185,9 +236,19 @@ describe("the roster and the stage", () => {
 
   it("keeps hands, the transcribing mark and link quality per person", () => {
     let peers = roomPeers(new Map(), { type: "peer-joined", identity: "a", name: "Ada" });
-    peers = roomPeers(peers, { type: "attributes", identity: "a", handAt: 5, capture: true });
+    peers = roomPeers(peers, {
+      type: "attributes",
+      identity: "a",
+      attributes: { "lucent.hand": "5", "lucent.capture": "9", "lucent.optout": "1" },
+    });
     peers = roomPeers(peers, { type: "quality", identity: "a", quality: "poor" });
-    expect(peers.get("a")).toMatchObject({ handAt: 5, capture: true, quality: "poor" });
+    expect(peers.get("a")).toMatchObject({
+      handAt: 5,
+      capture: true,
+      captureAt: 9,
+      optedOut: true,
+      quality: "poor",
+    });
     // Quality for someone who already left doesn't bring them back.
     peers = roomPeers(peers, { type: "quality", identity: "ghost", quality: "lost" });
     expect(peers.has("ghost")).toBe(false);

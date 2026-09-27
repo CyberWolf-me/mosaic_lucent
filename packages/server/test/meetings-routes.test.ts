@@ -126,6 +126,20 @@ describe("validateTurns", () => {
     expect(validateTurns([{ speaker: "A", at: 1, text: "  " }]).ok).toBe(false);
     expect(validateTurns([{ speaker: "A", at: 1, text: "x", kind: "vibe" }]).ok).toBe(false);
   });
+
+  it("keeps who said a line when the capture knows, and nothing that isn't an id (A3.5)", () => {
+    const res = validateTurns([
+      { speaker: "Ada", at: 1, text: "hi", speakerId: "usr_ada-1" },
+      { speaker: "Room", at: 2, text: "yo" },
+    ]);
+    expect(res.ok && res.turns.map((t) => t.speakerId)).toEqual(["usr_ada-1", undefined]);
+    expect(
+      validateTurns([{ speaker: "A", at: 1, text: "x", speakerId: "<script>" }] as never).ok,
+    ).toBe(false);
+    expect(validateTurns([{ speaker: "A", at: 1, text: "x", speakerId: 7 }] as never).ok).toBe(
+      false,
+    );
+  });
 });
 
 describe("board meetings routes (E3/R3)", () => {

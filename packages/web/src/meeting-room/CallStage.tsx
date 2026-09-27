@@ -40,6 +40,8 @@ interface Person {
   camOn: boolean;
   speaking: boolean;
   capture: boolean;
+  /** Asked not to be transcribed (docs/28 §4.3). */
+  optedOut: boolean;
   quality: RoomPeer["quality"];
   video: MediaTile | undefined;
   screen: MediaTile | undefined;
@@ -184,6 +186,7 @@ function Tile({
   canHost,
   onHostAction,
   size,
+  transcribingNow,
 }: {
   person: Person;
   screen?: boolean;
@@ -194,6 +197,8 @@ function Tile({
   canHost: boolean;
   onHostAction: (a: HostAction) => void;
   size: "grid" | "main" | "strip";
+  /** Someone is transcribing the call, so "Not transcribed" means something. */
+  transcribingNow: boolean;
 }) {
   const media = screen ? person.screen : person.camOn ? person.video : undefined;
   const label = screen
@@ -218,6 +223,11 @@ function Tile({
         {handRank !== null && !screen && (
           <span className="call-chip is-hand" title="Hand raised">
             <Ico.HandRaise width={12} height={12} /> {handRank}
+          </span>
+        )}
+        {person.optedOut && !person.capture && !screen && transcribingNow && (
+          <span className="call-chip" title="Asked not to be transcribed">
+            Not transcribed
           </span>
         )}
         {person.capture && !screen && (
@@ -285,11 +295,13 @@ function PeoplePanel({
   isHost,
   onHostAction,
   onClose,
+  transcriber,
 }: {
   people: Person[];
   isHost: boolean;
   onHostAction: (a: HostAction) => void;
   onClose: () => void;
+  transcriber: { name: string } | null;
 }) {
   const sorted = sortRoster(people);
   const hands = sorted.filter((p) => p.handAt !== null);
@@ -325,6 +337,9 @@ function PeoplePanel({
               {p.isLocal ? `${p.name} (You)` : p.name}
               {p.host && <span className="call-host-badge">Host</span>}
               {p.capture && <span className="call-roster-note">Transcribing</span>}
+              {p.optedOut && !p.capture && transcriber && (
+                <span className="call-roster-note is-muted">Not transcribed</span>
+              )}
             </span>
             <span className="call-roster-icons">
               {p.handAt !== null && (
@@ -495,6 +510,10 @@ export function CallStage({
     leave,
     devices,
     chooseDevice,
+    transcriber,
+    transcribeMe,
+    setTranscribeMe,
+    contribution,
   } = s;
 
   const [panel, setPanel] = useState<Panel>(null);
@@ -535,6 +554,7 @@ export function CallStage({
       camOn,
       speaking: local?.speaking ?? false,
       capture: local?.capture ?? false,
+      optedOut: !transcribeMe,
       quality: local?.quality ?? "unknown",
       video: video(LOCAL),
       screen: screenOn ? screen(LOCAL) : undefined,
@@ -551,13 +571,14 @@ export function CallStage({
         camOn: p.camOn,
         speaking: p.speaking,
         capture: p.capture,
+        optedOut: p.optedOut,
         quality: p.quality,
         video: video(p.identity),
         screen: screen(p.identity),
       });
     }
     return list;
-  }, [peers, tiles, micOn, camOn, screenOn, meta, isHost, selfName]);
+  }, [peers, tiles, micOn, camOn, screenOn, meta, isHost, selfName, transcribeMe]);
 
   // The speaker view follows whoever spoke last (not you, unless you're alone).
   useEffect(() => {
@@ -610,6 +631,7 @@ export function CallStage({
         canHost={isHost}
         onHostAction={runHost}
         size={size}
+        transcribingNow={transcriber !== null}
       />
     );
   };
@@ -660,6 +682,15 @@ export function CallStage({
       .catch(() => {});
   };
 
+  // One call, one transcript (docs/28 A3.5): while someone else records it,
+  // this person's words already go into theirs.
+  const recordedElsewhere = !isRecording && transcriber !== null && !transcriber.isLocal;
+  const recordLabel = isRecording
+    ? "Stop transcribing"
+    : recordedElsewhere
+      ? `${transcriber?.name ?? "Someone"} is already transcribing this call`
+      : "Transcribe this meeting";
+
   const startedAt = meta?.startedAt && meta.startedAt <= now ? meta.startedAt : joinedAt;
   const others = people.filter((p) => !p.isLocal);
   const cols = gridColumns(people.length);
@@ -673,17 +704,50 @@ export function CallStage({
           <span className="call-head-time mono">{formatElapsed(now - startedAt)}</span>
         </div>
         <div className="call-head-state">
-          {transcribing.length > 0 && (
+          {transcriber?.isLocal && (
             <span className="call-chip is-rec" role="status">
               <span className="call-rec-dot" aria-hidden />
-              {transcribing.some((p) => p.isLocal)
-                ? "You're transcribing this meeting"
-                : `Lucent is transcribing · ${transcribing.map((p) => p.name).join(", ")}`}
+              You're transcribing this meeting
+            </span>
+          )}
+          {transcriber && !transcriber.isLocal && (
+            <span className="call-chip is-rec" role="status">
+              <span className="call-rec-dot" aria-hidden />
+              {`Lucent is transcribing · ${transcriber.name}`}
+            </span>
+          )}
+          {!transcriber && transcribing.length > 0 && (
+            <span className="call-chip is-rec" role="status">
+              <span className="call-rec-dot" aria-hidden />
+              {`Lucent is transcribing · ${transcribing.map((p) => p.name).join(", ")}`}
             </span>
           )}
           {screenOn && <span className="call-chip is-share">You're presenting</span>}
         </div>
       </header>
+
+      {transcriber && !transcriber.isLocal && (
+        <div className="call-banner is-capture" role="status">
+          <span>
+            {!transcribeMe
+              ? "You're not being transcribed. Others see that on your tile."
+              : contribution === "live"
+                ? "Your words are transcribed on this device and go into the meeting's transcript under your name."
+                : contribution === "paused"
+                  ? "Your mic is off, so nothing of yours is transcribed."
+                  : contribution === "unsupported"
+                    ? "This browser can't transcribe you, so your words aren't in the transcript. Chrome and Edge can."
+                    : "Starting transcription…"}
+          </span>
+          <button
+            type="button"
+            className="call-link-btn"
+            onClick={() => void setTranscribeMe(!transcribeMe)}
+          >
+            {transcribeMe ? "Stop transcribing me" : "Include me"}
+          </button>
+        </div>
+      )}
 
       {status === "reconnecting" && (
         <div className="call-banner is-warn" role="status">
@@ -751,6 +815,7 @@ export function CallStage({
             isHost={isHost}
             onHostAction={runHost}
             onClose={() => setPanel(null)}
+            transcriber={transcriber}
           />
         )}
         {panel === "chat" && (
@@ -876,8 +941,9 @@ export function CallStage({
               type="button"
               className={`call-btn ${isRecording ? "is-rec" : ""}`}
               aria-pressed={isRecording}
-              aria-label={isRecording ? "Stop transcribing" : "Transcribe this meeting"}
-              title={isRecording ? "Stop transcribing" : "Transcribe this meeting"}
+              aria-label={recordLabel}
+              title={recordLabel}
+              disabled={recordedElsewhere}
               onClick={onToggleRecording}
             >
               <span className="call-rec-glyph" aria-hidden />

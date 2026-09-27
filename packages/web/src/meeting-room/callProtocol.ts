@@ -25,6 +25,7 @@ export interface CallMeta {
 export const CALL_ATTRIBUTES = {
   hand: "lucent.hand",
   capture: "lucent.capture",
+  optOut: "lucent.optout",
 } as const;
 
 const strings = (value: unknown): string[] =>
@@ -53,8 +54,47 @@ export function handFrom(attributes: Record<string, string> | undefined): number
   return Number.isFinite(at) && at > 0 ? at : null;
 }
 
+/**
+ * When this person's device started transcribing the meeting (epoch ms), or
+ * null. An older server wrote "on"; it reads as the earliest possible start.
+ */
+export function captureSince(attributes: Record<string, string> | undefined): number | null {
+  const raw = attributes?.[CALL_ATTRIBUTES.capture];
+  if (!raw) return null;
+  if (raw === "on") return 1;
+  const at = Number(raw);
+  return Number.isFinite(at) && at > 0 ? at : null;
+}
+
 export function captureFrom(attributes: Record<string, string> | undefined): boolean {
-  return attributes?.[CALL_ATTRIBUTES.capture] === "on";
+  return captureSince(attributes) !== null;
+}
+
+/** This person asked not to be transcribed (docs/28 §4.3 `muted`). */
+export function optedOutFrom(attributes: Record<string, string> | undefined): boolean {
+  return attributes?.[CALL_ATTRIBUTES.optOut] === "1";
+}
+
+/**
+ * Whose transcript the call feeds (docs/28 A3.5): the person who started
+ * transcribing first. One call, one transcript — everyone else's device sends
+ * its lines there, so turn numbers, citations and extraction stay one record.
+ */
+export function transcriberOf(
+  people: ReadonlyArray<{ identity: string; captureAt: number | null }>,
+): string | null {
+  let best: { identity: string; captureAt: number } | null = null;
+  for (const p of people) {
+    if (p.captureAt === null) continue;
+    if (
+      !best ||
+      p.captureAt < best.captureAt ||
+      (p.captureAt === best.captureAt && p.identity < best.identity)
+    ) {
+      best = { identity: p.identity, captureAt: p.captureAt };
+    }
+  }
+  return best?.identity ?? null;
 }
 
 // --- Data messages -------------------------------------------------------
@@ -104,6 +144,50 @@ export function decodeReaction(payload: Uint8Array): Reaction | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * One finished line of someone's speech, sent by their own device to the
+ * device that keeps the transcript (docs/28 A3.5). Who said it is the LiveKit
+ * participant that sent it — the payload carries only the words.
+ */
+export const LINE_TOPIC = "lucent.line";
+export const MAX_LINE_CHARS = 2000;
+
+export function encodeLine(text: string, at: number): Uint8Array | null {
+  const body = text.trim();
+  if (!body || body.length > MAX_LINE_CHARS) return null;
+  return encoder.encode(JSON.stringify({ v: 1, text: body, at }));
+}
+
+export function decodeLine(payload: Uint8Array): { text: string; at: number } | null {
+  try {
+    const value = JSON.parse(decoder.decode(payload)) as Record<string, unknown>;
+    if (value?.v !== 1 || typeof value.text !== "string") return null;
+    const text = value.text.trim().slice(0, MAX_LINE_CHARS);
+    return text ? { text, at: typeof value.at === "number" ? value.at : 0 } : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A per-sender flood gate for incoming lines: people finish a sentence every
+ * few seconds, so more than `max` lines in `windowMs` from one device is a
+ * broken or hostile client, and the extra lines are dropped.
+ */
+export function createLineGate(max = 8, windowMs = 5000): (sender: string, now: number) => boolean {
+  const seen = new Map<string, number[]>();
+  return (sender, now) => {
+    const recent = (seen.get(sender) ?? []).filter((t) => now - t < windowMs);
+    if (recent.length >= max) {
+      seen.set(sender, recent);
+      return false;
+    }
+    recent.push(now);
+    seen.set(sender, recent);
+    return true;
+  };
 }
 
 export interface ChatMessage {

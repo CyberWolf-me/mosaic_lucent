@@ -168,8 +168,10 @@ export function withHost(meta: CallMeta, userId: string): CallMeta {
 export const CALL_ATTRIBUTES = {
   /** Epoch ms the hand went up; absent when it's down. The order is who raised first. */
   hand: "lucent.hand",
-  /** "on" while this person's device transcribes the meeting (rule 4). */
+  /** Epoch ms this person's device started transcribing the meeting (rule 4). */
   capture: "lucent.capture",
+  /** "1" when this person asked not to be transcribed (docs/28 §4.3 `muted`). */
+  optOut: "lucent.optout",
 } as const;
 
 // --- LiveKit ---------------------------------------------------------------

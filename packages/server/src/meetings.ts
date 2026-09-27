@@ -23,6 +23,12 @@ export interface MeetingTurn {
   text: string;
   /** The meeting flow's classification of this line, when the flow classifies. */
   kind?: "problem" | "hypothesis" | "solution" | "decision" | "action" | "requirement";
+  /**
+   * The account that said it, when the capture knows (docs/28 A3.5): in a
+   * call, each person's line arrives from their own device, as their LiveKit
+   * identity — their user id. Absent for on-device capture of a room.
+   */
+  speakerId?: string;
 }
 
 /**
@@ -351,6 +357,12 @@ export function validateTurns(
         return { ok: false, error: "turn.kind must be one of the six classifications" };
       }
       turn.kind = t.kind as MeetingTurn["kind"];
+    }
+    if (t.speakerId !== undefined && t.speakerId !== null) {
+      if (typeof t.speakerId !== "string" || !/^[\w-]{1,128}$/.test(t.speakerId)) {
+        return { ok: false, error: "turn.speakerId must be an account id" };
+      }
+      turn.speakerId = t.speakerId;
     }
     turns.push(turn);
   }

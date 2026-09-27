@@ -18,7 +18,8 @@ import {
  *
  *   GET  /api/boards/:id/call          who is in the call, who hosts it (viewer)
  *   POST /api/boards/:id/call/state    raise or lower your hand; mark that you
- *                                      transcribe; a host lowers someone's hand
+ *                                      transcribe, or that you'd rather not be
+ *                                      transcribed; a host lowers someone's hand
  *   POST /api/boards/:id/call/mute     host: mute one person, or everyone
  *   POST /api/boards/:id/call/remove   host: remove someone for this call
  *   POST /api/boards/:id/call/hosts    host: make someone a co-host
@@ -119,15 +120,18 @@ export const registerCallRoutes: RegisterRoutes = (router, s) => {
       attributes[CALL_ATTRIBUTES.hand] = input.hand ? String(Date.now()) : "";
     }
     if (typeof input.capture === "boolean") {
-      attributes[CALL_ATTRIBUTES.capture] = input.capture ? "on" : "";
+      attributes[CALL_ATTRIBUTES.capture] = input.capture ? String(Date.now()) : "";
+    }
+    if (typeof input.transcribe === "boolean") {
+      attributes[CALL_ATTRIBUTES.optOut] = input.transcribe ? "" : "1";
     }
     if (Object.keys(attributes).length === 0) {
-      return send(res, 400, { error: "send hand or capture" });
+      return send(res, 400, { error: "send hand, capture or transcribe" });
     }
     // Someone else's state: a host may lower a hand (as in Meet), nothing more.
     if (target !== call.user.id) {
       if (!call.host) return send(res, 403, { error: "Only the host can do that." });
-      if (input.hand !== false || input.capture !== undefined) {
+      if (input.hand !== false || input.capture !== undefined || input.transcribe !== undefined) {
         return send(res, 403, { error: "A host can only lower someone's hand." });
       }
     }

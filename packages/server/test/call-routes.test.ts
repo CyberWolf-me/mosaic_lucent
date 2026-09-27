@@ -317,7 +317,12 @@ describe("the board call's host (docs/28 A3.2)", () => {
 
     const capture = await post(h, `/api/boards/${boardId}/call/state`, bob, { capture: true });
     expect(capture.status).toBe(200);
-    expect(bobInRoom().attributes[CALL_ATTRIBUTES.capture]).toBe("on");
+    expect(Number(bobInRoom().attributes[CALL_ATTRIBUTES.capture])).toBeGreaterThan(0);
+    const optOut = await post(h, `/api/boards/${boardId}/call/state`, bob, { transcribe: false });
+    expect(optOut.status).toBe(200);
+    expect(bobInRoom().attributes[CALL_ATTRIBUTES.optOut]).toBe("1");
+    await post(h, `/api/boards/${boardId}/call/state`, bob, { transcribe: true });
+    expect(bobInRoom().attributes[CALL_ATTRIBUTES.optOut]).toBeUndefined();
 
     // A host may lower Bob's hand, but not mark Bob as transcribing.
     const spoof = await post(h, `/api/boards/${boardId}/call/state`, alice, {

@@ -14,20 +14,24 @@ import { roomPeers, type RoomPeer } from "./roomPeers.js";
 import type { ConversationalLease } from "../meeting-voice.js";
 import {
   appendChat,
-  captureFrom,
   CHAT_TOPIC,
+  createLineGate,
   decodeChat,
+  decodeLine,
   decodeReaction,
   describeDisconnect,
   describeJoinFailure,
   encodeChat,
+  encodeLine,
   encodeReaction,
   handFrom,
+  LINE_TOPIC,
   readCallMeta,
   REACTION_TOPIC,
   rejoinMarker,
   rejoinOffer,
   REJOIN_KEY,
+  transcriberOf,
   type CallEnd,
   type CallMeta,
   type ChatMessage,
@@ -39,6 +43,8 @@ import {
   type DeviceChoice,
   type DeviceKind,
 } from "./devices.js";
+import { useSettings } from "../settings.js";
+import { resolveSttProvider, type SttProviderId, type VoiceSession } from "../stt/index.js";
 
 export interface MediaTile {
   key: string;
@@ -89,7 +95,10 @@ export interface LiveKitRoom {
     setMicrophoneEnabled(on: boolean, options?: { deviceId?: string }): Promise<unknown>;
     setCameraEnabled(on: boolean, options?: { deviceId?: string }): Promise<unknown>;
     setScreenShareEnabled(on: boolean): Promise<unknown>;
-    publishData(data: Uint8Array, options?: { reliable?: boolean; topic?: string }): Promise<void>;
+    publishData(
+      data: Uint8Array,
+      options?: { reliable?: boolean; topic?: string; destinationIdentities?: string[] },
+    ): Promise<void>;
   };
   remoteParticipants: Map<string, LiveKitParticipant>;
 }
@@ -200,7 +209,37 @@ interface MeetingSessionValue {
   dismissRejoin: () => void;
   capture: LiveCapture | null;
   setCapture: React.Dispatch<React.SetStateAction<LiveCapture | null>>;
+  /**
+   * Whose device keeps the call's transcript (docs/28 A3.5): the first person
+   * who started transcribing. Null when nobody is.
+   */
+  transcriber: { identity: string; name: string; isLocal: boolean } | null;
+  /** You agree to be transcribed in this call (the default); off is "Stop transcribing me". */
+  transcribeMe: boolean;
+  setTranscribeMe: (on: boolean) => Promise<void>;
+  /** How this device is contributing your words to someone else's transcript. */
+  contribution: Contribution;
+  /**
+   * Hear each line another person's device sends to this device's transcript;
+   * returns the unsubscribe. The sender is the LiveKit participant, never the
+   * payload.
+   */
+  subscribeLines: (listener: (line: RemoteLine) => void) => () => void;
 }
+
+/** One line of someone else's speech, sent to this device's transcript. */
+export interface RemoteLine {
+  identity: string;
+  name: string;
+  text: string;
+}
+
+/**
+ * Your part in someone else's transcript: `live` while your device
+ * transcribes you, `paused` while your mic is off, `off` when you opted out
+ * or nobody is transcribing, `unsupported` when this browser can't.
+ */
+export type Contribution = "off" | "live" | "paused" | "unsupported";
 
 const MeetingSessionContext = createContext<MeetingSessionValue | null>(null);
 
@@ -269,7 +308,11 @@ export function MeetingSessionProvider({ children }: { children: ReactNode }) {
   );
   const [activeLease, setActiveLease] = useState<ConversationalLease | null>(null);
   const [capture, setCapture] = useState<LiveCapture | null>(null);
+  const [transcribeMe, setTranscribeMeState] = useState(true);
+  const [contribution, setContribution] = useState<Contribution>("off");
 
+  const lineListeners = useRef(new Set<(line: RemoteLine) => void>());
+  const lineGate = useRef(createLineGate());
   const roomRef = useRef<LiveKitRoom | null>(null);
   const deadRef = useRef(false);
   const joinSeq = useRef(0);
@@ -379,6 +422,9 @@ export function MeetingSessionProvider({ children }: { children: ReactNode }) {
       setChat([]);
       setChatUnread(0);
       setRejoin(null);
+      // A new participant session starts with no attributes on the server,
+      // so "Stop transcribing me" starts off too.
+      setTranscribeMeState(true);
       deadRef.current = false;
       endingRef.current = false;
       let data: { token: string; url: string };
@@ -436,12 +482,7 @@ export function MeetingSessionProvider({ children }: { children: ReactNode }) {
         const seedPeer = (p: LiveKitParticipant) => {
           const identity = idOf(p);
           act({ type: "peer-joined", identity, name: nameOf(p) });
-          act({
-            type: "attributes",
-            identity,
-            handAt: handFrom(p.attributes),
-            capture: captureFrom(p.attributes),
-          });
+          act({ type: "attributes", identity, attributes: p.attributes });
           for (const pub of p.audioTrackPublications.values()) {
             if (pub.source === "microphone") {
               act({ type: "track", identity, kind: "audio", on: !pub.isMuted });
@@ -557,12 +598,7 @@ export function MeetingSessionProvider({ children }: { children: ReactNode }) {
             if (identity !== LOCAL && handAt !== null && before && before.handAt === null) {
               showToast(`${nameOf(p)} raised a hand`);
             }
-            return roomPeers(prev, {
-              type: "attributes",
-              identity,
-              handAt,
-              capture: captureFrom(p.attributes),
-            });
+            return roomPeers(prev, { type: "attributes", identity, attributes: p.attributes });
           });
         }) as (...args: never[]) => void);
 
@@ -584,6 +620,16 @@ export function MeetingSessionProvider({ children }: { children: ReactNode }) {
         ) => {
           // Only people in the room send data; a server-sent packet has no participant.
           if (!p) return;
+          if (topic === LINE_TOPIC) {
+            // A line of someone's speech for this device's transcript. Dropped
+            // unless this tab is recording, and past a sane rate per sender.
+            const line = decodeLine(payload);
+            if (!line || !captureRef.current || lineListeners.current.size === 0) return;
+            if (!lineGate.current(p.identity, Date.now())) return;
+            const remote = { identity: p.identity, name: p.name || p.identity, text: line.text };
+            for (const listener of lineListeners.current) listener(remote);
+            return;
+          }
           if (topic === CHAT_TOPIC) {
             const message = decodeChat(payload);
             if (!message) return;
@@ -831,20 +877,10 @@ export function MeetingSessionProvider({ children }: { children: ReactNode }) {
       const board = boardRef.current;
       if (!board) return;
       const before = peers.get(LOCAL);
-      act({
-        type: "attributes",
-        identity: LOCAL,
-        handAt: up ? Date.now() : null,
-        capture: before?.capture ?? false,
-      });
+      act({ type: "hand", identity: LOCAL, handAt: up ? Date.now() : null });
       const result = await callRoute(board, "state", { hand: up });
       if (!result.ok) {
-        act({
-          type: "attributes",
-          identity: LOCAL,
-          handAt: before?.handAt ?? null,
-          capture: before?.capture ?? false,
-        });
+        act({ type: "hand", identity: LOCAL, handAt: before?.handAt ?? null });
         setNotice(result.error);
       }
     },
@@ -884,6 +920,48 @@ export function MeetingSessionProvider({ children }: { children: ReactNode }) {
     captureSent.current = on;
     void callRoute(activeBoardId, "state", { capture: on });
   }, [status, activeBoardId, capture]);
+
+  const setTranscribeMe = useCallback(async (on: boolean) => {
+    setTranscribeMeState(on);
+    const board = boardRef.current;
+    if (!board) return;
+    // Others see the choice on this person's tile (docs/28 §4.3 `muted`).
+    const result = await callRoute(board, "state", { transcribe: on });
+    if (!result.ok) setNotice(result.error);
+  }, []);
+
+  const subscribeLines = useCallback((listener: (line: RemoteLine) => void) => {
+    lineListeners.current.add(listener);
+    return () => {
+      lineListeners.current.delete(listener);
+    };
+  }, []);
+
+  /** One line of your speech, to the device that keeps the call's transcript. */
+  const sendLine = useCallback((to: string, text: string) => {
+    const room = roomRef.current;
+    const payload = encodeLine(text, Date.now());
+    if (!room || !payload) return;
+    void room.localParticipant
+      .publishData(payload, { reliable: true, topic: LINE_TOPIC, destinationIdentities: [to] })
+      .catch(() => {});
+  }, []);
+
+  const transcriber = useMemo(() => {
+    const id = transcriberOf([...peers.values()]);
+    const peer = id ? peers.get(id) : undefined;
+    if (!peer) return null;
+    const isLocal = peer.identity === LOCAL;
+    return { identity: peer.identity, name: isLocal ? (selfName ?? "You") : peer.name, isLocal };
+  }, [peers, selfName]);
+
+  // Your words go to someone else's transcript while they record this call —
+  // unless you opted out, or this tab records it itself.
+  const recordingHere = capture !== null && capture.boardId === activeBoardId;
+  const contributeTo =
+    inCall(status) && transcriber && !transcriber.isLocal && transcribeMe && !recordingHere
+      ? transcriber.identity
+      : null;
 
   // Clean up on app unmount (the marker stays: a reload offers the call back).
   useEffect(() => () => teardown(), [teardown]);
@@ -940,8 +1018,18 @@ export function MeetingSessionProvider({ children }: { children: ReactNode }) {
       },
       capture,
       setCapture,
+      transcriber,
+      transcribeMe,
+      setTranscribeMe,
+      contribution,
+      subscribeLines,
     }),
     [
+      transcriber,
+      transcribeMe,
+      setTranscribeMe,
+      contribution,
+      subscribeLines,
       status,
       error,
       ended,
@@ -988,8 +1076,80 @@ export function MeetingSessionProvider({ children }: { children: ReactNode }) {
     <MeetingSessionContext.Provider value={value}>
       {children}
       <CallAudio tiles={tiles} />
+      <CallTranscriber
+        to={contributeTo}
+        micOn={micOn}
+        onLine={sendLine}
+        onState={setContribution}
+      />
     </MeetingSessionContext.Provider>
   );
+}
+
+/**
+ * A provider that can feed someone else's live transcript: lines must arrive
+ * as they're spoken, so providers that transcribe only at stop (on-device
+ * Whisper) and LiveKit's agent room are out.
+ */
+function liveProvider(preferred: SttProviderId) {
+  const order: SttProviderId[] =
+    preferred === "browser" || preferred === "hosted"
+      ? [preferred, "browser", "hosted"]
+      : ["browser", "hosted"];
+  for (const id of order) {
+    const { provider } = resolveSttProvider(id);
+    if (provider.id === id && !provider.finalsAtStop) return provider;
+  }
+  return null;
+}
+
+/**
+ * Transcribes you, on your own device, while someone else in the call records
+ * it (docs/28 A3.5): each finished line goes to their device, which files it
+ * under your name. Nothing runs while your mic is off, and nothing at all
+ * after "Stop transcribing me".
+ */
+function CallTranscriber({
+  to,
+  micOn,
+  onLine,
+  onState,
+}: {
+  to: string | null;
+  micOn: boolean;
+  onLine: (to: string, text: string) => void;
+  onState: (state: Contribution) => void;
+}) {
+  const [settings] = useSettings();
+  const preferred = settings.sttProvider;
+  useEffect(() => {
+    if (!to) {
+      onState("off");
+      return;
+    }
+    if (!micOn) {
+      onState("paused");
+      return;
+    }
+    const provider = liveProvider(preferred);
+    if (!provider) {
+      onState("unsupported");
+      return;
+    }
+    let session: VoiceSession | null = null;
+    session = provider.start({
+      onFinal: (text) => {
+        const line = text.trim();
+        if (line) onLine(to, line);
+      },
+      onError: (message) => {
+        if (message) onState("unsupported");
+      },
+    });
+    onState(session ? "live" : "unsupported");
+    return () => session?.stop();
+  }, [to, micOn, preferred, onLine, onState]);
+  return null;
 }
 
 /**

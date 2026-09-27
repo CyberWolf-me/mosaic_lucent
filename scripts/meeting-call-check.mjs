@@ -245,6 +245,13 @@ const message = await waitFor(async () => {
 });
 check("the host reads it, under the guest's name", !!message);
 
+// Trace what arrives, so a miss says whether the packet or the render failed.
+await guest.page.evaluate(() => {
+  window.__packets = [];
+  window.__lucentCall?.on("dataReceived", (_payload, p, _kind, topic) =>
+    window.__packets.push(`${topic}:${p ? "from-participant" : "no-participant"}`),
+  );
+});
 await host.page.getByRole("button", { name: "Send a reaction" }).click();
 await host.page.getByRole("menuitem", { name: "React 🎉" }).click();
 const reaction = await waitFor(
@@ -252,7 +259,11 @@ const reaction = await waitFor(
   5000,
   100,
 );
-check("a reaction floats over the sender's tile", reaction);
+check(
+  "a reaction floats over the sender's tile",
+  reaction,
+  reaction ? "" : `packets: ${await guest.page.evaluate(() => window.__packets.join(", "))}`,
+);
 
 await guest.page.getByRole("button", { name: /Raise your hand/ }).click();
 const toast = await waitFor(async () =>
@@ -409,6 +420,70 @@ await stage(third.page).waitFor({ timeout: 20000 });
 check(
   "a board viewer can join and speak (docs/28 §9.3)",
   await waitFor(async () => (await tiles(host.page)).some((l) => l === "Cy Viewer")),
+);
+
+// --- each person transcribed under their own name (A3.5) -----------------------
+
+const liveTurns = async () => {
+  const res = await host.page.request.get(`${base}/api/boards/${boardId}/meetings`);
+  return (await res.json()).meetings?.[0]?.turns ?? [];
+};
+const say = (page, text) =>
+  waitFor(() => page.evaluate((t) => window.__say?.(t) === true, text), 10000);
+const includedBanner = async (page) =>
+  (await page.locator(".call-banner.is-capture").textContent())?.includes(
+    "go into the meeting's transcript under your name",
+  );
+check(
+  "the others are told their words go into the transcript",
+  (await waitFor(() => includedBanner(guest.page))) &&
+    (await waitFor(() => includedBanner(third.page))),
+);
+await say(guest.page, "The API is ready for review.");
+await say(third.page, "I will write the release notes.");
+const named = await waitFor(async () => {
+  const turns = await liveTurns();
+  const by = (text) => turns.find((t) => t.text === text);
+  const gus = by("The API is ready for review.");
+  const cy = by("I will write the release notes.");
+  const hana = by("We ship the call feature on Friday.");
+  return gus?.speaker === "Gus Guest" &&
+    cy?.speaker === "Cy Viewer" &&
+    hana?.speaker === "Hana Host" &&
+    gus.speakerId &&
+    cy.speakerId &&
+    hana.speakerId &&
+    new Set([gus.speakerId, cy.speakerId, hana.speakerId]).size === 3
+    ? turns
+    : null;
+}, 15000);
+check(
+  "each person's line lands in one transcript under their own name",
+  !!named,
+  (await liveTurns()).map((t) => `${t.speaker}: ${t.text}`).join(" | "),
+);
+const guestRecord = guest.page.getByRole("button", {
+  name: "Hana Host is already transcribing this call",
+});
+check(
+  "a second recording of the same call can't start",
+  (await guestRecord.count()) === 1 && (await guestRecord.isDisabled()),
+);
+
+await third.page.getByRole("button", { name: "Stop transcribing me" }).click();
+check(
+  "opting out shows on the person's tile",
+  await waitFor(async () =>
+    (await host.page.locator(".call-tile", { hasText: "Cy Viewer" }).textContent())?.includes(
+      "Not transcribed",
+    ),
+  ),
+);
+await third.page.evaluate(() => window.__say?.("This should stay out of the transcript."));
+await host.page.waitForTimeout(2500);
+check(
+  "after Stop transcribing me, nothing of theirs is captured",
+  !(await liveTurns()).some((t) => t.text === "This should stay out of the transcript."),
 );
 
 // --- the host removes the guest ------------------------------------------------

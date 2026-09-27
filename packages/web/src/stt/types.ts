@@ -37,6 +37,11 @@ export interface FinalMeta {
    * handle marketing" becomes a task owned by Sarah, not an anonymous card.
    */
   speaker?: string;
+  /**
+   * The speaker's account id, when known: in a board call, each person's
+   * lines come from their own device as their LiveKit identity (docs/28 A3.5).
+   */
+  speakerId?: string;
 }
 
 export interface VoiceHandlers {

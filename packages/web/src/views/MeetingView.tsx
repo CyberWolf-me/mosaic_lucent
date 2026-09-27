@@ -409,7 +409,22 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
     peers,
     status: roomStatus,
     setCapture: publishCapture,
+    activeBoardId: callBoardId,
+    selfName,
+    selfIdentity,
+    transcriber: callTranscriber,
+    subscribeLines,
   } = useMeetingSession();
+  // docs/28 A3.5: while this board's call runs, the capture names its own
+  // speaker and hears everyone else's lines (refs: the capture's callbacks
+  // are made once, at Start).
+  const inThisCall = inCall(roomStatus) && callBoardId === boardId;
+  const callSelfRef = useRef<{ name: string; id: string } | null>(null);
+  callSelfRef.current =
+    inThisCall && selfName && selfIdentity ? { name: selfName, id: selfIdentity } : null;
+  const callTranscriberRef = useRef(callTranscriber);
+  callTranscriberRef.current = inThisCall ? callTranscriber : null;
+  const remoteLinesRef = useRef<(() => void) | null>(null);
   const leaseManagerRef = useRef<ConversationalLeaseManager>(
     new ConversationalLeaseManager({ leaseDurationMs: 15_000, maxFollowUpTurns: 3 }),
   );
@@ -536,6 +551,8 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
     () => () => {
       voiceRef.current?.stop();
       voiceRef.current = null;
+      remoteLinesRef.current?.();
+      remoteLinesRef.current = null;
       playbackRef.current?.stop();
       playbackRef.current = null;
       const capture = captureRef.current;
@@ -558,6 +575,13 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
     }
     if (!voiceSupported) {
       notify("Voice is not supported in this browser.");
+      return;
+    }
+    // docs/28 A3.5: one call, one transcript. Someone else already records
+    // this call, and this device's words already reach it.
+    const other = callTranscriberRef.current;
+    if (other && !other.isLocal) {
+      notify(`${other.name} is already transcribing this call — your words are included.`);
       return;
     }
     // docs/28 F22: the capture works with less — say so for as long as it
@@ -682,11 +706,19 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
       },
       onFinal: (text, meta) => {
         const t = text.trim();
-        if (!t || isTtsSpeaking()) return;
+        // Lucent's spoken answer plays on this device only, so only this
+        // device's mic can hear it; a line from another person's device can't
+        // be Lucent talking.
+        if (!t || (meta?.speakerId === undefined && isTtsSpeaking())) return;
         engineRef.current.noteFinal(Date.now());
+        // In a call, your own lines carry your name, as everyone else's do
+        // (docs/28 A3.5) — "You" means nothing to the next reader.
+        const self = callSelfRef.current;
         const speaker =
           meta?.speaker ??
+          self?.name ??
           (provider.id === "livekit" || provider.id === "hosted" ? "Speaker" : "You");
+        const speakerId = meta?.speakerId ?? (meta?.speaker ? undefined : self?.id);
         setLastSpeaker(speaker);
 
         appendTurn({
@@ -694,6 +726,7 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
           at: Date.now(),
           text: t,
           kind: classifyTurn(t),
+          ...(speakerId ? { speakerId } : {}),
         });
 
         // Queue the turn for the live extraction loop
@@ -813,6 +846,14 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
       // loop with. Reset-on-start recovers by construction.
       engineRef.current.reset();
       setRecording(true);
+      // docs/28 A3.5: everyone else in the call is transcribed on their own
+      // device, and their lines arrive here under the name LiveKit knows them
+      // by — the same path as this device's own lines: classified, extracted,
+      // persisted, and heard by the conversational lease ("Lucent, …").
+      remoteLinesRef.current?.();
+      remoteLinesRef.current = subscribeLines((line) =>
+        voiceCallbacks.onFinal(line.text, { speaker: line.name, speakerId: line.identity }),
+      );
     }
   };
 
@@ -839,6 +880,8 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
   const stopRecording = (): void => {
     voiceRef.current?.stop();
     voiceRef.current = null;
+    remoteLinesRef.current?.();
+    remoteLinesRef.current = null;
     // M6.2: a stopped meeting stops talking — cancel audio in flight so no
     // answer outlives the capture it answered.
     playbackRef.current?.stop();

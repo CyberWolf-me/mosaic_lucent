@@ -1,3 +1,5 @@
+import { captureSince, handFrom, optedOutFrom } from "./callProtocol.js";
+
 /**
  * Native room peer state (docs/22 native-meeting direction).
  *
@@ -22,6 +24,10 @@ export interface RoomPeer {
   handAt: number | null;
   /** Their device is transcribing the meeting (rule 4: capture is never invisible). */
   capture: boolean;
+  /** When that transcription started; the earliest one is the call's transcript. */
+  captureAt: number | null;
+  /** They asked not to be transcribed (docs/28 §4.3). */
+  optedOut: boolean;
   /** LiveKit's view of their link; "poor" and "lost" show on the tile. */
   quality: "excellent" | "good" | "poor" | "lost" | "unknown";
 }
@@ -32,7 +38,8 @@ export type RoomPeerAction =
   | { type: "reset" }
   | { type: "track"; identity: string; kind: "audio" | "video" | "screen"; on: boolean }
   | { type: "speakers"; identities: string[] }
-  | { type: "attributes"; identity: string; handAt: number | null; capture: boolean }
+  | { type: "attributes"; identity: string; attributes: Record<string, string> | undefined }
+  | { type: "hand"; identity: string; handAt: number | null }
   | { type: "quality"; identity: string; quality: RoomPeer["quality"] };
 
 const blank = (identity: string, name: string): RoomPeer => ({
@@ -44,6 +51,8 @@ const blank = (identity: string, name: string): RoomPeer => ({
   speaking: false,
   handAt: null,
   capture: false,
+  captureAt: null,
+  optedOut: false,
   quality: "unknown",
 });
 
@@ -100,7 +109,19 @@ export function roomPeers(
     }
     case "attributes": {
       const existing = next.get(action.identity) ?? blank(action.identity, action.identity);
-      next.set(action.identity, { ...existing, handAt: action.handAt, capture: action.capture });
+      const captureAt = captureSince(action.attributes);
+      next.set(action.identity, {
+        ...existing,
+        handAt: handFrom(action.attributes),
+        capture: captureAt !== null,
+        captureAt,
+        optedOut: optedOutFrom(action.attributes),
+      });
+      return next;
+    }
+    case "hand": {
+      const existing = next.get(action.identity);
+      if (existing) next.set(action.identity, { ...existing, handAt: action.handAt });
       return next;
     }
     case "quality": {

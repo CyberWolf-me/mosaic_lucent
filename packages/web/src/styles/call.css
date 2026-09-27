@@ -416,6 +416,19 @@
   background: var(--call-surface-2);
   font-size: 12.5px;
 }
+.call-banner.is-capture {
+  justify-content: space-between;
+  background: rgba(229, 72, 77, 0.1);
+  color: #ffd9da;
+  text-align: left;
+}
+.call-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.call-roster-note.is-muted {
+  color: var(--call-ink-2);
+}
 .call-banner.is-warn {
   background: rgba(245, 180, 0, 0.16);
   color: #ffe7a8;

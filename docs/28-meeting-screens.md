@@ -159,14 +159,14 @@ the board role and the host's removals.
 `off → starting → live ⇄ degraded → stopped`, plus `muted` (the person asked
 not to be transcribed, docs/27 §2.9) and `refused` (org policy).
 
-| State      | The user sees                                                                                                                                                                 |                        Today                        |
-| ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :-------------------------------------------------: |
-| `starting` | "Starting transcription…"                                                                                                                                                     | ✅ toasts: "Transcribing on device…", "Connecting…" |
-| `live`     | REC with the provider named                                                                                                                                                   |                         ✅                          |
-| `degraded` | the reason: "On-device transcription — every line shows as You", "Hosted transcription dropped a chunk", "This provider transcribes when you stop — Lucent can't answer live" |                       ❌ F22                        |
-| `muted`    | "You're not being transcribed" (to you); a mark on your tile (to others)                                                                                                      |                         ❌                          |
-| `refused`  | "Your organization has turned off meeting capture. The call still works."                                                                                                     | 🟡 server 403 with `recordingDisabled`; no UI copy  |
-| `failed`   | "Transcription stopped: <reason>" with Restart; turns so far are kept                                                                                                         |    🟡 toast; the server transcript is left open     |
+| State      | The user sees                                                                                                                                                                 |                          Today                           |
+| ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :------------------------------------------------------: |
+| `starting` | "Starting transcription…"                                                                                                                                                     |   ✅ toasts: "Transcribing on device…", "Connecting…"    |
+| `live`     | REC with the provider named                                                                                                                                                   |                            ✅                            |
+| `degraded` | the reason: "On-device transcription — every line shows as You", "Hosted transcription dropped a chunk", "This provider transcribes when you stop — Lucent can't answer live" |                          ❌ F22                          |
+| `muted`    | "You're not being transcribed" (to you); a mark on your tile (to others)                                                                                                      | ✅ "Stop transcribing me"; "Not transcribed" on the tile |
+| `refused`  | "Your organization has turned off meeting capture. The call still works."                                                                                                     |    🟡 server 403 with `recordingDisabled`; no UI copy    |
+| `failed`   | "Transcription stopped: <reason>" with Restart; turns so far are kept                                                                                                         |       🟡 toast; the server transcript is left open       |
 
 ### 4.4 Lucent's availability in this meeting
 
@@ -309,7 +309,7 @@ are still to come.
 | Chat                                                          | everyone                     |                   ✅ in-call only, never stored (as in Meet)                    |
 | Live captions (interim, never stored)                         | everyone                     |                             ❌ interim is discarded                             |
 | Capture indicator (rule 4)                                    | everyone sees it             |                      ✅ "Lucent is transcribing · <name>"                       |
-| Stop transcribing me                                          | everyone                     |                                       ❌                                        |
+| Stop transcribing me                                          | everyone                     |                                       ✅                                        |
 | Board beside the call; follow, spotlight, bring everyone here | everyone / presenter         |                          ❌ (`focusOn` exists, unused)                          |
 | Leave                                                         | everyone                     |                                  ✅ no confirm                                  |
 | End for everyone                                              | host                         |                       ✅ also ends a capture of the call                        |
@@ -473,7 +473,7 @@ call. Org policy caps both.
 | ------------------------------ | :--------------: | :----------: | :------------: | -------------------------------------------------------- |
 | See the meeting and transcript |        ✅        |      ✅      |       ✅       | viewer floor ✅                                          |
 | Join the call, speak, share    |    ✅ (§9.3)     |      ✅      |       ✅       | ✅ every board member's token can publish                |
-| Be transcribed                 | ✅ unless muted  |      ✅      |       ✅       | only the recorder's mic                                  |
+| Be transcribed                 | ✅ unless muted  |      ✅      |       ✅       | ✅ each person on their own device, in a call            |
 | Start or stop capture          |        ❌        |      ✅      |       ✅       | editor floor; the UI doesn't check (F19)                 |
 | Private notes, enhance, Ask    |        ✅        |      ✅      |       ✅       | ✅ viewer floor                                          |
 | Correct a turn                 | own turns (§9.4) |      ✅      |       ✅       | ❌                                                       |
@@ -565,6 +565,24 @@ V8 transport (F4).
   LiveKit project (37/37, four runs in a row). Not yet: live captions (V8),
   "stop transcribing me", the board beside the call, host-restricted sharing,
   a waiting room for guests (A6), background blur, and video recording.
+- **A3.5, per-participant capture — done (2026-09-27).** In a board call, each
+  person is transcribed on their own device while someone records the call,
+  and every line lands in ONE transcript under the name LiveKit knows them by
+  — with their account id on the turn (`speakerId`). The recording tab stays
+  the one writer: other devices send finished lines to it over the call's data
+  channel (`lucent.line`), addressed to it alone, and it files them like its
+  own — classified, extracted, persisted, and heard by the conversational lease,
+  so "Lucent, …" works from anyone in the call. The sender is the LiveKit
+  participant, never a name in the payload; a flood from one device is dropped.
+  The first person to start recording holds the call's transcript, and a second
+  recording of the same call won't start ("Hana is already transcribing this
+  call — your words are included"). Everyone else sees that their words are
+  included, with **Stop transcribing me**; opting out shows "Not transcribed" on
+  their tile, and nothing of theirs is captured. Nothing is transcribed while a
+  person's mic is off. Needs a live speech provider on each device (browser
+  speech in Chrome and Edge, or hosted); a browser without one says so.
+  Confidence and `startMs` on turns are not carried yet, and Lucent's spoken
+  answers still play only on the recording device.
 - **A3.5, corrections part — done (2026-09-27).** An editor corrects a
   transcript line in place on a saved meeting (`POST …/turns/:n/correction`).
   The correction is an overlay (`corrections`, migration 0034, appended
@@ -580,7 +598,8 @@ V8 transport (F4).
 Taken with the recommendation on 2026-09-27, when the owner asked for meetings
 that work like Zoom and Meet: **1** (the host ends for everyone; LiveKit closes
 an empty room after two minutes; the idle sweep ends orphaned captures), **3**
-(viewers speak) and **6** (early join). 2, 4 and 5 are still open.
+(viewers speak) and **6** (early join); and **2** (per participant in a call,
+one-device capture for a room with no call), with A3.5. 4 and 5 are still open.
 
 | #   | Question                                                                                | Recommendation                                                                                                                         |
 | --- | --------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
