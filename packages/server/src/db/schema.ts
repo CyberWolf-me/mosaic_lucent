@@ -1284,6 +1284,8 @@ export const integrationConnections = pgTable(
     config: jsonb("config"),
     scopes: jsonb("scopes").notNull(),
     status: text("status").notNull(),
+    /** docs/26 A5: how it has been answering (integrations/health.ts). */
+    health: jsonb("health"),
     createdBy: text("created_by").notNull(),
     createdAt: bigint("created_at", { mode: "number" }).notNull(),
     updatedAt: bigint("updated_at", { mode: "number" }).notNull(),

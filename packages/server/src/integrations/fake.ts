@@ -118,6 +118,11 @@ export class FakeProvider implements ExecutionProvider {
 
   searchTasks(query: string): Promise<ExternalTask[]> {
     this.calls.push({ method: "searchTasks", input: query, at: Date.now() });
+    // Only a fault queued FOR search is taken here: the recovery path searches
+    // before it creates, and must not swallow a fault meant for the create.
+    if (this.failQueue[0]?.method === "searchTasks") {
+      return Promise.reject(this.failQueue.shift()!.error);
+    }
     const needle = query.toLowerCase();
     return Promise.resolve(
       [...this.tasks.values()].filter(

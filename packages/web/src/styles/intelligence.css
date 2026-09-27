@@ -538,3 +538,8 @@ html[data-theme="dark"] .intel-derived.caution {
 .intel-side .empty-title {
   line-height: 1.3;
 }
+
+/* docs/26 A5: a connection that isn't answering, on its Sync button. */
+.intel-conn-warn {
+  color: var(--madder);
+}

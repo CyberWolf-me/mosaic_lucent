@@ -541,6 +541,8 @@ export interface IntegrationConnectionView {
   config?: Record<string, string>;
   scopes: string[];
   status: "active" | "disabled";
+  /** docs/26 A5: how it has been answering (servers before A5 omit it). */
+  state?: "active" | "degraded" | "needs-reauth" | "revoked";
   updatedAt: number;
 }
 

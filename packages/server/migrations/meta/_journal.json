@@ -274,6 +274,13 @@
       "when": 1790519233420,
       "tag": "0038_lowly_jean_grey",
       "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1790524547948,
+      "tag": "0039_lean_talos",
+      "breakpoints": true
     }
   ]
 }

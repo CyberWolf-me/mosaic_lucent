@@ -7,6 +7,7 @@ import {
   MAX_CREDENTIAL_REF_CHARS,
 } from "../integrations/integrations.js";
 import { webhookSchemes } from "../integrations/webhook.js";
+import { connectionFailure, connectionState, watchProvider } from "../integrations/health.js";
 import { providerFact } from "../modelRouter.js";
 import { MAX_AI_SELECTED_ACTIONS } from "@lucent/ai";
 import type { IntegrationProviderName } from "../integrations/integrations.js";
@@ -46,10 +47,20 @@ const putConnectionSchema = z.object({
 function resolveProvider(
   integrations: NonNullable<import("./context.js").RouteServices["integrations"]>,
   providerName: string,
-  connection: { id: string; credentialRef: string; config?: Record<string, string> },
+  connection: {
+    id: string;
+    orgId: string;
+    credentialRef: string;
+    config?: Record<string, string>;
+  },
 ):
-  | { ok: true; provider: import("../integrations/provider.js").ExecutionProvider }
-  | { ok: false; error: string } {
+  | {
+      ok: true;
+      provider: import("../integrations/provider.js").ExecutionProvider;
+      /** docs/26 A5: report how this request's calls went, once. */
+      settle(): Promise<void>;
+    }
+  | { ok: false; error: string; recorded?: Promise<void> } {
   const factory = integrations.providers.get(providerName);
   if (!factory) {
     return {
@@ -57,13 +68,22 @@ function resolveProvider(
       error: `no provider implementation named "${providerName}" is loaded`,
     };
   }
+  const record = (outcome: import("../integrations/health.js").CallOutcome) =>
+    integrations.store.recordCall(connection.orgId, providerName, outcome, Date.now());
   try {
-    return { ok: true as const, provider: factory(connection) };
+    const watched = watchProvider(factory(connection), record);
+    return { ok: true as const, provider: watched.provider, settle: watched.settle };
   } catch (err) {
     // The factory's honest errors: an unset env credential, a missing
     // teamId — the configuration problem, surfaced as the 503/400 the
-    // caller maps it to.
-    return { ok: false as const, error: (err as Error).message };
+    // caller maps it to. An unset credential is the connection's health too.
+    const failed = connectionFailure(err);
+    const recorded = failed?.auth ? record(failed).catch(() => {}) : undefined;
+    return {
+      ok: false as const,
+      error: (err as Error).message,
+      ...(recorded ? { recorded } : {}),
+    };
   }
 }
 
@@ -107,6 +127,11 @@ export const registerIntegrationRoutes: RegisterRoutes = (router, s) => {
       integrations: connections.map((c) => ({
         ...connectionView(c),
         supportsInbound: webhookSchemes.has(c.provider),
+      })),
+      // docs/26 A5: what this deployment can connect to, for the connect UI.
+      available: [...integrations.providers.keys()].map((name) => ({
+        provider: name,
+        supportsInbound: webhookSchemes.has(name),
       })),
     });
   });
@@ -198,6 +223,53 @@ export const registerIntegrationRoutes: RegisterRoutes = (router, s) => {
     }
     void auditRow(req, user.id, orgId, "integration.disconnected", provider, { provider });
     send(res, 200, { provider, status: "disabled" });
+  });
+
+  // docs/26 A5: "is this connection working?" — one read-only call through
+  // it, recorded as its health. Owner, like the rest of the admin surface.
+  router.post("/api/orgs/:id/integrations/:provider/check", async (ctx) => {
+    const { req, res } = ctx;
+    const route = "/api/orgs/:id/integrations/:provider/check";
+    if (!requireCsrf(req, res, route)) return;
+    const user = await requireUser(req, res);
+    if (!user) return;
+    if (!meter(req, res, route)) return;
+    const orgId = ctx.param("id");
+    const guard = await requireOrgRole(req, res, orgId, "owner", route);
+    if (!guard.ok) return;
+    if (!integrations) return send(res, 503, { error: "integrations are not configured" });
+    const provider = ctx.param("provider");
+    const connection = await integrations.store.connection(orgId, provider);
+    if (!connection) {
+      send(res, 404, { error: `no ${provider} connection is configured for this org` });
+      return;
+    }
+    if (connection.status !== "active") {
+      send(res, 409, { error: `the ${provider} connection is disconnected` });
+      return;
+    }
+    const resolved = resolveProvider(integrations, provider, connection);
+    let detail: string | null = null;
+    if (resolved.ok) {
+      try {
+        await resolved.provider.searchTasks("lucent-connection-check");
+      } catch (err) {
+        detail = (err as Error).message;
+      }
+      await resolved.settle();
+    } else {
+      detail = resolved.error;
+      await resolved.recorded;
+    }
+    const fresh = (await integrations.store.connection(orgId, provider)) ?? connection;
+    send(res, 200, {
+      integration: {
+        ...connectionView(fresh),
+        supportsInbound: webhookSchemes.has(fresh.provider),
+      },
+      ok: detail === null && connectionState(fresh) === "active",
+      ...(detail !== null ? { detail } : {}),
+    });
   });
 
   // ---- The board link surface (viewer floor — links are read state) -------
@@ -408,6 +480,7 @@ export const registerIntegrationRoutes: RegisterRoutes = (router, s) => {
         results.push({ nodeId: node.id, action: "failed", reason: (err as Error).message });
       }
     }
+    await resolved.settle();
 
     // Stage D7: the supersession arm. Lucent is OUTBOUND-AUTHORITATIVE on
     // explicit sync — the board's pushed value is the newer human decision.
@@ -788,6 +861,7 @@ export const registerIntegrationRoutes: RegisterRoutes = (router, s) => {
       }
     }
     if (appliedCount > 0) await actions.applied(boardId, actionId, Date.now());
+    await resolved.settle();
     send(res, 200, {
       action: decided,
       applied: appliedCount,

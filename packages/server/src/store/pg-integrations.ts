@@ -34,6 +34,7 @@ import type {
   ExecutionRecord,
 } from "../integrations/ledger.js";
 import { DEFAULT_STALE_AFTER_MS, isReclaimable } from "../integrations/ledger.js";
+import { nextHealth, type CallOutcome, type ConnectionHealth } from "../integrations/health.js";
 import type {
   InboundChangeRecord,
   InboundChangeStore,
@@ -74,6 +75,9 @@ function rowToConnection(row: typeof integrationConnections.$inferSelect): Integ
       : {}),
     scopes: (row.scopes as string[]) ?? [],
     status: row.status as IntegrationStatus,
+    ...(row.health !== null && row.health !== undefined
+      ? { health: row.health as ConnectionHealth }
+      : {}),
     createdBy: row.createdBy,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
@@ -121,10 +125,14 @@ export class PostgresIntegrationStore implements IntegrationStore {
       .values(values)
       .onConflictDoUpdate({
         target: [integrationConnections.orgId, integrationConnections.provider],
+        // Reconnecting is a fresh start (docs/26 A5): active again, and the
+        // old credential's failures no longer describe it.
         set: {
           credentialRef: values.credentialRef,
           config: values.config,
           scopes: values.scopes,
+          status: "active",
+          health: null,
           updatedAt: now,
         },
       })
@@ -179,6 +187,22 @@ export class PostgresIntegrationStore implements IntegrationStore {
       )
       .returning();
     return updated.length > 0;
+  }
+
+  async recordCall(
+    orgId: string,
+    provider: string,
+    outcome: CallOutcome,
+    now: number,
+  ): Promise<void> {
+    const current = await this.connection(orgId, provider);
+    if (!current) return;
+    await this.db
+      .update(integrationConnections)
+      .set({ health: nextHealth(current.health, outcome, now) })
+      .where(
+        and(eq(integrationConnections.orgId, orgId), eq(integrationConnections.provider, provider)),
+      );
   }
 
   async linkTask(input: LinkTaskInput, now: number): Promise<IntegrationTaskLink> {

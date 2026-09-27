@@ -238,6 +238,7 @@ function BoardIntelligenceView({
       status: string;
       config?: Record<string, string>;
       supportsInbound?: boolean;
+      state?: string;
     }>
   >([]);
   const [panelProvider, setPanelProvider] = useState<string | null>(null);
@@ -508,6 +509,19 @@ function BoardIntelligenceView({
               {t(c.supportsInbound ? "integrations.sync.with" : "integrations.send.to", locale, {
                 provider: name,
               })}
+              {/* docs/26 A5: a connection that isn't answering says so here,
+                  where people sync — not only in the admin console. */}
+              {(c.state === "degraded" || c.state === "needs-reauth") && (
+                <span className="intel-conn-warn">
+                  {" · "}
+                  {t(
+                    c.state === "degraded"
+                      ? "integrations.state.degraded"
+                      : "integrations.state.needs_reauth",
+                    locale,
+                  )}
+                </span>
+              )}
               {c.supportsInbound && pendingInbound > 0 && (
                 <span
                   className="intel-badge"

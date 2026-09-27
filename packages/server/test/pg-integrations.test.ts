@@ -85,6 +85,34 @@ function connectionContract(name: string, make: () => IntegrationStore, prefix: 
       expect(after!.credentialRef).toBe("R2");
     });
 
+    it("records health, and a reconnect is a fresh start (docs/26 A5)", async () => {
+      const store = make();
+      const org = `${prefix}-org`;
+      await store.putConnection(
+        { orgId: org, provider: "linear", credentialRef: "R1", createdBy: "u" },
+        1,
+      );
+      await store.recordCall(org, "linear", { ok: true }, 10);
+      await store.recordCall(org, "linear", { ok: false, error: "401", auth: true }, 20);
+      expect((await store.connection(org, "linear"))!.health).toEqual({
+        failures: 1,
+        authFailed: true,
+        lastError: "401",
+        lastErrorAt: 20,
+        lastOkAt: 10,
+      });
+      await store.setConnectionStatus(org, "linear", "disabled", 30);
+      await store.putConnection(
+        { orgId: org, provider: "linear", credentialRef: "R2", createdBy: "u" },
+        40,
+      );
+      const back = await store.connection(org, "linear");
+      expect(back!.status).toBe("active");
+      expect(back!.health).toBeUndefined();
+      // Recording against a connection nobody made is a no-op.
+      await store.recordCall(`${prefix}-nobody`, "linear", { ok: true }, 50);
+    });
+
     it("linkTask upserts per (board, node, provider); reads are board-scoped", async () => {
       const store = make();
       const board = `${prefix}-board`;

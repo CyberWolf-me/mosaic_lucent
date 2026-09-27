@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { actionNodes, type Workspace } from "@lucent/core";
+import { connectionState, nextHealth, type CallOutcome, type ConnectionHealth } from "./health.js";
 
 /**
  * The integration connection + task-link store (Stage D4, ADR 0030).
@@ -100,6 +101,8 @@ export interface IntegrationConnection {
   /** What the connection may do, provider-specific words (e.g. "issues:write"). */
   scopes: string[];
   status: IntegrationStatus;
+  /** How it has been answering (docs/26 A5); absent until the first call. */
+  health?: ConnectionHealth;
   createdBy: string;
   createdAt: number;
   updatedAt: number;
@@ -163,6 +166,11 @@ export interface IntegrationStore {
     status: IntegrationStatus,
     now: number,
   ): Promise<boolean>;
+  /**
+   * docs/26 A5: record how a batch of calls went (`nextHealth`). A no-op for
+   * a connection that doesn't exist.
+   */
+  recordCall(orgId: string, provider: string, outcome: CallOutcome, now: number): Promise<void>;
 
   /**
    * Upsert the node's link by (nodeId, provider): a sync that re-links
@@ -302,6 +310,9 @@ export function connectionView(c: IntegrationConnection): Record<string, unknown
     ...(c.config ? { config: c.config } : {}),
     scopes: c.scopes,
     status: c.status,
+    // docs/26 A5: the derived state and what it's based on.
+    state: connectionState(c),
+    ...(c.health ? { health: c.health } : {}),
     createdBy: c.createdBy,
     createdAt: c.createdAt,
     updatedAt: c.updatedAt,
@@ -322,11 +333,15 @@ export class InMemoryIntegrationStore implements IntegrationStore {
       (c) => c.orgId === normalized.orgId && c.provider === normalized.provider,
     );
     if (existing) {
+      // Reconnecting is a fresh start: active again, and the old credential's
+      // failures no longer describe it (docs/26 A5).
+      const { health: _stale, ...rest } = existing;
       const updated: IntegrationConnection = {
-        ...existing,
+        ...rest,
         credentialRef: normalized.credentialRef,
         ...(normalized.config ? { config: normalized.config } : {}),
         scopes: normalized.scopes,
+        status: "active",
         updatedAt: now,
       };
       this.connections.set(existing.id, updated);
@@ -381,6 +396,19 @@ export class InMemoryIntegrationStore implements IntegrationStore {
     if (!found) return false;
     this.connections.set(found.id, { ...found, status, updatedAt: now });
     return true;
+  }
+
+  async recordCall(
+    orgId: string,
+    provider: string,
+    outcome: CallOutcome,
+    now: number,
+  ): Promise<void> {
+    const found = [...this.connections.values()].find(
+      (c) => c.orgId === orgId && c.provider === provider,
+    );
+    if (!found) return;
+    this.connections.set(found.id, { ...found, health: nextHealth(found.health, outcome, now) });
   }
 
   async linkTask(input: LinkTaskInput, now: number): Promise<IntegrationTaskLink> {

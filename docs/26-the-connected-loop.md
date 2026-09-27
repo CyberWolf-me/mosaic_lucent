@@ -700,6 +700,16 @@ a much better product — not rewriting the layout engine.
     The proposal rules never displace a person's pending proposal. Each rule
     is read when its job runs, and a model call passes a person's gates.
 
+  - _Connections (A5.3)._ Admin → Integrations connects Linear, Jira and
+    GitHub: the key's server variable (never the key) and the provider's
+    settings. Saving checks the connection with one read-only call. Each
+    connection shows its state, derived from how it has been answering:
+    Connected, Failing (5xx, 429 or network errors since the last success),
+    Needs a new key (401/403 or an unset variable, until a call succeeds or
+    it's reconnected) or Disconnected. Only the connection's own failures
+    count: a refused item says nothing about it. The Sync button says so too.
+    Reconnecting a disconnected integration now makes it active again; it
+    used to stay disabled whatever was saved.
   - Found on the way: the live meeting loop's prompt is ~3.5k characters of
     instructions, and the message cap was 4k. A batch with more than about
     500 characters of speech was refused whole, so the busiest stretches of

@@ -21,6 +21,17 @@ import {
   type AutomationRule,
   type AutomationSettings,
 } from "../automation.js";
+import {
+  PROVIDER_FORMS,
+  STATE_WORD,
+  checkIntegration,
+  connectIntegration,
+  disconnectIntegration,
+  loadIntegrations,
+  providerLabel,
+  type AvailableProvider,
+  type ConnectionView,
+} from "../integrationsAdmin.js";
 import { getCurrentOrgId } from "../orgs.js";
 import { useWorkspace } from "../workspace.js";
 
@@ -363,6 +374,9 @@ export function AdminView({ onBack }: { onBack: () => void }) {
       <SectionLabel>AI activity</SectionLabel>
       <AiActivitySection org={org} />
 
+      <SectionLabel>Integrations</SectionLabel>
+      <IntegrationsSection org={org} />
+
       <SectionLabel>Automation</SectionLabel>
       <AutomationSection org={org} />
 
@@ -468,6 +482,278 @@ function AiActivitySection({ org }: { org: OrgSummary | null }) {
         })}
       </ol>
     </Card>
+  );
+}
+
+/**
+ * The org's connections to Linear, Jira and GitHub (docs/26 A5): connect,
+ * check, edit and disconnect each, and see how it has been answering —
+ * Connected, Failing, Needs a new key, Disconnected. Owners only.
+ */
+function IntegrationsSection({ org }: { org: OrgSummary | null }) {
+  const [data, setData] = useState<
+    { connections: ConnectionView[]; available: AvailableProvider[] } | null | "failed"
+  >(null);
+  const [editing, setEditing] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [notice, setNotice] = useState<{
+    provider: string;
+    text: string;
+    tone: "ok" | "error";
+  } | null>(null);
+  const reload = async (orgId: string) => {
+    const next = await loadIntegrations(orgId);
+    setData(next ?? "failed");
+  };
+  useEffect(() => {
+    if (!org || org.role !== "owner") return;
+    void reload(org.id);
+  }, [org]);
+  if (!org) return null;
+  if (org.role !== "owner") {
+    return <EmptyState compact title="Integrations are set up by workspace owners" />;
+  }
+  if (data === null) {
+    return (
+      <p className="boards-admin-muted" role="status">
+        Loading integrations…
+      </p>
+    );
+  }
+  if (data === "failed") {
+    return (
+      <p className="boards-admin-muted" role="alert">
+        Couldn&apos;t load integrations.
+      </p>
+    );
+  }
+  const providers = [
+    ...data.available.map((a) => a.provider),
+    ...data.connections
+      .map((c) => c.provider)
+      .filter((p) => !data.available.some((a) => a.provider === p)),
+  ];
+  if (providers.length === 0) {
+    return (
+      <EmptyState
+        compact
+        title="No integrations on this server"
+        body="Linear, Jira and GitHub become available when the server is configured for them."
+      />
+    );
+  }
+  const check = async (provider: string) => {
+    setBusy(provider);
+    const result = await checkIntegration(org.id, provider);
+    setBusy(null);
+    setNotice(
+      result.ok
+        ? result.checked
+          ? { provider, text: "It answered — the connection works.", tone: "ok" }
+          : { provider, text: result.detail ?? "It didn't answer.", tone: "error" }
+        : { provider, text: result.error, tone: "error" },
+    );
+    await reload(org.id);
+  };
+  const disconnect = async (provider: string) => {
+    setBusy(provider);
+    const ok = await disconnectIntegration(org.id, provider);
+    setBusy(null);
+    setNotice(
+      ok
+        ? {
+            provider,
+            text: "Disconnected. Links stay; nothing syncs until you reconnect.",
+            tone: "ok",
+          }
+        : { provider, text: "Couldn't disconnect it.", tone: "error" },
+    );
+    await reload(org.id);
+  };
+  return (
+    <Card className="boards-admin-card">
+      <ul className="integ-list" aria-label="Integrations">
+        {providers.map((provider) => {
+          const c = data.connections.find((x) => x.provider === provider);
+          return (
+            <li key={provider} className="integ-row">
+              <div className="integ-head">
+                <span className="integ-name">{providerLabel(provider)}</span>
+                <span className={`integ-state ${c ? c.state : "none"}`}>
+                  {c ? STATE_WORD[c.state] : "Not connected"}
+                </span>
+                <span className="integ-actions">
+                  {c && c.state !== "revoked" && (
+                    <Button size="sm" disabled={busy !== null} onClick={() => void check(provider)}>
+                      Check
+                    </Button>
+                  )}
+                  <Button
+                    size="sm"
+                    variant={c ? "ghost" : "primary"}
+                    disabled={busy !== null}
+                    onClick={() => {
+                      setNotice(null);
+                      setEditing(editing === provider ? null : provider);
+                    }}
+                  >
+                    {!c ? "Connect" : c.state === "revoked" ? "Reconnect" : "Edit"}
+                  </Button>
+                  {c && c.state !== "revoked" && (
+                    <Button
+                      size="sm"
+                      disabled={busy !== null}
+                      onClick={() => void disconnect(provider)}
+                    >
+                      Disconnect
+                    </Button>
+                  )}
+                </span>
+              </div>
+              {c && <div className="integ-detail">{healthLine(c)}</div>}
+              {notice?.provider === provider && (
+                <p
+                  className={`integ-notice ${notice.tone}`}
+                  role={notice.tone === "error" ? "alert" : "status"}
+                >
+                  {notice.text}
+                </p>
+              )}
+              {editing === provider && (
+                <ConnectForm
+                  provider={provider}
+                  connection={c}
+                  onCancel={() => setEditing(null)}
+                  onSaved={async (text, tone) => {
+                    setEditing(null);
+                    setNotice({ provider, text, tone });
+                    await reload(org.id);
+                  }}
+                  orgId={org.id}
+                />
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </Card>
+  );
+}
+
+/** What the state rests on, in a sentence. */
+function healthLine(c: ConnectionView): string {
+  const h = c.health;
+  switch (c.state) {
+    case "revoked":
+      return "Disconnected. Existing links stay; reconnect to sync again.";
+    case "needs-reauth":
+      return `The key was refused or isn't set on the server${h?.lastError ? ` (${h.lastError})` : ""}. Save a new one.`;
+    case "degraded":
+      return `${h?.failures ?? 1} failed ${h?.failures === 1 ? "call" : "calls"}${
+        h?.lastOkAt ? ` since it last answered ${formatWhen(h.lastOkAt)}` : ""
+      }${h?.lastError ? ` — ${h.lastError}` : ""}.`;
+    default:
+      return h?.lastOkAt ? `Last answered ${formatWhen(h.lastOkAt)}.` : "Not used yet.";
+  }
+}
+
+function ConnectForm({
+  orgId,
+  provider,
+  connection,
+  onCancel,
+  onSaved,
+}: {
+  orgId: string;
+  provider: string;
+  connection: ConnectionView | undefined;
+  onCancel: () => void;
+  onSaved: (text: string, tone: "ok" | "error") => Promise<void>;
+}) {
+  const form = PROVIDER_FORMS[provider] ?? { label: provider, credential: "the key", fields: [] };
+  const [credentialRef, setCredentialRef] = useState("");
+  const [config, setConfig] = useState<Record<string, string>>(connection?.config ?? {});
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const missing = [
+    ...(credentialRef.trim() ? [] : ["the key's variable"]),
+    ...form.fields.filter((f) => f.required && !config[f.key]?.trim()).map((f) => f.label),
+  ];
+  const submit = async () => {
+    if (missing.length > 0) {
+      setError(`Fill in ${missing.join(", ")}.`);
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    const clean = Object.fromEntries(
+      Object.entries(config)
+        .map(([k, v]) => [k, v.trim()] as const)
+        .filter(([, v]) => v !== ""),
+    );
+    const result = await connectIntegration(orgId, provider, { credentialRef, config: clean });
+    setSaving(false);
+    if (!result.ok) {
+      setError(result.error);
+      return;
+    }
+    await onSaved(
+      result.checked
+        ? `${form.label} is connected — it answered.`
+        : `Saved, but ${form.label} didn't answer: ${result.detail ?? "no reply"}.`,
+      result.checked ? "ok" : "error",
+    );
+  };
+  return (
+    <form
+      className="integ-form"
+      aria-label={`Connect ${form.label}`}
+      onSubmit={(e) => {
+        e.preventDefault();
+        void submit();
+      }}
+    >
+      <label className="integ-field">
+        <span>Key variable</span>
+        <input
+          className="mono"
+          value={credentialRef}
+          placeholder={`${provider.toUpperCase()}_API_KEY`}
+          onChange={(e) => setCredentialRef(e.target.value)}
+        />
+        <small>
+          The name of an environment variable on the Lucent server that holds {form.credential}. The
+          key itself never passes through your browser
+          {connection ? ` — enter it again to save changes (now ${connection.credentialRef})` : ""}.
+        </small>
+      </label>
+      {form.fields.map((f) => (
+        <label key={f.key} className="integ-field">
+          <span>
+            {f.label}
+            {f.required ? "" : " (optional)"}
+          </span>
+          <input
+            value={config[f.key] ?? ""}
+            placeholder={f.placeholder}
+            onChange={(e) => setConfig({ ...config, [f.key]: e.target.value })}
+          />
+        </label>
+      ))}
+      {error && (
+        <p className="integ-notice error" role="alert">
+          {error}
+        </p>
+      )}
+      <div className="integ-form-actions">
+        <Button size="sm" onClick={onCancel} disabled={saving}>
+          Cancel
+        </Button>
+        <Button size="sm" variant="primary" type="submit" disabled={saving}>
+          {saving ? "Checking…" : "Save and check"}
+        </Button>
+      </div>
+    </form>
   );
 }
 

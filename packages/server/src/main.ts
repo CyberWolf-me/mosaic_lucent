@@ -29,6 +29,7 @@ import {
 import { buildAiHandlers } from "./workers/ai.js";
 import { buildMediaHandlers } from "./workers/media.js";
 import { buildIntegrationHandlers } from "./workers/integration.js";
+import { connectionFailure } from "./integrations/health.js";
 import { createStaticHandler } from "./static.js";
 import { resolve as resolvePath } from "node:path";
 import { InMemorySessionStore, PostgresSessionStore, type SessionStore } from "./sessions.js";
@@ -903,6 +904,13 @@ async function sweepIntegration(): Promise<void> {
         if (!factory) continue;
         const provider = factory(connection);
         const task = await provider.getTask(row.externalId);
+        // docs/26 A5: the connection answered.
+        await stores.integrations.store.recordCall(
+          row.orgId,
+          row.provider,
+          { ok: true },
+          Date.now(),
+        );
         const ingested = await ingestInboundChange(
           {
             linksForExternalId: (p, externalId) =>
@@ -927,6 +935,13 @@ async function sweepIntegration(): Promise<void> {
           (err as Error).message.slice(0, 300),
           Date.now(),
         );
+        // docs/26 A5: a failure of the connection (not of one issue) is its health.
+        const failed = connectionFailure(err);
+        if (failed) {
+          await stores.integrations.store
+            .recordCall(row.orgId, row.provider, failed, Date.now())
+            .catch(() => {});
+        }
         logger.error("integrations.sweep.webhook", {
           error: (err as Error).message,
           provider: row.provider,
