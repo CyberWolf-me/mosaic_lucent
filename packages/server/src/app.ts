@@ -134,7 +134,13 @@ import { registerSttRoutes } from "./routes/stt.js";
 import { registerCallRoutes } from "./routes/calls.js";
 import { registerTtsRoutes } from "./routes/tts.js";
 import { mintLiveKitToken } from "./livekit.js";
-import { admitToCall, callRoomName, newCallMeta } from "./calls.js";
+import {
+  admitToCall,
+  callRoomName,
+  newCallMeta,
+  publishScopeFor,
+  type PublishScope,
+} from "./calls.js";
 import {
   agentGrantFromHeader,
   issueAgentGrant,
@@ -3360,24 +3366,33 @@ export function createApp(deps: AppDeps): App {
       // RoomService trouble never blocks a join — the call then has no host
       // powers, which is what it had before hosts existed.
       let host = false;
+      let scope: PublishScope = "all";
       const calls = deps.callControl;
       if (calls && access.kind === "board" && room === callRoomName(access.boardId)) {
         try {
           const now = Date.now();
           const opened = await calls.open(room, newCallMeta(user.id, now));
           const state = await calls.read(room);
-          const admission = admitToCall(
-            state ? state.meta : opened,
-            (state?.participants ?? []).map((p) => p.identity),
-            user.id,
-            now,
-          );
+          const present = (state?.participants ?? []).map((p) => p.identity);
+          let admission = admitToCall(state ? state.meta : opened, present, user.id, now);
+          // Handing hosting on writes the metadata: decide again on the latest
+          // value, in turn with the host's own changes (calls.ts updateMeta).
+          if (admission.kind === "admitted" && admission.changed) {
+            await calls.updateMeta(room, (current) => {
+              admission = admitToCall(current, present, user.id, now);
+              return admission.kind === "admitted" && admission.changed ? admission.meta : null;
+            });
+          }
           if (admission.kind === "removed") {
             send(res, 403, { error: "The host removed you from this call.", removed: true });
             return;
           }
-          if (admission.changed) await calls.setMeta(room, admission.meta);
+          if (admission.kind === "locked") {
+            send(res, 403, { error: "The host locked this call.", locked: true });
+            return;
+          }
           host = admission.host;
+          scope = publishScopeFor(admission.meta, user.id);
         } catch (err) {
           logger.warn("call.admit_failed", { room, error: (err as Error).message });
         }
@@ -3387,6 +3402,7 @@ export function createApp(deps: AppDeps): App {
         room,
         identity: user.id,
         name: user.name,
+        ...(scope === "no-screen" ? { sources: ["camera", "microphone"] as const } : {}),
       });
       send(res, 200, {
         token: minted.token,

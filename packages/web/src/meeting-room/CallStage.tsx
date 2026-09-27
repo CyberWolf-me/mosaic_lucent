@@ -514,6 +514,11 @@ export function CallStage({
     transcribeMe,
     setTranscribeMe,
     contribution,
+    captionsOn,
+    setCaptionsOn,
+    captions,
+    captionsRequested,
+    setCallSettings,
   } = s;
 
   const [panel, setPanel] = useState<Panel>(null);
@@ -643,7 +648,6 @@ export function CallStage({
       const stage = stageRef.current;
       if (!stage || stage.getClientRects().length === 0) return;
       const mod = e.ctrlKey || e.metaKey;
-      if (!mod) return;
       const target = e.target as HTMLElement | null;
       if (
         target &&
@@ -652,6 +656,13 @@ export function CallStage({
         return;
       }
       const key = e.key.toLowerCase();
+      if (!mod) {
+        if (key === "c" && !e.altKey && !e.shiftKey) {
+          e.preventDefault();
+          void setCaptionsOn(!captionsOn);
+        }
+        return;
+      }
       if (key === "d" && !e.altKey) {
         e.preventDefault();
         void toggleMic();
@@ -665,7 +676,7 @@ export function CallStage({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [toggleMic, toggleCam, setHand, handUp]);
+  }, [toggleMic, toggleCam, setHand, handUp, setCaptionsOn, captionsOn]);
 
   const copyLink = () => {
     if (!boardId) return;
@@ -690,6 +701,11 @@ export function CallStage({
     : recordedElsewhere
       ? `${transcriber?.name ?? "Someone"} is already transcribing this call`
       : "Transcribe this meeting";
+
+  // Only hosts present, when the host says so (docs/28 S5).
+  const shareLocked = Boolean(meta?.hostsOnlyShare) && !isHost && !screenOn;
+  // Your device transcribes you for someone's captions, not for a transcript.
+  const captionsOnly = captionsRequested && !isRecording && !(transcriber && !transcriber.isLocal);
 
   const startedAt = meta?.startedAt && meta.startedAt <= now ? meta.startedAt : joinedAt;
   const others = people.filter((p) => !p.isLocal);
@@ -722,6 +738,11 @@ export function CallStage({
               {`Lucent is transcribing · ${transcribing.map((p) => p.name).join(", ")}`}
             </span>
           )}
+          {meta?.locked && (
+            <span className="call-chip" title="No one new can join">
+              Locked
+            </span>
+          )}
           {screenOn && <span className="call-chip is-share">You're presenting</span>}
         </div>
       </header>
@@ -738,6 +759,23 @@ export function CallStage({
                   : contribution === "unsupported"
                     ? "This browser can't transcribe you, so your words aren't in the transcript. Chrome and Edge can."
                     : "Starting transcription…"}
+          </span>
+          <button
+            type="button"
+            className="call-link-btn"
+            onClick={() => void setTranscribeMe(!transcribeMe)}
+          >
+            {transcribeMe ? "Stop transcribing me" : "Include me"}
+          </button>
+        </div>
+      )}
+
+      {captionsOnly && (
+        <div className="call-banner is-capture" role="status">
+          <span>
+            {transcribeMe
+              ? "Someone is reading live captions, so your words are transcribed on this device. Nothing is kept."
+              : "You're not being transcribed, so your words don't appear in anyone's captions."}
           </span>
           <button
             type="button"
@@ -799,6 +837,23 @@ export function CallStage({
                   <Ico.Link width={14} height={14} />{" "}
                   {copied ? "Link copied" : "Copy the link to invite someone"}
                 </button>
+              )}
+            </div>
+          )}
+          {captionsOn && (
+            <div
+              className={`call-captions ${others.length === 0 ? "is-raised" : ""}`}
+              aria-live="polite"
+              aria-label="Live captions"
+            >
+              {captions.length === 0 ? (
+                <p className="call-caption is-waiting">Captions appear when someone speaks.</p>
+              ) : (
+                captions.map((c) => (
+                  <p key={c.identity} className="call-caption">
+                    <strong>{c.name}</strong> {c.text}
+                  </p>
+                ))
               )}
             </div>
           )}
@@ -894,8 +949,21 @@ export function CallStage({
             type="button"
             className={`call-btn ${screenOn ? "is-on" : ""}`}
             aria-pressed={screenOn}
-            aria-label={screenOn ? "Stop presenting" : "Present your screen"}
-            title={screenOn ? "Stop presenting" : "Present your screen"}
+            aria-label={
+              shareLocked
+                ? "Only hosts can present in this call"
+                : screenOn
+                  ? "Stop presenting"
+                  : "Present your screen"
+            }
+            disabled={shareLocked}
+            title={
+              shareLocked
+                ? "Only hosts can present in this call"
+                : screenOn
+                  ? "Stop presenting"
+                  : "Present your screen"
+            }
             onClick={() => void toggleScreen()}
           >
             <Ico.Screen width={18} height={18} />
@@ -935,6 +1003,18 @@ export function CallStage({
             onClick={() => void setHand(!handUp)}
           >
             <Ico.HandRaise width={18} height={18} />
+          </button>
+          <button
+            type="button"
+            className={`call-btn ${captionsOn ? "is-on" : ""}`}
+            aria-pressed={captionsOn}
+            aria-label={captionsOn ? "Turn off captions (c)" : "Turn on captions (c)"}
+            title={captionsOn ? "Turn off captions (c)" : "Turn on captions (c)"}
+            onClick={() => void setCaptionsOn(!captionsOn)}
+          >
+            <span className="call-cc" aria-hidden>
+              CC
+            </span>
           </button>
           {onToggleRecording && (
             <button
@@ -989,6 +1069,38 @@ export function CallStage({
                   >
                     {copied ? "Link copied" : "Copy joining link"}
                   </MenuItem>
+                )}
+                {isHost && (
+                  <>
+                    <hr className="call-menu-rule" />
+                    <p className="call-menu-heading">Host</p>
+                    <MenuItem
+                      onClick={() => {
+                        close();
+                        void setCallSettings({ locked: !meta?.locked });
+                      }}
+                    >
+                      {meta?.locked ? "Unlock the call" : "Lock the call"}
+                      <small>
+                        {meta?.locked
+                          ? "Anyone on the board can join again."
+                          : "No one new can join until you unlock it."}
+                      </small>
+                    </MenuItem>
+                    <MenuItem
+                      onClick={() => {
+                        close();
+                        void setCallSettings({ hostsOnlyShare: !meta?.hostsOnlyShare });
+                      }}
+                    >
+                      {meta?.hostsOnlyShare ? "Let everyone present" : "Only hosts can present"}
+                      <small>
+                        {meta?.hostsOnlyShare
+                          ? "Anyone in the call can share their screen."
+                          : "Others stop presenting and can't start."}
+                      </small>
+                    </MenuItem>
+                  </>
                 )}
                 {isHost && others.length > 0 && (
                   <MenuItem

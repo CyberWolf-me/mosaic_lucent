@@ -33,6 +33,16 @@ export interface CallMeta {
   removed: string[];
   startedBy: string;
   startedAt: number;
+  /** No one new gets in; hosts always can (Zoom's "Lock meeting"). */
+  locked?: boolean;
+  /** Only hosts may present their screen. */
+  hostsOnlyShare?: boolean;
+  /**
+   * Bumped by every write, so a client that receives an older room update
+   * after a newer one (LiveKit can deliver them out of order around a
+   * permission change) keeps the newer.
+   */
+  rev?: number;
 }
 
 export type CallTrackSource =
@@ -75,8 +85,21 @@ export interface CallControl {
   /** The room and who is in it; null when no call is running. */
   read(room: string): Promise<CallRoom | null>;
   setMeta(room: string, meta: CallMeta): Promise<void>;
+  /**
+   * Change the call's metadata: `change` gets the latest value and returns
+   * the next one (or null for no change). Changes to one room run one at a
+   * time, each on top of the last — two host actions a moment apart (Unlock,
+   * then "only hosts present") used to read the same value and the second
+   * wrote the lock back. Returns the metadata as it stands afterwards.
+   */
+  updateMeta(
+    room: string,
+    change: (current: CallMeta | null) => CallMeta | null,
+  ): Promise<CallMeta | null>;
   /** Set attributes on one participant; an empty string removes one. */
   setAttributes(room: string, identity: string, attributes: Record<string, string>): Promise<void>;
+  /** Change what one participant may publish, now (the host's "only hosts present"). */
+  setPublishScope(room: string, identity: string, scope: PublishScope): Promise<void>;
   mute(room: string, identity: string, trackSid: string): Promise<void>;
   /** Disconnect one participant and void the tokens they already hold. */
   remove(room: string, identity: string): Promise<void>;
@@ -109,6 +132,9 @@ export function parseCallMeta(raw: string | null | undefined): CallMeta | null {
       removed: stringList(value.removed),
       startedBy: typeof value.startedBy === "string" ? value.startedBy : "",
       startedAt: typeof value.startedAt === "number" ? value.startedAt : 0,
+      ...(value.locked === true ? { locked: true } : {}),
+      ...(value.hostsOnlyShare === true ? { hostsOnlyShare: true } : {}),
+      ...(typeof value.rev === "number" ? { rev: value.rev } : {}),
     };
   } catch {
     return null;
@@ -117,6 +143,7 @@ export function parseCallMeta(raw: string | null | undefined): CallMeta | null {
 
 export type CallAdmission =
   | { kind: "removed" }
+  | { kind: "locked" }
   | { kind: "admitted"; host: boolean; meta: CallMeta; changed: boolean };
 
 /**
@@ -138,6 +165,10 @@ export function admitToCall(
     return { kind: "admitted", host: true, meta: current, changed: meta === null };
   }
   const hostHere = current.hosts.some((h) => present.includes(h));
+  // A locked call keeps newcomers out while a host is there to let them in
+  // (unlock); with every host gone, the lock would strand the call, so the
+  // hand-off below still applies.
+  if (hostHere && current.locked && !present.includes(userId)) return { kind: "locked" };
   if (hostHere) return { kind: "admitted", host: false, meta: current, changed: false };
   return {
     kind: "admitted",
@@ -172,7 +203,17 @@ export const CALL_ATTRIBUTES = {
   capture: "lucent.capture",
   /** "1" when this person asked not to be transcribed (docs/28 §4.3 `muted`). */
   optOut: "lucent.optout",
+  /** "1" while this person reads live captions — speakers' devices send them. */
+  captions: "lucent.cc",
 } as const;
+
+/** What a participant may publish: everything, or everything but their screen. */
+export type PublishScope = "all" | "no-screen";
+
+/** The publish scope a person gets in this call. */
+export function publishScopeFor(meta: CallMeta | null, userId: string): PublishScope {
+  return meta?.hostsOnlyShare && !meta.hosts.includes(userId) ? "no-screen" : "all";
+}
 
 // --- LiveKit ---------------------------------------------------------------
 
@@ -207,6 +248,35 @@ export function createLiveKitCallControl(config: LiveKitConfig): CallControl {
     return client;
   };
 
+  // What this server last wrote to each room's metadata. RoomService reads
+  // lag writes in a busy room — seen: the read right after an Unlock returned
+  // the lock, and the next host action wrote it back. For a minute after a
+  // write, our own last write wins unless the room says something newer (a
+  // higher `rev`, from another server) or is another call altogether (a
+  // different start: LiveKit closed the room and the name was reused).
+  const written = new Map<string, { meta: CallMeta; at: number }>();
+  const WRITE_FRESH_MS = 60_000;
+  const freshest = (room: string, listed: CallMeta | null): CallMeta | null => {
+    const mine = written.get(room);
+    if (!mine) return listed;
+    const otherCall = listed !== null && listed.startedAt !== mine.meta.startedAt;
+    if (otherCall || Date.now() - mine.at > WRITE_FRESH_MS) {
+      written.delete(room);
+      return listed;
+    }
+    if (listed && (listed.rev ?? 0) > (mine.meta.rev ?? 0)) return listed;
+    return mine.meta;
+  };
+
+  const writeMeta = async (room: string, meta: CallMeta): Promise<CallMeta> => {
+    const next = { ...meta, rev: (meta.rev ?? 0) + 1 };
+    await (await svc()).updateRoomMetadata(room, JSON.stringify(next));
+    written.set(room, { meta: next, at: Date.now() });
+    return next;
+  };
+  // One queue of metadata changes per room (updateMeta).
+  const queues = new Map<string, Promise<unknown>>();
+
   return {
     async open(room, initial) {
       const created = await (
@@ -217,7 +287,7 @@ export function createLiveKitCallControl(config: LiveKitConfig): CallControl {
         departureTimeout: DEPARTURE_TIMEOUT_S,
         metadata: JSON.stringify(initial),
       });
-      return parseCallMeta(created.metadata);
+      return freshest(room, parseCallMeta(created.metadata));
     },
     async read(room) {
       const rs = await svc();
@@ -230,7 +300,7 @@ export function createLiveKitCallControl(config: LiveKitConfig): CallControl {
         if (!isNotFound(err)) throw err;
       }
       return {
-        meta: parseCallMeta(info.metadata),
+        meta: freshest(room, parseCallMeta(info.metadata)),
         participants: people
           .filter((p) => Number(p.state) !== DISCONNECTED)
           .map((p) => ({
@@ -247,10 +317,43 @@ export function createLiveKitCallControl(config: LiveKitConfig): CallControl {
       };
     },
     async setMeta(room, meta) {
-      await (await svc()).updateRoomMetadata(room, JSON.stringify(meta));
+      await writeMeta(room, meta);
+    },
+    updateMeta(room, change) {
+      const run = async (): Promise<CallMeta | null> => {
+        const [info] = await (await svc()).listRooms([room]);
+        if (!info) throw Object.assign(new Error("room not found"), { status: 404 });
+        const current = freshest(room, parseCallMeta(info.metadata));
+        const next = change(current);
+        return next ? writeMeta(room, next) : current;
+      };
+      const result = (queues.get(room) ?? Promise.resolve()).then(run, run);
+      queues.set(
+        room,
+        result.then(
+          () => undefined,
+          () => undefined,
+        ),
+      );
+      return result;
     },
     async setAttributes(room, identity, attributes) {
       await (await svc()).updateParticipant(room, identity, { attributes });
+    },
+    async setPublishScope(room, identity, scope) {
+      // Permissions replace as a whole, so every grant the token gave is restated.
+      await (
+        await svc()
+      ).updateParticipant(room, identity, {
+        permission: {
+          canSubscribe: true,
+          canPublish: true,
+          canPublishData: true,
+          canUpdateMetadata: false,
+          // TrackSource: CAMERA = 1, MICROPHONE = 2; empty means every source.
+          canPublishSources: scope === "no-screen" ? [1, 2] : [],
+        },
+      });
     },
     async mute(room, identity, trackSid) {
       await (await svc()).mutePublishedTrack(room, identity, trackSid, true);
@@ -265,6 +368,7 @@ export function createLiveKitCallControl(config: LiveKitConfig): CallControl {
       });
     },
     async end(room) {
+      written.delete(room);
       try {
         await (await svc()).deleteRoom(room);
       } catch (err) {
@@ -314,7 +418,18 @@ export class InMemoryCallControl implements CallControl {
   async setMeta(room: string, meta: CallMeta): Promise<void> {
     const r = this.rooms.get(room);
     if (!r) throw Object.assign(new Error("room not found"), { status: 404 });
-    r.meta = meta;
+    r.meta = { ...meta, rev: (meta.rev ?? 0) + 1 };
+  }
+
+  async updateMeta(
+    room: string,
+    change: (current: CallMeta | null) => CallMeta | null,
+  ): Promise<CallMeta | null> {
+    const r = this.rooms.get(room);
+    if (!r) throw Object.assign(new Error("room not found"), { status: 404 });
+    const next = change(r.meta);
+    if (next) await this.setMeta(room, next);
+    return r.meta;
   }
 
   async setAttributes(
@@ -329,6 +444,10 @@ export class InMemoryCallControl implements CallControl {
       else p.attributes[k] = v;
     }
     this.log.push(`attributes ${identity} ${JSON.stringify(attributes)}`);
+  }
+
+  async setPublishScope(room: string, identity: string, scope: PublishScope): Promise<void> {
+    this.log.push(`scope ${identity} ${scope}`);
   }
 
   async mute(room: string, identity: string, trackSid: string): Promise<void> {

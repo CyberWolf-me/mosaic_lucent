@@ -1,9 +1,18 @@
 import { describe, expect, it } from "vitest";
 import {
   appendChat,
+  captionsFrom,
+  CAPTION_TTL_MS,
   captureFrom,
+  decodeCaption,
+  encodeCaption,
+  MAX_CAPTION_CHARS,
+  withCaption,
   captureSince,
+  createLineDedup,
   createLineGate,
+  decodeLineAck,
+  encodeLineAck,
   decodeChat,
   decodeLine,
   encodeLine,
@@ -48,6 +57,9 @@ describe("host metadata and attributes", () => {
       removed: [],
       startedBy: "usr_a",
       startedAt: 9,
+      locked: false,
+      hostsOnlyShare: false,
+      rev: 0,
     });
     expect(readCallMeta("")).toBeNull();
     expect(readCallMeta("not json")).toBeNull();
@@ -133,14 +145,32 @@ describe("one transcript per call, everyone in it (docs/28 A3.5)", () => {
 
   it("carries only the words — who said it is the sender LiveKit names", () => {
     const bytes = encodeLine("  We ship Friday. ", 7)!;
-    expect(decodeLine(bytes)).toEqual({ text: "We ship Friday.", at: 7 });
+    expect(decodeLine(bytes)).toEqual({ text: "We ship Friday.", at: 7, id: "" });
     expect(encodeLine("   ", 1)).toBeNull();
     expect(encodeLine("x".repeat(MAX_LINE_CHARS + 1), 1)).toBeNull();
     const spoofed = new TextEncoder().encode(
       JSON.stringify({ v: 1, text: "hi", at: 1, speaker: "The CEO" }),
     );
-    expect(decodeLine(spoofed)).toEqual({ text: "hi", at: 1 });
+    expect(decodeLine(spoofed)).toEqual({ text: "hi", at: 1, id: "" });
     expect(decodeLine(new TextEncoder().encode("nope"))).toBeNull();
+  });
+
+  it("files a resent line once, and acknowledges it by id", () => {
+    const line = decodeLine(encodeLine("We ship Friday.", 5, "l1")!);
+    expect(line).toEqual({ text: "We ship Friday.", at: 5, id: "l1" });
+    expect(decodeLineAck(encodeLineAck("l1"))).toBe("l1");
+    expect(decodeLineAck(new TextEncoder().encode("{}"))).toBeNull();
+    const firstTime = createLineDedup(2);
+    expect(firstTime("a", "l1")).toBe(true);
+    expect(firstTime("a", "l1")).toBe(false);
+    expect(firstTime("b", "l1")).toBe(true);
+    // No id (an older sender): always filed.
+    expect(firstTime("a", "")).toBe(true);
+    expect(firstTime("a", "")).toBe(true);
+    // Bounded: the oldest id is forgotten.
+    firstTime("a", "l2");
+    firstTime("a", "l3");
+    expect(firstTime("a", "l1")).toBe(true);
   });
 
   it("drops a flood from one device and lets everyone else through", () => {
@@ -148,6 +178,61 @@ describe("one transcript per call, everyone in it (docs/28 A3.5)", () => {
     expect([0, 1, 2, 3].map((t) => gate("a", t))).toEqual([true, true, true, false]);
     expect(gate("b", 3)).toBe(true);
     expect(gate("a", 1001)).toBe(true);
+  });
+});
+
+describe("live captions (docs/28 S5)", () => {
+  it("carries the end of what's being said, and whether the line is finished", () => {
+    expect(decodeCaption(encodeCaption("  so we ship  ", false)!)).toEqual({
+      text: "so we ship",
+      final: false,
+    });
+    expect(decodeCaption(encodeCaption("done.", true)!)).toEqual({ text: "done.", final: true });
+    expect(encodeCaption("   ", true)).toBeNull();
+    const long = "word ".repeat(200);
+    expect(decodeCaption(encodeCaption(long, false)!)!.text.length).toBeLessThanOrEqual(
+      MAX_CAPTION_CHARS,
+    );
+  });
+
+  it("keeps one line per speaker, the three latest, and drops what went quiet", () => {
+    const c = (identity: string, at: number, text = identity) => ({
+      identity,
+      name: identity,
+      text,
+      at,
+    });
+    let list = withCaption([], c("a", 0, "hel"));
+    list = withCaption(list, c("a", 100, "hello"));
+    expect(list).toEqual([c("a", 100, "hello")]);
+    list = withCaption(list, c("b", 200));
+    list = withCaption(list, c("c", 300));
+    list = withCaption(list, c("d", 400));
+    expect(list.map((x) => x.identity)).toEqual(["b", "c", "d"]);
+    list = withCaption(list, c("e", 400 + CAPTION_TTL_MS));
+    expect(list.map((x) => x.identity)).toEqual(["e"]);
+    expect(captionsFrom({ "lucent.cc": "1" })).toBe(true);
+    expect(captionsFrom({})).toBe(false);
+  });
+
+  it("reads the host's lock and presenting settings, and says why a locked call refused", () => {
+    const raw = JSON.stringify({
+      v: 1,
+      hosts: ["a"],
+      removed: [],
+      startedBy: "a",
+      startedAt: 1,
+      locked: true,
+      hostsOnlyShare: true,
+    });
+    expect(readCallMeta(raw)).toMatchObject({ locked: true, hostsOnlyShare: true });
+    expect(readCallMeta(JSON.stringify({ v: 1, hosts: [] }))).toMatchObject({
+      locked: false,
+      hostsOnlyShare: false,
+    });
+    expect(describeJoinFailure(403, { locked: true })).toBe(
+      "The host locked this call, so no one new can join. Ask them to unlock it.",
+    );
   });
 });
 

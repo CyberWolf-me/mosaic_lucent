@@ -300,24 +300,24 @@ mode"; the host can change the mode here), and Join.
 
 **Today ✅ (A3.2):** `CallStage.tsx` — auto grid, spotlight when someone presents
 or is pinned, speaker view, People and Chat panels, reactions, the host's
-menus. Live captions, "stop transcribing me" and the board beside the call
-are still to come.
+menus, live captions, "stop transcribing me". The board beside the call is
+still to come.
 
-| Control                                                       | Who                          |                                      Today                                      |
-| ------------------------------------------------------------- | ---------------------------- | :-----------------------------------------------------------------------------: |
-| Mic, camera                                                   | everyone                     |                                ✅ Ctrl+D, Ctrl+E                                |
-| Switch device in the call                                     | everyone                     |                           ✅ Audio and video settings                           |
-| Share screen, stop sharing                                    | everyone (host may restrict) |                       ✅ F24 (host restriction not built)                       |
-| Roster with speaking, muted, sharing, hand                    | everyone                     |                                 ✅ People panel                                 |
-| Raise hand, reactions                                         | everyone                     |                                       ✅                                        |
-| Chat                                                          | everyone                     |                   ✅ in-call only, never stored (as in Meet)                    |
-| Live captions (interim, never stored)                         | everyone                     |                             ❌ interim is discarded                             |
-| Capture indicator (rule 4)                                    | everyone sees it             |                      ✅ "Lucent is transcribing · <name>"                       |
-| Stop transcribing me                                          | everyone                     |                                       ✅                                        |
-| Board beside the call; follow, spotlight, bring everyone here | everyone / presenter         |                          ❌ (`focusOn` exists, unused)                          |
-| Leave                                                         | everyone                     |                                  ✅ no confirm                                  |
-| End for everyone                                              | host                         |                       ✅ also ends a capture of the call                        |
-| Mute, remove, allow sharing, make co-host                     | host                         | ✅ mute, mute everyone, remove, co-host, lower a hand; sharing rights not built |
+| Control                                                       | Who                          |                                          Today                                           |
+| ------------------------------------------------------------- | ---------------------------- | :--------------------------------------------------------------------------------------: |
+| Mic, camera                                                   | everyone                     |                                    ✅ Ctrl+D, Ctrl+E                                     |
+| Switch device in the call                                     | everyone                     |                               ✅ Audio and video settings                                |
+| Share screen, stop sharing                                    | everyone (host may restrict) |                       ✅ F24; the host can let only hosts present                        |
+| Roster with speaking, muted, sharing, hand                    | everyone                     |                                     ✅ People panel                                      |
+| Raise hand, reactions                                         | everyone                     |                                            ✅                                            |
+| Chat                                                          | everyone                     |                        ✅ in-call only, never stored (as in Meet)                        |
+| Live captions (interim, never stored)                         | everyone                     |                 ✅ CC — each speaker's own device, to whoever reads them                 |
+| Capture indicator (rule 4)                                    | everyone sees it             |                           ✅ "Lucent is transcribing · <name>"                           |
+| Stop transcribing me                                          | everyone                     |                                            ✅                                            |
+| Board beside the call; follow, spotlight, bring everyone here | everyone / presenter         |                              ❌ (`focusOn` exists, unused)                               |
+| Leave                                                         | everyone                     |                                      ✅ no confirm                                       |
+| End for everyone                                              | host                         |                            ✅ also ends a capture of the call                            |
+| Mute, remove, allow sharing, make co-host                     | host                         | ✅ mute, mute everyone, remove, co-host, lower a hand, lock the call, only hosts present |
 
 States follow §4.2. Two more: **ended by host** ("Alice ended the meeting" →
 S8 for the host, S10 for others) and **removed** (→ S1).
@@ -566,9 +566,8 @@ V8 transport (F4).
   token can rename itself. The dock (S6) offers the call back after a reload.
   Fixed on the way: remote audio was attached nowhere, so a call could be
   silent. `scripts/meeting-call-check.mjs` drives three accounts through a real
-  LiveKit project (37/37, four runs in a row). Not yet: live captions (V8),
-  "stop transcribing me", the board beside the call, host-restricted sharing,
-  a waiting room for guests (A6), background blur, and video recording.
+  LiveKit project (37/37, four runs in a row). Not yet: the board beside the
+  call, a waiting room for guests (A6), background blur, and video recording.
 - **A3.4 — done (2026-09-27): meetings can be scheduled.** The plan lives on
   the meeting's own row (ADR 0045; migration 0035 adds `scheduled_for`,
   `duration_min`, `invitees`, `template`, `cancelled_at`, `cancelled_by`),
@@ -588,6 +587,22 @@ V8 transport (F4).
   CANCEL `.ics`). S1 lists Upcoming, and meetings you're invited to on boards
   shared from another org. `scripts/meeting-schedule-check.mjs` 19/19. Not yet:
   reminders, calendar sync, linking one meeting to several boards, guests (A6).
+- **Captions and host settings — done (2026-09-27).** CC (the button, or
+  "c") turns on live captions for you: every speaker's own device — the one
+  that already transcribes them for the record — sends what it hears of them,
+  words-so-far lossy and the finished line reliable, to the people reading
+  captions and to no one else, and nothing is kept. A speaker is told when
+  someone reads captions, and "Stop transcribing me" covers captions too. The
+  host can lock the call (no one new gets in; hosts and anyone already in
+  can) and let only hosts present (others' screens stop at once, and their
+  tokens can't publish one). Found on the way, against the live LiveKit
+  project: two host actions a moment apart both read the same room metadata
+  and the second undid the first, and a client could apply an older room
+  update after a newer one. Metadata changes now run one at a time per room
+  on the server, the server trusts its own last write over a lagging read,
+  and every write carries a `rev` clients use to ignore stale updates.
+  Transcript lines are acknowledged by the recording device and resent until
+  they are, so a data-channel hiccup doesn't cost anyone their words.
 - **A3.5, per-participant capture — done (2026-09-27).** In a board call, each
   person is transcribed on their own device while someone records the call,
   and every line lands in ONE transcript under the name LiveKit knows them by

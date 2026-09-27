@@ -46,6 +46,11 @@ export interface MintLiveKitTokenInput {
   ttlSeconds?: number;
   /** Test seam for the expiry math. */
   now?: () => number;
+  /**
+   * What the participant may publish, when not everything: the host's "only
+   * hosts present" leaves others their camera and mic (docs/28 S5).
+   */
+  sources?: Array<"camera" | "microphone" | "screen_share" | "screen_share_audio">;
 }
 
 export interface MintedLiveKitToken {
@@ -95,6 +100,7 @@ export function mintLiveKitToken(input: MintLiveKitTokenInput): MintedLiveKitTok
       canSubscribe: true,
       // Chat and reactions ride the data channel (docs/28 S5).
       canPublishData: true,
+      ...(input.sources ? { canPublishSources: input.sources } : {}),
       // Never granted: it would let a participant rename itself. A raised
       // hand is set by the server on the caller's behalf (calls.ts).
       canUpdateOwnMetadata: false,

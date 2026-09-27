@@ -1,4 +1,4 @@
-import { captureSince, handFrom, optedOutFrom } from "./callProtocol.js";
+import { captionsFrom, captureSince, handFrom, optedOutFrom } from "./callProtocol.js";
 
 /**
  * Native room peer state (docs/22 native-meeting direction).
@@ -28,6 +28,8 @@ export interface RoomPeer {
   captureAt: number | null;
   /** They asked not to be transcribed (docs/28 §4.3). */
   optedOut: boolean;
+  /** They read live captions, so speakers' devices send them. */
+  captions: boolean;
   /** LiveKit's view of their link; "poor" and "lost" show on the tile. */
   quality: "excellent" | "good" | "poor" | "lost" | "unknown";
 }
@@ -53,6 +55,7 @@ const blank = (identity: string, name: string): RoomPeer => ({
   capture: false,
   captureAt: null,
   optedOut: false,
+  captions: false,
   quality: "unknown",
 });
 
@@ -116,6 +119,7 @@ export function roomPeers(
         capture: captureAt !== null,
         captureAt,
         optedOut: optedOutFrom(action.attributes),
+        captions: captionsFrom(action.attributes),
       });
       return next;
     }

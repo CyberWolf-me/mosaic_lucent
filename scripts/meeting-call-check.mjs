@@ -36,9 +36,11 @@ const browser = await chromium.launch({
 });
 
 const results = [];
+const consoleLog = [];
 function check(name, cond, detail) {
   results.push({ name, pass: !!cond, detail });
   console.log(`${cond ? "PASS" : "FAIL"}  ${name}${detail ? `  (${detail})` : ""}`);
+  if (!cond) for (const line of consoleLog.slice(-12)) console.log(`      ${line}`);
 }
 
 /** Poll until `fn` is truthy (or the time runs out); returns the last value. */
@@ -89,6 +91,12 @@ async function account(name) {
   });
   const page = await ctx.newPage();
   page.on("pageerror", (e) => console.log(`[${name} pageerror]`, e.message));
+  // Kept, and printed only when a check fails: LiveKit says why a transport stalled.
+  page.on("console", (m) => {
+    if (m.type() === "error" || m.type() === "warning") {
+      consoleLog.push(`[${name} ${m.type()}] ${m.text().slice(0, 200)}`);
+    }
+  });
   const email = `${name.split(" ")[0].toLowerCase()}_${Date.now()}@example.com`;
   await page.goto(base + "/signup", { waitUntil: "networkidle", timeout: 30000 });
   await page.locator('input[type="text"]').first().fill(name);
@@ -328,6 +336,33 @@ if (presenting) {
   );
 }
 
+// --- live captions (S5) ---------------------------------------------------------
+
+await host.page.evaluate(() => (window.__recognizer = null));
+await guest.page.getByRole("button", { name: "Turn on captions (c)" }).click();
+check(
+  "turning on captions tells the speaker their device transcribes them",
+  await waitFor(async () =>
+    (await host.page.locator(".call-banner.is-capture").textContent())?.includes(
+      "Someone is reading live captions",
+    ),
+  ),
+);
+await waitFor(() => host.page.evaluate(() => !!window.__recognizer?.onresult), 10000);
+await host.page.evaluate(() => window.__say("Captions check, one two three."));
+check(
+  "the reader sees the speaker's words as a caption, under their name",
+  await waitFor(async () => {
+    const text = await guest.page.locator(".call-captions").textContent();
+    return text?.includes("Hana Host") && text.includes("Captions check, one two three.");
+  }, 10000),
+);
+await guest.page.getByRole("button", { name: "Turn off captions (c)" }).click();
+check(
+  "turning captions off stops the speaker's transcription",
+  await waitFor(async () => (await host.page.locator(".call-banner.is-capture").count()) === 0),
+);
+
 // --- the connection drops and recovers (§4.2) -------------------------------
 
 const banner = guest.page.locator(".call-banner.is-warn");
@@ -403,9 +438,21 @@ const replaced = await waitFor(async () =>
 check("joining from a second tab ends the call in the first, and says why", replaced);
 await guest.page.close();
 guest.page = tab2;
+await tab2.waitForTimeout(3000);
+const tab2InCall =
+  (await tab2.locator(".call-stage").isVisible()) &&
+  (await tiles(tab2)).some((l) => l?.startsWith("Hana Host"));
+check(
+  "the tab that took over stays in the call",
+  tab2InCall,
+  tab2InCall
+    ? ""
+    : ((await tab2.locator("main").textContent()) ?? "").replace(/\s+/g, " ").slice(0, 200),
+);
 
 // --- a transcript, then a viewer joins -----------------------------------------
 
+await host.page.evaluate(() => (window.__recognizer = null));
 await host.page.getByRole("button", { name: "Transcribe this meeting" }).click();
 await host.page.waitForFunction(() => !!window.__recognizer?.onresult, null, { timeout: 10000 });
 await host.page.evaluate(() => window.__say("We ship the call feature on Friday."));
@@ -414,8 +461,45 @@ const recChip = await waitFor(async () =>
 );
 check("everyone sees that the meeting is being transcribed", recChip);
 
+// --- the host locks the call, and lets only hosts present ---------------------------
+
+const hostMenu = async (item) => {
+  await host.page.getByRole("button", { name: "More options" }).click();
+  await host.page.getByRole("menuitem", { name: item }).click();
+};
+await hostMenu(/Lock the call/);
+check(
+  "a locked call shows it",
+  await waitFor(async () =>
+    (await guest.page.locator(".call-head").textContent())?.includes("Locked"),
+  ),
+);
 await third.page.goto(`${meetingUrl}&call=1`, { waitUntil: "networkidle" });
 await third.page.getByRole("button", { name: "Join now" }).click();
+check(
+  "no one new gets into a locked call, and they're told why",
+  await waitFor(async () =>
+    (await third.page.locator(".call-lobby-error").textContent())?.includes(
+      "The host locked this call",
+    ),
+  ),
+);
+await hostMenu(/Unlock the call/);
+await hostMenu(/Only hosts can present/);
+const guestShare = guest.page.getByRole("button", { name: "Only hosts can present in this call" });
+check(
+  "only hosts can present when the host says so",
+  await waitFor(async () => (await guestShare.count()) === 1 && (await guestShare.isDisabled())),
+);
+await hostMenu(/Let everyone present/);
+check(
+  "and everyone can again when they don't",
+  await waitFor(
+    async () => await guest.page.getByRole("button", { name: "Present your screen" }).isEnabled(),
+  ),
+);
+
+await third.page.getByRole("button", { name: /Try again|Join now/ }).click();
 await stage(third.page).waitFor({ timeout: 20000 });
 check(
   "a board viewer can join and speak (docs/28 §9.3)",

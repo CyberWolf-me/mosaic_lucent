@@ -14,8 +14,20 @@ import { roomPeers, type RoomPeer } from "./roomPeers.js";
 import type { ConversationalLease } from "../meeting-voice.js";
 import {
   appendChat,
+  CAPTION_TOPIC,
+  CAPTION_TTL_MS,
+  decodeCaption,
+  encodeCaption,
+  withCaption,
+  type Caption,
   CHAT_TOPIC,
+  createLineDedup,
   createLineGate,
+  decodeLineAck,
+  encodeLineAck,
+  LINE_ACK_TOPIC,
+  LINE_MAX_SENDS,
+  LINE_RESEND_MS,
   decodeChat,
   decodeLine,
   decodeReaction,
@@ -225,6 +237,20 @@ interface MeetingSessionValue {
    * payload.
    */
   subscribeLines: (listener: (line: RemoteLine) => void) => () => void;
+  /** You read live captions (the CC button). */
+  captionsOn: boolean;
+  setCaptionsOn: (on: boolean) => Promise<void>;
+  /** The captions on screen now, one line per recent speaker. */
+  captions: Caption[];
+  /** Someone else in the call reads captions, so your device transcribes you. */
+  captionsRequested: boolean;
+  /**
+   * Send this device's own speech as a caption — for the tab that records,
+   * whose recognizer is the recording's (a browser runs one at a time).
+   */
+  broadcastCaption: (text: string, final: boolean) => void;
+  /** The host's call settings: lock the call; let only hosts present. */
+  setCallSettings: (settings: { locked?: boolean; hostsOnlyShare?: boolean }) => Promise<boolean>;
 }
 
 /** One line of someone else's speech, sent to this device's transcript. */
@@ -310,11 +336,27 @@ export function MeetingSessionProvider({ children }: { children: ReactNode }) {
   const [capture, setCapture] = useState<LiveCapture | null>(null);
   const [transcribeMe, setTranscribeMeState] = useState(true);
   const [contribution, setContribution] = useState<Contribution>("off");
+  const [captionsOn, setCaptionsOnState] = useState(false);
+  const [captions, setCaptions] = useState<Caption[]>([]);
 
   const lineListeners = useRef(new Set<(line: RemoteLine) => void>());
   const lineGate = useRef(createLineGate());
+  const lineDedup = useRef(createLineDedup());
+  /** Lines this device sent that the keeper hasn't acknowledged yet. */
+  const pendingLines = useRef(
+    new Map<string, { to: string; text: string; at: number; lastSent: number; sends: number }>(),
+  );
+  const lineToRef = useRef<string | null>(null);
   const roomRef = useRef<LiveKitRoom | null>(null);
   const deadRef = useRef(false);
+  /**
+   * The page is going away. LiveKit hangs up on `pagehide` itself and calls
+   * it "client initiated" — read as Leave, that cleared the rejoin offer a
+   * reload is meant to make (S6).
+   */
+  const unloadingRef = useRef(false);
+  /** The browser froze this background tab; LiveKit hangs up then too. */
+  const frozenRef = useRef(false);
   const joinSeq = useRef(0);
   const chatOpenRef = useRef(false);
   const captureRef = useRef<LiveCapture | null>(null);
@@ -425,6 +467,9 @@ export function MeetingSessionProvider({ children }: { children: ReactNode }) {
       // A new participant session starts with no attributes on the server,
       // so "Stop transcribing me" starts off too.
       setTranscribeMeState(true);
+      frozenRef.current = false;
+      setCaptionsOnState(false);
+      setCaptions([]);
       deadRef.current = false;
       endingRef.current = false;
       let data: { token: string; url: string };
@@ -446,6 +491,7 @@ export function MeetingSessionProvider({ children }: { children: ReactNode }) {
           const body = (await resp.json().catch(() => ({}))) as {
             error?: string;
             removed?: boolean;
+            locked?: boolean;
           };
           throw new Error(describeJoinFailure(resp.status, body));
         }
@@ -579,6 +625,8 @@ export function MeetingSessionProvider({ children }: { children: ReactNode }) {
         on(E.RoomMetadataChanged, "roomMetadataChanged", ((raw: string) => {
           setMeta((prev) => {
             const next = readCallMeta(raw);
+            // An older update delivered late must not undo a newer one.
+            if (prev && next && next.rev < prev.rev) return prev;
             const self = room.localParticipant.identity;
             if (next && prev && !prev.hosts.includes(self) && next.hosts.includes(self)) {
               showToast("You're now a host of this call.");
@@ -626,8 +674,38 @@ export function MeetingSessionProvider({ children }: { children: ReactNode }) {
             const line = decodeLine(payload);
             if (!line || !captureRef.current || lineListeners.current.size === 0) return;
             if (!lineGate.current(p.identity, Date.now())) return;
-            const remote = { identity: p.identity, name: p.name || p.identity, text: line.text };
-            for (const listener of lineListeners.current) listener(remote);
+            // Filed once, acknowledged every time: a resend means our receipt was lost.
+            if (lineDedup.current(p.identity, line.id)) {
+              const remote = { identity: p.identity, name: p.name || p.identity, text: line.text };
+              for (const listener of lineListeners.current) listener(remote);
+            }
+            if (line.id) {
+              void room.localParticipant
+                .publishData(encodeLineAck(line.id), {
+                  reliable: true,
+                  topic: LINE_ACK_TOPIC,
+                  destinationIdentities: [p.identity],
+                })
+                .catch(() => {});
+            }
+            return;
+          }
+          if (topic === LINE_ACK_TOPIC) {
+            const id = decodeLineAck(payload);
+            if (id) pendingLines.current.delete(id);
+            return;
+          }
+          if (topic === CAPTION_TOPIC) {
+            const caption = decodeCaption(payload);
+            if (!caption) return;
+            setCaptions((prev) =>
+              withCaption(prev, {
+                identity: p.identity,
+                name: p.name || p.identity,
+                text: caption.text,
+                at: Date.now(),
+              }),
+            );
             return;
           }
           if (topic === CHAT_TOPIC) {
@@ -670,10 +748,16 @@ export function MeetingSessionProvider({ children }: { children: ReactNode }) {
         }) as (...args: never[]) => void);
 
         on(E.Disconnected, "disconnected", ((reason?: number | string) => {
-          if (deadRef.current) return;
+          if (deadRef.current || unloadingRef.current) return;
           const name =
             typeof reason === "number" ? sdk.DisconnectReason?.[reason] : (reason ?? undefined);
-          const described = describeDisconnect(name);
+          // A tab the browser froze in the background was dropped, not left.
+          const described = frozenRef.current
+            ? {
+                kind: "lost" as const,
+                text: "The call dropped while this tab was in the background.",
+              }
+            : describeDisconnect(name);
           const end =
             endingRef.current && described.kind === "ended"
               ? { kind: "ended" as const, text: "You ended the call for everyone." }
@@ -937,15 +1021,51 @@ export function MeetingSessionProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  /** One line of your speech, to the device that keeps the call's transcript. */
-  const sendLine = useCallback((to: string, text: string) => {
+  /** Put one line on the wire (sendLine keeps track of it until it's acknowledged). */
+  const publishLine = useCallback((to: string, text: string, at: number, id: string) => {
     const room = roomRef.current;
-    const payload = encodeLine(text, Date.now());
+    const payload = encodeLine(text, at, id);
     if (!room || !payload) return;
     void room.localParticipant
       .publishData(payload, { reliable: true, topic: LINE_TOPIC, destinationIdentities: [to] })
       .catch(() => {});
   }, []);
+
+  /** One line of your speech, to the device keeping the call's transcript, until it says it has it. */
+  const sendLine = useCallback(
+    (to: string, text: string) => {
+      const id = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+      const at = Date.now();
+      pendingLines.current.set(id, { to, text, at, lastSent: at, sends: 1 });
+      publishLine(to, text, at, id);
+    },
+    [publishLine],
+  );
+
+  // Resend what the keeper hasn't acknowledged — to whoever keeps the
+  // transcript now — and give up after a few tries.
+  useEffect(() => {
+    if (!inCall(status)) {
+      pendingLines.current.clear();
+      return;
+    }
+    const timer = window.setInterval(() => {
+      const now = Date.now();
+      for (const [id, line] of pendingLines.current) {
+        if (now - line.lastSent < LINE_RESEND_MS) continue;
+        if (line.sends >= LINE_MAX_SENDS) {
+          pendingLines.current.delete(id);
+          continue;
+        }
+        const to = lineToRef.current ?? line.to;
+        line.to = to;
+        line.lastSent = now;
+        line.sends += 1;
+        publishLine(to, line.text, line.at, id);
+      }
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [status, publishLine]);
 
   const transcriber = useMemo(() => {
     const id = transcriberOf([...peers.values()]);
@@ -962,9 +1082,110 @@ export function MeetingSessionProvider({ children }: { children: ReactNode }) {
     inCall(status) && transcriber && !transcriber.isLocal && transcribeMe && !recordingHere
       ? transcriber.identity
       : null;
+  lineToRef.current = contributeTo;
+
+  // Who reads captions besides you: your device sends them what it hears of you.
+  const captionReaders = useMemo(
+    () =>
+      [...peers.values()].filter((p) => p.identity !== LOCAL && p.captions).map((p) => p.identity),
+    [peers],
+  );
+  const captionsRequested = captionReaders.length > 0;
+  const captionReadersRef = useRef(captionReaders);
+  captionReadersRef.current = captionReaders;
+  const captionsOnRef = useRef(captionsOn);
+  captionsOnRef.current = captionsOn;
+  const selfNameRef = useRef(selfName);
+  selfNameRef.current = selfName;
+
+  /** One caption of your speech, to the people reading captions — and to you. */
+  const broadcastCaption = useCallback((text: string, final: boolean) => {
+    const at = Date.now();
+    if (captionsOnRef.current) {
+      setCaptions((prev) => withCaption(prev, { identity: LOCAL, name: "You", text, at }));
+    }
+    const room = roomRef.current;
+    const readers = captionReadersRef.current;
+    const payload = encodeCaption(text, final);
+    if (!room || !payload || readers.length === 0) return;
+    // Words still being said go lossy — the next update supersedes them; the
+    // finished line goes reliably, so the caption a reader is left with is right.
+    void room.localParticipant
+      .publishData(payload, {
+        reliable: final,
+        topic: CAPTION_TOPIC,
+        destinationIdentities: readers,
+      })
+      .catch(() => {});
+  }, []);
+
+  const setCaptionsOn = useCallback(async (on: boolean) => {
+    setCaptionsOnState(on);
+    if (!on) setCaptions([]);
+    const board = boardRef.current;
+    if (!board) return;
+    const result = await callRoute(board, "state", { captions: on });
+    if (!result.ok) setNotice(result.error);
+  }, []);
+
+  const setCallSettings = useCallback(
+    async (settings: { locked?: boolean; hostsOnlyShare?: boolean }) => {
+      const board = boardRef.current;
+      if (!board) return false;
+      const result = await callRoute(board, "settings", settings);
+      if (!result.ok) setNotice(result.error);
+      return result.ok;
+    },
+    [],
+  );
+
+  // Captions fade a few seconds after they stop changing.
+  useEffect(() => {
+    if (captions.length === 0) return;
+    const timer = window.setInterval(() => {
+      const now = Date.now();
+      setCaptions((prev) => {
+        const next = prev.filter((c) => now - c.at < CAPTION_TTL_MS);
+        return next.length === prev.length ? prev : next;
+      });
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [captions.length]);
+
+  // Transcribe you on this device while your words are wanted — for someone
+  // else's transcript, or for anyone's captions (yours included) — and never
+  // after "Stop transcribing me", or while this tab records (its own
+  // recognizer covers you then).
+  const transcribeLocally =
+    inCall(status) &&
+    transcribeMe &&
+    !recordingHere &&
+    (contributeTo !== null || captionsRequested || captionsOn);
 
   // Clean up on app unmount (the marker stays: a reload offers the call back).
   useEffect(() => () => teardown(), [teardown]);
+  useEffect(() => {
+    const going = () => {
+      unloadingRef.current = true;
+    };
+    // A page restored from the back-forward cache is back, not going.
+    const back = (e: PageTransitionEvent) => {
+      if (e.persisted) unloadingRef.current = false;
+    };
+    const frozen = () => {
+      frozenRef.current = true;
+    };
+    window.addEventListener("pagehide", going);
+    window.addEventListener("beforeunload", going);
+    window.addEventListener("pageshow", back);
+    document.addEventListener("freeze", frozen);
+    return () => {
+      window.removeEventListener("pagehide", going);
+      window.removeEventListener("beforeunload", going);
+      window.removeEventListener("pageshow", back);
+      document.removeEventListener("freeze", frozen);
+    };
+  }, []);
 
   const isHost = selfIdentity !== null && meta !== null && meta.hosts.includes(selfIdentity);
 
@@ -1023,8 +1244,20 @@ export function MeetingSessionProvider({ children }: { children: ReactNode }) {
       setTranscribeMe,
       contribution,
       subscribeLines,
+      captionsOn,
+      setCaptionsOn,
+      captions,
+      captionsRequested,
+      broadcastCaption,
+      setCallSettings,
     }),
     [
+      captionsOn,
+      setCaptionsOn,
+      captions,
+      captionsRequested,
+      broadcastCaption,
+      setCallSettings,
       transcriber,
       transcribeMe,
       setTranscribeMe,
@@ -1077,9 +1310,11 @@ export function MeetingSessionProvider({ children }: { children: ReactNode }) {
       {children}
       <CallAudio tiles={tiles} />
       <CallTranscriber
-        to={contributeTo}
+        active={transcribeLocally}
+        lineTo={contributeTo}
         micOn={micOn}
         onLine={sendLine}
+        onCaption={broadcastCaption}
         onState={setContribution}
       />
     </MeetingSessionContext.Provider>
@@ -1110,20 +1345,30 @@ function liveProvider(preferred: SttProviderId) {
  * after "Stop transcribing me".
  */
 function CallTranscriber({
-  to,
+  active,
+  lineTo,
   micOn,
   onLine,
+  onCaption,
   onState,
 }: {
-  to: string | null;
+  /** Your words are wanted — for a transcript or for captions. */
+  active: boolean;
+  /** The device keeping the call's transcript, when someone records. */
+  lineTo: string | null;
   micOn: boolean;
   onLine: (to: string, text: string) => void;
+  onCaption: (text: string, final: boolean) => void;
   onState: (state: Contribution) => void;
 }) {
   const [settings] = useSettings();
   const preferred = settings.sttProvider;
+  // Read at each line, so the recognizer keeps running when someone starts
+  // or stops recording while captions are on.
+  const lineToRef = useRef(lineTo);
+  lineToRef.current = lineTo;
   useEffect(() => {
-    if (!to) {
+    if (!active) {
       onState("off");
       return;
     }
@@ -1138,9 +1383,14 @@ function CallTranscriber({
     }
     let session: VoiceSession | null = null;
     session = provider.start({
+      onInterim: (text) => {
+        if (text.trim()) onCaption(text, false);
+      },
       onFinal: (text) => {
         const line = text.trim();
-        if (line) onLine(to, line);
+        if (!line) return;
+        onCaption(line, true);
+        if (lineToRef.current) onLine(lineToRef.current, line);
       },
       onError: (message) => {
         if (message) onState("unsupported");
@@ -1148,7 +1398,7 @@ function CallTranscriber({
     });
     onState(session ? "live" : "unsupported");
     return () => session?.stop();
-  }, [to, micOn, preferred, onLine, onState]);
+  }, [active, micOn, preferred, onLine, onCaption, onState]);
   return null;
 }
 

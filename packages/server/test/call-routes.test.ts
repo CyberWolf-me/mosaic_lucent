@@ -347,6 +347,74 @@ describe("the board call's host (docs/28 A3.2)", () => {
     expect(absent.body.error).toBe("You're not in this call.");
   });
 
+  it("a locked call keeps newcomers out, never a host, and not someone already in", async () => {
+    const h = (open = await harness());
+    const { boardId, alice, bob, carol } = await boardWith(h);
+    await enter(h, boardId, alice);
+    await enter(h, boardId, bob);
+    expect(
+      (await post(h, `/api/boards/${boardId}/call/settings`, bob, { locked: true })).status,
+    ).toBe(403);
+    const locked = await post(h, `/api/boards/${boardId}/call/settings`, alice, { locked: true });
+    expect(locked.body).toMatchObject({ ok: true, locked: true });
+
+    const refused = await enter(h, boardId, carol);
+    expect(refused.status).toBe(403);
+    expect(refused.body).toEqual({ error: "The host locked this call.", locked: true });
+    // Bob reconnecting (still in the room) and Alice (a host) get back in.
+    expect((await enter(h, boardId, bob)).status).toBe(200);
+    expect((await enter(h, boardId, alice)).status).toBe(200);
+
+    await post(h, `/api/boards/${boardId}/call/settings`, alice, { locked: false });
+    expect((await enter(h, boardId, carol)).status).toBe(200);
+  });
+
+  it("only hosts present: the others lose the screen at once, and new tokens say so", async () => {
+    const h = (open = await harness());
+    const { boardId, alice, bob, carol } = await boardWith(h);
+    await enter(h, boardId, alice);
+    await enter(h, boardId, bob);
+    const room = h.calls.rooms.get(`board-${boardId}`)!;
+    room.participants
+      .find((p) => p.identity === bob.id)!
+      .tracks.push({ sid: "TR_screen_bob", source: "screen_share", muted: false });
+
+    await post(h, `/api/boards/${boardId}/call/settings`, alice, { hostsOnlyShare: true });
+    expect(h.calls.log).toEqual(
+      expect.arrayContaining([
+        `scope ${alice.id} all`,
+        `scope ${bob.id} no-screen`,
+        `mute ${bob.id} TR_screen_bob`,
+      ]),
+    );
+
+    const carolToken = (await enter(h, boardId, carol)).body.token as string;
+    const claims = JSON.parse(
+      Buffer.from(
+        carolToken.split(".")[1]!.replace(/-/g, "+").replace(/_/g, "/"),
+        "base64",
+      ).toString(),
+    );
+    expect(claims.video.canPublishSources).toEqual(["camera", "microphone"]);
+
+    await post(h, `/api/boards/${boardId}/call/hosts`, alice, { identity: bob.id });
+    expect(h.calls.log).toContain(`scope ${bob.id} all`);
+  });
+
+  it("marks who reads captions, so speakers' devices know to send them", async () => {
+    const h = (open = await harness());
+    const { boardId, alice, bob } = await boardWith(h);
+    await enter(h, boardId, alice);
+    await enter(h, boardId, bob);
+    expect(
+      (await post(h, `/api/boards/${boardId}/call/state`, bob, { captions: true })).status,
+    ).toBe(200);
+    const bobInRoom = h.calls.rooms
+      .get(`board-${boardId}`)!
+      .participants.find((p) => p.identity === bob.id)!;
+    expect(bobInRoom.attributes[CALL_ATTRIBUTES.captions]).toBe("1");
+  });
+
   it("keeps the call to the board's members", async () => {
     const h = (open = await harness());
     const { boardId, alice } = await boardWith(h);

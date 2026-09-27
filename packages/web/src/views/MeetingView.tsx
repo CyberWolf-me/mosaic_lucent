@@ -421,6 +421,7 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
     selfIdentity,
     transcriber: callTranscriber,
     subscribeLines,
+    broadcastCaption,
   } = useMeetingSession();
   // docs/28 A3.5: while this board's call runs, the capture names its own
   // speaker and hears everyone else's lines (refs: the capture's callbacks
@@ -432,6 +433,10 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
   const callTranscriberRef = useRef(callTranscriber);
   callTranscriberRef.current = inThisCall ? callTranscriber : null;
   const remoteLinesRef = useRef<(() => void) | null>(null);
+  // Live captions of this device's own speech while it records the call: the
+  // recording's recognizer is the only one a browser runs (docs/28 S5).
+  const callCaptionRef = useRef<typeof broadcastCaption | null>(null);
+  callCaptionRef.current = inThisCall ? broadcastCaption : null;
   const leaseManagerRef = useRef<ConversationalLeaseManager>(
     new ConversationalLeaseManager({ leaseDurationMs: 15_000, maxFollowUpTurns: 3 }),
   );
@@ -708,8 +713,9 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
     // legacy path append byte-identical turns.
     const voiceCallbacks: VoiceHandlers = {
       onStart: () => setRecording(true),
-      onInterim: () => {
-        // Interim text is display-only here; the durable record is finals.
+      onInterim: (text) => {
+        // Interim text never reaches the record; in a call it becomes a caption.
+        callCaptionRef.current?.(text, false);
       },
       onFinal: (text, meta) => {
         const t = text.trim();
@@ -717,6 +723,8 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
         // device's mic can hear it; a line from another person's device can't
         // be Lucent talking.
         if (!t || (meta?.speakerId === undefined && isTtsSpeaking())) return;
+        // This device's own line (another person's arrives with its speaker).
+        if (meta?.speakerId === undefined) callCaptionRef.current?.(t, true);
         engineRef.current.noteFinal(Date.now());
         // In a call, your own lines carry your name, as everyone else's do
         // (docs/28 A3.5) — "You" means nothing to the next reader.

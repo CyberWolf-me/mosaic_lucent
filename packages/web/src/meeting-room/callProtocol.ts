@@ -19,6 +19,12 @@ export interface CallMeta {
   removed: string[];
   startedBy: string;
   startedAt: number;
+  /** No one new gets in (the host's lock). */
+  locked: boolean;
+  /** Only hosts may present. */
+  hostsOnlyShare: boolean;
+  /** The server's write counter: an update older than the one held is stale. */
+  rev: number;
 }
 
 /** Participant attributes the server sets (mirrors `CALL_ATTRIBUTES` on the server). */
@@ -26,7 +32,13 @@ export const CALL_ATTRIBUTES = {
   hand: "lucent.hand",
   capture: "lucent.capture",
   optOut: "lucent.optout",
+  captions: "lucent.cc",
 } as const;
+
+/** This person reads live captions. */
+export function captionsFrom(attributes: Record<string, string> | undefined): boolean {
+  return attributes?.[CALL_ATTRIBUTES.captions] === "1";
+}
 
 const strings = (value: unknown): string[] =>
   Array.isArray(value) ? value.filter((v): v is string => typeof v === "string") : [];
@@ -41,6 +53,9 @@ export function readCallMeta(raw: string | undefined | null): CallMeta | null {
       removed: strings(value.removed),
       startedBy: typeof value.startedBy === "string" ? value.startedBy : "",
       startedAt: typeof value.startedAt === "number" ? value.startedAt : 0,
+      locked: value.locked === true,
+      hostsOnlyShare: value.hostsOnlyShare === true,
+      rev: typeof value.rev === "number" ? value.rev : 0,
     };
   } catch {
     return null;
@@ -154,21 +169,70 @@ export function decodeReaction(payload: Uint8Array): Reaction | null {
 export const LINE_TOPIC = "lucent.line";
 export const MAX_LINE_CHARS = 2000;
 
-export function encodeLine(text: string, at: number): Uint8Array | null {
+/**
+ * `id` is the sender's own name for the line: the keeper acknowledges it
+ * (LINE_ACK_TOPIC) and the sender resends until it does, so a data channel
+ * that hiccups mid-meeting doesn't cost anyone their words; a resend the
+ * keeper already filed is recognised by its id and dropped.
+ */
+export function encodeLine(text: string, at: number, id = ""): Uint8Array | null {
   const body = text.trim();
   if (!body || body.length > MAX_LINE_CHARS) return null;
-  return encoder.encode(JSON.stringify({ v: 1, text: body, at }));
+  return encoder.encode(JSON.stringify({ v: 1, text: body, at, id }));
 }
 
-export function decodeLine(payload: Uint8Array): { text: string; at: number } | null {
+export function decodeLine(payload: Uint8Array): { text: string; at: number; id: string } | null {
   try {
     const value = JSON.parse(decoder.decode(payload)) as Record<string, unknown>;
     if (value?.v !== 1 || typeof value.text !== "string") return null;
     const text = value.text.trim().slice(0, MAX_LINE_CHARS);
-    return text ? { text, at: typeof value.at === "number" ? value.at : 0 } : null;
+    return text
+      ? {
+          text,
+          at: typeof value.at === "number" ? value.at : 0,
+          id: typeof value.id === "string" ? value.id.slice(0, 64) : "",
+        }
+      : null;
   } catch {
     return null;
   }
+}
+
+/** The keeper's receipt for a line, sent back to its speaker. */
+export const LINE_ACK_TOPIC = "lucent.line-ack";
+
+export function encodeLineAck(id: string): Uint8Array {
+  return encoder.encode(JSON.stringify({ v: 1, id }));
+}
+
+export function decodeLineAck(payload: Uint8Array): string | null {
+  try {
+    const value = JSON.parse(decoder.decode(payload)) as { v?: unknown; id?: unknown };
+    return value?.v === 1 && typeof value.id === "string" && value.id ? value.id : null;
+  } catch {
+    return null;
+  }
+}
+
+/** How often, and how many times, an unacknowledged line is sent again. */
+export const LINE_RESEND_MS = 2500;
+export const LINE_MAX_SENDS = 6;
+
+/**
+ * The keeper's memory of lines it filed, per speaker: true the first time an
+ * id is seen, false for a resend. Bounded, oldest forgotten first.
+ */
+export function createLineDedup(max = 500): (sender: string, id: string) => boolean {
+  const seen = new Map<string, string[]>();
+  return (sender, id) => {
+    if (!id) return true;
+    const ids = seen.get(sender) ?? [];
+    if (ids.includes(id)) return false;
+    ids.push(id);
+    if (ids.length > max) ids.shift();
+    seen.set(sender, ids);
+    return true;
+  };
 }
 
 /**
@@ -188,6 +252,53 @@ export function createLineGate(max = 8, windowMs = 5000): (sender: string, now: 
     seen.set(sender, recent);
     return true;
   };
+}
+
+/**
+ * Live captions (docs/28 S5): each speaker's own device sends what it hears
+ * of them — the words so far, then the finished line — to the people who
+ * turned captions on. Never stored: a caption is gone a few seconds after it
+ * stops changing. The speaker is the sending participant, as with lines.
+ */
+export const CAPTION_TOPIC = "lucent.caption";
+/** A caption shows the end of a long utterance; this is how much. */
+export const MAX_CAPTION_CHARS = 240;
+/** How long a caption stays once it stops changing. */
+export const CAPTION_TTL_MS = 6000;
+
+export function encodeCaption(text: string, final: boolean): Uint8Array | null {
+  const body = text.trim();
+  if (!body) return null;
+  return encoder.encode(JSON.stringify({ v: 1, text: body.slice(-MAX_CAPTION_CHARS), final }));
+}
+
+export function decodeCaption(payload: Uint8Array): { text: string; final: boolean } | null {
+  try {
+    const value = JSON.parse(decoder.decode(payload)) as Record<string, unknown>;
+    if (value?.v !== 1 || typeof value.text !== "string") return null;
+    const text = value.text.trim().slice(-MAX_CAPTION_CHARS);
+    return text ? { text, final: value.final === true } : null;
+  } catch {
+    return null;
+  }
+}
+
+export interface Caption {
+  identity: string;
+  name: string;
+  text: string;
+  at: number;
+}
+
+/**
+ * The captions on screen after one more arrives: one line per speaker (the
+ * newest words replace theirs), the three most recent speakers, nothing
+ * older than CAPTION_TTL_MS.
+ */
+export function withCaption(list: readonly Caption[], next: Caption): Caption[] {
+  return [...list.filter((c) => c.identity !== next.identity), next]
+    .filter((c) => next.at - c.at < CAPTION_TTL_MS)
+    .slice(-3);
 }
 
 export interface ChatMessage {
@@ -245,13 +356,16 @@ export function describeDisconnect(reason: string | undefined): CallEnd {
  */
 export function describeJoinFailure(
   status: number | null,
-  body: { error?: string; removed?: boolean } = {},
+  body: { error?: string; removed?: boolean; locked?: boolean } = {},
 ): string {
   if (status === null) return "Couldn't connect. Check your connection, then try again.";
   if (status === 503) {
     return "Video calls aren't set up on this server. You can still transcribe on this device.";
   }
   if (status === 403 && body.removed) return "The host removed you from this call.";
+  if (status === 403 && body.locked) {
+    return "The host locked this call, so no one new can join. Ask them to unlock it.";
+  }
   if (status === 401) return "Sign in to join the call.";
   if (status === 403 || status === 404) return "You don't have access to this meeting's call.";
   return `Couldn't connect to the call (error ${status}). Try again.`;

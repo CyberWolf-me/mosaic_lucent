@@ -7,6 +7,7 @@ import {
   callRoomName,
   isCallHost,
   newCallMeta,
+  publishScopeFor,
   withHost,
   withRemoved,
   type CallRoom,
@@ -125,13 +126,21 @@ export const registerCallRoutes: RegisterRoutes = (router, s) => {
     if (typeof input.transcribe === "boolean") {
       attributes[CALL_ATTRIBUTES.optOut] = input.transcribe ? "" : "1";
     }
+    if (typeof input.captions === "boolean") {
+      attributes[CALL_ATTRIBUTES.captions] = input.captions ? "1" : "";
+    }
     if (Object.keys(attributes).length === 0) {
-      return send(res, 400, { error: "send hand, capture or transcribe" });
+      return send(res, 400, { error: "send hand, capture, transcribe or captions" });
     }
     // Someone else's state: a host may lower a hand (as in Meet), nothing more.
     if (target !== call.user.id) {
       if (!call.host) return send(res, 403, { error: "Only the host can do that." });
-      if (input.hand !== false || input.capture !== undefined || input.transcribe !== undefined) {
+      if (
+        input.hand !== false ||
+        input.capture !== undefined ||
+        input.transcribe !== undefined ||
+        input.captions !== undefined
+      ) {
         return send(res, 403, { error: "A host can only lower someone's hand." });
       }
     }
@@ -191,9 +200,9 @@ export const registerCallRoutes: RegisterRoutes = (router, s) => {
     }
     // The removal is recorded before the disconnect, so the client's own
     // reconnect attempt already meets a refusal at the token route.
-    await calls.setMeta(
-      call.room,
-      withRemoved(call.state.meta ?? newCallMeta(call.user.id, Date.now()), input.identity),
+    const removed = input.identity;
+    await calls.updateMeta(call.room, (current) =>
+      withRemoved(current ?? newCallMeta(call.user.id, Date.now()), removed),
     );
     if (call.state.participants.some((p) => p.identity === input.identity)) {
       await calls.remove(call.room, input.identity);
@@ -222,14 +231,73 @@ export const registerCallRoutes: RegisterRoutes = (router, s) => {
     if (!call.state.participants.some((p) => p.identity === input.identity)) {
       return send(res, 404, { error: "They're not in this call." });
     }
-    await calls.setMeta(
-      call.room,
-      withHost(call.state.meta ?? newCallMeta(call.user.id, Date.now()), input.identity),
+    const promoted = input.identity;
+    const meta = await calls.updateMeta(call.room, (current) =>
+      withHost(current ?? newCallMeta(call.user.id, Date.now()), promoted),
     );
+    // A co-host may present even when only hosts may.
+    if (meta?.hostsOnlyShare) await calls.setPublishScope(call.room, promoted, "all");
     await auditRow(req, call.user.id, call.board.orgId, "board.call.host_added", call.board.id, {
       userId: input.identity,
     });
     send(res, 200, { ok: true });
+  });
+
+  // The host's call settings (Zoom's "Lock meeting", "Share screen: host
+  // only"). Restricting sharing takes effect at once: every non-host loses
+  // the right to publish a screen, and a screen they're presenting stops.
+  router.post("/api/boards/:id/call/settings", async (ctx) => {
+    const { req, res } = ctx;
+    const route = "/api/boards/:id/call/settings";
+    const call = await inCall(req, res, ctx.param("id"), route, { host: true });
+    if (!call || !calls) return;
+    const input = await body(req, res);
+    if (!input) return;
+    // Applied on top of the latest metadata, in turn with every other change.
+    let before = newCallMeta(call.user.id, Date.now());
+    const next =
+      (await calls.updateMeta(call.room, (current) => {
+        before = current ?? before;
+        const changed = { ...before };
+        if (typeof input.locked === "boolean") {
+          if (input.locked) changed.locked = true;
+          else delete changed.locked;
+        }
+        if (typeof input.hostsOnlyShare === "boolean") {
+          if (input.hostsOnlyShare) changed.hostsOnlyShare = true;
+          else delete changed.hostsOnlyShare;
+        }
+        return changed;
+      })) ?? before;
+    if (Boolean(next.hostsOnlyShare) !== Boolean(before.hostsOnlyShare)) {
+      for (const p of call.state.participants) {
+        const scope = publishScopeFor(next, p.identity);
+        await calls.setPublishScope(call.room, p.identity, scope);
+        if (scope === "no-screen") {
+          for (const t of p.tracks) {
+            if ((t.source === "screen_share" || t.source === "screen_share_audio") && !t.muted) {
+              await calls.mute(call.room, p.identity, t.sid);
+            }
+          }
+        }
+      }
+    }
+    await auditRow(
+      req,
+      call.user.id,
+      call.board.orgId,
+      "board.call.settings_changed",
+      call.board.id,
+      {
+        locked: Boolean(next.locked),
+        hostsOnlyShare: Boolean(next.hostsOnlyShare),
+      },
+    );
+    send(res, 200, {
+      ok: true,
+      locked: Boolean(next.locked),
+      hostsOnlyShare: Boolean(next.hostsOnlyShare),
+    });
   });
 
   router.post("/api/boards/:id/call/end", async (ctx) => {
