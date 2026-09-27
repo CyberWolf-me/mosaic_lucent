@@ -27,6 +27,8 @@ import {
   type OrgProjectStatus,
   type ProjectPage,
   type WorkspaceStatement,
+  getProjectExecution,
+  type ProjectExecutionView,
 } from "../orgProjects.js";
 import { MeetingRow } from "./MeetingsView.js";
 import { ScopedAsk } from "../ui/ScopedAsk.js";
@@ -465,6 +467,20 @@ function ProjectDetail({
     }
   };
 
+  /** A meeting at the turn a decision or task came from. */
+  const openTurn = async (target: string, meetingId: string, turn?: number) => {
+    if (target !== boardId && !(await openBoard(target))) {
+      notify("Couldn't open that meeting's board — you may no longer have access.");
+      return;
+    }
+    const params = new URLSearchParams(window.location.search);
+    params.set("meeting", meetingId);
+    params.set("board", target);
+    if (turn !== undefined) params.set("turn", String(turn));
+    window.history.replaceState(null, "", `?${params.toString()}`);
+    setView("meeting");
+  };
+
   const openMeeting = async (m: MeetingSummary) => {
     if (m.boardId !== boardId && !(await openBoard(m.boardId))) {
       notify("Couldn't open that meeting's board — you may no longer have access.");
@@ -604,6 +620,16 @@ function ProjectDetail({
           scope={{ project: project.id }}
           threadKey={threadScope.project(org.id, project.id)}
           placeholder={`Ask about ${project.name} — why, who, what's still open…`}
+        />
+      )}
+
+      {project.boards.length > 0 && (
+        <ExecutionSection
+          orgId={org.id}
+          projectId={project.id}
+          refreshKey={project.updatedAt}
+          onOpen={(board, node) => void openOn(board, node)}
+          onTurn={(board, meetingId, turn) => void openTurn(board, meetingId, turn)}
         />
       )}
 
@@ -829,5 +855,171 @@ function EditProjectForm({
         </Button>
       </div>
     </form>
+  );
+}
+
+/**
+ * The project's execution (docs/26 §8): progress across its boards, each
+ * workstream, every blocker told as a story — what it waits on and who owns
+ * each step, the decision that drove it, the meeting where that was decided —
+ * and late work. Every piece opens where it lives.
+ */
+function ExecutionSection({
+  orgId,
+  projectId,
+  refreshKey,
+  onOpen,
+  onTurn,
+}: {
+  orgId: string;
+  projectId: string;
+  refreshKey: number;
+  onOpen: (boardId: string, nodeId?: string) => void;
+  onTurn: (boardId: string, meetingId: string, turn?: number) => void;
+}) {
+  const [view, setView] = useState<ProjectExecutionView | null | "failed">(null);
+  useEffect(() => {
+    void getProjectExecution(orgId, projectId).then((v) => setView(v ?? "failed"));
+  }, [orgId, projectId, refreshKey]);
+  if (view === null || view === "failed") return null;
+  const { execution: x, meetings } = view;
+  if (x.rollup.total === 0) {
+    return (
+      <section className="boards-notif-group" aria-label="Execution">
+        <SectionLabel>Execution</SectionLabel>
+        <p className="sched-note">
+          No tracked work yet. Plan from a decision on a board — the actions it creates, and who
+          owns them, are followed here.
+        </p>
+      </section>
+    );
+  }
+  const meetingName = (id: string) => {
+    const m = meetings[id];
+    if (!m) return "a meeting";
+    const day = new Date(m.startedAt).toLocaleDateString(undefined, {
+      month: "short",
+      day: "numeric",
+    });
+    return m.title ? `${m.title} (${day})` : `the meeting on ${day}`;
+  };
+  return (
+    <section className="boards-notif-group projects-execution" aria-label="Execution">
+      <SectionLabel count={x.rollup.total}>Execution</SectionLabel>
+      <div className="pexec-progress" aria-label={`${x.rollup.percent}% done`}>
+        <div className="pexec-progress-bar">
+          <span style={{ width: `${x.rollup.percent}%` }} />
+        </div>
+        <span className="pexec-progress-text">
+          {x.rollup.percent}% done · {x.rollup.completed} of {x.rollup.total}
+          {x.rollup.blocked > 0 ? ` · ${x.rollup.blocked} blocked` : ""}
+          {x.rollup.overdue > 0 ? ` · ${x.rollup.overdue} late` : ""}
+        </span>
+      </div>
+
+      {x.workstreams.length > 1 && (
+        <ul className="pexec-streams" aria-label="Workstreams">
+          {x.workstreams.map((w) => (
+            <li key={`${w.boardId}:${w.groupId ?? "loose"}`}>
+              <button type="button" onClick={() => onOpen(w.boardId)}>
+                <span className="pexec-stream-name">{w.label}</span>
+                <span className="pexec-progress-bar small">
+                  <span style={{ width: `${w.percent}%` }} />
+                </span>
+                <span className="pexec-stream-meta">
+                  {w.completed}/{w.total}
+                  {w.blocked ? ` · ${w.blocked} blocked` : ""}
+                  {w.overdue ? ` · ${w.overdue} late` : ""}
+                </span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {x.blockers.length > 0 && (
+        <>
+          <div className="pexec-subhead mono-caps">Blocked</div>
+          <ul className="pexec-stories" aria-label="Blocked work">
+            {x.blockers.map((b) => (
+              <li key={`${b.boardId}:${b.target.id}`} className="pexec-story">
+                <button
+                  type="button"
+                  className="pexec-story-target"
+                  onClick={() => onOpen(b.boardId, b.target.id)}
+                >
+                  {b.target.label}
+                  {b.target.owner ? <span className="pexec-owner"> · {b.target.owner}</span> : null}
+                </button>
+                {b.waitsOn.length > 0 ? (
+                  <div className="pexec-story-line">
+                    waits on{" "}
+                    {b.waitsOn.map((s, i) => (
+                      <span key={s.id}>
+                        {i > 0 ? " → " : ""}
+                        <button type="button" onClick={() => onOpen(b.boardId, s.id)}>
+                          {s.label}
+                        </button>
+                        {s.owner ? <span className="pexec-owner"> ({s.owner})</span> : null}
+                      </span>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="pexec-story-line">marked blocked by hand</div>
+                )}
+                {b.decisions.map((d) => (
+                  <div key={d.id} className="pexec-story-line">
+                    because of{" "}
+                    <button type="button" onClick={() => onOpen(b.boardId, d.id)}>
+                      {d.label}
+                    </button>
+                    {d.evidence && (
+                      <>
+                        {" — decided in "}
+                        <button
+                          type="button"
+                          onClick={() =>
+                            onTurn(
+                              meetings[d.evidence!.meetingId]?.boardId ?? b.boardId,
+                              d.evidence!.meetingId,
+                              d.evidence!.turnRange?.[0],
+                            )
+                          }
+                        >
+                          {meetingName(d.evidence.meetingId)}
+                        </button>
+                      </>
+                    )}
+                  </div>
+                ))}
+                <div className="pexec-story-where mono">{b.boardName}</div>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+
+      {x.overdue.length > 0 && (
+        <>
+          <div className="pexec-subhead mono-caps">Late</div>
+          <ul className="pexec-stories" aria-label="Late work">
+            {x.overdue.map((o) => (
+              <li key={`${o.boardId}:${o.id}`} className="pexec-story">
+                <button
+                  type="button"
+                  className="pexec-story-target"
+                  onClick={() => onOpen(o.boardId, o.id)}
+                >
+                  {o.label}
+                  {o.owner ? <span className="pexec-owner"> · {o.owner}</span> : null}
+                </button>
+                <div className="pexec-story-line">due {o.dueDate}</div>
+                <div className="pexec-story-where mono">{o.boardName}</div>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+    </section>
   );
 }

@@ -6,6 +6,7 @@ import {
   type ProjectPatch,
   type StoredProject,
 } from "../projects.js";
+import { projectExecution } from "@lucent/core";
 import type { RegisterRoutes } from "./context.js";
 
 /**
@@ -15,6 +16,7 @@ import type { RegisterRoutes } from "./context.js";
  *                                                   holding a board shared with the caller
  *   POST   /api/orgs/:id/projects                   create (org editor, CSRF, audited)
  *   GET    /api/orgs/:id/projects/:pid              one project: boards, meetings, statements
+ *   GET    /api/orgs/:id/projects/:pid/execution    its dashboard: progress, workstreams, blockers
  *   PATCH  /api/orgs/:id/projects/:pid              edit or archive (org editor, CSRF, audited)
  *   PUT    /api/orgs/:id/projects/:pid/boards/:bid  link a board (org editor, CSRF, audited)
  *   DELETE /api/orgs/:id/projects/:pid/boards/:bid  unlink it
@@ -230,6 +232,56 @@ export const registerProjectRoutes: RegisterRoutes = (router, s) => {
       project: { ...view(project, readable), stats: statsOf(rows) },
       meetings: meetingSummaries,
       statements: rows.map((r) => ({ ...r, boardName: names.get(r.boardId) ?? "" })),
+    });
+  });
+
+  // docs/26 §8 (A5): the project dashboard — progress, workstreams, and every
+  // blocker as a story (what it waits on, who owns each step, the decision
+  // behind it, the meeting turns behind that), across the boards the caller
+  // can read. Computed on read from the boards; nothing stored.
+  router.get("/api/orgs/:id/projects/:pid/execution", async (ctx) => {
+    const { req, res } = ctx;
+    const user = await requireUser(req, res);
+    if (!user) return;
+    const orgId = ctx.param("id");
+    const found = await visible(orgId, ctx.param("pid"), user.id, req);
+    if (!found) return send(res, 404, { error: "project not found" });
+    const boards = found.project.boardIds
+      .map((id) => found.readable.get(id))
+      .filter((b) => b !== undefined);
+    const execution = projectExecution(
+      boards.map((b) => ({ id: b.id, name: b.name, workspace: b.workspace })),
+      Date.now(),
+    );
+    // Name the meetings the stories cite, so "decided in Tuesday's review"
+    // can be said, not a meeting id.
+    const cited = new Set<string>();
+    for (const b of execution.blockers) {
+      if (b.evidence) cited.add(b.evidence.meetingId);
+      for (const d of b.decisions) if (d.evidence) cited.add(d.evidence.meetingId);
+    }
+    const meetingNames: Record<
+      string,
+      { boardId: string; title: string | null; startedAt: number }
+    > = {};
+    if (meetings && cited.size > 0) {
+      for (const m of await meetings.forBoards(
+        boards.map((b) => b.id),
+        200,
+      )) {
+        if (cited.has(m.id)) {
+          meetingNames[m.id] = {
+            boardId: m.boardId,
+            title: m.title ?? null,
+            startedAt: m.startedAt,
+          };
+        }
+      }
+    }
+    send(res, 200, {
+      project: { id: found.project.id, name: found.project.name },
+      execution,
+      meetings: meetingNames,
     });
   });
 

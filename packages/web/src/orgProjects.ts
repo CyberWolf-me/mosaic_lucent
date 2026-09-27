@@ -162,6 +162,27 @@ export async function setProjectBoard(
   }
 }
 
+/** A project's dashboard (docs/26 §8): progress, workstreams, blockers as stories. */
+export interface ProjectExecutionView {
+  execution: import("@lucent/core").ProjectExecution;
+  meetings: Record<string, { boardId: string; title: string | null; startedAt: number }>;
+}
+
+export async function getProjectExecution(
+  orgId: string,
+  projectId: string,
+): Promise<ProjectExecutionView | null> {
+  try {
+    const res = await apiFetch(
+      `${orgPath(orgId)}/projects/${encodeURIComponent(projectId)}/execution`,
+    );
+    if (!res.ok) return null;
+    return (await res.json()) as ProjectExecutionView;
+  } catch {
+    return null;
+  }
+}
+
 /** The projects a board belongs to — empty when there are none or the call fails. */
 export async function projectsOfBoard(
   boardId: string,

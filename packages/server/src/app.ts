@@ -474,6 +474,7 @@ const ROUTE_SEGMENTS = new Set([
   "search",
   "local",
   "threads",
+  "execution",
 ]);
 
 /**

@@ -25,6 +25,7 @@ export * from "./partial.js";
 export * from "./topicFold.js";
 export * from "./statementIndex.js";
 export * from "./trust.js";
+export * from "./projectExecution.js";
 export * from "./routing.js";
 export * from "./representations.js";
 export * from "./mermaid.js";
