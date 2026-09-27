@@ -32,9 +32,14 @@ is already treated as an input to intelligence, not the intelligence itself
 (ADR 0021: statements live on nodes; ADR 0022: provenance rides the
 operation).
 
-The fourth clause — the voice participant — is not built, and the advisory
-itself says not to start there (§27: "I would not start with
-voice-interacting Lucent. That is flashy but not the foundation.").
+The fourth clause — the voice participant — was not built when this was
+written, and the advisory itself says not to start there (§27: "I would not
+start with voice-interacting Lucent. That is flashy but not the
+foundation."). It has since shipped in an honest form (docs/25 V6–V9): in
+Assistant and Participant modes Lucent answers when addressed, by text and
+voice, and the conversational lease (`web/src/meeting-voice.ts`) takes the
+same speaker's follow-ups for 15 s without the wake word. It never speaks
+unprompted. _(Updated 2026-09-27, docs/26 F11.)_
 
 ## 2. Coverage audit — advisory section → code
 
@@ -54,7 +59,7 @@ voice-interacting Lucent. That is flashy but not the foundation.").
 | Meeting Event Stream as a formal type                                     | Typed union of every event                       | **Shipped for speech (docs/25 V1b)**            | `web/src/stt/events.ts` — `speech_started`/`interim`/`final`/`speech_stopped` with distinct identity fields, one bridge deriving callbacks, interim structurally barred from durability. Domain events (outbox vocabulary) stay fixed/small by rule                                                                                               |
 | Native + external meetings converge on one internal model                 | Zoom/Meet → same pipeline                        | **Shipped seam + mock (E/V3)**                  | Native meetings already land as: capture → turns → extraction → statements → provenance. External import lands the same way (`meetingConnectors.ts` + import route); vendor adapters + attendee grant follow when a Gate C ask or credentials arrive                                                                                              |
 | Retention: audio/transcript/intelligence separately                       | Configurable per class                           | **Trivially satisfied today, policy not built** | Audio is never stored at all (STT is streaming; only text persists) — the advisory's strictest default. Transcript retention = board deletion; no independent policy                                                                                                                                                                              |
-| Native AV meeting room (video/screen share)                               | Lucent as the meeting product                    | **Not built**                                   | LiveKit is used as an STT transport (token-minted rooms), not as an AV surface; MeetingView is transcript-first by design                                                                                                                                                                                                                         |
+| Native AV meeting room (video/screen share)                               | Lucent as the meeting product                    | **Built (2026-09)**                             | A LiveKit room per board (`web/src/meeting-room/NativeRoom.tsx`): camera, mic, screen share, speaking rings, and a dock that keeps the call while you work elsewhere. Lobby, roster, host powers and chat are still to come — docs/28 S4–S5                                                                                                       |
 | Meeting modes: record / intelligence / assistant / participant            | Behavior profiles, not prompt toggles            | **Shipped (D/V2)**                              | `web/src/meeting-modes.ts` (Record burns zero generations, Assistant/Participant degrade disclosed); profile persisted on transcripts (migration 0030); picker + note in MeetingView                                                                                                                                                              |
 | Response Policy Engine + TTS                                              | Lucent speaks, with thresholds                   | **Shipped (V6–V9 honest form)**                 | Wake/address detection + mode policy table (docs/25 §5); text answers via Ask, TTS seam (local default + server proxy), chunk-cadence interruption, proactive text panel. Proactive speech + per-utterance barge-in stay gated                                                                                                                    |
 | Model router (fast/smart/reasoning)                                       | Different models per loop                        | **Partial**                                     | One provider per deployment + BYO-key per request (`modelRouter.ts`); no per-loop routing — justified only when a second loop exists (M6)                                                                                                                                                                                                         |
