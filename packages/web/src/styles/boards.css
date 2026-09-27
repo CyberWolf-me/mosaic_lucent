@@ -322,6 +322,39 @@ html[data-theme="dark"] .boards-sk-shape {
   color: var(--ink-0);
   border-color: var(--ink-4);
 }
+.boards-tool.star {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  padding: 0;
+}
+.boards-tool.star svg {
+  width: 13px;
+  height: 13px;
+}
+.boards-tool.star.on {
+  color: var(--bloom-2);
+}
+.boards-tool.star.on svg {
+  fill: currentColor;
+}
+/* A starred card keeps its star in view; the other tools still wait for hover. */
+.boards-card-tools.keep {
+  opacity: 1;
+}
+.boards-card-tools.keep .boards-tool:not(.star) {
+  opacity: 0;
+  transition: opacity 0.15s var(--e-out);
+}
+.boards-card:hover .boards-card-tools.keep .boards-tool,
+.boards-card:focus-within .boards-card-tools.keep .boards-tool {
+  opacity: 1;
+}
+@media (hover: none) {
+  .boards-card-tools.keep .boards-tool {
+    opacity: 1;
+  }
+}
 .boards-tool.danger:hover {
   color: var(--madder);
   border-color: oklch(from var(--madder) l c h / 0.45);

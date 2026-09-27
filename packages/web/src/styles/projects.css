@@ -60,6 +60,16 @@ html[data-theme="dark"] .projects-form {
 .projects-status select {
   min-width: 110px;
 }
+.projects-star svg {
+  width: 14px;
+  height: 14px;
+}
+.projects-star.on {
+  color: var(--bloom-2);
+}
+.projects-star.on svg {
+  fill: currentColor;
+}
 .projects-board {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;

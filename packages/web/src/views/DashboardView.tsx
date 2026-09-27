@@ -8,7 +8,7 @@ import {
   type StatementFields,
   type Workspace,
 } from "@lucent/core";
-import { Ico } from "../ui/icons.js";
+import { Ico, ToolIco } from "../ui/icons.js";
 import { DIAGRAM_LABELS } from "../scene.js";
 import { Button, Card, EmptyState, FilterChips, Page, PageHeader, type FilterItem } from "../ui/kit.js";
 import { StatementGlyph } from "../ui/StatementGlyph.js";
@@ -36,6 +36,7 @@ import { hasSession } from "../session.js";
 import { loadOrgs, setCurrentOrgId, type OrgSummary } from "../orgs.js";
 import { listBoards, listSharedWithMe, type BoardSummary } from "../boards.js";
 import { trashBoard } from "../trash.js";
+import { listFavorites, setFavorite } from "../me.js";
 import { KIND_TINT, statementIsHistory } from "../statementUi.js";
 import { TEMPLATES, type Template } from "../templates.js";
 
@@ -126,6 +127,35 @@ export function DashboardView({ onOpenSettings }: { onOpenSettings: (section?: s
       cancelled = true;
     };
   }, []);
+  /** docs/26 A6: the server boards you starred — they lead Home. */
+  const [starred, setStarred] = useState<ReadonlySet<string>>(() => new Set());
+  useEffect(() => {
+    if (!hasSession()) return;
+    let cancelled = false;
+    void listFavorites().then((list) => {
+      if (!cancelled && list) {
+        setStarred(new Set(list.filter((f) => f.kind === "board").map((f) => f.id)));
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const toggleStar = async (b: BoardEntry): Promise<void> => {
+    const on = !starred.has(b.id);
+    const flip = (want: boolean) =>
+      setStarred((s) => {
+        const next = new Set(s);
+        if (want) next.add(b.id);
+        else next.delete(b.id);
+        return next;
+      });
+    flip(on);
+    if (!(await setFavorite("board", b.id, on))) {
+      flip(!on);
+      notify(`Couldn't ${on ? "star" : "unstar"} ${b.name}.`, undefined, "error");
+    }
+  };
   // "idle" when signed out: there is no server list to wait for.
   const [cloudState, setCloudState] = useState<"idle" | "loading" | "ready" | "offline">(() =>
     hasSession() ? "loading" : "idle",
@@ -652,6 +682,12 @@ export function DashboardView({ onOpenSettings }: { onOpenSettings: (section?: s
                       : b.id === openBoardId
                   }
                   onOpen={() => void openEntry(b)}
+                  starred={starred.has(b.id)}
+                  onStar={
+                    b.scope === "team" || b.scope === "shared"
+                      ? () => void toggleStar(b)
+                      : undefined
+                  }
                   onRename={
                     b.scope === "local"
                       ? () => {
@@ -775,6 +811,8 @@ function BoardCard({
   onOpen,
   onRename,
   onDelete,
+  starred = false,
+  onStar,
 }: {
   board: BoardEntry;
   now: number;
@@ -782,6 +820,9 @@ function BoardCard({
   onOpen: () => void;
   onRename?: () => void;
   onDelete?: () => void;
+  starred?: boolean;
+  /** Server boards only: star or unstar it for Home. */
+  onStar?: () => void;
 }) {
   const badge = SCOPE_BADGE[board.scope];
   const meta = [
@@ -829,8 +870,20 @@ function BoardCard({
           )}
         </div>
       </button>
-      {(onRename || onDelete) && (
-        <div className="boards-card-tools">
+      {(onRename || onDelete || onStar) && (
+        <div className={`boards-card-tools ${starred ? "keep" : ""}`}>
+          {onStar && (
+            <button
+              type="button"
+              className={`boards-tool star ${starred ? "on" : ""}`}
+              onClick={onStar}
+              aria-pressed={starred}
+              aria-label={`${starred ? "Unstar" : "Star"} ${board.name}`}
+              title={starred ? "Starred — it leads Home" : "Star it for Home"}
+            >
+              <ToolIco.Star aria-hidden />
+            </button>
+          )}
           {onRename && (
             <button
               type="button"

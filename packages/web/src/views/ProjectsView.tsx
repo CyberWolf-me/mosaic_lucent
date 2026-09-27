@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useId, useMemo, useState } from "react";
 import { trashProject } from "../trash.js";
+import { listFavorites, setFavorite } from "../me.js";
 import type { StatementKind } from "@lucent/core";
 import { useWorkspace } from "../workspace.js";
 import { useToast } from "../ui/Toast.js";
-import { Ico } from "../ui/icons.js";
+import { Ico, ToolIco } from "../ui/icons.js";
 import {
   Button,
   EmptyState,
@@ -421,6 +422,27 @@ function ProjectDetail({
   const [orgBoards, setOrgBoards] = useState<BoardSummary[]>([]);
   const [editing, setEditing] = useState(false);
   const canEdit = org.role !== "viewer";
+  /** docs/26 A6: starred projects lead Home. */
+  const [starred, setStarred] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    void listFavorites().then((list) => {
+      if (!cancelled && list) {
+        setStarred(list.some((f) => f.kind === "project" && f.id === projectId));
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId]);
+  const toggleStar = async () => {
+    const on = !starred;
+    setStarred(on);
+    if (!(await setFavorite("project", projectId, on))) {
+      setStarred(!on);
+      notify(`Couldn't ${on ? "star" : "unstar"} this project.`, undefined, "error");
+    }
+  };
 
   const refresh = useCallback(async () => {
     const next = await getOrgProject(org.id, projectId);
@@ -559,6 +581,15 @@ function ProjectDetail({
           <>
             <Button variant="quiet" onClick={onBack}>
               <Ico.Left /> All projects
+            </Button>
+            <Button
+              variant="quiet"
+              className={`projects-star ${starred ? "on" : ""}`}
+              aria-pressed={starred}
+              onClick={() => void toggleStar()}
+              title={starred ? "Starred — it leads Home" : "Star it for Home"}
+            >
+              <ToolIco.Star aria-hidden /> {starred ? "Starred" : "Star"}
             </Button>
             {canEdit && (
               <label className="projects-status">

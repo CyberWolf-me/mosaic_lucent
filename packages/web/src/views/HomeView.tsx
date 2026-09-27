@@ -6,6 +6,7 @@ import { listBoards, type BoardSummary } from "../boards.js";
 import { loadOrgs } from "../orgs.js";
 import { listWorkspaceMeetings, meetingName, type MeetingSummary } from "../meetings.js";
 import { listOrgProjects, loadWorkspaceIntelligence, type OrgProject } from "../orgProjects.js";
+import { listFavorites, loadActivity, type ActivityItem, type FavoriteView } from "../me.js";
 import { ScopedAsk } from "../ui/ScopedAsk.js";
 import { threadScope } from "../workspaceAsk.js";
 import {
@@ -21,7 +22,7 @@ import {
   type PulseItem,
   type PulseNotice,
 } from "../pulse.js";
-import { Ico } from "../ui/icons.js";
+import { Ico, ToolIco } from "../ui/icons.js";
 import { useToast } from "../ui/Toast.js";
 import { StatementGlyph } from "../ui/StatementGlyph.js";
 import {
@@ -56,6 +57,8 @@ const LOCAL_BOARD_CAP = 12;
 /** Rows before "Show all". */
 const NEEDS_PREVIEW = 6;
 const RECENT_LIMIT = 5;
+const STARRED_PREVIEW = 6;
+const ACTIVITY_PREVIEW = 6;
 
 /** How a board key opens: a local project slot, a server board, or both. */
 interface Opener {
@@ -142,6 +145,24 @@ export function HomeView({ onOpenSettings }: { onOpenSettings: (section?: string
         if (!cancelled) setCloud((c) => (c.loaded ? c : { ...c, loaded: true }));
       }
     })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Yours across workspaces (docs/26 A6): what you starred, and what others
+  // changed lately on the boards you follow. Either failing just hides it.
+  const [mine, setMine] = useState<{
+    loaded: boolean;
+    starred: FavoriteView[];
+    activity: ActivityItem[];
+  }>(() => ({ loaded: !hasSession(), starred: [], activity: [] }));
+  useEffect(() => {
+    if (!hasSession()) return;
+    let cancelled = false;
+    void Promise.all([listFavorites(), loadActivity()]).then(([starred, activity]) => {
+      if (!cancelled) setMine({ loaded: true, starred: starred ?? [], activity: activity ?? [] });
+    });
     return () => {
       cancelled = true;
     };
@@ -275,9 +296,14 @@ export function HomeView({ onOpenSettings }: { onOpenSettings: (section?: string
     return input ? input.workspace === null && !input.indexed : false;
   });
   const serverOnlyWithContent = serverOnly.filter((b) => b.nodes === undefined || b.nodes > 0);
-  const hasWork = pulse.boardsWithContent > 0 || serverOnlyWithContent.length > 0;
-  const firstRun = !hasWork && cloud.loaded;
-  const settling = !hasWork && !cloud.loaded;
+  // Something starred, or a teammate's recent change, is work to come back to.
+  const hasWork =
+    pulse.boardsWithContent > 0 ||
+    serverOnlyWithContent.length > 0 ||
+    mine.starred.length > 0 ||
+    mine.activity.length > 0;
+  const firstRun = !hasWork && cloud.loaded && mine.loaded;
+  const settling = !hasWork && !(cloud.loaded && mine.loaded);
 
   /* ----------------------------- navigation ----------------------------- */
 
@@ -366,6 +392,15 @@ export function HomeView({ onOpenSettings }: { onOpenSettings: (section?: string
     params.set("project", id);
     window.history.replaceState(null, "", `?${params.toString()}`);
     setView("projects");
+  };
+
+  /** A server board by id — a starred one, or one the feed names. */
+  const openServerBoard = async (id: string): Promise<void> => {
+    if (id === boardId) {
+      setView("canvas");
+      return;
+    }
+    if (!(await openBoard(id))) notify(MISSING_BOARD, undefined, "error");
   };
 
   const openRecent = (key: string) => {
@@ -686,9 +721,53 @@ export function HomeView({ onOpenSettings }: { onOpenSettings: (section?: string
                     )}
                   </>
                 )}
+
+                {mine.activity.length > 0 && (
+                  <>
+                    <SectionLabel>From your team</SectionLabel>
+                    <ul className="home-activity">
+                      {mine.activity.slice(0, ACTIVITY_PREVIEW).map((a) => (
+                        <ActivityRow
+                          key={`${a.boardId}:${a.seq}`}
+                          item={a}
+                          now={now}
+                          onOpen={() => void openServerBoard(a.boardId)}
+                        />
+                      ))}
+                    </ul>
+                  </>
+                )}
               </div>
 
               <div className="home-col">
+                {mine.starred.length > 0 && (
+                  <>
+                    <SectionLabel count={mine.starred.length}>Starred</SectionLabel>
+                    <ul className="home-boards">
+                      {mine.starred.slice(0, STARRED_PREVIEW).map((f) => (
+                        <li key={`${f.kind}:${f.id}`}>
+                          <button
+                            type="button"
+                            className={`home-board ${f.id === boardId ? "current" : ""}`}
+                            onClick={() =>
+                              f.kind === "board" ? void openServerBoard(f.id) : openOrgProject(f.id)
+                            }
+                          >
+                            <ToolIco.Star className="home-star" aria-hidden />
+                            <span className="home-board-text">
+                              <span className="home-board-name">{f.name}</span>
+                              <span className="home-board-meta">
+                                {f.kind === "board" ? "board" : "project"} · updated{" "}
+                                {timeAgo(f.updatedAt, now)}
+                              </span>
+                            </span>
+                            <Ico.Arrow className="home-board-arrow" aria-hidden />
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  </>
+                )}
                 {org.projects.length > 0 && (
                   <>
                     <SectionLabel count={org.projects.length}>Projects</SectionLabel>
@@ -886,6 +965,35 @@ function MeetingRow({ meeting: m, onOpen }: { meeting: MeetingSummary; onOpen: (
             {meetingName(m)} · {m.boardName || "Board"}
           </span>
           <span className="home-meeting-meta">{meta}</span>
+        </span>
+      </button>
+    </li>
+  );
+}
+
+/** One change someone else made on a board you follow. */
+function ActivityRow({
+  item: a,
+  now,
+  onOpen,
+}: {
+  item: ActivityItem;
+  now: number;
+  onOpen: () => void;
+}) {
+  const who = a.onBehalfOf ? `${a.actor} for ${a.onBehalfOf}` : a.actor;
+  return (
+    <li>
+      <button type="button" className="home-activity-row" onClick={onOpen}>
+        <Avatar name={a.actor} size={24} />
+        <span className="home-board-text">
+          <span className="home-activity-what">
+            <strong>{who}</strong> {a.label || `made ${a.ops} change${a.ops === 1 ? "" : "s"}`}
+          </span>
+          <span className="home-board-meta">
+            {a.starred ? "★ " : ""}
+            {a.boardName} · {timeAgo(a.at, now)}
+          </span>
         </span>
       </button>
     </li>

@@ -406,6 +406,56 @@ html[data-theme="dark"] .home-board {
   flex-shrink: 0;
   color: var(--ink-3);
 }
+.home-star {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  color: var(--bloom-2);
+  fill: currentColor;
+}
+
+/* ---------------------------------------------------------------
+   From your team — what others changed on boards you follow
+   --------------------------------------------------------------- */
+
+.home-activity {
+  display: grid;
+  gap: 2px;
+  list-style: none;
+}
+.home-activity-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  margin-left: -10px;
+  font: inherit;
+  text-align: left;
+  color: inherit;
+  background: none;
+  border: 0;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.home-activity-row:hover {
+  background: var(--paper-2);
+}
+.home-activity-row:focus-visible {
+  outline: 2px solid var(--bloom-1);
+  outline-offset: 2px;
+}
+.home-activity-what {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  color: var(--ink-1);
+}
+.home-activity-what strong {
+  font-weight: 500;
+  color: var(--ink-0);
+}
 
 /* ---------------------------------------------------------------
    What Lucent noticed — only ever a real, derived signal

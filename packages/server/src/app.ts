@@ -132,6 +132,8 @@ import { registerOrgMemberRoutes } from "./routes/orgMembers.js";
 import { registerGuestRoutes } from "./routes/guests.js";
 import { registerTeamRoutes } from "./routes/teams.js";
 import { registerTrashRoutes } from "./routes/trash.js";
+import { registerMeRoutes } from "./routes/me.js";
+import { InMemoryFavoriteStore } from "./favorites.js";
 import { InMemoryTrashStore, withMeetingTrash, withProjectTrash } from "./trash.js";
 import { InMemoryTeamStore, withTeamGrants } from "./teams.js";
 import { registerSsoRoutes } from "./routes/sso.js";
@@ -320,6 +322,8 @@ export interface AppDeps {
   teams?: import("./teams.js").TeamStore;
   /** docs/26 A6: trashed meetings and projects (in-memory when absent). */
   trash?: import("./trash.js").TrashStore;
+  /** docs/26 A6: the boards and projects people star (in-memory when absent). */
+  favorites?: import("./favorites.js").FavoriteStore;
   /**
    * P2's outbox. When present, ending a meeting announces `MeetingEnded`
    * (docs/28 A3.3) and main.ts's consumer queues its summary. Absent in most
@@ -2369,6 +2373,7 @@ export function createApp(deps: AppDeps): App {
     meetingNotes: deps.meetingNotes ?? (meetings ? new InMemoryMeetingNotesStore() : undefined),
     projects: withProjectTrash(deps.projects ?? new InMemoryProjectStore(), trashStore),
     trash: trashStore,
+    favorites: deps.favorites ?? new InMemoryFavoriteStore(),
     intelligence,
     aiRuns,
     recordRun,
@@ -2604,6 +2609,7 @@ export function createApp(deps: AppDeps): App {
   registerGuestRoutes(router, services);
   registerTeamRoutes(router, services);
   registerTrashRoutes(router, services);
+  registerMeRoutes(router, services);
   registerOrgSettingsRoutes(router, services);
   registerSttRoutes(router, services);
   registerCallRoutes(router, services);

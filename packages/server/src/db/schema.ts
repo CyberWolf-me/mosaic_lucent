@@ -1435,6 +1435,23 @@ export const boardTrash = pgTable(
   }),
 );
 
+/** docs/26 A6: the boards and projects a person stars (favorites.ts). */
+export const favorites = pgTable(
+  "favorites",
+  {
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull(),
+    targetId: text("target_id").notNull(),
+    orgId: text("org_id").notNull(),
+    createdAt: bigint("created_at", { mode: "number" }).notNull(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.userId, t.kind, t.targetId] }),
+  }),
+);
+
 /**
  * docs/26 A6: trashed meetings and projects (trash.ts) — hidden from every
  * read until restored, purged after 30 days.

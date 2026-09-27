@@ -835,8 +835,26 @@ a much better product — not rewriting the layout engine.
     had a Delete. A meeting has Delete beside Rename, and a project has it
     in its edit form.
 
+  - _Favorites and activity._ Star a board from its dashboard card or a
+    project from its page. Starred things lead Home, newest first, and each
+    opens in one click. A star is personal, and the list shows only what you
+    can still open: a board you lost access to, or one in the trash, drops
+    off without being unstarred. Migration 0044 (favorites, RLS on); at
+    most 200 per person.
+
+    Home's "From your team" is what others changed lately on the boards you
+    follow: starred ones first, then the ones given to you, then each
+    workspace's recently changed boards. It shows up to 15 boards and 14
+    days, from the op log. Your own edits, and an AI's edits you asked for,
+    aren't news, so they're left out. An AI change names who asked for it.
+    Before, a person with only starred or shared work landed on Home's
+    first-run screen; that now counts as work.
+    `GET/PUT/DELETE /api/me/favorites`, `GET /api/me/activity`.
+
   - Evidence: server `org-members.test.ts` (3), `guests.test.ts` (4),
     `trash.test.ts` (3), `pg-trash.test.ts`; `scripts/trash-check.mjs` (6/6);
+    `me.test.ts` (2), `pg-favorites.test.ts`; `scripts/favorites-check.mjs`
+    (8/8);
     `teams.test.ts` (3, with SCIM Groups), `pg-teams.test.ts`;
     `scripts/teams-check.mjs` (6/6);
     `scripts/guests-check.mjs` (6/6); `scripts/org-members-check.mjs`

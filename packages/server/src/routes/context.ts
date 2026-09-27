@@ -130,6 +130,8 @@ export interface RouteServices {
   readonly teams: import("../teams.js").TeamStore;
   /** docs/26 A6: trashed meetings and projects. */
   readonly trash: import("../trash.js").TrashStore;
+  /** docs/26 A6: the boards and projects people star. */
+  readonly favorites: import("../favorites.js").FavoriteStore;
   /**
    * The boards a user can read in an org — every board for a member, only
    * the boards shared with them for an outside collaborator. Every
