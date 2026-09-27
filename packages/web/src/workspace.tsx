@@ -46,7 +46,7 @@ import {
 import { WORKER_ELK_ENGINE } from "./diagram/elk/index.js";
 import { pushRegionNeighbors } from "./diagram/regionGrowth.js";
 import { classifyTurn } from "./meetings.js";
-import { BoardSync, type Peer } from "./boardSync.js";
+import { BoardSync, type Peer, type Spotlight, type Viewport } from "./boardSync.js";
 import {
   createServerProposal,
   decideServerProposal,
@@ -340,8 +340,20 @@ export interface WorkspaceState {
 
   /** Live collaborators on the current board (empty when offline/solo). */
   peers: Peer[];
-  /** Report this user's cursor/selection to collaborators. */
-  setPresence: (update: { cursor?: { x: number; y: number } | null; selection?: string[] }) => void;
+  /** Report this user's cursor/selection/viewport to collaborators. */
+  setPresence: (update: {
+    cursor?: { x: number; y: number } | null;
+    selection?: string[];
+    viewport?: Viewport | null;
+  }) => void;
+  /** docs/28 S5: who has the board's spotlight (everyone follows their view). */
+  spotlight: Spotlight | null;
+  /** Take the spotlight, or give it up. */
+  setSpotlight: (on: boolean) => void;
+  /** Bring everyone else to this view, once. */
+  summon: (viewport: Viewport) => void;
+  /** The latest "bring everyone here" that reached this board, for the canvas to follow. */
+  lastSummon: { from: Spotlight; viewport: Viewport; at: number } | null;
   /** Realtime connection state, for the share dialog and a status dot. */
   syncStatus: SyncStatus;
   /** This user's role on the shared board, once connected. */
@@ -896,6 +908,12 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   // Live collaborators. Populated only when a server-side board is open and the
   // realtime socket is connected; empty in the offline/solo localStorage flow.
   const [peers, setPeers] = useState<Peer[]>([]);
+  const [spotlight, setSpotlightState] = useState<Spotlight | null>(null);
+  const [lastSummon, setLastSummon] = useState<{
+    from: Spotlight;
+    viewport: Viewport;
+    at: number;
+  } | null>(null);
   const [syncStatus, setSyncStatus] = useState<SyncStatus>("offline");
   const [syncRole, setSyncRole] = useState<BoardRole | null>(null);
   const [boardId, setBoardId] = useState<string | null>(null);
@@ -910,11 +928,17 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const applyingRemote = useRef(false);
 
   const setPresence = useCallback(
-    (update: { cursor?: { x: number; y: number } | null; selection?: string[] }) => {
+    (update: {
+      cursor?: { x: number; y: number } | null;
+      selection?: string[];
+      viewport?: Viewport | null;
+    }) => {
       syncRef.current?.setPresence(update);
     },
     [],
   );
+  const setSpotlight = useCallback((on: boolean) => syncRef.current?.setSpotlight(on), []);
+  const summon = useCallback((viewport: Viewport) => syncRef.current?.summon(viewport), []);
 
   /**
    * Attach a realtime session to a server-side board. The server is
@@ -923,6 +947,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
    */
   const connectSync = useCallback((id: string, initial: Workspace) => {
     syncRef.current?.disconnect();
+    // A new board's room says who has its spotlight when it welcomes us.
+    setSpotlightState(null);
+    setLastSummon(null);
     const sync = new BoardSync(id, initial, {
       onWorkspace: (ws) => {
         applyingRemote.current = true;
@@ -964,6 +991,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       onPeers: setPeers,
       onStatus: setSyncStatus,
       onRole: setSyncRole,
+      onSpotlight: setSpotlightState,
+      onSummon: (from, viewport) => setLastSummon({ from, viewport, at: Date.now() }),
       onRejected: (error) => {
         // A viewer's edit, or a stale op. The server state we already hold wins.
         setChat((c) => [...c, { role: "error", text: `Change refused: ${error}` }]);
@@ -1103,6 +1132,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     setSyncRole(null);
     setSyncStatus("offline");
     setPeers([]);
+    setSpotlightState(null);
+    setLastSummon(null);
     setBoardId(null);
     stripBoardFromUrl();
   }, []);
@@ -2565,6 +2596,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     canRedo: historyRef.current.canRedo(),
     peers,
     setPresence,
+    spotlight,
+    setSpotlight,
+    summon,
+    lastSummon,
     syncStatus,
     syncRole,
     readOnly,

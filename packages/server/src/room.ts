@@ -49,8 +49,38 @@ export interface Presence {
   cursor: { x: number; y: number } | null;
   /** Object ids the participant currently has selected. */
   selection: string[];
+  /**
+   * Where they're looking (docs/28 S5): the content point at the centre of
+   * their screen and their zoom, so someone following sees the same place
+   * whatever the size of their window. Null until their camera reports; the
+   * cross-instance presence store doesn't carry it (following is per instance).
+   */
+  viewport?: Viewport | null;
   color: string;
   updatedAt: number;
+}
+
+/** A camera in content coordinates: its centre and its zoom (percent). */
+export interface Viewport {
+  x: number;
+  y: number;
+  zoom: number;
+}
+
+/** Who has everyone's attention on the board right now (docs/28 S5). */
+export interface Spotlight {
+  userId: string;
+  name: string;
+}
+
+/** A viewport a client sent, or null when it isn't one. */
+export function cleanViewport(value: unknown): Viewport | null {
+  if (typeof value !== "object" || value === null) return null;
+  const v = value as Record<string, unknown>;
+  const ok = (n: unknown, max: number): n is number =>
+    typeof n === "number" && Number.isFinite(n) && Math.abs(n) <= max;
+  if (!ok(v.x, 1e7) || !ok(v.y, 1e7) || !ok(v.zoom, 1000) || v.zoom <= 0) return null;
+  return { x: v.x, y: v.y, zoom: v.zoom };
 }
 
 export interface CommitResult {
@@ -546,7 +576,11 @@ export class Room {
   updatePresence(
     userId: string,
     name: string,
-    update: { cursor?: { x: number; y: number } | null; selection?: string[] },
+    update: {
+      cursor?: { x: number; y: number } | null;
+      selection?: string[];
+      viewport?: Viewport | null;
+    },
   ): Presence {
     const existing = this.presence.get(userId);
     const next: Presence = {
@@ -554,6 +588,7 @@ export class Room {
       name,
       cursor: update.cursor !== undefined ? update.cursor : (existing?.cursor ?? null),
       selection: update.selection ?? existing?.selection ?? [],
+      viewport: update.viewport !== undefined ? update.viewport : (existing?.viewport ?? null),
       color: existing?.color ?? colorForUser(userId),
       updatedAt: Date.now(),
     };
@@ -563,6 +598,21 @@ export class Room {
 
   removePresence(userId: string): void {
     this.presence.delete(userId);
+  }
+
+  /**
+   * Who has the spotlight (docs/28 S5): everyone else's view follows theirs
+   * until they stop, leave, or a follower steps away. One at a time; this
+   * instance's room only.
+   */
+  private spotlit: Spotlight | null = null;
+
+  spotlight(): Spotlight | null {
+    return this.spotlit;
+  }
+
+  setSpotlight(next: Spotlight | null): void {
+    this.spotlit = next;
   }
 
   /** Everyone currently present, optionally excluding one user. */

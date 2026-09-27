@@ -314,7 +314,7 @@ still to come.
 | Live captions (interim, never stored)                         | everyone                     |                 ✅ CC — each speaker's own device, to whoever reads them                 |
 | Capture indicator (rule 4)                                    | everyone sees it             |                           ✅ "Lucent is transcribing · <name>"                           |
 | Stop transcribing me                                          | everyone                     |                                            ✅                                            |
-| Board beside the call; follow, spotlight, bring everyone here | everyone / presenter         |                              ❌ (`focusOn` exists, unused)                               |
+| Board beside the call; follow, spotlight, bring everyone here | everyone / editors           |                     ✅ on the board, with the call in the dock (S6)                      |
 | Leave                                                         | everyone                     |                                      ✅ no confirm                                       |
 | End for everyone                                              | host                         |                            ✅ also ends a capture of the call                            |
 | Mute, remove, allow sharing, make co-host                     | host                         | ✅ mute, mute everyone, remove, co-host, lower a hand, lock the call, only hosts present |
@@ -688,6 +688,39 @@ V8 transport (F4).
 
   `meeting-followup.test.ts` (2); `scripts/meeting-followup-check.mjs` 7/7
   (two accounts, the dev mailbox).
+
+- **Follow, spotlight, bring everyone here — done (2026-09-28).** On a
+  shared board (with the call in the dock, S6, or without a call), everyone
+  can look at the same place.
+
+  - Each person's presence carries where they look: the board point at the
+    centre of their screen, and their zoom. A follower glides to that point
+    at that zoom, so it holds across window sizes.
+  - **Follow:** anyone can follow someone by clicking their avatar. Your
+    view tracks theirs until you move it yourself; a wheel or a press on the
+    board is taking over.
+  - **Spotlight:** an editor takes it ("Spotlight me") and everyone else
+    follows them. Someone who takes over steps out, and can step back in
+    ("Follow"). It ends when its holder stops or leaves, and an owner can
+    end someone else's.
+  - **Bring everyone here:** an editor moves everyone else's view to theirs,
+    once, and each of them gets "Go back" for fifteen seconds.
+  - The room holds the spotlight and tells a late joiner. Viewers can
+    follow but can't lead.
+
+  Found on the way:
+
+  - Nothing ever published a cursor or a selection, so the live cursors
+    (docs/12) never showed on anyone else's screen. The canvas now publishes
+    both.
+  - The avatar stack sat under the top bar and the shape toolbar, faded and
+    unclickable; it now sits below them.
+
+  Per instance: the cross-instance presence store doesn't carry viewports
+  or the spotlight yet. `collab.e2e.test.ts` (spotlight, summon, viewport
+  over real sockets); `scripts/follow-check.mjs` 7/7 (two browsers: cursors,
+  follow, spotlight, stepping out and back, bring everyone here and go
+  back).
 
 ## 9. Decisions needed
 

@@ -6,7 +6,8 @@ import {
   type Operation,
   type Workspace,
 } from "@lucent/core";
-import { Room } from "./room.js";
+import { Room, cleanViewport } from "./room.js";
+import { roleAtLeast } from "./identity.js";
 import type { LoggedOp } from "./room.js";
 import type { FanoutMessage, Unsubscribe } from "./fanout.js";
 import type { BoardStore } from "./boards.js";
@@ -33,7 +34,7 @@ import type { NotificationKind, NotifyEvent } from "./notifications.js";
  */
 
 interface ClientMsg {
-  type: "join" | "op" | "presence" | "ping";
+  type: "join" | "op" | "presence" | "ping" | "spotlight" | "summon";
   boardId?: string;
   fromSeq?: number;
   ops?: unknown[];
@@ -52,6 +53,10 @@ interface ClientMsg {
   runId?: string;
   cursor?: { x: number; y: number } | null;
   selection?: string[];
+  /** docs/28 S5: where the sender is looking — presence, and a summon's destination. */
+  viewport?: unknown;
+  /** docs/28 S5: take the spotlight (true) or give it up (false). */
+  on?: boolean;
 }
 
 interface Conn {
@@ -275,6 +280,12 @@ export class RealtimeServer {
       case "presence":
         this.presence(conn, msg);
         break;
+      case "spotlight":
+        this.spotlight(conn, msg.on === true);
+        break;
+      case "summon":
+        this.summon(conn, msg);
+        break;
       case "ping":
         this.sendTo(conn, { type: "pong" });
         break;
@@ -347,6 +358,7 @@ export class RealtimeServer {
         version: room.version(),
         role: room.roleOf(conn.userId),
         peers: room.peers(conn.userId),
+        spotlight: room.spotlight(),
       });
       this.broadcast(boardId, { type: "peer-joined", presence }, conn);
       return;
@@ -360,6 +372,7 @@ export class RealtimeServer {
       role: room.roleOf(conn.userId),
       catchup: room.since(fromSeq),
       peers: room.peers(conn.userId),
+      spotlight: room.spotlight(),
     });
     // Tell everyone else this person is here.
     this.broadcast(boardId, { type: "peer-joined", presence }, conn);
@@ -623,6 +636,7 @@ export class RealtimeServer {
     const presence = room.updatePresence(conn.userId, conn.name, {
       cursor: msg.cursor,
       selection: msg.selection,
+      ...(msg.viewport !== undefined ? { viewport: cleanViewport(msg.viewport) } : {}),
     });
     this.broadcast(conn.boardId, { type: "presence", presence }, conn);
     // M3: mirror the cursor/selection to the cross-instance store. A live
@@ -643,6 +657,50 @@ export class RealtimeServer {
     }
   }
 
+  /**
+   * Take or give up the spotlight (docs/28 S5): everyone else's view follows
+   * the holder's. Directing everyone's attention is an editor's to do; an
+   * owner may end someone else's.
+   */
+  private spotlight(conn: Conn, on: boolean): void {
+    if (!conn.boardId) return;
+    const room = this.rooms.get(conn.boardId);
+    if (!room) return;
+    const role = room.roleOf(conn.userId);
+    if (!role || !roleAtLeast(role, "editor")) {
+      this.sendTo(conn, { type: "error", message: "only editors can spotlight" });
+      return;
+    }
+    const current = room.spotlight();
+    if (on) {
+      room.setSpotlight({ userId: conn.userId, name: conn.name });
+    } else if (current && (current.userId === conn.userId || role === "owner")) {
+      room.setSpotlight(null);
+    } else {
+      return;
+    }
+    this.broadcast(conn.boardId, { type: "spotlight", spotlight: room.spotlight() });
+  }
+
+  /** "Bring everyone here" (docs/28 S5): one move of everyone else's view to the sender's. */
+  private summon(conn: Conn, msg: ClientMsg): void {
+    if (!conn.boardId) return;
+    const room = this.rooms.get(conn.boardId);
+    if (!room) return;
+    const role = room.roleOf(conn.userId);
+    if (!role || !roleAtLeast(role, "editor")) {
+      this.sendTo(conn, { type: "error", message: "only editors can bring everyone here" });
+      return;
+    }
+    const viewport = cleanViewport(msg.viewport);
+    if (!viewport) return;
+    this.broadcast(
+      conn.boardId,
+      { type: "summon", from: { userId: conn.userId, name: conn.name }, viewport },
+      conn,
+    );
+  }
+
   private leave(conn: Conn): void {
     // The SLO histogram first: it must fire for every leave, including the
     // early-return below for sockets that never joined a board, or the
@@ -656,6 +714,12 @@ export class RealtimeServer {
     if (room) {
       room.removePresence(conn.userId);
       this.broadcast(conn.boardId, { type: "peer-left", userId: conn.userId }, conn);
+      // The spotlight goes with its holder, once none of their tabs is left.
+      const stillHere = [...(set ?? [])].some((c) => c.userId === conn.userId);
+      if (!stillHere && room.spotlight()?.userId === conn.userId) {
+        room.setSpotlight(null);
+        this.broadcast(conn.boardId, { type: "spotlight", spotlight: null });
+      }
       // Evict an empty room; its state is already persisted in the board store.
       // The cross-instance store is the authoritative "is anyone still here?"
       // when it is wired — a peer on a sibling instance counts.

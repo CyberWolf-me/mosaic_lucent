@@ -66,7 +66,9 @@ import {
 } from "./familyMenu.js";
 import { EngagementBadges, EngagementBar, VotePanel } from "./Engagement.js";
 import { CommentInbox, CommentPanel, CommentPins, NotificationBell } from "./Comments.js";
-import { PresenceBar, PresenceCursors } from "./Presence.js";
+import { FollowBar, PresenceBar, PresenceCursors } from "./Presence.js";
+import { useFollow } from "./useFollow.js";
+import { getSessionUser } from "../session.js";
 import { toggleVoteOps } from "../board/engagement.js";
 import { openThreadCount } from "../board/comments.js";
 import { boardIsBlank, useWorkspace } from "../workspace.js";
@@ -318,6 +320,11 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
     syncStatus,
     boardId,
     startSharing,
+    setPresence,
+    spotlight,
+    setSpotlight,
+    summon,
+    lastSummon,
   } = useWorkspace();
   const [settings] = useSettings();
   const { notify } = useToast();
@@ -433,6 +440,29 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
     return plain;
   }, [selected, selectedNodes, workspace.nodes, workspace.groups]);
   const controls = useRef<ViewportControls | null>(null);
+
+  // docs/28 S5: follow someone's view, the spotlight, "bring everyone here" —
+  // and what the others need for it: where I look, point and select.
+  const meId = getSessionUser()?.id ?? null;
+  const followModes = useFollow({
+    controls,
+    viewportBox,
+    zoom,
+    peers,
+    spotlight,
+    lastSummon,
+    setPresence,
+    meId,
+  });
+  const selectionKey = [...selectedNodes, ...selectedShapes].sort().join(",");
+  useEffect(() => {
+    setPresence({ selection: selectionKey ? selectionKey.split(",") : [] });
+  }, [selectionKey, setPresence]);
+  /** The pointer, in board coordinates, for the others' live cursors. */
+  const publishCursor = (e: React.PointerEvent<HTMLDivElement>) => {
+    const at = controls.current?.clientToContent(e.clientX, e.clientY);
+    if (at) setPresence({ cursor: { x: Math.round(at.x), y: Math.round(at.y) } });
+  };
   const voiceRef = useRef<VoiceSession | null>(null);
   const voiceSupported = isAnyVoiceSupported();
   const voiceInitiatedRef = useRef(false);
@@ -2930,168 +2960,183 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
         </>
       ) : (
         <>
-          <CanvasViewport
-            initialZoom={85}
-            tool={tool === "hand" ? "hand" : "select"}
-            className={drawingArmed ? "drawing-active" : undefined}
-            onZoom={setZoom}
-            setControls={(c) => (controls.current = c)}
-            onViewport={setViewportBox}
+          {/* docs/28 S5: moving the view yourself takes over from whoever you follow. */}
+          <div
+            className="canvas-follow-watch"
+            onWheelCapture={() => {
+              if (followModes.following) followModes.takeOver();
+            }}
+            onPointerDownCapture={() => {
+              if (followModes.following) followModes.takeOver();
+            }}
+            onPointerMove={publishCursor}
+            onPointerLeave={() => setPresence({ cursor: null })}
           >
-            {tool === "select" && canEdit && canvasPhase === "main" && (
-              <MarqueeLayer
-                scale={zoom / 100}
-                shapes={shapes}
-                nodes={Object.values(workspace.nodes)}
-                onSelect={({ shapes: sIds, nodes: nIds }) => {
-                  setSelectedShapes(sIds);
-                  setSelectedNodes(nIds);
-                  // Keep a focused node so the HUD has something to act on.
-                  setSelected(nIds.size > 0 ? [...nIds][0]! : null);
-                }}
-              />
-            )}
-            <DiagramLayer
-              workspace={previewWorkspace}
-              useElkRoutes={settings.elkLayout}
-              selected={selected}
-              selectedNodes={selectedNodes}
-              proposedIds={proposedIds}
-              onSelect={onNodeSelect}
-              frameLabel={`${projectName || "Untitled"} · ${DIAGRAM_LABELS[workspace.diagramKind]}`}
-              spotlightId={spotlightId}
-              scale={zoom / 100}
-              dragOverride={nodeDrag}
-              viewport={viewportBox}
-              renameNodeId={renameNodeId}
-              onRenameConsumed={() => setRenameNodeId(null)}
-              collapsedRegions={collapsedRegions}
-              onToggleCollapse={toggleRegionCollapse}
-              expandedRegions={expandedRegions}
-              onToggleExpand={toggleRegionExpand}
-              {...(tool === "select" && canEdit
-                ? { onMoveNode: moveNode, onRenameNode: renameNode }
-                : {})}
-            />
-            <ShapeLinkLayer
-              workspace={workspace}
-              dragOverride={dragOverride}
-              selectedLink={selectedLink}
-              onSelectLink={(id) => {
-                setSelectedLink(id);
-                setSelectedShapes(new Set());
-                setSelected(null);
-              }}
-            />
-            {drawShapes.map((sh) => {
-              const withDrag =
-                dragOverride && dragOverride.id === sh.id
-                  ? { ...sh, position: { x: dragOverride.x, y: dragOverride.y } }
-                  : sh;
-              return (
-                <ShapeElement
-                  key={sh.id}
-                  shape={withDrag}
-                  selected={selectedShapes.has(sh.id)}
-                  linkSource={linkSource === sh.id}
+            <CanvasViewport
+              initialZoom={85}
+              tool={tool === "hand" ? "hand" : "select"}
+              className={drawingArmed ? "drawing-active" : undefined}
+              onZoom={setZoom}
+              setControls={(c) => (controls.current = c)}
+              onViewport={setViewportBox}
+            >
+              {tool === "select" && canEdit && canvasPhase === "main" && (
+                <MarqueeLayer
                   scale={zoom / 100}
-                  onSelect={onShapePrimary}
-                  onMove={moveShape}
-                  onResize={resizeShape}
-                  onRotate={rotateShape}
-                  onChangeLabel={relabelShape}
-                  onAltDragDuplicate={altDragDuplicate}
-                  editRequested={editShapeId === sh.id}
-                  onEditConsumed={() => setEditShapeId(null)}
-                  onContextMenu={(id, cx, cy) => {
-                    if (!selectedShapes.has(id)) onShapePrimary(id, false);
-                    setMenu({ x: cx, y: cy, regionId: regionForSelection() });
+                  shapes={shapes}
+                  nodes={Object.values(workspace.nodes)}
+                  onSelect={({ shapes: sIds, nodes: nIds }) => {
+                    setSelectedShapes(sIds);
+                    setSelectedNodes(nIds);
+                    // Keep a focused node so the HUD has something to act on.
+                    setSelected(nIds.size > 0 ? [...nIds][0]! : null);
                   }}
                 />
-              );
-            })}
-            {Object.values(workspace.wireframes).map((wf, idx) => {
-              const size = ON_CANVAS_WF_SIZE[wf.viewport] ?? ON_CANVAS_WF_SIZE.desktop!;
-              const wfX = 1150 + idx * (size.w + 60);
-              const wfY = 100;
-              return (
-                <div
-                  key={wf.id}
-                  className="frame"
-                  style={{
-                    position: "absolute",
-                    left: wfX,
-                    top: wfY,
-                    width: size.w,
-                    zIndex: 2,
-                    background: "var(--canvas-2)",
-                    borderRadius: 14,
-                    boxShadow: "0 12px 36px rgba(0,0,0,0.35)",
-                    border: "1px solid var(--stroke-2)",
-                    padding: "32px 16px 16px",
-                  }}
-                >
-                  <div
-                    className="frame-label"
-                    style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}
-                  >
-                    <Ico.Grid /> {wf.title} · Wireframe · {size.label}
-                  </div>
-                  <div className="wf-browser">
-                    <div className="wf-browser-bar">
-                      <span className="wf-dot" />
-                      <span className="wf-dot" />
-                      <span className="wf-dot" />
-                      <div className="wf-url">app.local/{wf.id}</div>
-                    </div>
-                    <div className="wf-canvas" style={{ maxHeight: 600, overflowY: "auto" }}>
-                      <WireframeRenderer wireframe={wf} />
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-            {tool === "pen" && canEdit && (
-              <PenLayer
+              )}
+              <DiagramLayer
+                workspace={previewWorkspace}
+                useElkRoutes={settings.elkLayout}
+                selected={selected}
+                selectedNodes={selectedNodes}
+                proposedIds={proposedIds}
+                onSelect={onNodeSelect}
+                frameLabel={`${projectName || "Untitled"} · ${DIAGRAM_LABELS[workspace.diagramKind]}`}
+                spotlightId={spotlightId}
                 scale={zoom / 100}
-                stroke="var(--ink-0)"
-                onCommit={addDrawing}
-                onDone={() => setTool("select")}
+                dragOverride={nodeDrag}
+                viewport={viewportBox}
+                renameNodeId={renameNodeId}
+                onRenameConsumed={() => setRenameNodeId(null)}
+                collapsedRegions={collapsedRegions}
+                onToggleCollapse={toggleRegionCollapse}
+                expandedRegions={expandedRegions}
+                onToggleExpand={toggleRegionExpand}
+                {...(tool === "select" && canEdit
+                  ? { onMoveNode: moveNode, onRenameNode: renameNode }
+                  : {})}
               />
-            )}
-            {guides.map((g, i) => (
-              <div
-                key={i}
-                className={`align-guide ${g.axis}`}
-                style={
-                  g.axis === "v"
-                    ? { left: g.at, top: g.from, height: Math.max(1, g.to - g.from) }
-                    : { top: g.at, left: g.from, width: Math.max(1, g.to - g.from) }
-                }
-              />
-            ))}
-            {SHAPE_KINDS.has(tool) && canEdit && (
-              <ShapeDrawLayer
-                kind={tool as DropKind}
-                scale={zoom / 100}
-                onCreate={addShape}
-                onDone={() => setTool("select")}
-              />
-            )}
-            {/* Vote counts and reaction chips live in content space so they
-                track their objects through pan and zoom. */}
-            {mode !== "present" && <EngagementBadges workspace={workspace} />}
-            {mode !== "present" && <CommentPins workspace={workspace} onOpen={setCommentTarget} />}
-            {engagementTarget && canEdit && !voting && !drawingArmed && (
-              <EngagementAnchor
+              <ShapeLinkLayer
                 workspace={workspace}
-                targetId={engagementTarget}
-                onApply={applyManual}
+                dragOverride={dragOverride}
+                selectedLink={selectedLink}
+                onSelectLink={(id) => {
+                  setSelectedLink(id);
+                  setSelectedShapes(new Set());
+                  setSelected(null);
+                }}
               />
-            )}
-            {/* Live collaborators' cursors and selections track content space. */}
-            {peers.length > 0 && <PresenceCursors peers={peers} />}
-          </CanvasViewport>
+              {drawShapes.map((sh) => {
+                const withDrag =
+                  dragOverride && dragOverride.id === sh.id
+                    ? { ...sh, position: { x: dragOverride.x, y: dragOverride.y } }
+                    : sh;
+                return (
+                  <ShapeElement
+                    key={sh.id}
+                    shape={withDrag}
+                    selected={selectedShapes.has(sh.id)}
+                    linkSource={linkSource === sh.id}
+                    scale={zoom / 100}
+                    onSelect={onShapePrimary}
+                    onMove={moveShape}
+                    onResize={resizeShape}
+                    onRotate={rotateShape}
+                    onChangeLabel={relabelShape}
+                    onAltDragDuplicate={altDragDuplicate}
+                    editRequested={editShapeId === sh.id}
+                    onEditConsumed={() => setEditShapeId(null)}
+                    onContextMenu={(id, cx, cy) => {
+                      if (!selectedShapes.has(id)) onShapePrimary(id, false);
+                      setMenu({ x: cx, y: cy, regionId: regionForSelection() });
+                    }}
+                  />
+                );
+              })}
+              {Object.values(workspace.wireframes).map((wf, idx) => {
+                const size = ON_CANVAS_WF_SIZE[wf.viewport] ?? ON_CANVAS_WF_SIZE.desktop!;
+                const wfX = 1150 + idx * (size.w + 60);
+                const wfY = 100;
+                return (
+                  <div
+                    key={wf.id}
+                    className="frame"
+                    style={{
+                      position: "absolute",
+                      left: wfX,
+                      top: wfY,
+                      width: size.w,
+                      zIndex: 2,
+                      background: "var(--canvas-2)",
+                      borderRadius: 14,
+                      boxShadow: "0 12px 36px rgba(0,0,0,0.35)",
+                      border: "1px solid var(--stroke-2)",
+                      padding: "32px 16px 16px",
+                    }}
+                  >
+                    <div
+                      className="frame-label"
+                      style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}
+                    >
+                      <Ico.Grid /> {wf.title} · Wireframe · {size.label}
+                    </div>
+                    <div className="wf-browser">
+                      <div className="wf-browser-bar">
+                        <span className="wf-dot" />
+                        <span className="wf-dot" />
+                        <span className="wf-dot" />
+                        <div className="wf-url">app.local/{wf.id}</div>
+                      </div>
+                      <div className="wf-canvas" style={{ maxHeight: 600, overflowY: "auto" }}>
+                        <WireframeRenderer wireframe={wf} />
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+              {tool === "pen" && canEdit && (
+                <PenLayer
+                  scale={zoom / 100}
+                  stroke="var(--ink-0)"
+                  onCommit={addDrawing}
+                  onDone={() => setTool("select")}
+                />
+              )}
+              {guides.map((g, i) => (
+                <div
+                  key={i}
+                  className={`align-guide ${g.axis}`}
+                  style={
+                    g.axis === "v"
+                      ? { left: g.at, top: g.from, height: Math.max(1, g.to - g.from) }
+                      : { top: g.at, left: g.from, width: Math.max(1, g.to - g.from) }
+                  }
+                />
+              ))}
+              {SHAPE_KINDS.has(tool) && canEdit && (
+                <ShapeDrawLayer
+                  kind={tool as DropKind}
+                  scale={zoom / 100}
+                  onCreate={addShape}
+                  onDone={() => setTool("select")}
+                />
+              )}
+              {/* Vote counts and reaction chips live in content space so they
+                track their objects through pan and zoom. */}
+              {mode !== "present" && <EngagementBadges workspace={workspace} />}
+              {mode !== "present" && (
+                <CommentPins workspace={workspace} onOpen={setCommentTarget} />
+              )}
+              {engagementTarget && canEdit && !voting && !drawingArmed && (
+                <EngagementAnchor
+                  workspace={workspace}
+                  targetId={engagementTarget}
+                  onApply={applyManual}
+                />
+              )}
+              {/* Live collaborators' cursors and selections track content space. */}
+              {peers.length > 0 && <PresenceCursors peers={peers} />}
+            </CanvasViewport>
+          </div>
 
           {menu && (
             <ContextMenu
@@ -3106,9 +3151,36 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
             />
           )}
 
-          {peers.length > 0 && (
+          {(peers.length > 0 || spotlight || followModes.summoned) && (
             <div className="presence-bar-slot">
-              <PresenceBar peers={peers} />
+              <FollowBar
+                following={followModes.following}
+                spotlight={spotlight}
+                meId={meId}
+                steppedOut={followModes.steppedOut}
+                summonedBy={followModes.summoned?.name ?? null}
+                canLead={!readOnly && peers.length > 0}
+                onStop={followModes.takeOver}
+                onRejoin={followModes.rejoinSpotlight}
+                onSpotlight={setSpotlight}
+                onSummon={() => {
+                  const here = followModes.here();
+                  if (!here) return;
+                  summon(here);
+                  notify("Everyone else is looking where you are");
+                }}
+                onGoBack={followModes.goBack}
+              >
+                <PresenceBar
+                  peers={peers}
+                  followingId={followModes.following?.userId ?? null}
+                  onFollow={(p) =>
+                    followModes.following?.userId === p.userId
+                      ? followModes.takeOver()
+                      : followModes.follow(p)
+                  }
+                />
+              </FollowBar>
             </div>
           )}
 

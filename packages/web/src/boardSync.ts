@@ -19,7 +19,22 @@ export interface Peer {
   name: string;
   cursor: { x: number; y: number } | null;
   selection: string[];
+  /** Where they're looking: the content point at their screen's centre, and their zoom. */
+  viewport?: Viewport | null;
   color: string;
+}
+
+/** A camera in content coordinates: its centre and its zoom (percent) — docs/28 S5. */
+export interface Viewport {
+  x: number;
+  y: number;
+  zoom: number;
+}
+
+/** Who has the board's spotlight: everyone else's view follows theirs. */
+export interface Spotlight {
+  userId: string;
+  name: string;
 }
 
 export interface BoardSyncCallbacks {
@@ -63,6 +78,10 @@ export interface BoardSyncCallbacks {
   onStatus?: (status: "connecting" | "online" | "offline") => void;
   /** The caller's role on this board. */
   onRole?: (role: BoardRole) => void;
+  /** docs/28 S5: someone took the spotlight, or it ended (null). */
+  onSpotlight?: (spotlight: Spotlight | null) => void;
+  /** docs/28 S5: someone brought everyone to where they're looking. */
+  onSummon?: (from: Spotlight, viewport: Viewport) => void;
 }
 
 /**
@@ -82,7 +101,11 @@ export class BoardSync {
   private closed = false;
   private reconnectAttempts = 0;
   private presenceTimer: ReturnType<typeof setTimeout> | null = null;
-  private pendingPresence: { cursor?: { x: number; y: number } | null; selection?: string[] } = {};
+  private pendingPresence: {
+    cursor?: { x: number; y: number } | null;
+    selection?: string[];
+    viewport?: Viewport | null;
+  } = {};
   /**
    * Stage B4: batches committed while the socket was down. `send()` used to
    * drop them silently — an edit made on a train tunnel vanished when the
@@ -173,6 +196,7 @@ export class BoardSync {
         for (const p of (msg.peers ?? []) as Peer[]) this.peers.set(p.userId, p);
         this.cb.onWorkspace(this.workspace);
         this.cb.onPeers([...this.peers.values()]);
+        this.cb.onSpotlight?.((msg.spotlight as Spotlight | null | undefined) ?? null);
         // Stage B4: catchup is in, the queue goes out. Replay in order with
         // the original requestIds — idempotency (B1) makes anything that
         // actually landed before the drop a duplicate no-op, so the replay
@@ -198,6 +222,7 @@ export class BoardSync {
         for (const p of (msg.peers ?? []) as Peer[]) this.peers.set(p.userId, p);
         this.cb.onWorkspace(this.workspace);
         this.cb.onPeers([...this.peers.values()]);
+        this.cb.onSpotlight?.((msg.spotlight as Spotlight | null | undefined) ?? null);
         // The queued batches were built against pre-resync state; they are
         // still the user's edits, so they replay as-is — the server's
         // validation is the arbiter of what still applies (B1 semantics).
@@ -255,6 +280,15 @@ export class BoardSync {
         this.peers.delete(String(msg.userId));
         this.cb.onPeers([...this.peers.values()]);
         break;
+      case "spotlight":
+        this.cb.onSpotlight?.((msg.spotlight as Spotlight | null | undefined) ?? null);
+        break;
+      case "summon": {
+        const from = msg.from as Spotlight | undefined;
+        const viewport = msg.viewport as Viewport | undefined;
+        if (from && viewport) this.cb.onSummon?.(from, viewport);
+        break;
+      }
       case "proposal-created": {
         const proposal = msg.proposal as ServerProposal | undefined;
         if (proposal) {
@@ -319,8 +353,22 @@ export class BoardSync {
     }
   }
 
-  /** Report cursor/selection; throttled so a moving mouse doesn't flood. */
-  setPresence(update: { cursor?: { x: number; y: number } | null; selection?: string[] }): void {
+  /** Take the spotlight, or give it up (docs/28 S5). */
+  setSpotlight(on: boolean): void {
+    this.send({ type: "spotlight", on });
+  }
+
+  /** Bring everyone else to this view, once (docs/28 S5). */
+  summon(viewport: Viewport): void {
+    this.send({ type: "summon", viewport });
+  }
+
+  /** Report cursor/selection/viewport; throttled so a moving mouse doesn't flood. */
+  setPresence(update: {
+    cursor?: { x: number; y: number } | null;
+    selection?: string[];
+    viewport?: Viewport | null;
+  }): void {
     this.pendingPresence = { ...this.pendingPresence, ...update };
     if (this.presenceTimer) return;
     this.presenceTimer = setTimeout(() => {

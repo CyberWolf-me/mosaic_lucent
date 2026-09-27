@@ -712,6 +712,14 @@ export interface ViewportControls {
    */
   visibleBox: () => { x: number; y: number; width: number; height: number } | null;
   /**
+   * The board point at the centre of the canvas — exactly what `focusOn`
+   * brings to the centre, so another screen can look at the same place
+   * (docs/28 S5). The visible box leaves the chrome out; this doesn't.
+   */
+  centerPoint: () => { x: number; y: number } | null;
+  /** A screen position (clientX/Y) as a board point: a live cursor's place. */
+  clientToContent: (clientX: number, clientY: number) => { x: number; y: number } | null;
+  /**
    * The exact camera, and a glide back to one (docs/26 §6.4 camera history).
    * Exact on purpose: restoring through focusOn/fitBounds would drift by the
    * chrome insets and fit padding on every round trip.
@@ -924,6 +932,29 @@ export function CanvasViewport({
         const tl = toContent(CHROME_INSET.left, CHROME_INSET.top);
         const br = toContent(w - CHROME_INSET.right, h - CHROME_INSET.bottom);
         return { x: tl.x, y: tl.y, width: br.x - tl.x, height: br.y - tl.y };
+      },
+      centerPoint: () => {
+        const el = containerRef.current;
+        if (!el) return null;
+        const { width: w, height: h } = el.getBoundingClientRect();
+        const s = zoom / 100;
+        // The inverse of focusOn: the content point it would centre.
+        return {
+          x: (w / 2 - pan.x - 0.5 * w) / s + 0.5 * w,
+          y: (h / 2 - pan.y - 0.4 * h) / s + 0.4 * h,
+        };
+      },
+      clientToContent: (clientX, clientY) => {
+        const el = containerRef.current;
+        if (!el) return null;
+        const r = el.getBoundingClientRect();
+        const s = zoom / 100;
+        const ox = 0.5 * r.width;
+        const oy = 0.4 * r.height;
+        return {
+          x: (clientX - r.left - pan.x - ox) / s + ox,
+          y: (clientY - r.top - pan.y - oy) / s + oy,
+        };
       },
     });
   }, [zoom, pan, setControls, ensureLoop]);

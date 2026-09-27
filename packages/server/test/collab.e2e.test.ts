@@ -549,3 +549,67 @@ describe("collaboration end to end", () => {
     expect(current.welcome.version).toBe(latest);
   });
 });
+
+describe("follow, spotlight, bring everyone here (docs/28 S5)", () => {
+  it("shares where people look; editors direct everyone's view; it ends when they leave", async () => {
+    const h = (open = await harness());
+    const owner = await signup(h, "lead@example.com");
+    const editor = await signup(h, "ed@example.com");
+    const viewer = await signup(h, "vi@example.com");
+    const { boardId } = await seedBoard(h, owner, "Follow me", []);
+    for (const [who, role] of [
+      [editor, "editor"],
+      [viewer, "viewer"],
+    ] as const) {
+      const link = await api(h, `/api/boards/${boardId}/share`, {
+        method: "POST",
+        token: owner.token,
+        body: JSON.stringify({ role }),
+      });
+      await api(h, `/api/boards/${boardId}/join`, {
+        method: "POST",
+        token: who.token,
+        body: JSON.stringify({ token: link.body.token }),
+      });
+    }
+    const o = await join(h, boardId, owner.token);
+    const e = await join(h, boardId, editor.token);
+    const v = await join(h, boardId, viewer.token);
+    expect(e.welcome.spotlight).toBeNull();
+
+    // Where someone looks rides their presence; nonsense doesn't.
+    const seen = frame(o.socket, ["presence"]);
+    e.socket.send(JSON.stringify({ type: "presence", viewport: { x: 120, y: -40, zoom: 150 } }));
+    expect((await seen).presence.viewport).toEqual({ x: 120, y: -40, zoom: 150 });
+    const junk = frame(o.socket, ["presence"]);
+    e.socket.send(JSON.stringify({ type: "presence", viewport: { x: 1, y: 2, zoom: 0 } }));
+    expect((await junk).presence.viewport).toBeNull();
+
+    // A viewer can't direct anyone's view.
+    const refused = frame(v.socket, ["error"]);
+    v.socket.send(JSON.stringify({ type: "spotlight", on: true }));
+    expect((await refused).message).toBe("only editors can spotlight");
+
+    // An editor takes the spotlight: everyone hears, and a late joiner is told.
+    const toOwner = frame(o.socket, ["spotlight"]);
+    const toViewer = frame(v.socket, ["spotlight"]);
+    e.socket.send(JSON.stringify({ type: "spotlight", on: true }));
+    expect((await toOwner).spotlight).toEqual({ userId: editor.id, name: "ed" });
+    expect((await toViewer).spotlight.userId).toBe(editor.id);
+    const late = await join(h, boardId, viewer.token);
+    expect(late.welcome.spotlight).toEqual({ userId: editor.id, name: "ed" });
+
+    // "Bring everyone here" moves everyone else, once.
+    const summoned = frame(o.socket, ["summon"]);
+    e.socket.send(JSON.stringify({ type: "summon", viewport: { x: 300, y: 200, zoom: 90 } }));
+    expect(await summoned).toMatchObject({
+      from: { userId: editor.id, name: "ed" },
+      viewport: { x: 300, y: 200, zoom: 90 },
+    });
+
+    // The spotlight leaves with its holder.
+    const ended = frame(o.socket, ["spotlight"]);
+    e.socket.close();
+    expect((await ended).spotlight).toBeNull();
+  });
+});
