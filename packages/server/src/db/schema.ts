@@ -1065,6 +1065,11 @@ export const meetingTranscripts = pgTable(
      * until then, and always in Record mode (transcript only).
      */
     summary: jsonb("summary"),
+    /**
+     * docs/28 S7: people's corrections to turns — an append-only overlay, so
+     * `turns` (and an ended transcript's record) is never rewritten.
+     */
+    corrections: jsonb("corrections"),
     /** Null when the creator has been deleted; the transcript stays. */
     createdBy: text("created_by").references(() => users.id, { onDelete: "set null" }),
     createdAt: bigint("created_at", { mode: "number" }).notNull(),

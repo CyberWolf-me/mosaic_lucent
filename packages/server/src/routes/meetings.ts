@@ -227,6 +227,51 @@ export const registerMeetingRoutes: RegisterRoutes = (router, s) => {
     send(res, 200, row);
   });
 
+  // docs/28 S7 (spec §23): correct what a turn says. Editor, like every
+  // meeting write — the speaker can't correct their own line yet because
+  // speakers are labels, not accounts (§9.4 waits on per-participant
+  // capture). The correction is an overlay: the turn and any earlier
+  // correction stay on record, and readers see the latest.
+  router.post("/api/boards/:id/meetings/:mid/turns/:n/correction", async (ctx) => {
+    const { req, res } = ctx;
+    const route = "/api/boards/:id/meetings/:mid/turns/:n/correction";
+    if (!requireCsrf(req, res, route)) return;
+    const boardId = ctx.param("id");
+    const guard = await requireBoardRole(req, res, boardId, "editor", route);
+    if (!guard.ok) return;
+    if (!meetings) return send(res, 503, { error: "meeting transcripts are not configured" });
+    let body: { text?: unknown };
+    try {
+      const raw = await readBody(req);
+      body = raw ? (JSON.parse(raw) as typeof body) : {};
+    } catch (err) {
+      send(res, 400, { error: "bad request", detail: (err as Error).message });
+      return;
+    }
+    const { MAX_CORRECTION_CHARS } = await import("../meetings.js");
+    const text = typeof body.text === "string" ? body.text.trim() : "";
+    if (text === "" || text.length > MAX_CORRECTION_CHARS) {
+      send(res, 400, { error: `text must be 1–${MAX_CORRECTION_CHARS} characters` });
+      return;
+    }
+    const mid = ctx.param("mid");
+    const meeting = await meetings.get(boardId, mid);
+    if (!meeting) return send(res, 404, { error: "meeting not found" });
+    const turn = Number(ctx.param("n"));
+    if (!Number.isInteger(turn) || turn < 0 || turn >= meeting.turns.length) {
+      send(res, 400, { error: "no such turn in this meeting" });
+      return;
+    }
+    const updated = await meetings.addCorrection(boardId, mid, {
+      turn,
+      text,
+      by: guard.user.id,
+      at: Date.now(),
+    });
+    if (!updated) return send(res, 404, { error: "meeting not found" });
+    send(res, 200, updated);
+  });
+
   // docs/28 A3.3 / S9: write — or rewrite — the end-of-meeting summary now.
   // Editor, like every meeting write; the job does the same work after an
   // end, and this is how a person asks for it again (or for a capture the

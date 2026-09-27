@@ -542,6 +542,15 @@ V8 transport (F4).
   above the Brief with turn chips, says "Writing the summary" while the job runs,
   and lets an editor Write it now / Rewrite (`POST …/summary`). Per-item review
   of candidates with trust stays A2 (J5). `scripts/meeting-capture-check.mjs` 29/29.
+- **A3.5, corrections part — done (2026-09-27).** An editor corrects a
+  transcript line in place on a saved meeting (`POST …/turns/:n/correction`).
+  The correction is an overlay (`corrections`, migration 0034, appended
+  atomically on Postgres): the turn keeps its words on record and an ended
+  transcript stays immutable; the line reads "· edited" with the original in
+  its tooltip. The summary, Ask and search (through `visibleMeetings`) and
+  extraction read the corrected words. Only editors for now — §9.4's "the
+  speaker" needs speakers to be accounts, which is per-participant capture,
+  the rest of A3.5 (it needs a multi-person LiveKit room to build and verify).
 
 ## 9. Decisions needed
 

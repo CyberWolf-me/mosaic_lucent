@@ -34,6 +34,47 @@ export interface MeetingTranscript {
   title?: string;
   /** The end-of-meeting summary (docs/28 A3.3); absent until written. */
   recap?: MeetingRecap;
+  /** People's corrections to turns (docs/28 S7): an overlay, originals kept. */
+  corrections?: Array<{ turn: number; text: string; by: string; at: number }>;
+}
+
+/** A turn as a reader sees it: corrected, with the original words kept aside. */
+export type ReadTurn = MeetingTurn & { original?: string };
+
+/**
+ * The turns with each one's latest correction applied (docs/28 S7) — the
+ * server's `correctedTurns`, mirrored. A corrected turn keeps its original
+ * words in `original`, for the "edited" mark.
+ */
+export function correctedTurns(
+  meeting: Pick<MeetingTranscript, "turns" | "corrections">,
+): ReadTurn[] {
+  const corrections = meeting.corrections ?? [];
+  if (corrections.length === 0) return meeting.turns;
+  const latest = new Map<number, { text: string; at: number }>();
+  for (const c of corrections) {
+    const prior = latest.get(c.turn);
+    if (!prior || c.at >= prior.at) latest.set(c.turn, c);
+  }
+  return meeting.turns.map((t, i) => {
+    const c = latest.get(i);
+    return c && c.text !== t.text ? { ...t, text: c.text, original: t.text } : t;
+  });
+}
+
+/** Correct what one turn says (editor). Null on failure. */
+export async function correctTurn(
+  boardId: string,
+  meetingId: string,
+  turn: number,
+  text: string,
+): Promise<MeetingTranscript | null> {
+  const res = await apiFetch(
+    `/api/boards/${encodeURIComponent(boardId)}/meetings/${encodeURIComponent(meetingId)}/turns/${turn}/correction`,
+    { method: "POST", body: JSON.stringify({ text }) },
+  );
+  if (!res.ok) return null;
+  return (await res.json()) as MeetingTranscript;
 }
 
 /**

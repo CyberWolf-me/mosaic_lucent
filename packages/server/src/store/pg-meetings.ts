@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, isNotNull, isNull, lt, lte } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, isNull, lt, lte, sql } from "drizzle-orm";
 import type { Db } from "../db/client.js";
 import { meetingTranscripts } from "../db/schema.js";
 import {
@@ -9,6 +9,7 @@ import {
   type MeetingStore,
   type MeetingTranscript,
   type MeetingTurn,
+  type TurnCorrection,
   type NewMeetingTranscript,
 } from "../meetings.js";
 
@@ -89,6 +90,27 @@ export class PostgresMeetingStore implements MeetingStore {
     const rows = await this.target.db
       .update(meetingTranscripts)
       .set({ summary: recap })
+      .where(and(eq(meetingTranscripts.boardId, boardId), eq(meetingTranscripts.id, id)))
+      .returning();
+    return rows[0] ? toRow(rows[0]) : undefined;
+  }
+
+  /**
+   * Append one correction atomically: a JSONB concatenation inside the one
+   * UPDATE, so two editors correcting at once both land — a read-modify-write
+   * here would let the second write drop the first. The board-scoped WHERE
+   * keeps a leaked id from writing elsewhere.
+   */
+  async addCorrection(
+    boardId: string,
+    id: string,
+    correction: TurnCorrection,
+  ): Promise<MeetingTranscript | undefined> {
+    const rows = await this.target.db
+      .update(meetingTranscripts)
+      .set({
+        corrections: sql`COALESCE(${meetingTranscripts.corrections}, '[]'::jsonb) || ${JSON.stringify([correction])}::jsonb`,
+      })
       .where(and(eq(meetingTranscripts.boardId, boardId), eq(meetingTranscripts.id, id)))
       .returning();
     return rows[0] ? toRow(rows[0]) : undefined;
@@ -242,5 +264,9 @@ function toRow(row: typeof meetingTranscripts.$inferSelect): MeetingTranscript {
     ...(row.title ? { title: row.title } : {}),
     // No summary yet (or Record mode) reads NULL (docs/28 A3.3).
     ...(row.summary ? { recap: row.summary as MeetingRecap } : {}),
+    // No corrections reads NULL (docs/28 S7).
+    ...(Array.isArray(row.corrections) && row.corrections.length > 0
+      ? { corrections: row.corrections as TurnCorrection[] }
+      : {}),
   };
 }

@@ -857,3 +857,117 @@ describe("the end-of-meeting summary (A3.3)", () => {
     expect(failed.body.recap).toMatchObject({ by: "fallback", offline: "model-failed" });
   });
 });
+
+/**
+ * docs/28 S7 (spec §23): a person corrects what a turn says. The correction
+ * is an overlay — the turn keeps its words on record — and every reader (the
+ * summary, Ask, search) sees the latest correction.
+ */
+describe("transcript corrections (docs/28 S7)", () => {
+  let h: Harness | null = null;
+  afterEach(async () => {
+    if (h) await h.close();
+    h = null;
+  });
+
+  it("correctedTurns applies each turn's latest correction and leaves the rest", async () => {
+    const { correctedTurns } = await import("../src/meetings.js");
+    const turns = [
+      { speaker: "A", at: 1, text: "one" },
+      { speaker: "B", at: 2, text: "tow" },
+    ];
+    expect(correctedTurns({ turns })).toBe(turns);
+    const fixed = correctedTurns({
+      turns,
+      corrections: [
+        { turn: 1, text: "two?", by: "u", at: 10 },
+        { turn: 1, text: "two", by: "u", at: 20 },
+      ],
+    });
+    expect(fixed.map((t) => t.text)).toEqual(["one", "two"]);
+    expect(turns[1]!.text).toBe("tow");
+  });
+
+  it("an editor corrects a turn of an ended meeting; the original stays on record", async () => {
+    h = await harness();
+    const owner = await h.signup("fix.owner@example.com");
+    const viewer = await h.signup("fix.viewer@example.com");
+    const boardId = await h.seedBoard(owner.token);
+    const saved = await h.api(`/api/boards/${boardId}/meetings`, {
+      method: "POST",
+      token: owner.token,
+      body: JSON.stringify({ turns: TURNS, startedAt: 1_000, endedAt: 60_000 }),
+    });
+    const mid = saved.body.id as string;
+    const path = (n: number) => `/api/boards/${boardId}/meetings/${mid}/turns/${n}/correction`;
+
+    const fixed = await h.api(path(2), {
+      method: "POST",
+      token: owner.token,
+      body: JSON.stringify({ text: "We agreed to add a wallet option." }),
+    });
+    expect(fixed.status).toBe(200);
+    expect(fixed.body.turns[2].text).toBe(TURNS[2]!.text);
+    expect(fixed.body.corrections).toEqual([
+      expect.objectContaining({ turn: 2, text: "We agreed to add a wallet option.", by: owner.id }),
+    ]);
+
+    const bad = [
+      await h.api(path(99), {
+        method: "POST",
+        token: owner.token,
+        body: JSON.stringify({ text: "x" }),
+      }),
+      await h.api(path(0), {
+        method: "POST",
+        token: owner.token,
+        body: JSON.stringify({ text: "  " }),
+      }),
+    ];
+    expect(bad.map((r) => r.status)).toEqual([400, 400]);
+    await h.boardStore.setMember({
+      boardId,
+      userId: viewer.id,
+      role: "viewer",
+      invitedBy: null,
+      createdAt: 1,
+    });
+    expect(
+      (
+        await h.api(path(0), {
+          method: "POST",
+          token: viewer.token,
+          body: JSON.stringify({ text: "x" }),
+        })
+      ).status,
+    ).toBe(404);
+
+    // The summary reads the corrected words: the fixed line now carries a
+    // decision cue the offline draft (the mock) can cite.
+    const summary = await h.api(`/api/boards/${boardId}/meetings/${mid}/summary`, {
+      method: "POST",
+      token: owner.token,
+    });
+    const texts = (summary.body.recap.sections as Array<{ items: Array<{ text: string }> }>)
+      .flatMap((s) => s.items)
+      .map((i) => i.text);
+    expect(texts.some((t) => t.includes("We agreed to add a wallet option."))).toBe(true);
+  });
+
+  it("Ask and search read the corrected words (the visible-meetings window)", async () => {
+    const { visibleMeetings } = await import("../src/meetingsWindow.js");
+    const meeting = {
+      id: "mtg_1",
+      boardId: "b",
+      orgId: "o",
+      startedAt: 5,
+      endedAt: 9,
+      turns: [{ speaker: "A", at: 5, text: "Postgress" }],
+      createdBy: null,
+      createdAt: 5,
+      corrections: [{ turn: 0, text: "Postgres", by: "u", at: 6 }],
+    };
+    expect(visibleMeetings([meeting], 0)[0]!.turns[0]!.text).toBe("Postgres");
+    expect(meeting.turns[0]!.text).toBe("Postgress");
+  });
+});

@@ -25,6 +25,46 @@ export interface MeetingTurn {
   kind?: "problem" | "hypothesis" | "solution" | "decision" | "action" | "requirement";
 }
 
+/**
+ * A person's correction to one transcript turn (docs/28 S7, spec §23). An
+ * OVERLAY: the turn itself is never rewritten, so an ended transcript stays
+ * immutable and the original words stay on record. The latest correction of
+ * a turn is what readers — the summary, Ask, search, extraction — see.
+ */
+export interface TurnCorrection {
+  /** Index of the corrected turn. */
+  turn: number;
+  text: string;
+  /** Who corrected it. */
+  by: string;
+  at: number;
+}
+
+/** How long a corrected line may be — the same cap as a turn. */
+export const MAX_CORRECTION_CHARS = 2000;
+
+/** The turns as readers should see them: each turn's latest correction applied. */
+export function correctedTurns(
+  meeting: Pick<MeetingTranscript, "turns" | "corrections">,
+): MeetingTurn[] {
+  const corrections = meeting.corrections ?? [];
+  if (corrections.length === 0) return meeting.turns;
+  const latest = new Map<number, TurnCorrection>();
+  for (const c of corrections) {
+    const prior = latest.get(c.turn);
+    if (!prior || c.at >= prior.at) latest.set(c.turn, c);
+  }
+  return meeting.turns.map((t, i) => {
+    const c = latest.get(i);
+    return c ? { ...t, text: c.text } : t;
+  });
+}
+
+/** The meeting as a reader should see it: corrected turns, originals kept aside. */
+export function withCorrections(meeting: MeetingTranscript): MeetingTranscript {
+  return meeting.corrections?.length ? { ...meeting, turns: correctedTurns(meeting) } : meeting;
+}
+
 /** One saved meeting. */
 export interface MeetingTranscript {
   id: string;
@@ -45,6 +85,8 @@ export interface MeetingTranscript {
   title?: string;
   /** The end-of-meeting summary (docs/28 A3.3). Absent until it is written. */
   recap?: MeetingRecap;
+  /** People's corrections to turns (docs/28 S7): an overlay on `turns`. */
+  corrections?: TurnCorrection[];
 }
 
 /**
@@ -194,6 +236,16 @@ export interface MeetingStore {
     boardId: string,
     id: string,
     recap: MeetingRecap,
+  ): Promise<MeetingTranscript | undefined>;
+  /**
+   * Record one correction (docs/28 S7) — appended, never replacing the turn
+   * or an earlier correction, so the log of who changed what stays whole.
+   * The route checks the turn index is inside the transcript.
+   */
+  addCorrection(
+    boardId: string,
+    id: string,
+    correction: TurnCorrection,
   ): Promise<MeetingTranscript | undefined>;
   /** One transcript, scoped to its board so a leaked id is not a read. */
   get(boardId: string, id: string): Promise<MeetingTranscript | undefined>;
@@ -362,6 +414,17 @@ export class InMemoryMeetingStore implements MeetingStore {
     if (!row || row.boardId !== boardId) return undefined;
     row.recap = recap;
     return { ...row, turns: [...row.turns] };
+  }
+
+  async addCorrection(
+    boardId: string,
+    id: string,
+    correction: TurnCorrection,
+  ): Promise<MeetingTranscript | undefined> {
+    const row = this.rows.get(id);
+    if (!row || row.boardId !== boardId) return undefined;
+    row.corrections = [...(row.corrections ?? []), { ...correction }];
+    return { ...row, turns: [...row.turns], corrections: [...row.corrections] };
   }
 
   async get(boardId: string, id: string): Promise<MeetingTranscript | undefined> {

@@ -43,6 +43,8 @@ import {
   appendMeetingTurns,
   classifyTurn,
   endMeeting,
+  correctTurn,
+  correctedTurns,
   fetchMeeting,
   listMeetings,
   promptFromTranscript,
@@ -50,6 +52,7 @@ import {
   saveMeeting,
   writeMeetingSummary,
   type MeetingRecap,
+  type ReadTurn,
   type MeetingTranscript,
   type MeetingTurn,
 } from "../meetings.js";
@@ -1021,7 +1024,8 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
   };
 
   const onExtract = (meeting: MeetingTranscript): void => {
-    const spliced = withTopicBreaks(meeting.turns, topicBreaks);
+    // Extract what was meant: the corrected words (docs/28 S7).
+    const spliced = withTopicBreaks(correctedTurns(meeting), topicBreaks);
     const prompt = promptFromTranscript({ ...meeting, turns: spliced });
     setView("canvas");
     // send() lands on the canvas with the prompt, through the standard
@@ -1043,7 +1047,31 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
   };
 
   const shown = selectedMeeting;
-  const displayTurns = shown ? shown.turns : turns;
+  // A saved meeting reads as corrected (docs/28 S7); the live list has none yet.
+  const displayTurns: ReadTurn[] = useMemo(
+    () => (shown ? correctedTurns(shown) : turns),
+    [shown, turns],
+  );
+
+  // Correcting a turn in place (docs/28 S7): an editor, on a saved meeting.
+  const [editingTurn, setEditingTurn] = useState<{ turn: number; text: string } | null>(null);
+  useEffect(() => setEditingTurn(null), [shown?.id]);
+  const saveCorrection = async (): Promise<void> => {
+    if (!editingTurn || !shown || !boardId) return;
+    const text = editingTurn.text.trim();
+    if (!text || text === displayTurns[editingTurn.turn]?.text) {
+      setEditingTurn(null);
+      return;
+    }
+    const updated = await correctTurn(boardId, shown.id, editingTurn.turn, text);
+    if (!updated) {
+      notify("Couldn't save the correction — try again.");
+      return;
+    }
+    setSelectedMeeting(updated);
+    setSaved((prev) => prev.map((m) => (m.id === updated.id ? updated : m)));
+    setEditingTurn(null);
+  };
 
   // Naming a past meeting (ADR 0045, docs/28 S10).
   const [renaming, setRenaming] = useState(false);
@@ -2339,7 +2367,61 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
                                 </span>
                               )}
                             </div>
-                            <p className="meet-turn-text">{highlight(t.text, query)}</p>
+                            {editingTurn?.turn === i ? (
+                              <form
+                                className="meet-rename meet-turn-edit"
+                                onSubmit={(e) => {
+                                  e.preventDefault();
+                                  void saveCorrection();
+                                }}
+                              >
+                                <input
+                                  autoFocus
+                                  aria-label={`Correct turn ${i + 1}`}
+                                  value={editingTurn.text}
+                                  maxLength={2000}
+                                  onChange={(e) =>
+                                    setEditingTurn({ turn: i, text: e.target.value })
+                                  }
+                                  onKeyDown={(e) => {
+                                    if (e.key === "Escape") setEditingTurn(null);
+                                  }}
+                                />
+                                <Button size="sm" variant="primary" type="submit">
+                                  Save
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() => setEditingTurn(null)}
+                                >
+                                  Cancel
+                                </Button>
+                              </form>
+                            ) : (
+                              <p className="meet-turn-text">
+                                {highlight(t.text, query)}
+                                {t.original !== undefined && (
+                                  <span
+                                    className="mono meet-turn-edited"
+                                    title={`Corrected. Originally: “${t.original}”`}
+                                  >
+                                    {" "}
+                                    · edited
+                                  </span>
+                                )}
+                                {shown && boardId && !readOnly && (
+                                  <button
+                                    type="button"
+                                    className="meet-link meet-turn-fix"
+                                    aria-label={`Correct turn ${i + 1}`}
+                                    onClick={() => setEditingTurn({ turn: i, text: t.text })}
+                                  >
+                                    Edit
+                                  </button>
+                                )}
+                              </p>
+                            )}
                             <div className="meet-turn-foot">
                               {produced && produced.length > 0 && (
                                 <span

@@ -123,4 +123,19 @@ describeIf("meeting store parity: titles and the workspace list", () => {
     expect(results[0]).toEqual({ written: recap, missing: undefined, read: recap });
     expect(results[1]).toEqual(results[0]);
   });
+
+  it("appends corrections atomically: two at once both land (docs/28 S7)", async () => {
+    const pg = new PostgresMeetingStore(db);
+    const m = await seed(pg, boardA, 8_000);
+    await Promise.all([
+      pg.addCorrection(boardA, m.id, { turn: 0, text: "first", by: userId, at: 1 }),
+      pg.addCorrection(boardA, m.id, { turn: 0, text: "second", by: userId, at: 2 }),
+    ]);
+    const read = await pg.get(boardA, m.id);
+    expect(read?.corrections?.map((c) => c.text).sort()).toEqual(["first", "second"]);
+    expect(read?.turns[0]?.text).toBe("x");
+    expect(
+      await pg.addCorrection(boardB, m.id, { turn: 0, text: "no", by: userId, at: 3 }),
+    ).toBeUndefined();
+  });
 });

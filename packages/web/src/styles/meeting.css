@@ -293,6 +293,25 @@ button.meet-rec:hover {
   outline: 2px solid var(--bloom-wash-2);
   outline-offset: 1px;
 }
+/* Correcting a turn (docs/28 S7): quiet until hovered, marked once edited. */
+.meet-turn-edit {
+  margin: 4px 0;
+}
+.meet-turn-edited {
+  font-size: 11px;
+  color: var(--ink-3);
+  cursor: help;
+}
+.meet-turn-fix {
+  margin-left: 8px;
+  font-size: 11px;
+  opacity: 0.5;
+  transition: opacity 0.12s var(--e-out);
+}
+.meet-turn:hover .meet-turn-fix,
+.meet-turn-fix:focus-visible {
+  opacity: 1;
+}
 .meet-past {
   display: flex;
   align-items: baseline;

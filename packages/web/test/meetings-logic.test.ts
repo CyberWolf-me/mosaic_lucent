@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   classifyTurn,
+  correctedTurns,
   meetingName,
   promptFromTranscript,
   type MeetingTranscript,
@@ -83,5 +84,28 @@ describe("meetingName (ADR 0045)", () => {
     expect(meetingName({ startedAt: at })).toMatch(/^Meeting · /);
     expect(meetingName({ title: null, startedAt: at }, "Board A")).toMatch(/^Board A · /);
     expect(meetingName({ title: "", startedAt: at })).toMatch(/^Meeting · /);
+  });
+});
+
+describe("correctedTurns (docs/28 S7)", () => {
+  const turns = [
+    { speaker: "A", at: 1, text: "one" },
+    { speaker: "B", at: 2, text: "tow" },
+  ];
+  it("shows each turn's latest correction and keeps the original words beside it", () => {
+    expect(correctedTurns({ turns })).toBe(turns);
+    const read = correctedTurns({
+      turns,
+      corrections: [
+        { turn: 1, text: "two?", by: "u", at: 10 },
+        { turn: 1, text: "two", by: "u", at: 20 },
+      ],
+    });
+    expect(read[1]).toMatchObject({ text: "two", original: "tow" });
+    expect(read[0]).toBe(turns[0]);
+  });
+  it("a correction back to the original words is not marked edited", () => {
+    const read = correctedTurns({ turns, corrections: [{ turn: 0, text: "one", by: "u", at: 5 }] });
+    expect(read[0]!.original).toBeUndefined();
   });
 });

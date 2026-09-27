@@ -434,6 +434,32 @@ check(
   renamed?.title === "Pricing sync",
   renamed?.title,
 );
+
+// --- docs/28 S7: correct a line; the original stays on record ---
+// A proposal left pending by the F16 section covers the transcript column;
+// dismiss it the way a person would before reading the transcript.
+const pendingPanel = page.getByRole("dialog", { name: "Proposed changes" });
+if (await pendingPanel.isVisible()) {
+  await pendingPanel.getByRole("button", { name: /cancel/i }).click();
+  await page.waitForTimeout(500);
+}
+await page.getByRole("button", { name: "Correct turn 1" }).first().click();
+await page.getByLabel("Correct turn 1").fill("Corrected: we ship on Thursday.");
+await page.getByRole("button", { name: "Save" }).click();
+await page.waitForTimeout(800);
+const correctedOnServer = (await meetings())?.find((m) => m.id === openedId);
+check(
+  "a corrected line is recorded as an overlay, the original kept",
+  correctedOnServer?.corrections?.[0]?.text === "Corrected: we ship on Thursday." &&
+    correctedOnServer?.turns[0]?.text !== "Corrected: we ship on Thursday.",
+  JSON.stringify(correctedOnServer?.corrections ?? null),
+);
+check(
+  "the transcript shows the correction, marked edited",
+  (await statusText()).includes("Corrected: we ship on Thursday.") &&
+    (await page.locator(".meet-turn-edited").count()) >= 1,
+);
+
 await page.goto(`${base}/?view=meetings`, { waitUntil: "networkidle" });
 await page.waitForTimeout(800);
 check(

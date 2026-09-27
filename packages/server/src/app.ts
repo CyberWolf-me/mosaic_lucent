@@ -1924,11 +1924,13 @@ export function createApp(deps: AppDeps): App {
     // nothing); an editor asking again does.
     if (meeting.recap && !options.replace) return { outcome: "written", meeting };
     const { assembleNotes, fallbackNotesDraft } = await import("@lucent/ai");
+    const { correctedTurns } = await import("./meetings.js");
     const request: import("@lucent/ai").NotesRequest = {
       template: "general",
       ...(meeting.title ? { title: meeting.title } : {}),
       today: new Date(meeting.startedAt).toISOString().slice(0, 10),
-      transcript: meeting.turns.map((t) => ({ speaker: t.speaker, text: t.text })),
+      // The words as corrected (docs/28 S7): a summary quotes what was meant.
+      transcript: correctedTurns(meeting).map((t) => ({ speaker: t.speaker, text: t.text })),
       notes: [],
     };
     const now = Date.now();

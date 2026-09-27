@@ -239,6 +239,13 @@
       "when": 1790482274071,
       "tag": "0033_unusual_iron_patriot",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1790483288912,
+      "tag": "0034_outgoing_tana_nile",
+      "breakpoints": true
     }
   ]
 }
