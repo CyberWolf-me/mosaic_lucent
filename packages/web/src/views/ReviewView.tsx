@@ -6,6 +6,7 @@ import { StatementGlyph } from "../ui/StatementGlyph.js";
 import { Button, EmptyState, KindBadge, Page, PageHeader, SectionLabel } from "../ui/kit.js";
 import { loadOrgs } from "../orgs.js";
 import { hasSession } from "../session.js";
+import { inboundChangeText } from "./inboundRows.js";
 import { decideInboundChange, decideServerProposal } from "../boards.js";
 import {
   decideStatements,
@@ -363,12 +364,7 @@ export function ReviewView({ onOpenSettings }: { onOpenSettings: (section?: stri
                       <span className="boards-notif-new">{c.provider}</span>
                     </span>
                     <span className="boards-notif-title">{c.label}</span>
-                    <span className="boards-notif-body">
-                      {c.provider} says “{c.externalValue}”
-                      {c.mappedValue
-                        ? ` — mark it ${c.mappedValue.replace(/_/g, " ")}`
-                        : " — no matching status here"}
-                    </span>
+                    <span className="boards-notif-body">{inboundChangeText(c)}</span>
                   </span>
                 </div>
                 {canDecide(c.boardId) && (
@@ -389,7 +385,7 @@ export function ReviewView({ onOpenSettings }: { onOpenSettings: (section?: stri
                     >
                       Dismiss
                     </Button>
-                    {c.mappedValue && (
+                    {c.mappedValue !== null && (
                       <Button
                         size="sm"
                         variant="primary"

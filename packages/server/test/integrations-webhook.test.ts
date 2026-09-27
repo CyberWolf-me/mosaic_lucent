@@ -155,7 +155,7 @@ describe("the receiver — the Stripe protocol, Linear's scheme", () => {
   function harness() {
     const events = new InMemoryIntegrationWebhookEventStore();
     const changes: Array<{
-      change: { provider: string; externalId: string; status: string; at: number };
+      change: import("../src/integrations/webhook.js").WebhookChange;
       orgId: string;
     }> = [];
     const receiver = createIntegrationWebhookReceiver({
@@ -453,7 +453,7 @@ describe("the github scheme — X-Hub-Signature-256, the composed words (D8)", (
   function ghHarness() {
     const events = new InMemoryIntegrationWebhookEventStore();
     const changes: Array<{
-      change: { provider: string; externalId: string; status: string; at: number };
+      change: import("../src/integrations/webhook.js").WebhookChange;
       orgId: string;
     }> = [];
     const receiver = createIntegrationWebhookReceiver({

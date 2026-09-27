@@ -483,7 +483,13 @@ export function createAutomations(deps: AutomationDeps): Automations {
     async closeFromTracker(records) {
       let applied = 0;
       for (const record of records) {
-        if (record.status !== "pending" || record.mappedValue !== "completed") continue;
+        if (
+          record.status !== "pending" ||
+          record.field !== "status" ||
+          record.mappedValue !== "completed"
+        ) {
+          continue;
+        }
         const board = await deps.boardStore.get(record.boardId);
         if (!board || board.orgId !== record.orgId) continue;
         if (!(await ruleOn(board.orgId, "externalClose"))) continue;

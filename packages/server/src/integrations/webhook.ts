@@ -1,4 +1,8 @@
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
+import type { InboundTaskChange } from "./inbound.js";
+
+/** One verified delivery's change, stamped with when it arrived. */
+export type WebhookChange = InboundTaskChange & { at: number };
 
 /**
  * The inbound webhook receiver (Stage D7, ADR 0033).
@@ -134,18 +138,24 @@ export function verifyLinearSignature(
  */
 export interface ParsedWebhook {
   kind: "change";
-  change: { provider: string; externalId: string; status: string; at: number };
+  change: WebhookChange;
 }
 
 export type ParseResult =
-  | { kind: "change"; change: { provider: string; externalId: string; status: string; at: number } }
+  | { kind: "change"; change: WebhookChange }
   | { kind: "ignored"; reason: string };
 
 export function parseLinearWebhook(provider: string, raw: Buffer, at: number): ParseResult {
   let body: {
     action?: unknown;
     type?: unknown;
-    data?: { identifier?: unknown; state?: { name?: unknown } | null };
+    data?: {
+      identifier?: unknown;
+      state?: { name?: unknown } | null;
+      assignee?: { name?: unknown } | null;
+      assigneeId?: unknown;
+      dueDate?: unknown;
+    };
   };
   try {
     body = JSON.parse(raw.toString("utf8"));
@@ -166,9 +176,28 @@ export function parseLinearWebhook(provider: string, raw: Buffer, at: number): P
   if (!identifier || !stateName) {
     return { kind: "ignored", reason: "the issue update carries no identifier/state" };
   }
+  // docs/26 A5: the owner and due date ride the same update — only when the
+  // delivery carries them, so a payload without them never reads as "cleared".
+  const assignee =
+    "assignee" in data
+      ? typeof data.assignee?.name === "string"
+        ? data.assignee.name
+        : null
+      : "assigneeId" in data && data.assigneeId === null
+        ? null
+        : undefined;
+  const dueDate =
+    "dueDate" in data ? (typeof data.dueDate === "string" ? data.dueDate : null) : undefined;
   return {
     kind: "change",
-    change: { provider, externalId: identifier, status: stateName, at },
+    change: {
+      provider,
+      externalId: identifier,
+      status: stateName,
+      ...(assignee !== undefined ? { assignee } : {}),
+      ...(dueDate !== undefined ? { dueDate } : {}),
+      at,
+    },
   };
 }
 
@@ -279,7 +308,12 @@ export const githubWebhookScheme: WebhookScheme = {
   parse(provider, raw, at) {
     let body: {
       action?: unknown;
-      issue?: { number?: unknown; state?: unknown; state_reason?: unknown } | null;
+      issue?: {
+        number?: unknown;
+        state?: unknown;
+        state_reason?: unknown;
+        assignee?: { login?: unknown } | null;
+      } | null;
     };
     try {
       body = JSON.parse(raw.toString("utf8"));
@@ -287,6 +321,27 @@ export const githubWebhookScheme: WebhookScheme = {
       return { kind: "ignored", reason: "unreadable payload" } as ParseResult;
     }
     const action = typeof body.action === "string" ? body.action : "";
+    // docs/26 A5: assignment is a change too — the issue's (first) assignee
+    // after the event, or none.
+    if (action === "assigned" || action === "unassigned") {
+      const number = body.issue && typeof body.issue.number === "number" ? body.issue.number : null;
+      if (number === null) {
+        return {
+          kind: "ignored",
+          reason: "the issue webhook carries no issue.number",
+        } as ParseResult;
+      }
+      const login = body.issue?.assignee?.login;
+      return {
+        kind: "change",
+        change: {
+          provider,
+          externalId: String(number),
+          assignee: typeof login === "string" ? login : null,
+          at,
+        },
+      } as ParseResult;
+    }
     if (action !== "opened" && action !== "reopened" && action !== "closed") {
       return {
         kind: "ignored",
@@ -526,10 +581,7 @@ export interface IntegrationWebhookReceiverOptions {
   candidates: SignatureCandidate[];
   events: IntegrationWebhookEventStore;
   /** Where a verified change lands: the inbound queue's ingest. */
-  onChange: (
-    change: { provider: string; externalId: string; status: string; at: number },
-    orgId: string,
-  ) => Promise<void>;
+  onChange: (change: WebhookChange, orgId: string) => Promise<void>;
   staleAfterMs?: number;
   now?: () => number;
 }

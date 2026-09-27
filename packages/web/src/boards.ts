@@ -728,7 +728,8 @@ export interface InboundChangeView {
   nodeLabel: string;
   externalId: string;
   url?: string;
-  field: "status";
+  /** docs/26 A5: the owner and the due date arrive too. */
+  field: "status" | "assignee" | "dueDate";
   /** The raw provider word at detection — what the human reads. */
   externalValue: string;
   /** null = the never-guesses warning row (dismiss-only). */

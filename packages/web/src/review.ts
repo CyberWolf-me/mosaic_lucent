@@ -51,6 +51,8 @@ export interface ReviewInbound {
   provider: string;
   nodeId: string;
   label: string;
+  /** Which field changed there (servers before docs/26 A5 send only status). */
+  field?: "status" | "assignee" | "dueDate";
   externalValue: string;
   mappedValue: string | null;
   detectedAt: number;

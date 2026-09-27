@@ -710,6 +710,23 @@ a much better product — not rewriting the layout engine.
     count: a refused item says nothing about it. The Sync button says so too.
     Reconnecting a disconnected integration now makes it active again; it
     used to stay disabled whatever was saved.
+  - _Inbound beyond status (A5.3)._
+    - A tracker's owner and due date reach the board the way its status
+      does, as changes a person accepts or dismisses in Review ("Linear
+      gives it to Bo", "…moved its due date to Oct 15"). Linear updates and
+      GitHub assign/unassign events carry them.
+    - Each is news only once: a link now records what the provider said for
+      each field at the last sync, accept or dismiss, and a value the board
+      already holds is never asked about.
+    - That fixed a spurious question: a tracker's update about the owner
+      carries the unchanged state, and used to queue "mark it open" too.
+  - _The poll._ `integration.poll` (every 10 minutes) reads each active
+    connection's linked tasks (up to 100 a run) and queues what moved there.
+    It is how Jira's changes arrive at all (Jira has no webhook scheme), and
+    a net under missed deliveries. It records the connection's health.
+  - _Why, in the tracker._ A task created on approve carries the action's
+    description and the decisions that drive it ("Why (decided in
+    Lucent): …"). Updates leave a description edited there alone.
   - Found on the way: the live meeting loop's prompt is ~3.5k characters of
     instructions, and the message cap was 4k. A batch with more than about
     500 characters of speech was refused whole, so the busiest stretches of
@@ -723,13 +740,14 @@ a much better product — not rewriting the layout engine.
     - `scripts/project-execution-check.mjs` (9/9) and
       `scripts/automation-check.mjs` (8/8: a rule turned on in Admin, a
       decision approved in Review, its plan a pending proposal from the job
-      runner, the owner told) in the running app.
-  - Not yet (A5.3/A5.4):
-    - integration connection states and a connect UI;
-    - inbound assignee and due date;
-    - Jira inbound through the poll job;
-    - OAuth connect for Linear/Jira;
-    - Slack outbound.
+      runner, the owner told), `scripts/integrations-check.mjs` (6/6) and
+      `scripts/inbound-fields-check.mjs` (5/5: a signed tracker webhook
+      reassigns and reschedules a synced task; Review asks in words; accepting
+      the owner moves only the owner) in the running app;
+    - server `integration-health.test.ts`, `inbound-fields.test.ts` and
+      `pg-integrations` (health, the link baseline).
+  - Not yet (A5.4): OAuth connect for Linear and Jira (keys are still server
+    variables), and Slack outbound.
 
 ## 12. Decisions (locked 2026-09-24)
 

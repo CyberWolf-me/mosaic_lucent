@@ -14,6 +14,8 @@ import type { Job } from "../jobs.js";
 
 export interface IntegrationWorkerDeps {
   logger: { info: (e: string, f?: Record<string, unknown>) => void };
+  /** docs/26 A5: the inbound poll (integrations/poll.ts), when wired. */
+  poll?: () => Promise<{ connections: number; read: number; queued: number }>;
 }
 
 /**
@@ -47,7 +49,12 @@ export function buildIntegrationHandlers(
      * providers whose webhooks can be dropped entirely.
      */
     "integration.poll": async (job: Job): Promise<void> => {
-      deps.logger.info("integration.poll", { jobId: job.id, note: "lane reserved" });
+      if (!deps.poll) {
+        deps.logger.info("integration.poll", { jobId: job.id, note: "lane reserved" });
+        return;
+      }
+      const result = await deps.poll();
+      if (result.read > 0) deps.logger.info("integration.poll", { jobId: job.id, ...result });
     },
     /**
      * Reserved: reconcile a board's links against the provider's current

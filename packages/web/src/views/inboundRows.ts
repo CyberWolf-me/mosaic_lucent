@@ -1,4 +1,5 @@
 import type { InboundChangeView } from "../boards.js";
+import { providerLabel } from "../integrationsAdmin.js";
 
 /**
  * The inbound-row decisions (Stage D7), pure so they can be tested without
@@ -30,6 +31,33 @@ export function inboundRowActions(row: InboundChangeView): {
 /** The pending count the Sync button badge renders. */
 export function pendingInboundCount(rows: readonly InboundChangeView[]): number {
   return rows.filter((r) => r.status === "pending").length;
+}
+
+/**
+ * What a change says, in a sentence (docs/26 A5): a status to mark, an owner
+ * to give it to, a date to move it to — or that the provider cleared one.
+ */
+export function inboundChangeText(change: {
+  provider: string;
+  field?: "status" | "assignee" | "dueDate";
+  externalValue: string;
+  mappedValue: string | null;
+}): string {
+  const { externalValue: ext, mappedValue: mapped } = change;
+  const provider = providerLabel(change.provider);
+  switch (change.field ?? "status") {
+    case "assignee":
+      return ext ? `${provider} gives it to ${ext}` : `${provider} unassigned it`;
+    case "dueDate":
+      if (!ext) return `${provider} cleared its due date`;
+      return mapped
+        ? `${provider} moved its due date to ${mapped}`
+        : `${provider} says it's due “${ext}” — not a date Lucent can read`;
+    default:
+      return mapped
+        ? `${provider} says “${ext}” — mark it ${mapped.replace(/_/g, " ")}`
+        : `${provider} says “${ext}” — no matching status here`;
+  }
 }
 
 /** The row's one-line drift sentence: "Linear says Done — the board says todo". */

@@ -1,5 +1,5 @@
 import type { ExecutionStatus } from "@lucent/core";
-import type { IntegrationProviderName } from "./integrations.js";
+import type { IntegrationProviderName, SyncedFields } from "./integrations.js";
 import { newIntegrationId } from "./integrations.js";
 
 /**
@@ -33,9 +33,9 @@ export const INBOUND_CHANGE_STATUSES = ["pending", "applied", "dismissed", "supe
 export type InboundChangeStatus = (typeof INBOUND_CHANGE_STATUSES)[number];
 
 /** The field an inbound change touches. Status first (D7's scope — the
- * vocabulary mapStatus owns); the string anticipates title/assignee
- * landing later without a schema break. */
-export const INBOUND_FIELDS = ["status"] as const;
+ * vocabulary mapStatus owns); docs/26 A5 adds the owner and the due date,
+ * in the same column without a schema break. */
+export const INBOUND_FIELDS = ["status", "assignee", "dueDate"] as const;
 export type InboundField = (typeof INBOUND_FIELDS)[number];
 
 export interface InboundChangeRecord {
@@ -48,9 +48,12 @@ export interface InboundChangeRecord {
   field: InboundField;
   /** The raw provider word AT DETECTION — what the human reads. */
   externalValue: string;
-  /** mapStatus(externalValue): the D1 word, or undefined when the word
-   * does not translate (the warning record — dismiss-only). */
-  mappedValue: ExecutionStatus | undefined;
+  /** What the board would say: for status, mapStatus(externalValue) — the
+   * D1 word, or undefined when the word does not translate (the warning
+   * record — dismiss-only); for the owner, the provider's name for them;
+   * for the due date, the calendar day (undefined when it isn't one). An
+   * empty string clears the field. */
+  mappedValue: string | undefined;
   status: InboundChangeStatus;
   /** Where the detection came from; the sweeper's refetch and a webhook
    * land in the same queue through the same path. */
@@ -252,11 +255,21 @@ export interface IngestDeps {
       provider: IntegrationProviderName;
       externalId: string;
       lastSyncedStatus: string;
+      /** docs/26 A5: what the provider said for the other fields at last sync. */
+      lastSyncedFields?: SyncedFields;
     }>
   >;
   /** board(boardId) → the live node's issue status, or null when the
    * node is gone or carries no issue (the honest "nothing to compare"). */
   boardNodeStatus: (boardId: string, nodeId: string) => Promise<string | null>;
+  /**
+   * docs/26 A5: the live node's owner and due date, for the fields beyond
+   * status. Absent, those fields compare against nothing on the board.
+   */
+  boardNodeIssue?: (
+    boardId: string,
+    nodeId: string,
+  ) => Promise<{ assignee?: string; dueDate?: string } | null>;
   store: InboundChangeStore;
   /** The provider instance — mapStatus only; ingest touches no wire. */
   provider: { mapStatus(externalStatus: string): ExecutionStatus | undefined };
@@ -273,10 +286,30 @@ export interface IngestOutcome {
   records: InboundChangeRecord[];
 }
 
+/**
+ * What a provider says about one task. `status` is the word it reported;
+ * `assignee` and `dueDate` are present only when the delivery carried them
+ * (null = cleared there), so a status-only webhook never reads as "unassigned".
+ */
+export interface InboundTaskChange {
+  provider: string;
+  externalId: string;
+  status?: string;
+  assignee?: string | null;
+  dueDate?: string | null;
+}
+
+/** A provider's date as the board's calendar day, or undefined when it isn't one. */
+export function inboundDate(value: string): string | undefined {
+  const day = value.slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(day) ? day : undefined;
+}
+
 export async function ingestInboundChange(
   deps: IngestDeps,
-  change: { provider: string; externalId: string; status: string },
+  change: InboundTaskChange,
   orgId: string,
+  source: InboundChangeRecord["source"] = "webhook",
 ): Promise<IngestOutcome> {
   const now = (deps.now ?? Date.now)();
   const links = await deps.linksForExternalId(change.provider, change.externalId);
@@ -288,30 +321,64 @@ export async function ingestInboundChange(
     // Org scoping: a webhook resolved to one org never writes another
     // org's board, even if two orgs somehow link the same external task.
     if (link.orgId !== orgId) continue;
-    const liveValue = await deps.boardNodeStatus(link.boardId, link.nodeId);
-    const mapped = deps.provider.mapStatus(change.status);
-    if (liveValue !== null && mapped !== undefined && liveValue === mapped) {
+    const queue = async (
+      field: InboundField,
+      externalValue: string,
+      mappedValue: string | undefined,
+    ) => {
+      records.push(
+        await deps.store.put(
+          {
+            orgId,
+            boardId: link.boardId,
+            provider: link.provider,
+            nodeId: link.nodeId,
+            externalId: link.externalId,
+            field,
+            externalValue,
+            mappedValue,
+          },
+          source,
+          now,
+        ),
+      );
+    };
+
+    if (change.status !== undefined) {
+      const liveValue = await deps.boardNodeStatus(link.boardId, link.nodeId);
+      const mapped = deps.provider.mapStatus(change.status);
       // Resolution-level dedupe: the provider's word is what the board
       // already says. No pending row — the fact is recorded on the link
       // at the next sync; a row would be noise asking for a decision
       // that has nothing to decide.
-      continue;
+      const agrees = liveValue !== null && mapped !== undefined && liveValue === mapped;
+      // What the provider said at the last sync, accept or dismiss is not
+      // news (docs/26 A5): a poll re-reads every linked task, and a tracker's
+      // update about its owner or date carries its unchanged state too.
+      const seen = change.status === link.lastSyncedStatus;
+      if (!agrees && !seen) await queue("status", change.status, mapped);
     }
-    const record = await deps.store.put(
-      {
-        orgId,
-        boardId: link.boardId,
-        provider: link.provider,
-        nodeId: link.nodeId,
-        externalId: link.externalId,
-        field: "status",
-        externalValue: change.status,
-        mappedValue: mapped,
-      },
-      "webhook",
-      now,
-    );
-    records.push(record);
+
+    if (change.assignee !== undefined || change.dueDate !== undefined) {
+      const live = (await deps.boardNodeIssue?.(link.boardId, link.nodeId)) ?? null;
+      if (change.assignee !== undefined) {
+        const external = (change.assignee ?? "").trim().slice(0, 120);
+        const baseline = link.lastSyncedFields?.assignee;
+        const board = (live?.assignee ?? "").trim();
+        const unchangedThere = baseline !== undefined && baseline === external;
+        if (!unchangedThere && board.toLowerCase() !== external.toLowerCase()) {
+          await queue("assignee", external, external);
+        }
+      }
+      if (change.dueDate !== undefined) {
+        const external = (change.dueDate ?? "").trim();
+        const mapped = external === "" ? "" : inboundDate(external);
+        const baseline = link.lastSyncedFields?.dueDate;
+        const board = live?.dueDate ?? "";
+        const unchangedThere = baseline !== undefined && baseline === external;
+        if (!unchangedThere && board !== mapped) await queue("dueDate", external, mapped);
+      }
+    }
   }
   return {
     outcome: links.some((l) => l.orgId === orgId) ? "queued" : "unlinked",

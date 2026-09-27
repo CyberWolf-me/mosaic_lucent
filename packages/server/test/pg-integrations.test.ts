@@ -142,6 +142,28 @@ function connectionContract(name: string, make: () => IntegrationStore, prefix: 
       expect(links).toHaveLength(1);
       expect(links[0]!.externalId).toBe("E2");
       expect(links[0]!.lastSyncedStatus).toBe("done");
+      // docs/26 A5: the owner/date baseline merges field by field, and a
+      // write without it leaves it as it was.
+      const relink = (fields?: Record<string, string>) =>
+        store.linkTask(
+          {
+            orgId: "o",
+            boardId: board,
+            nodeId: "n1",
+            provider: "fake",
+            externalId: "E2",
+            lastSyncedStatus: "done",
+            ...(fields ? { lastSyncedFields: fields } : {}),
+          },
+          2_500,
+        );
+      await relink({ assignee: "Ada", dueDate: "" });
+      await relink({ dueDate: "2026-10-01" });
+      await relink();
+      expect((await store.linksForNode(board, "n1"))[0]!.lastSyncedFields).toEqual({
+        assignee: "Ada",
+        dueDate: "2026-10-01",
+      });
       // A node with two providers keeps both links.
       await store.linkTask(
         {

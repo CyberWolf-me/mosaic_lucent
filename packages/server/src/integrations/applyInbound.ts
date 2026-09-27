@@ -48,18 +48,19 @@ export async function applyInboundChange(
   const inbound = integrations.inbound!;
 
   // Apply the REVIEWED SNAPSHOT: a SET_ISSUE carrying the mapped value on
-  // the record's fields. The system actor — the timeline honestly shows
+  // the record's field. The system actor — the timeline honestly shows
   // "Lucent ← the provider", accepted by whoever decided.
   const node = board.workspace.nodes[record.nodeId];
-  const currentIssue = node?.issue;
   const ops: Operation[] = [
     {
       op: "SET_ISSUE",
       id: record.nodeId,
-      issue: currentIssue
-        ? { ...currentIssue, status: record.mappedValue }
-        : { type: "task", status: record.mappedValue },
-    },
+      issue: issueWith(
+        node?.issue as Record<string, unknown> | undefined,
+        record.field,
+        record.mappedValue,
+      ),
+    } as Operation,
   ];
   const errors = validateOperations(board.workspace, ops);
   if (errors.length > 0) {
@@ -118,25 +119,9 @@ export async function applyInboundChange(
     }
   }
 
-  // The link's lastSyncedStatus is a fact about the provider: applying
-  // records it (the board now agrees with the provider).
-  const link = (await integrations.store.linksForNode(board.id, record.nodeId)).find(
-    (l) => l.provider === record.provider,
-  );
-  if (link) {
-    await integrations.store.linkTask(
-      {
-        orgId: board.orgId,
-        boardId: board.id,
-        nodeId: record.nodeId,
-        provider: record.provider,
-        externalId: link.externalId,
-        ...(link.url !== undefined ? { url: link.url } : {}),
-        lastSyncedStatus: record.externalValue,
-      },
-      Date.now(),
-    );
-  }
+  // What the provider said is a fact about the provider: applying records
+  // it on the link (the board now agrees with the provider).
+  await recordProviderValue(integrations.store, board.orgId, record);
 
   const change = await inbound.decide(
     board.id,
@@ -155,4 +140,50 @@ export async function applyInboundChange(
     by: decider.decidedBy,
   });
   return { ok: true, change, applied: ops.length, seq, persistedByRoom };
+}
+
+/** The node's issue with one field set from an inbound change ("" clears it). */
+export function issueWith(
+  current: Record<string, unknown> | undefined,
+  field: InboundChangeRecord["field"],
+  value: string,
+): Record<string, unknown> {
+  const issue: Record<string, unknown> = current
+    ? { ...current }
+    : { type: "task", status: "open" };
+  if (field === "status") issue.status = value;
+  else if (value === "") delete issue[field];
+  else issue[field] = value;
+  return issue;
+}
+
+/**
+ * Record on the link what the provider said for the record's field — after
+ * an accept or a dismiss alike: it's the baseline the next change is news
+ * against (docs/26 A5), not what the board agreed to.
+ */
+export async function recordProviderValue(
+  store: NonNullable<RouteServices["integrations"]>["store"],
+  orgId: string,
+  record: InboundChangeRecord,
+): Promise<void> {
+  const link = (await store.linksForNode(record.boardId, record.nodeId)).find(
+    (l) => l.provider === record.provider,
+  );
+  if (!link) return;
+  await store.linkTask(
+    {
+      orgId,
+      boardId: record.boardId,
+      nodeId: record.nodeId,
+      provider: record.provider,
+      externalId: link.externalId,
+      ...(link.url !== undefined ? { url: link.url } : {}),
+      lastSyncedStatus: record.field === "status" ? record.externalValue : link.lastSyncedStatus,
+      ...(record.field !== "status"
+        ? { lastSyncedFields: { [record.field]: record.externalValue } }
+        : {}),
+    },
+    Date.now(),
+  );
 }

@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { actionNodes, type Workspace } from "@lucent/core";
+import { actionNodes, decisionsBehindAction, type Workspace } from "@lucent/core";
 import { connectionState, nextHealth, type CallOutcome, type ConnectionHealth } from "./health.js";
 
 /**
@@ -116,6 +116,21 @@ export interface NewIntegrationConnection {
   createdBy: string;
 }
 
+/**
+ * What the provider said for the fields beyond status at the last sync,
+ * accept or dismiss (docs/26 A5) — the baseline an inbound change is news
+ * against. An empty string is "none there".
+ */
+export interface SyncedFields {
+  assignee?: string;
+  dueDate?: string;
+}
+
+/** An external task's fields, as a link's baseline. */
+export function syncedFieldsOf(task: { assignee?: string; dueDate?: string }): SyncedFields {
+  return { assignee: task.assignee ?? "", dueDate: task.dueDate ?? "" };
+}
+
 /** One board node's live link to an external task. */
 export interface IntegrationTaskLink {
   id: string;
@@ -127,6 +142,8 @@ export interface IntegrationTaskLink {
   url?: string;
   /** The external status word AT LAST SYNC — raw, before mapStatus. */
   lastSyncedStatus: string;
+  /** docs/26 A5: the owner and due date the provider held at last sync. */
+  lastSyncedFields?: SyncedFields;
   syncedAt: number;
 }
 
@@ -138,6 +155,8 @@ export interface LinkTaskInput {
   externalId: string;
   url?: string;
   lastSyncedStatus: string;
+  /** Merged over the link's baseline; absent leaves it as it was. */
+  lastSyncedFields?: SyncedFields;
 }
 
 export interface IntegrationStore {
@@ -286,6 +305,7 @@ export function extractProposalItems(
       ...(issue.status ? { status: issue.status } : {}),
     };
     const warnings = capabilityWarnings?.(fields);
+    const description = taskDescription(workspace, node.id);
     return {
       nodeId: node.id,
       action: link ? ("update" as const) : ("create" as const),
@@ -294,10 +314,26 @@ export function extractProposalItems(
       ...(issue.dueDate ? { dueDate: issue.dueDate } : {}),
       status: issue.status,
       ...(link ? { externalId: link.externalId } : {}),
+      ...(description ? { description } : {}),
       idempotencyKey: `ext_${node.id}`,
       ...(warnings && warnings.length > 0 ? { warnings } : {}),
     };
   });
+}
+
+/**
+ * What an external task says about itself (docs/26 A5): the action's own
+ * description, and the decisions on the board that drive it — so whoever
+ * picks it up in Linear, Jira or GitHub knows why it exists.
+ */
+export function taskDescription(workspace: Workspace, nodeId: string): string | undefined {
+  const own = workspace.nodes[nodeId]?.issue?.description?.trim();
+  const why = decisionsBehindAction(workspace, nodeId).map((d) => `- ${d.label}`);
+  const parts = [
+    ...(own ? [own] : []),
+    ...(why.length > 0 ? [`Why (decided in Lucent):\n${why.join("\n")}`] : []),
+  ];
+  return parts.length > 0 ? parts.join("\n\n").slice(0, 4000) : undefined;
 }
 
 /** The admin's view of a connection: the reference as a FINGERPRINT, never in full. */
@@ -425,6 +461,9 @@ export class InMemoryIntegrationStore implements IntegrationStore {
         externalId: normalized.externalId,
         ...(normalized.url !== undefined ? { url: normalized.url } : {}),
         lastSyncedStatus: normalized.lastSyncedStatus,
+        ...(normalized.lastSyncedFields
+          ? { lastSyncedFields: { ...existing.lastSyncedFields, ...normalized.lastSyncedFields } }
+          : {}),
         syncedAt: now,
       };
       this.links.set(existing.id, updated);
@@ -439,6 +478,7 @@ export class InMemoryIntegrationStore implements IntegrationStore {
       externalId: normalized.externalId,
       ...(normalized.url !== undefined ? { url: normalized.url } : {}),
       lastSyncedStatus: normalized.lastSyncedStatus,
+      ...(normalized.lastSyncedFields ? { lastSyncedFields: normalized.lastSyncedFields } : {}),
       syncedAt: now,
     };
     this.links.set(row.id, row);
@@ -516,6 +556,8 @@ export interface IntegrationActionItem {
   status: string;
   /** For updates: the existing external id; for creates: absent. */
   externalId?: string;
+  /** docs/26 A5: what the task says about itself — see `taskDescription`. */
+  description?: string;
   /** The exactly-once key the executor threads to the provider. */
   idempotencyKey: string;
   /**

@@ -5,6 +5,7 @@ import {
   connectionView,
   extractProposalItems,
   MAX_CREDENTIAL_REF_CHARS,
+  syncedFieldsOf,
 } from "../integrations/integrations.js";
 import { webhookSchemes } from "../integrations/webhook.js";
 import { connectionFailure, connectionState, watchProvider } from "../integrations/health.js";
@@ -411,6 +412,7 @@ export const registerIntegrationRoutes: RegisterRoutes = (router, s) => {
                 externalId: recovered.externalId,
                 ...(recovered.url ? { url: recovered.url } : {}),
                 lastSyncedStatus: recovered.status,
+                lastSyncedFields: syncedFieldsOf(recovered),
               },
               Date.now(),
             );
@@ -433,6 +435,7 @@ export const registerIntegrationRoutes: RegisterRoutes = (router, s) => {
               externalId: task.externalId,
               ...(task.url ? { url: task.url } : {}),
               lastSyncedStatus: task.status,
+              lastSyncedFields: syncedFieldsOf(task),
             },
             Date.now(),
           );
@@ -459,6 +462,7 @@ export const registerIntegrationRoutes: RegisterRoutes = (router, s) => {
                 externalId: link.externalId,
                 ...(task.url ? { url: task.url } : {}),
                 lastSyncedStatus: task.status,
+                lastSyncedFields: syncedFieldsOf(task),
               },
               Date.now(),
             );
@@ -487,16 +491,20 @@ export const registerIntegrationRoutes: RegisterRoutes = (router, s) => {
     // Every pending inbound record for the fields this sync pushed becomes
     // `superseded`, and the response says how many, so the UI can say
     // "3 queued external changes were overtaken by this sync".
-    const supersededInbound = integrations.inbound
-      ? await integrations.inbound.supersedePending(
-          boardId,
-          actions.map((n) => n.id),
-          providerName,
-          "status",
-          "superseded by an explicit sync",
-          Date.now(),
-        )
-      : 0;
+    // The sync pushed the owner and due date too (docs/26 A5).
+    let supersededInbound = 0;
+    for (const field of ["status", "assignee", "dueDate"] as const) {
+      supersededInbound += integrations.inbound
+        ? await integrations.inbound.supersedePending(
+            boardId,
+            actions.map((n) => n.id),
+            providerName,
+            field,
+            "superseded by an explicit sync",
+            Date.now(),
+          )
+        : 0;
+    }
 
     send(res, 200, {
       provider: providerName,
@@ -763,6 +771,11 @@ export const registerIntegrationRoutes: RegisterRoutes = (router, s) => {
       try {
         const input = {
           title: item.title,
+          // docs/26 A5: a new task says why it exists; an update leaves a
+          // description someone may have edited there alone.
+          ...(item.action === "create" && item.description
+            ? { description: item.description }
+            : {}),
           ...(item.assignee ? { assignee: item.assignee } : {}),
           ...(item.dueDate ? { dueDate: item.dueDate } : {}),
           status: item.status,
@@ -794,6 +807,7 @@ export const registerIntegrationRoutes: RegisterRoutes = (router, s) => {
                 externalId: recovered.externalId,
                 ...(recovered.url ? { url: recovered.url } : {}),
                 lastSyncedStatus: recovered.status,
+                lastSyncedFields: syncedFieldsOf(recovered),
               },
               Date.now(),
             );
@@ -837,6 +851,7 @@ export const registerIntegrationRoutes: RegisterRoutes = (router, s) => {
             externalId: task.externalId,
             ...(task.url ? { url: task.url } : {}),
             lastSyncedStatus: task.status,
+            lastSyncedFields: syncedFieldsOf(task),
           },
           Date.now(),
         );
@@ -982,7 +997,8 @@ export const registerIntegrationRoutes: RegisterRoutes = (router, s) => {
       inbound: rows.map((r) => {
         const link = links.get(`${r.provider}:${r.nodeId}`);
         const node = guard.board.workspace.nodes[r.nodeId];
-        const boardValue = node?.issue?.status ?? null;
+        // The live value of the record's own field (docs/26 A5).
+        const boardValue = node?.issue?.[r.field] ?? (r.field === "status" ? null : "");
         return {
           id: r.id,
           provider: r.provider,
@@ -1125,27 +1141,12 @@ export const registerIntegrationRoutes: RegisterRoutes = (router, s) => {
     }
 
     // Dismiss keeps the board — but the link still records the provider's
-    // word: lastSyncedStatus is the honest "what the provider says now",
-    // not "what the board agreed to". A later sync pushes the board's value
-    // back (outbound-authoritative), and a later webhook re-queues if the
+    // word: it's the honest "what the provider says now", not "what the
+    // board agreed to". A later sync pushes the board's value back
+    // (outbound-authoritative), and a later change re-queues if the
     // provider moves again.
-    const link = (await integrations.store.linksForNode(boardId, record.nodeId)).find(
-      (l) => l.provider === record.provider,
-    );
-    if (link) {
-      await integrations.store.linkTask(
-        {
-          orgId: guard.board.orgId,
-          boardId,
-          nodeId: record.nodeId,
-          provider: record.provider,
-          externalId: link.externalId,
-          ...(link.url !== undefined ? { url: link.url } : {}),
-          lastSyncedStatus: record.externalValue,
-        },
-        Date.now(),
-      );
-    }
+    const { recordProviderValue } = await import("../integrations/applyInbound.js");
+    await recordProviderValue(integrations.store, guard.board.orgId, record);
 
     const decided = await inbound.decide(boardId, changeId, "dismissed", user.id, Date.now(), {
       reason: "kept the board's value",

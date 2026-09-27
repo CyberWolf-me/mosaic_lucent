@@ -2640,6 +2640,15 @@ export function createApp(deps: AppDeps): App {
                 const node = board.workspace.nodes[nodeId];
                 return node?.issue?.status ?? null;
               },
+              boardNodeIssue: async (boardId, nodeId) => {
+                const issue = (await boardStore.get(boardId))?.workspace.nodes[nodeId]?.issue;
+                return issue
+                  ? {
+                      ...(issue.assignee ? { assignee: issue.assignee } : {}),
+                      ...(issue.dueDate ? { dueDate: issue.dueDate } : {}),
+                    }
+                  : null;
+              },
               store: integrations.inbound!,
               provider: resolved(connection),
             },

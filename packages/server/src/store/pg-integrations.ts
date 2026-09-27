@@ -20,6 +20,7 @@ import type {
   IntegrationStatus,
   IntegrationStore,
   IntegrationTaskLink,
+  SyncedFields,
   LinkTaskInput,
   NewIntegrationConnection,
 } from "../integrations/integrations.js";
@@ -94,6 +95,9 @@ function rowToLink(row: typeof integrationTaskLinks.$inferSelect): IntegrationTa
     externalId: row.externalId,
     ...(row.url !== null ? { url: row.url } : {}),
     lastSyncedStatus: row.lastSyncedStatus,
+    ...(row.lastSyncedFields !== null && row.lastSyncedFields !== undefined
+      ? { lastSyncedFields: row.lastSyncedFields as SyncedFields }
+      : {}),
     syncedAt: row.syncedAt,
   };
 }
@@ -216,6 +220,7 @@ export class PostgresIntegrationStore implements IntegrationStore {
       externalId: normalized.externalId,
       url: normalized.url ?? null,
       lastSyncedStatus: normalized.lastSyncedStatus,
+      lastSyncedFields: normalized.lastSyncedFields ?? null,
       syncedAt: now,
     };
     // The (board,node,provider) unique carries the re-link upsert.
@@ -232,6 +237,10 @@ export class PostgresIntegrationStore implements IntegrationStore {
           externalId: values.externalId,
           url: values.url,
           lastSyncedStatus: values.lastSyncedStatus,
+          // Merged over the stored baseline; absent leaves it as it was.
+          lastSyncedFields: normalized.lastSyncedFields
+            ? sql`coalesce(${integrationTaskLinks.lastSyncedFields}, '{}'::jsonb) || ${JSON.stringify(normalized.lastSyncedFields)}::jsonb`
+            : sql`${integrationTaskLinks.lastSyncedFields}`,
           syncedAt: now,
         },
       })

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  inboundChangeText,
   inboundRowActions,
   inboundRowIsWarning,
   pendingInboundCount,
@@ -53,5 +54,23 @@ describe("pendingInboundCount", () => {
       row({ id: "d", status: "dismissed" }),
     ];
     expect(pendingInboundCount(rows)).toBe(2);
+  });
+});
+
+describe("inboundChangeText — what a change says (docs/26 A5)", () => {
+  const change = (field: "status" | "assignee" | "dueDate", ext: string, mapped: string | null) =>
+    inboundChangeText({ provider: "Linear", field, externalValue: ext, mappedValue: mapped });
+  it("names the status, the owner and the date — and a cleared one", () => {
+    expect(change("status", "In Progress", "in_progress")).toBe(
+      "Linear says “In Progress” — mark it in progress",
+    );
+    expect(change("status", "In QA", null)).toBe("Linear says “In QA” — no matching status here");
+    expect(change("assignee", "Bo", "Bo")).toBe("Linear gives it to Bo");
+    expect(change("assignee", "", "")).toBe("Linear unassigned it");
+    expect(change("dueDate", "2026-10-09", "2026-10-09")).toBe(
+      "Linear moved its due date to 2026-10-09",
+    );
+    expect(change("dueDate", "", "")).toBe("Linear cleared its due date");
+    expect(change("dueDate", "next sprint", null)).toContain("not a date Lucent can read");
   });
 });

@@ -198,6 +198,7 @@ export const registerReviewRoutes: RegisterRoutes = (router, s) => {
         provider: c.provider,
         nodeId: c.nodeId,
         label: byId.get(c.boardId)?.workspace.nodes[c.nodeId]?.label ?? c.nodeId,
+        field: c.field,
         externalValue: c.externalValue,
         mappedValue: c.mappedValue ?? null,
         detectedAt: c.detectedAt,

@@ -30,6 +30,7 @@ import { buildAiHandlers } from "./workers/ai.js";
 import { buildMediaHandlers } from "./workers/media.js";
 import { buildIntegrationHandlers } from "./workers/integration.js";
 import { connectionFailure } from "./integrations/health.js";
+import { boardNodeIssue, pollInbound } from "./integrations/poll.js";
 import { createStaticHandler } from "./static.js";
 import { resolve as resolvePath } from "node:path";
 import { InMemorySessionStore, PostgresSessionStore, type SessionStore } from "./sessions.js";
@@ -920,10 +921,18 @@ async function sweepIntegration(): Promise<void> {
               if (!board) return null;
               return board.workspace.nodes[nodeId]?.issue?.status ?? null;
             },
+            boardNodeIssue: (boardId, nodeId) => boardNodeIssue(stores.boardStore, boardId, nodeId),
             store: stores.integrations.inbound,
             provider,
           },
-          { provider: row.provider, externalId: row.externalId, status: task.status },
+          // The task as it is now: its owner and due date too (docs/26 A5).
+          {
+            provider: row.provider,
+            externalId: row.externalId,
+            status: task.status,
+            assignee: task.assignee ?? null,
+            dueDate: task.dueDate ?? null,
+          },
           row.orgId,
         );
         // docs/26 A5: "done" in the tracker closes the work where the org allows it.
@@ -1060,7 +1069,20 @@ const jobRunner = runsJobs(role)
           logger: { info: (e, f) => logger.info(e, f) },
         }),
         ...buildMediaHandlers({ logger: { info: (e, f) => logger.info(e, f) } }),
-        ...buildIntegrationHandlers({ logger: { info: (e, f) => logger.info(e, f) } }),
+        ...buildIntegrationHandlers({
+          logger: { info: (e, f) => logger.info(e, f) },
+          // docs/26 A5: read linked tasks through each active connection —
+          // how Jira's changes arrive, and a net under missed webhooks.
+          poll: () =>
+            pollInbound({
+              store: stores.integrations.store,
+              inbound: stores.integrations.inbound,
+              providers: stores.integrations.providers,
+              boardStore: stores.boardStore,
+              afterQueued: (records) => automations.closeFromTracker(records),
+              logger: { warn: (e, f) => logger.warn(e, f) },
+            }),
+        }),
         "prune-jobs": async () => {
           if (jobQueue instanceof PostgresJobQueue) {
             await jobQueue.prune(30 * 24 * 60 * 60 * 1000);

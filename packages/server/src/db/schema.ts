@@ -1312,6 +1312,8 @@ export const integrationTaskLinks = pgTable(
     externalId: text("external_id").notNull(),
     url: text("url"),
     lastSyncedStatus: text("last_synced_status").notNull(),
+    /** docs/26 A5: the owner and due date the provider held at last sync. */
+    lastSyncedFields: jsonb("last_synced_fields"),
     syncedAt: bigint("synced_at", { mode: "number" }).notNull(),
   },
   (t) => ({

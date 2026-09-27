@@ -131,6 +131,15 @@ export const RECURRING_JOBS: RecurringJob[] = [
     type: "sweep-idle-captures",
     everyMs: 15 * 60_000,
   },
+  // docs/26 A5: the inbound poll — Jira's only way in, and a net under
+  // missed webhooks. Ten minutes keeps a 100-link connection well inside
+  // every provider's rate limit.
+  {
+    key: "integration.poll",
+    family: "integration",
+    type: "integration.poll",
+    everyMs: 10 * 60_000,
+  },
   // docs/26 A5: due dates are calendar days, so an hourly look is prompt
   // enough; each reminder is sent once per due date.
   {

@@ -1,0 +1,1 @@
+ALTER TABLE "integration_task_links" ADD COLUMN "last_synced_fields" jsonb;

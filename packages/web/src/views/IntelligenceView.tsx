@@ -44,7 +44,12 @@ import { getCurrentOrgId } from "../orgs.js";
 import { hasSession } from "../session.js";
 import { WorkspaceIntelligence } from "./WorkspaceIntelligence.js";
 import { IntegrationPanel } from "./IntegrationPanel.js";
-import { inboundRowActions, inboundRowIsWarning, pendingInboundCount } from "./inboundRows.js";
+import {
+  inboundChangeText,
+  inboundRowActions,
+  inboundRowIsWarning,
+  pendingInboundCount,
+} from "./inboundRows.js";
 
 /** Stage D8: the providers' display names — the buttons' labels, the
  * not-connected note. One map; adding a provider touches this plus its
@@ -977,20 +982,22 @@ function BoardIntelligenceView({
                   )}
                 </div>
                 <div className="intel-inbound-line">
-                  {warning
-                    ? t("integrations.inbound.warning", locale, {
-                        provider: row.provider,
-                        value: row.externalValue,
-                      })
-                    : row.resolved
-                      ? t("integrations.inbound.resolved", locale, {
-                          value: row.mappedValue ?? "",
-                        })
-                      : t("integrations.inbound.row", locale, {
+                  {row.field !== "status" && !row.resolved
+                    ? `${inboundChangeText(row)} · the board says ${row.boardValue || "nothing"}`
+                    : warning
+                      ? t("integrations.inbound.warning", locale, {
                           provider: row.provider,
-                          external: row.externalValue,
-                          board: row.boardValue ?? "—",
-                        })}
+                          value: row.externalValue,
+                        })
+                      : row.resolved
+                        ? t("integrations.inbound.resolved", locale, {
+                            value: row.mappedValue ?? "",
+                          })
+                        : t("integrations.inbound.row", locale, {
+                            provider: row.provider,
+                            external: row.externalValue,
+                            board: row.boardValue ?? "—",
+                          })}
                 </div>
                 {row.status !== "pending" && (
                   <div className="intel-inbound-outcome mono">
