@@ -65,6 +65,7 @@ import { createCaptureDurability, type CaptureDurability } from "../meetingCaptu
 import { NativeRoom } from "../meeting-room/NativeRoom.js";
 import { spokenReply } from "../voiceConversation.js";
 import { ScheduleMeetingDialog } from "./ScheduleMeeting.js";
+import { ImportTranscriptDialog } from "./ImportTranscript.js";
 import { UpcomingMeeting } from "./UpcomingMeeting.js";
 import {
   applyExtractOutcome,
@@ -440,6 +441,8 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
   // remounts this view once while it checks the session.
   // docs/28 S2: the Schedule sheet, from this board.
   const [scheduling, setScheduling] = useState(false);
+  /** docs/28 S12: importing a transcript another tool exported. */
+  const [importing, setImporting] = useState(false);
   /** The next meeting's title and who to invite, when scheduled as a follow-up (S11). */
   const [schedulePrefill, setSchedulePrefill] = useState<{
     title: string;
@@ -2325,6 +2328,20 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
     window.history.replaceState(null, "", `?${params.toString()}`);
   };
 
+  const importDialog = importing && boardId && (
+    <ImportTranscriptDialog
+      boardId={boardId}
+      onClose={() => setImporting(false)}
+      onDone={(meeting, note) => {
+        setImporting(false);
+        notify(note);
+        setSaved((prev) => [meeting, ...prev.filter((m) => m.id !== meeting.id)]);
+        meetingInUrl(meeting.id);
+        openMeeting(meeting);
+      }}
+    />
+  );
+
   const scheduleDialog = scheduling && boardId && (
     <ScheduleMeetingDialog
       boardId={boardId}
@@ -2391,6 +2408,7 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
           notify={notify}
         />
         {scheduleDialog}
+        {importDialog}
       </Page>
     );
   }
@@ -2412,6 +2430,7 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
           not apply a proposal the user can't see. */}
       {view === "meeting" && <ProposalPanel docked />}
       {scheduleDialog}
+      {importDialog}
       {voiceHud && (
         <VoiceStateHud
           snapshot={
@@ -2630,6 +2649,11 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
                     <Ico.Plus /> Schedule
                   </Button>
                 )}
+                {boardId && !readOnly && (
+                  <Button variant="quiet" size="sm" onClick={() => setImporting(true)}>
+                    <Ico.Attach /> Import
+                  </Button>
+                )}
                 <Button
                   variant="quiet"
                   size="sm"
@@ -2753,6 +2777,11 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
                     >
                       <Ico.Video /> Video call
                     </Button>
+                    {boardId && !readOnly && (
+                      <Button variant="ghost" onClick={() => setImporting(true)}>
+                        <Ico.Attach /> Import a transcript
+                      </Button>
+                    )}
                   </>
                 }
               />

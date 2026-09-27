@@ -286,6 +286,40 @@ export async function writeMeetingSummary(
   return { ok: false, error: body.error ?? "Couldn't write the summary — try again." };
 }
 
+/**
+ * Save a transcript someone exported from another tool (docs/28 S12) as an
+ * ended meeting — the same record native capture writes, so its summary and
+ * Ask follow — and give it its name.
+ */
+export async function importTranscript(
+  boardId: string,
+  input: {
+    turns: Array<{ speaker: string; text: string; at: number }>;
+    startedAt: number;
+    endedAt: number;
+    title: string;
+  },
+): Promise<{ ok: true; meeting: MeetingTranscript } | { ok: false; error: string }> {
+  try {
+    const res = await apiFetch(`/api/boards/${encodeURIComponent(boardId)}/meetings`, {
+      method: "POST",
+      body: JSON.stringify({
+        turns: input.turns,
+        startedAt: input.startedAt,
+        endedAt: input.endedAt,
+      }),
+    });
+    const body = (await res.json().catch(() => ({}))) as { error?: string } & MeetingTranscript;
+    if (!res.ok) return { ok: false, error: body.error ?? "Couldn't import that transcript." };
+    const title = input.title.trim();
+    if (!title) return { ok: true, meeting: body };
+    const named = await renameMeeting(boardId, body.id, title);
+    return { ok: true, meeting: named ?? { ...body, title } };
+  } catch {
+    return { ok: false, error: "Couldn't reach Lucent — try again." };
+  }
+}
+
 /** Who "Notify owners" told, and which owners matched no one (docs/28 S11). */
 export interface OwnersNotified {
   told: Array<{ name: string; you: boolean; actions: number }>;

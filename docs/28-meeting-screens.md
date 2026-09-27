@@ -111,7 +111,7 @@ against every file their row cites.
 | S9 Review                          | §26–27, §57 |    ✅ per item, on its page    |
 | S10 Past meeting                   | §121        |       ✅ A3.1 (+ rename)       |
 | S11 Follow-up                      | §57         |  ✅ offers once it's reviewed  |
-| S12 Import transcript              | §64         |   🟡 route, mock only, no UI   |
+| S12 Import transcript              | §64         |   ✅ from a file; APIs later   |
 
 ## 4. State machines every screen shares
 
@@ -721,6 +721,33 @@ V8 transport (F4).
   over real sockets); `scripts/follow-check.mjs` 7/7 (two browsers: cursors,
   follow, spotlight, stepping out and back, bring everyone here and go
   back).
+
+- **S12, import a transcript — done (2026-09-28).** A transcript another
+  tool exported becomes a meeting on the board: Zoom's or Teams' WebVTT,
+  subtitle SRT, or the plain text Google Meet, Otter and most note tools
+  export.
+
+  - The meeting view's Import (and "Import a transcript" on a board with no
+    meetings yet) takes a file or a paste. Before anything is sent it shows
+    what the file holds: which tool it looks like, how many lines, who
+    spoke, and the first lines. The title comes from the file name, and the
+    date and time say when it happened.
+  - Speakers are taken as the file names them and never guessed; a line
+    with no speaker the format can read is "Speaker", and the preview says
+    so. One speaker's run of short cues is merged, since Teams splits every
+    sentence. A turn longer than the store's 2,000 characters is split at
+    sentence ends. A file over the 500-line cap says how many lines won't
+    fit before anyone imports it.
+  - The reader is core's `parseTranscript` (pure, so the preview is exactly
+    what's imported). The import is the ordinary meeting save: editor, the
+    org's capture policy, and `MeetingEnded`, so the summary is written as
+    for a meeting Lucent recorded.
+
+  Rule 7 held: this is a real source, a file people already have. The
+  vendor APIs (Zoom cloud recordings, Meet, Teams) still arrive through the
+  connector seam when their apps exist. `transcriptImport.test.ts` (8:
+  Teams, Zoom, SRT, text, Otter/Meet, splitting, refusals, the cap);
+  `scripts/meeting-import-check.mjs` 6/6.
 
 ## 9. Decisions needed
 
