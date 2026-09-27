@@ -139,9 +139,18 @@ function CaptureRow({ capture, onOpen }: { capture: LiveCapture; onOpen: () => v
 }
 
 export function MeetingHuddleDock() {
-  const { view, setView } = useWorkspace();
+  const { view, setView, boardId, openBoard } = useWorkspace();
+  // docs/28 F25: open the meeting of the board the call or the recording
+  // belongs to — Expand used to open whichever board happened to be current.
+  const openMeetingOf = (board: string | null): void => {
+    void (async () => {
+      if (board && board !== boardId && !(await openBoard(board))) return;
+      setView("meeting");
+    })();
+  };
   const {
     capture,
+    activeBoardId,
     notice,
     dismissNotice,
     status,
@@ -183,7 +192,7 @@ export function MeetingHuddleDock() {
   if (status !== "live") {
     return capture ? (
       <aside className="meeting-huddle-dock" aria-label="Meeting recording" style={DOCK_STYLE}>
-        <CaptureRow capture={capture} onOpen={() => setView("meeting")} />
+        <CaptureRow capture={capture} onOpen={() => openMeetingOf(capture.boardId)} />
       </aside>
     ) : null;
   }
@@ -223,7 +232,7 @@ export function MeetingHuddleDock() {
 
         <button
           className="btn"
-          onClick={() => setView("meeting")}
+          onClick={() => openMeetingOf(activeBoardId)}
           title="Expand to Full Meeting Stage"
           style={{
             padding: "2px 8px",
@@ -239,7 +248,7 @@ export function MeetingHuddleDock() {
         </button>
       </div>
 
-      {capture && <CaptureRow capture={capture} onOpen={() => setView("meeting")} />}
+      {capture && <CaptureRow capture={capture} onOpen={() => openMeetingOf(capture.boardId)} />}
       {notice && <MediaNotice text={notice} onDismiss={dismissNotice} />}
 
       {/* Conversational Lease Follow-Up Indicator */}
@@ -297,7 +306,7 @@ export function MeetingHuddleDock() {
       {/* Screen share notification if active */}
       {screenTile && (
         <div
-          onClick={() => setView("meeting")}
+          onClick={() => openMeetingOf(activeBoardId)}
           style={{
             display: "flex",
             alignItems: "center",

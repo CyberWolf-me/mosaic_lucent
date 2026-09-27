@@ -324,6 +324,73 @@ check(
 await page.getByRole("button", { name: /^stop$/i }).click();
 await page.waitForTimeout(1000);
 
+// --- F25: the dock opens the recording's own board ---
+// Record on board A, open board B from the dashboard mid-meeting, then use
+// the dock's Open: it used to open B's meeting view, not the recording's.
+const csrfPost = async (path, data) => {
+  const { token } = await (await page.request.get(`${base}/api/auth/csrf`)).json();
+  const res = await page.request.post(`${base}${path}`, {
+    headers: { "x-csrf-token": token, origin: base },
+    data,
+  });
+  return { status: res.status(), body: await res.json().catch(() => ({})) };
+};
+const { orgs } = await (await page.request.get(`${base}/api/orgs`)).json();
+// Any valid workspace will do; board A's is one.
+const { workspace: validWorkspace } = await (
+  await page.request.get(`${base}/api/boards/${boardId}`)
+).json();
+const boardB = await csrfPost("/api/boards", {
+  name: "Board B",
+  orgId: orgs[0].id,
+  workspace: validWorkspace,
+});
+check(
+  "a second board exists",
+  boardB.status === 201,
+  `${boardB.status} ${JSON.stringify(boardB.body)}`,
+);
+
+await page.goto(`${base}/?view=meeting&board=${boardId}`, { waitUntil: "networkidle" });
+await page
+  .getByRole("button", { name: /start recording|new recording/i })
+  .first()
+  .click();
+await page.waitForFunction(
+  () => !!window.__recognizer?.onresult && window.__recognizer.results.length === 0,
+  { timeout: 10000 },
+);
+await say("Said on board A before switching.");
+await page.evaluate(() => {
+  window.history.pushState(null, "", "/?view=dashboard");
+  window.dispatchEvent(new PopStateEvent("popstate"));
+});
+await page.getByText("Board B", { exact: true }).first().click();
+await page.waitForTimeout(1500);
+await say("Said while board B is open.");
+await page.getByRole("button", { name: "Open the meeting" }).click();
+await page.waitForTimeout(1500);
+const onA = await statusText();
+// The kept-alive view shows the live lines whichever board is open; the
+// board it lands on is what F25 is about (the crumb names it).
+check("Open lands on the recording's board, not the one that was open", !onA.includes("Board B"));
+check(
+  "still recording there, with every line",
+  onA.includes("Said on board A before switching.") &&
+    onA.includes("Said while board B is open.") &&
+    (await page.getByRole("button", { name: /^stop$/i }).isVisible()),
+);
+await page.getByRole("button", { name: /^stop$/i }).click();
+await page.waitForTimeout(1200);
+const savedOnA = (await meetings())?.find((m) =>
+  texts(m).includes("Said on board A before switching."),
+);
+check(
+  "the transcript was kept on board A, whole",
+  savedOnA?.endedAt !== null && savedOnA?.turns.length === 2,
+  `turns=${savedOnA?.turns.length} endedAt=${savedOnA?.endedAt}`,
+);
+
 // --- F22: a capture that works with less says so ---
 // Ask for on-device Whisper in a page where it can't run (no MediaRecorder):
 // the browser recognizer takes over, and the fallback used to be silent.
