@@ -1,5 +1,6 @@
 import type { LiveKitConfig, SttProvider, VoiceHandlers, VoiceSession } from "./types.js";
 import { eventConsumerFromCallbacks, type VoiceEventHandlers } from "./events.js";
+import { apiFetch } from "../http.js";
 
 /**
  * LiveKit-backed speech-to-text.
@@ -31,12 +32,32 @@ interface TokenResponse {
   error?: string;
 }
 
-async function fetchToken(room: string): Promise<{ token: string; url: string }> {
-  const res = await fetch(config.tokenUrl, {
+/** True for a path on this origin, or an absolute URL that names it. */
+export function isSameOrigin(url: string): boolean {
+  if (url.startsWith("/") && !url.startsWith("//")) return true;
+  if (typeof window === "undefined") return false;
+  try {
+    return new URL(url, window.location.href).origin === window.location.origin;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * docs/28 F23: Lucent's own token route (the default, `/api/livekit/token`)
+ * needs the session and the CSRF header — a bare fetch got 403 "csrf
+ * rejected" for every cookie session. A third-party token server gets
+ * neither: Lucent's CSRF token and cookies never leave this origin.
+ */
+export async function fetchLiveKitToken(room: string): Promise<{ token: string; url: string }> {
+  const init: RequestInit = {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ room }),
-  });
+  };
+  const res = isSameOrigin(config.tokenUrl)
+    ? await apiFetch(config.tokenUrl, init)
+    : await fetch(config.tokenUrl, { ...init, credentials: "omit" });
   const data = (await res.json().catch(() => ({}))) as TokenResponse;
   if (!res.ok || !data.token) {
     throw new Error(data.error ?? `Token endpoint failed (${res.status}).`);
@@ -103,7 +124,7 @@ export const livekitSttProvider: SttProvider = {
 
     void (async () => {
       try {
-        const { token, url } = await fetchToken(config.room || "lucent-voice");
+        const { token, url } = await fetchLiveKitToken(config.room || "lucent-voice");
         if (stopped) return;
 
         // Dynamic import: optional dependency.

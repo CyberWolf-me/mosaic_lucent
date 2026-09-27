@@ -13,6 +13,10 @@ import { generate, generateImage } from "../src/api.js";
 import * as boards from "../src/boards.js";
 import * as session from "../src/session.js";
 import * as notifications from "../src/notifications.js";
+import * as meetings from "../src/meetings.js";
+import { configureLiveKit, fetchLiveKitToken } from "../src/stt/livekit.js";
+
+const TURN = { speaker: "Ann", at: 1, text: "We ship Friday." };
 
 /**
  * The CSRF header is the defect that broke the product: `/api/generate` and
@@ -242,6 +246,43 @@ const MUTATING: ClientCall[] = [
     method: "POST",
     run: () => notifications.markAllNotificationsRead(),
   },
+  // docs/28 F13/F17: meeting capture writes and proposal-create (the server
+  // now checks CSRF on all of them).
+  {
+    name: "saveMeeting",
+    url: "/api/boards/brd_1/meetings",
+    method: "POST",
+    run: () => meetings.saveMeeting("brd_1", { turns: [TURN], startedAt: 1 }),
+  },
+  {
+    name: "appendMeetingTurns",
+    url: "/api/boards/brd_1/meetings/mtg_1/turns",
+    method: "POST",
+    run: () => meetings.appendMeetingTurns("brd_1", "mtg_1", [TURN]),
+  },
+  {
+    name: "endMeeting",
+    url: "/api/boards/brd_1/meetings/mtg_1/end",
+    method: "POST",
+    run: () => meetings.endMeeting("brd_1", "mtg_1"),
+  },
+  {
+    name: "createServerProposal",
+    url: "/api/boards/brd_1/proposals",
+    method: "POST",
+    run: () => boards.createServerProposal("brd_1", { operations: [], request: "r" }),
+  },
+  // docs/28 F23: the LiveKit speech provider's token request used a bare
+  // fetch — a 403 for every cookie session on Lucent's own token route.
+  {
+    name: "fetchLiveKitToken",
+    url: "/api/livekit/token",
+    method: "POST",
+    run: () => {
+      configureLiveKit({ url: "wss://rtc.example", tokenUrl: "/api/livekit/token", room: "r" });
+      return fetchLiveKitToken("r");
+    },
+  },
   {
     name: "logout",
     url: "/api/auth/logout",
@@ -272,7 +313,20 @@ describe("every mutating client call carries the CSRF header", () => {
   it("covers every path the client posts to", () => {
     // Guards against a call being deleted from the table instead of fixed.
     expect(new Set(MUTATING.map((c) => `${c.method} ${c.url}`)).size).toBe(MUTATING.length);
-    expect(MUTATING).toHaveLength(19);
+    expect(MUTATING).toHaveLength(24);
+  });
+
+  it("a third-party LiveKit token server gets neither the CSRF token nor the cookies", async () => {
+    configureLiveKit({
+      url: "wss://rtc.example",
+      tokenUrl: "https://tokens.example.com/issue",
+      room: "r",
+    });
+    await fetchLiveKitToken("r");
+    const record = requestsTo("https://tokens.example.com/issue")[0];
+    expect(record, "no token request").toBeDefined();
+    expect(headersOf(record!)[CSRF_HEADER]).toBeUndefined();
+    expect(record!.init.credentials).toBe("omit");
   });
 });
 
