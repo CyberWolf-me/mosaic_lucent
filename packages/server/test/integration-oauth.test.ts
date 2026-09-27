@@ -40,7 +40,9 @@ describe("sealing and signing (unit)", () => {
       tokenBox(randomBytes(32).toString("base64"))!.open(sealed, "org_a:linear"),
     ).toThrow();
     const [v, iv, tag, body] = sealed.split(".");
-    const flipped = `${v}.${iv}.${tag}.${body!.slice(0, -2)}${body!.endsWith("A") ? "B" : "A"}${body!.slice(-1)}`;
+    const bytes = Buffer.from(body!, "base64url");
+    bytes[0] = bytes[0]! ^ 0x01;
+    const flipped = `${v}.${iv}.${tag}.${bytes.toString("base64url")}`;
     expect(() => box.open(flipped, "org_a:linear")).toThrow();
     expect(tokenBox(undefined)).toBeNull();
     expect(() => tokenBox(Buffer.from("short").toString("base64"))).toThrow(/32 random bytes/);
