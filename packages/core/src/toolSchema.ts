@@ -95,6 +95,15 @@ export function toolParametersJsonSchema(): JsonSchema {
           "One or two sentences describing what changed, or the full answer when " +
           "the user asked a question and `operations` is empty.",
       },
+      reply: {
+        type: "string",
+        description:
+          "What you say back to the person, spoken aloud in a voice conversation: " +
+          "talk WITH them, not about the diff. Acknowledge the request, name the " +
+          "key change in plain words (no IDs, no lists), and when it genuinely " +
+          "helps, end with ONE short question or an offer of the next step. One to " +
+          "three short sentences. When `operations` is empty, answer or ask here too.",
+      },
     },
     required: ["operations"],
     additionalProperties: false,

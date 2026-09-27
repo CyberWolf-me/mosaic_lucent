@@ -19,7 +19,12 @@ function kindLabel(kind: DiagramKind): string {
  * Proposal review panel, styled in the Atelier design system and wired
  * to the real pending proposal + apply-as-one-commit action (docs/15).
  */
-export function ProposalPanel() {
+/**
+ * `docked`: in the page's flow instead of floating over its right edge — the
+ * meeting view, whose own panel (transcript, notes) lives on that edge and was
+ * hidden behind a pending proposal.
+ */
+export function ProposalPanel({ docked = false }: { docked?: boolean } = {}) {
   const { proposal, applyProposal, cancelProposal, chat } = useWorkspace();
   const [closing, setClosing] = useState(false);
   const timerRef = useRef<number | null>(null);
@@ -90,14 +95,17 @@ export function ProposalPanel() {
     <div
       role="dialog"
       aria-label="Proposed changes"
-      className={`right-panel ${closing ? "leaving" : ""}`}
+      className={`right-panel${docked ? " docked" : ""} ${closing ? "leaving" : ""}`}
       style={{
         background: "var(--paper-0)",
         border: "1px solid oklch(from var(--paper-4) l c h / 0.8)",
         boxShadow: "var(--shadow-3)",
       }}
     >
-      <div className="panel-head" style={{ borderBottom: "1px solid oklch(from var(--paper-4) l c h / 0.5)" }}>
+      <div
+        className="panel-head"
+        style={{ borderBottom: "1px solid oklch(from var(--paper-4) l c h / 0.5)" }}
+      >
         <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between" }}>
           <div>
             <div className="panel-title" style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -120,7 +128,10 @@ export function ProposalPanel() {
               Preview · applies what fits · reports remainder
             </div>
             {skipped.length > 0 && (
-              <div className="mono" style={{ fontSize: 10.5, color: "var(--amber-2)", marginTop: 4 }}>
+              <div
+                className="mono"
+                style={{ fontSize: 10.5, color: "var(--amber-2)", marginTop: 4 }}
+              >
                 {skipped.length} change{skipped.length === 1 ? "" : "s"} didn&apos;t fit — see chat
                 for details
               </div>
@@ -129,7 +140,14 @@ export function ProposalPanel() {
           <button
             type="button"
             className="icon-btn"
-            style={{ padding: 6, height: 28, color: "var(--ink-3)", background: "none", border: 0, cursor: "pointer" }}
+            style={{
+              padding: 6,
+              height: 28,
+              color: "var(--ink-3)",
+              background: "none",
+              border: 0,
+              cursor: "pointer",
+            }}
             onClick={handleCancel}
             title="Dismiss proposal (Escape)"
           >
@@ -160,15 +178,28 @@ export function ProposalPanel() {
               marginBottom: 4,
             }}
           >
-            Origin Prompt
+            {proposal.turns?.length ? "From the meeting" : "Origin Prompt"}
           </div>
-          &ldquo;{proposal.request}&rdquo;
+          {/* A meeting-captured batch was asked for by an internal extraction
+              prompt, not a person — show what was actually said instead. */}
+          {proposal.turns?.length ? (
+            <div style={{ display: "grid", gap: 4 }}>
+              {proposal.turns.slice(-4).map((turn, i) => (
+                <div key={i}>&ldquo;{turn}&rdquo;</div>
+              ))}
+            </div>
+          ) : (
+            <>&ldquo;{proposal.request}&rdquo;</>
+          )}
         </div>
 
         {/* Additions Section */}
         {additions.length > 0 && (
           <div style={{ marginBottom: 14 }}>
-            <div className="mono-caps" style={{ color: "var(--moss)", marginBottom: 6, fontSize: 10 }}>
+            <div
+              className="mono-caps"
+              style={{ color: "var(--moss)", marginBottom: 6, fontSize: 10 }}
+            >
               {additions.length} addition{additions.length === 1 ? "" : "s"}
             </div>
             {additions.map((c, i) => (
@@ -186,7 +217,10 @@ export function ProposalPanel() {
         {/* Modifications Section */}
         {modifications.length > 0 && (
           <div style={{ marginBottom: 14 }}>
-            <div className="mono-caps" style={{ color: "var(--bloom-2)", marginBottom: 6, fontSize: 10 }}>
+            <div
+              className="mono-caps"
+              style={{ color: "var(--bloom-2)", marginBottom: 6, fontSize: 10 }}
+            >
               {modifications.length} modification{modifications.length === 1 ? "" : "s"}
             </div>
             {modifications.map((c, i) => (
@@ -204,14 +238,20 @@ export function ProposalPanel() {
         {/* Removals Section */}
         {removals.length > 0 && (
           <div style={{ marginBottom: 14 }}>
-            <div className="mono-caps" style={{ color: "var(--madder)", marginBottom: 6, fontSize: 10 }}>
+            <div
+              className="mono-caps"
+              style={{ color: "var(--madder)", marginBottom: 6, fontSize: 10 }}
+            >
               {removals.length} removal{removals.length === 1 ? "" : "s"}
             </div>
             {removals.map((c, i) => (
               <div key={`del-${i}`} className="change-item">
                 <span className="change-op del">Del</span>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div className="change-title" style={{ textDecoration: "line-through", opacity: 0.8 }}>
+                  <div
+                    className="change-title"
+                    style={{ textDecoration: "line-through", opacity: 0.8 }}
+                  >
                     {c.title}
                   </div>
                   <div className="change-sub">{c.sub}</div>
@@ -239,7 +279,10 @@ export function ProposalPanel() {
           title="Cancel proposal (Esc)"
           style={{ height: 32, fontSize: 12 }}
         >
-          Cancel <span className="mono" style={{ opacity: 0.6, fontSize: 10, marginLeft: 4 }}>Esc</span>
+          Cancel{" "}
+          <span className="mono" style={{ opacity: 0.6, fontSize: 10, marginLeft: 4 }}>
+            Esc
+          </span>
         </button>
         <button
           type="button"
@@ -250,7 +293,9 @@ export function ProposalPanel() {
         >
           <Ico.Check style={{ width: 14, height: 14 }} />
           <span>Apply all</span>
-          <span className="mono" style={{ opacity: 0.8, fontSize: 10, marginLeft: 4 }}>⌘↵</span>
+          <span className="mono" style={{ opacity: 0.8, fontSize: 10, marginLeft: 4 }}>
+            ⌘↵
+          </span>
         </button>
       </div>
     </div>

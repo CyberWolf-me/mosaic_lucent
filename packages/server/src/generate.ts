@@ -546,6 +546,7 @@ export async function handleGenerate(
     body: {
       operations: outcome.operations,
       explanation: outcome.explanation,
+      reply: outcome.reply,
       provider: outcome.provider,
       ...(outcome.boardVersion > 0 ? { boardVersion: outcome.boardVersion } : {}),
       // Partial-application skips (M1), same as the SSE done frame.
@@ -566,6 +567,8 @@ export type PipelineOutcome =
       ok: true;
       operations: Operation[];
       explanation: string | null;
+      /** What Lucent says back in a voice conversation (GenerateResult.reply). */
+      reply: string | null;
       provider: string;
       /** 0 when no authoritative board backed the request (field omitted downstream). */
       boardVersion: number;
@@ -753,6 +756,7 @@ async function runGeneratePipeline(
       ok: true,
       operations: appliedOps,
       explanation: result.explanation ?? null,
+      reply: result.reply ?? null,
       provider: provider.name,
       // The client learns the new server-side version in the same response.
       boardVersion: Date.now(),
@@ -767,6 +771,7 @@ async function runGeneratePipeline(
     ok: true,
     operations: appliedOps,
     explanation: result.explanation ?? null,
+    reply: result.reply ?? null,
     provider: provider.name,
     // No authoritative board: there is no server-side version to report.
     boardVersion: 0,
@@ -831,6 +836,7 @@ export async function handleGenerateStream(
   emit("done", {
     operations: outcome.operations,
     explanation: outcome.explanation,
+    reply: outcome.reply,
     provider: outcome.provider,
     boardVersion: outcome.boardVersion,
     // Partial-application skips (M1): the client shows what didn't land and

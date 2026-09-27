@@ -277,7 +277,8 @@
   border-color: var(--bloom-2);
 }
 .vectors-tile.is-loading {
-  background: linear-gradient(100deg, var(--paper-2) 30%, var(--paper-3) 50%, var(--paper-2) 70%) 0 0 / 200% 100%;
+  background: linear-gradient(100deg, var(--paper-2) 30%, var(--paper-3) 50%, var(--paper-2) 70%) 0
+    0 / 200% 100%;
   animation: vectors-shimmer 1.4s linear infinite;
 }
 @keyframes vectors-shimmer {
@@ -1187,4 +1188,51 @@ body:has(.node-inspector) .minimap {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* ---------------------------------------------------- voice conversation */
+
+/* The status line above the pill while talking with Lucent
+   (voiceConversation.ts): listening, thinking, answering. */
+.voice-phase {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  align-self: center;
+  margin: 0 auto 6px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  background: var(--canvas-2);
+  border: 1px solid var(--stroke-1);
+  box-shadow: var(--elev-1, 0 2px 8px rgba(0, 0, 0, 0.08));
+  color: var(--ink-1);
+  font-size: 12.5px;
+  width: fit-content;
+}
+.voice-phase-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--ink-2);
+}
+.voice-phase.is-listening .voice-phase-dot {
+  background: var(--sig-red);
+  animation: voice-pulse 1.4s ease-in-out infinite;
+}
+.voice-phase.is-thinking .voice-phase-dot {
+  background: var(--bloom-2);
+  animation: voice-pulse 0.9s ease-in-out infinite;
+}
+.voice-phase.is-speaking .voice-phase-dot {
+  background: var(--sig-green);
+}
+@keyframes voice-pulse {
+  50% {
+    opacity: 0.3;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .voice-phase-dot {
+    animation: none !important;
+  }
 }

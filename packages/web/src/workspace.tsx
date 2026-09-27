@@ -278,11 +278,16 @@ export type GenPhase = "understanding" | "constructing" | "validating" | "applyi
  * meeting view's extraction heartbeat).
  */
 export type SendOutcome =
-  | { outcome: "applied"; ops: number }
-  | { outcome: "proposed"; ops: number }
+  /**
+   * `reply` on the three answered kinds is what Lucent says back in a voice
+   * conversation (the model's conversational reply, or its explanation when it
+   * gave none) — the canvas and the meeting speak it.
+   */
+  | { outcome: "applied"; ops: number; reply: string }
+  | { outcome: "proposed"; ops: number; reply: string }
   /** A zero-op reply — often a clarifying question — carried as `text` so a
    *  caller outside the chat (the meeting's voice loop) can relay it. */
-  | { outcome: "answered"; text: string }
+  | { outcome: "answered"; text: string; reply: string }
   | { outcome: "rejected" }
   | { outcome: "failed"; error: string }
   | { outcome: "busy" }
@@ -379,7 +384,12 @@ export interface WorkspaceState {
    * is reading — the same content the history view shows, answered by the
    * model instead of listed).
    */
-  ask: (question: string) => Promise<void>;
+  /**
+   * Ask about the board (the Ask lens). Resolves to what was said back — the
+   * answer, or the reason there isn't one — so a voice conversation can speak
+   * it; null when nothing was asked.
+   */
+  ask: (question: string) => Promise<string | null>;
   /** The pill's Build/Ask mode; shared across views so the toggle persists. */
   pillMode: "build" | "ask";
   setPillMode: (mode: "build" | "ask") => void;
@@ -1520,6 +1530,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         // offer the one-click "build it on a new board".
         if (result.operations.length === 0) {
           const explanation = result.explanation ?? "(no answer)";
+          const reply = result.reply?.trim() || explanation;
           const suggestsBoard =
             Object.keys(workspace.nodes).length > 0 &&
             /own board|separate board|new board/i.test(explanation);
@@ -1528,6 +1539,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
             {
               role: "ai",
               text: explanation,
+              reply,
               ...(suggestsBoard ? { suggestNewBoard: true, originPrompt: text } : {}),
             },
           ];
@@ -1538,7 +1550,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           // the user's message and the answer simply disappeared (found live:
           // a "move the monitoring stack" answer was gone after a reload).
           persist(workspace, conversation, projectName);
-          return { outcome: "answered", text: explanation };
+          return { outcome: "answered", text: explanation, reply };
         }
         const errors = validateOperations(workspace, result.operations);
         if (errors.length > 0) {
@@ -1556,6 +1568,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           return { outcome: "rejected" };
         }
         const explanation = result.explanation ?? `Applied ${result.operations.length} operations.`;
+        const reply = result.reply?.trim() || explanation;
 
         // Provenance (M2 → Stage C2, ADR 0022): enrich the OPS with the
         // meeting evidence before anything else touches them, so the stamp
@@ -1666,6 +1679,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
             {
               role: "ai",
               text: `${explanation} — review ${result.operations.length} proposed changes.`,
+              reply: `${reply} It's waiting for your review.`,
               ...skippedNote,
             },
           ];
@@ -1683,7 +1697,11 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           // The ops themselves apply only on approval, but the request and
           // the review-gate reply are durable from this moment on.
           persist(workspace, conversation, projectName);
-          return { outcome: "proposed", ops: result.operations.length };
+          return {
+            outcome: "proposed",
+            ops: result.operations.length,
+            reply: `${reply} It's waiting for your review.`,
+          };
         } else if (foldedOps.length === 0) {
           // A clarifying reply (docs/26 locked philosophy): faced with an
           // ambiguous request the model asked a question instead of guessing,
@@ -1692,23 +1710,29 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           // no room broadcast, no canvas change.
           const conversation: ChatEntry[] = [
             ...withUser,
-            { role: "ai", text: explanation, ...skippedNote },
+            { role: "ai", text: explanation, reply, ...skippedNote },
           ];
           setChat(conversation);
           persist(workspace, conversation, projectName);
-          return { outcome: "answered", text: explanation };
+          return { outcome: "answered", text: explanation, reply };
         } else {
           const next = applyStamped();
           const conversation: ChatEntry[] = [
             ...withUser,
-            { role: "ai", text: explanation, ...skippedNote, effect: turnEffect(foldedOps) },
+            {
+              role: "ai",
+              text: explanation,
+              reply,
+              ...skippedNote,
+              effect: turnEffect(foldedOps),
+            },
           ];
           setChat(conversation);
           // The folded ops, not the raw model batch — the stamp and the
           // folded topic ride into history and the room with them (Stage C2
           // + C5).
           commitAndShare(next, foldedOps, explanation, conversation, projectName);
-          return { outcome: "applied", ops: foldedOps.length };
+          return { outcome: "applied", ops: foldedOps.length, reply };
         }
       } catch (err) {
         // Retriable-failure affordance (found live, 2026-09-10): a transient
@@ -1783,21 +1807,20 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
    * honest answer rather than an empty history.
    */
   const ask = useCallback(
-    async (question: string) => {
+    async (question: string): Promise<string | null> => {
       const text = question.trim();
-      if (!text || busy) return;
+      if (!text || busy) return null;
       if (!boardId) {
+        const refusal =
+          "Ask works on shared boards — their history lives on the server. Share this board first, then ask.";
         const conversation: ChatEntry[] = [
           ...chat,
           { role: "user", text },
-          {
-            role: "error",
-            text: "Ask works on shared boards — their history lives on the server. Share this board first, then ask.",
-          },
+          { role: "error", text: refusal },
         ];
         setChat(conversation);
         persist(workspace, conversation, projectName);
-        return;
+        return refusal;
       }
       const withUser: ChatEntry[] = [...chat, { role: "user", text }];
       setChat(withUser);
@@ -1818,7 +1841,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           const conversation: ChatEntry[] = [...withUser, { role: "error", text: result.error }];
           setChat(conversation);
           persist(workspace, conversation, projectName);
-          return;
+          return result.error;
         }
         const conversation: ChatEntry[] = [
           ...withUser,
@@ -1844,6 +1867,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         ];
         setChat(conversation);
         persist(workspace, conversation, projectName);
+        return result.answer;
       } catch (err) {
         const conversation: ChatEntry[] = [
           ...withUser,
@@ -1851,6 +1875,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         ];
         setChat(conversation);
         persist(workspace, conversation, projectName);
+        return (err as Error).message;
       } finally {
         setBusy(false);
       }

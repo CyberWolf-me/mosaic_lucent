@@ -1,3 +1,4 @@
+import { voicePhaseLabel, type VoicePhase } from "../voiceConversation.js";
 import { useId, useRef, useState } from "react";
 import { Ico } from "./icons.js";
 import { AllowanceNote } from "./Paywall.js";
@@ -53,6 +54,7 @@ export function AIPill({
   phase = null,
   progressNote = null,
   onCancel,
+  voicePhase = "idle",
 }: {
   /** Mode-aware callers pass one; the default stays the Build wording. */
   placeholder?: string;
@@ -95,6 +97,8 @@ export function AIPill({
   progressNote?: string | null;
   /** UX-2 cancel. Rendered only while busy; the workspace owns the abort. */
   onCancel?: () => void;
+  /** A voice conversation with Lucent, and where it is (voiceConversation.ts). */
+  voicePhase?: VoicePhase;
 }) {
   const [expanded, setExpanded] = useState(false);
   const bars = useRef(Array.from({ length: 14 }, () => 20 + Math.random() * 60));
@@ -105,6 +109,8 @@ export function AIPill({
     ? `${PHASE_LABEL[phase]}${progressNote ? ` — ${progressNote}` : ""}`
     : null;
   const statusText = phaseText ?? status?.text ?? null;
+  const conversing = voicePhase !== "idle";
+  const voiceLine = voicePhaseLabel(voicePhase);
 
   return (
     <div className={`ai-pill-wrap${shifted ? " shifted" : ""}`}>
@@ -183,6 +189,12 @@ export function AIPill({
         </div>
       )}
 
+      {voiceLine && (
+        <div className={`voice-phase is-${voicePhase}`} role="status" aria-live="polite">
+          <span className="voice-phase-dot" aria-hidden />
+          {voiceLine}
+        </div>
+      )}
       <div className={`ai-pill ${listening ? "listening" : ""}${readOnly ? " read-only" : ""}`}>
         <div className="pill-icon">
           {readOnly ? (
@@ -244,8 +256,10 @@ export function AIPill({
               placeholder={
                 listening
                   ? "Listening… speak your idea (tap mic or ↵ when done)"
-                  : placeholder ??
-                    (askMode ? "Ask about this board's history…" : "Ask Lucent to build something…")
+                  : (placeholder ??
+                    (askMode
+                      ? "Ask about this board's history…"
+                      : "Ask Lucent to build something…"))
               }
             />
             {listening && (
@@ -272,17 +286,25 @@ export function AIPill({
         {!readOnly && (
           <>
             <button
-              className={`mic-btn ${listening ? "active" : ""}`}
+              className={`mic-btn ${listening || conversing ? "active" : ""}`}
               onClick={onToggleMic}
               title={
-                listening
-                  ? "Stop listening & submit"
+                conversing
+                  ? listening && value.trim()
+                    ? "Send what you said"
+                    : "End the voice conversation"
                   : voiceSupported
-                    ? "Voice Dictation (transcribe speech into prompt)"
+                    ? "Talk with Lucent — it answers out loud and keeps listening"
                     : "Voice not supported in this browser"
               }
-              aria-label={listening ? "Stop voice input" : "Start voice input"}
-              aria-pressed={listening}
+              aria-label={
+                conversing
+                  ? listening && value.trim()
+                    ? "Send what you said"
+                    : "End the voice conversation"
+                  : "Talk with Lucent"
+              }
+              aria-pressed={conversing}
               style={voiceSupported ? undefined : { opacity: 0.45 }}
             >
               <Ico.Mic />

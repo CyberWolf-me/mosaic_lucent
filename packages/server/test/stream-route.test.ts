@@ -179,6 +179,8 @@ describe("POST /api/generate/stream", () => {
       expect(done).toBeDefined();
       const operations = (done!.data.operations as Array<{ op: string }>).map((o) => o.op);
       expect(operations).toContain("CREATE_NODE");
+      // The conversational reply rides the done frame too.
+      expect(done!.data.reply).toMatch(/\?$/);
       expect(frames.find((f) => f.event === "error")).toBeUndefined();
     } finally {
       await h.close();

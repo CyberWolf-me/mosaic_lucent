@@ -60,6 +60,7 @@ import {
 import { differentialPrompt, meetingExtractRequest } from "../meeting-extract.js";
 import { createCaptureDurability, type CaptureDurability } from "../meetingCapture.js";
 import { NativeRoom } from "../meeting-room/NativeRoom.js";
+import { spokenReply } from "../voiceConversation.js";
 import { ScheduleMeetingDialog } from "./ScheduleMeeting.js";
 import { UpcomingMeeting } from "./UpcomingMeeting.js";
 import {
@@ -684,17 +685,24 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
     const runVoiceCommand = async (speaker: string, instruction: string): Promise<void> => {
       notify("Applying voice instruction to canvas…");
       const result = await sendRef.current(instruction);
-      if (result.outcome !== "answered") return;
-      const reply = result.text.trim();
+      // Lucent talks back after a change too — what it did, and often a
+      // question — not only when it answers (it used to go silent).
+      const reply = spokenReply(result);
       if (!reply) return;
-      setVoiceAnswers((prev) => [...prev, voiceAnswerCard(instruction, { answer: reply })]);
+      if (result.outcome === "answered") {
+        setVoiceAnswers((prev) => [...prev, voiceAnswerCard(instruction, { answer: reply })]);
+      }
       const manager = leaseManagerRef.current;
       // "Thanks, Lucent" while the canvas was thinking: show it, don't speak.
       if (manager.getState() === "dormant") return;
       manager.onAiStartResponding();
       const listen = (): void => {
-        if (reply.endsWith("?")) manager.onClarificationAsked(instruction, reply);
-        else manager.onTtsDone(reply);
+        // A question INSTEAD of a change is a clarification: the answer
+        // completes the instruction. A question after a change is a follow-up:
+        // the answer is a new request (with the reply in the history).
+        if (result.outcome === "answered" && reply.endsWith("?")) {
+          manager.onClarificationAsked(instruction, reply);
+        } else manager.onTtsDone(reply);
       };
       if (voiceMutedRef.current) {
         listen();
@@ -1959,7 +1967,7 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
           the canvas. Only while this view is on screen: the panel binds
           Esc / Ctrl+Enter globally, and a hidden kept-alive copy (F14) must
           not apply a proposal the user can't see. */}
-      {view === "meeting" && <ProposalPanel />}
+      {view === "meeting" && <ProposalPanel docked />}
       {scheduleDialog}
       {voiceHud && (
         <VoiceStateHud

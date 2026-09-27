@@ -60,6 +60,21 @@ function getCtor(): RecognitionCtor | null {
   return w.SpeechRecognition ?? w.webkitSpeechRecognition ?? null;
 }
 
+/**
+ * Errors Chrome raises in the ordinary life of a long capture: a pause with no
+ * speech, its own restart, a moment without network. The recognizer ends and
+ * the provider starts it again; none of these is the person's problem, and
+ * reporting them ended every voice session the first time someone paused
+ * (found in use: "it only gets about four words, then resets").
+ */
+export function isTransientSpeechError(code: string | undefined): boolean {
+  return code === "no-speech" || code === "aborted" || code === "network";
+}
+
+/** A restart storm — the recognizer ending again and again — is a real failure. */
+export const MAX_RESTARTS_IN_WINDOW = 6;
+export const RESTART_WINDOW_MS = 5000;
+
 function describeError(code: string | undefined): string {
   switch (code) {
     case "not-allowed":
@@ -105,6 +120,19 @@ export const browserSttProvider: SttProvider = {
     // `emittedThrough` tracks the last result index already emitted so a
     // recognizer restart replaying the list can't double-fire a turn.
     let emittedThrough = -1;
+    // Words heard but not yet final. Chrome can end a recognition session in
+    // the middle of a phrase (its own restart, a network blip) without ever
+    // finalizing it; those words used to vanish, and the text reset.
+    let pendingInterim = "";
+    let networkErrors = 0;
+    const restarts: number[] = [];
+
+    const flushPending = () => {
+      const text = pendingInterim.trim();
+      pendingInterim = "";
+      if (!text || stopped || isTtsSpeaking()) return;
+      handlers.onEvent({ type: "final", text, at: Date.now(), source: "browser" });
+    };
 
     const begin = () => {
       if (stopped) return;
@@ -121,6 +149,7 @@ export const browserSttProvider: SttProvider = {
         if (stopped || isTtsSpeaking()) return;
         // Segment mode: the event carries an index where new results start.
         const event = baseEvent as unknown as SegmentedEvent;
+        networkErrors = 0;
         let interim = "";
         for (let i = 0; i < event.results.length; i++) {
           const result = event.results[i];
@@ -141,17 +170,39 @@ export const browserSttProvider: SttProvider = {
             interim += transcript;
           }
         }
+        pendingInterim = interim;
         if (interim && !stopped && !isTtsSpeaking())
           handlers.onEvent({ type: "interim", text: interim, at: Date.now(), source: "browser" });
       };
       recognition.onerror = (event) => {
         if (stopped) return;
-        const msg = describeError(event?.error);
+        const code = event?.error;
+        // Ordinary in a long capture: the recognizer ends and restarts itself.
+        if (isTransientSpeechError(code)) {
+          if (code === "network" && ++networkErrors >= 3) {
+            handlers.onError?.(describeError(code));
+          }
+          return;
+        }
+        // Anything else (blocked mic, no mic, unsupported) won't fix itself on
+        // a restart: stop here and say what to do.
+        stopped = true;
+        const msg = describeError(code);
         if (msg) handlers.onError?.(msg);
       };
       recognition.onend = () => {
         if (stopped) return;
-        handlers.onStatus?.("idle");
+        flushPending();
+        const now = Date.now();
+        restarts.push(now);
+        while (restarts.length > 0 && now - restarts[0]! > RESTART_WINDOW_MS) restarts.shift();
+        if (restarts.length > MAX_RESTARTS_IN_WINDOW) {
+          stopped = true;
+          handlers.onError?.(
+            "Voice recognition keeps stopping in this browser. Check the microphone, or switch to another speech provider in Settings.",
+          );
+          return;
+        }
         // Chrome stops recognition after any short silence. Continuously recreate
         // and restart capture unless stopped or TTS is actively playing.
         if (!stopped) {
@@ -211,6 +262,8 @@ export const browserSttProvider: SttProvider = {
 
     return {
       stop: () => {
+        // What was heard but not finalized when the person stopped is theirs.
+        flushPending();
         stopped = true;
         handlers.onEvent({ type: "speech_stopped", at: Date.now() });
         try {

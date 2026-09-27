@@ -54,6 +54,11 @@ export function MeetingNotes({
   const [offline, setOffline] = useState<Offline | null>(null);
   const [editing, setEditing] = useState<{ s: number; i: number } | null>(null);
   const [copied, setCopied] = useState(false);
+  // True while a meeting's stored notes are on their way. The pad is
+  // read-only meanwhile: lines typed before the answer landed were replaced
+  // by it (an empty stored copy wiped them from the screen, and the note that
+  // writes itself at the end had nothing to work from).
+  const [loading, setLoading] = useState(false);
   const editCancelled = useRef(false);
   const saveTimer = useRef<number | null>(null);
   const saveFlight = useRef<Promise<unknown> | null>(null);
@@ -84,6 +89,7 @@ export function MeetingNotes({
     const ended = justEnded.current && !live;
 
     if (!boardId || !meetingId) {
+      setLoading(false);
       if (!wasLive) {
         lastId.current = null;
         setLines([]);
@@ -101,14 +107,19 @@ export function MeetingNotes({
       return;
     }
     const carried = lastId.current === null ? linesRef.current.filter((l) => l.text.trim()) : [];
-    lastId.current = meetingId;
     setEnhanced(null);
     setOffline(null);
     setView("notes");
     if (carried.length === 0) setLines([]);
     let alive = true;
+    setLoading(true);
     void getNotes(boardId, meetingId).then(async (n) => {
       if (!alive) return;
+      // Marked only once its notes are here: a rerun of this effect before the
+      // answer (React runs it twice in development; a dependency can change
+      // mid-fetch) dropped the first answer and then skipped loading, so a
+      // reopened meeting showed an empty notepad.
+      lastId.current = meetingId;
       if (carried.length > 0 && (!n || n.lines.every((l) => !l.text.trim()))) {
         // Lines typed before this meeting had an id become its notes.
         await saveNotes(boardId, meetingId, { lines: linesRef.current, template });
@@ -118,6 +129,7 @@ export function MeetingNotes({
         setEnhanced(n.enhanced);
         if (n.enhanced && n.lines.length === 0) setView("enhanced");
       }
+      if (alive) setLoading(false);
       if (ended && alive) {
         justEnded.current = false;
         setAutoEnhance((x) => x + 1);
@@ -287,6 +299,8 @@ export function MeetingNotes({
                 : "Your notes on this meeting. Enhance them into a full note, with every added line tied to what was said."
             }
             value={lines.map((l) => l.text).join("\n")}
+            readOnly={loading}
+            aria-busy={loading}
             onChange={(e) => onType(e.target.value)}
             onKeyDown={(e) => e.stopPropagation()}
             spellCheck

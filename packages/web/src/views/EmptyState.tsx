@@ -2,6 +2,14 @@ import { useRef, useState } from "react";
 import { Ico, ToolIco } from "../ui/icons.js";
 import { useToast } from "../ui/Toast.js";
 import { downscaleImage } from "../board/images.js";
+import type { VoicePhase } from "../voiceConversation.js";
+
+const HERO_VOICE_CHIP: Record<VoicePhase, string> = {
+  idle: "Talk",
+  listening: "Listening…",
+  thinking: "Thinking…",
+  speaking: "Answering…",
+};
 
 /** What the hero hands the model alongside the words. */
 export interface HeroAttachments {
@@ -40,6 +48,7 @@ export function EmptyState({
   onStartVoiceCall,
   voiceAgentActive,
   listening,
+  voicePhase = "idle",
   onGenImage,
 }: {
   value: string;
@@ -53,6 +62,8 @@ export function EmptyState({
   onStartVoiceCall?: () => void;
   voiceAgentActive?: boolean;
   listening?: boolean;
+  /** Where a voice conversation started from here is. */
+  voicePhase?: VoicePhase;
   onGenImage?: () => void;
   failedAttempt?: { text: string; retryPrompt?: string } | null;
 }) {
@@ -186,12 +197,21 @@ export function EmptyState({
           </div>
         )}
         <div className="hero-actions">
+          {/* A conversation, not dictation: one tap, then talk — Lucent
+              answers out loud and keeps listening until you're done. */}
           <button
-            className={`hero-chip ${listening ? "on danger" : ""}`}
+            className={`hero-chip ${listening || voicePhase !== "idle" ? "on danger" : ""}`}
             onClick={onSpeak}
-            title={listening ? "Listening… click to stop" : "Dictate your description"}
+            aria-label={voicePhase === "idle" ? "Talk with Lucent" : "End the voice conversation"}
+            aria-pressed={voicePhase !== "idle"}
+            title={
+              voicePhase === "idle"
+                ? "Talk it through — Lucent answers out loud and keeps listening"
+                : "End the voice conversation"
+            }
           >
-            <Ico.Mic2 /> {listening ? "Listening…" : "Speak"}
+            <Ico.Mic2 />{" "}
+            {HERO_VOICE_CHIP[listening && voicePhase === "idle" ? "listening" : voicePhase]}
           </button>
           {onStartVoiceCall && (
             <button

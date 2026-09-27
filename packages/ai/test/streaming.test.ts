@@ -310,6 +310,7 @@ describe("fallback streams", () => {
     expect(JSON.parse(callbacks.text)).toEqual({
       operations: result.operations,
       explanation: result.explanation ?? null,
+      reply: result.reply ?? null,
     });
   });
 

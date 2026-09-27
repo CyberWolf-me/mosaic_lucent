@@ -210,6 +210,40 @@ tts.ts` seam (free local speech synthesis default — nothing to bill;
   (derived live, no store, never speech). Nothing speaks unprompted —
   proactive SPEECH waits on M6.3 maturity plus measured reliability, and
   stays gated on those.
+- **V10 — talking WITH Lucent, and speech that holds (2026-09-27).** The
+  owner's report: the agent doesn't interact, it only reads out the changes
+  it made; speech recognition gets about four words, then resets.
+  - _A reply, not a change list._ The one generation tool gains an optional
+    `reply` (core `toolSchema.ts`): what Lucent says back, spoken, usually
+    ending in one short question or next step. `explanation` stays the chat
+    pane's record of what changed. The server returns `reply` from both
+    generate routes; the mock writes one ("Done. … Should I add what happens
+    when X fails?"); recent history carries it so the model sees what it
+    last asked.
+  - _A conversation on the canvas._ One tap on the mic starts it: a pause
+    ends the person's turn (1.8 s after a final, 3.5 s on words still
+    arriving), Lucent answers out loud with the reply, then listens again by
+    itself. "That's all", a tap, or 30 s of silence ends it. The pill and the
+    empty board's chip show the phase (listening, thinking, answering). Before,
+    it took one utterance, stopped, and — only with "AI sound" on — read out
+    the change description.
+  - _Speech that holds._ Chrome's recognizer ends its session on its own
+    (pauses, restarts, network blips) and reported `no-speech`/`aborted`/
+    `network` as errors, which ended the voice session at the first pause.
+    Those are now ignored (network only after three in a row); words still
+    in flight when a session ends are kept as a final instead of vanishing;
+    a restart storm stops with a reason. In the duplex call, the transcript
+    banner showed only the newest segment on one clipped line — now the last
+    few lines, wrapped; a dispatch failure or an agent that never joins
+    (no worker, no `DEEPGRAM_API_KEY`) says so instead of waiting in silence.
+    The meeting speaks its reply after a voice command too, not only after
+    a question.
+  - Evidence: `test/stt-browser.test.ts`, `test/voice-conversation.test.ts`,
+    `ai/test/reply.test.ts`, the generate route tests, and
+    `scripts/canvas-voice-check.mjs` (a scripted recognizer and a recording
+    speaker, 11/11: one tap, turn by pause, a spoken question back, listening
+    again, a phrase never finalized across a recognizer restart arriving
+    whole, "that's all" ending it unsent).
 
 ## 5. Freeze legality (docs/17)
 

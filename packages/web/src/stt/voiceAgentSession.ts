@@ -9,11 +9,46 @@ export type VoiceAgentState =
   | "disconnected";
 
 export interface VoiceAgentTranscript {
+  /** LiveKit's segment id: one utterance, whose text grows until it's final. */
+  id: string;
   text: string;
   final: boolean;
   isAgent: boolean;
   timestamp: number;
 }
+
+/** One line of the call's rolling transcript. */
+export interface TranscriptLine {
+  id: string;
+  isAgent: boolean;
+  text: string;
+  final: boolean;
+}
+
+/** How many lines the bar keeps: the last exchange, not the whole call. */
+export const TRANSCRIPT_LINES = 4;
+
+/**
+ * Fold one transcription segment into the rolling transcript. A segment is
+ * updated in place as its words arrive (LiveKit re-sends the growing text
+ * under the same id), and a new one is a new line — the bar used to show only
+ * the latest segment, so it read as a few words that kept resetting.
+ */
+export function withTranscriptSegment(
+  lines: readonly TranscriptLine[],
+  seg: VoiceAgentTranscript,
+  max = TRANSCRIPT_LINES,
+): TranscriptLine[] {
+  const text = seg.text.trim();
+  if (!text) return [...lines];
+  const line: TranscriptLine = { id: seg.id, isAgent: seg.isAgent, text, final: seg.final };
+  const at = lines.findIndex((l) => l.id === seg.id);
+  const next = at >= 0 ? lines.map((l, i) => (i === at ? line : l)) : [...lines, line];
+  return next.slice(-max);
+}
+
+/** How long to wait for the agent to join before saying it isn't coming. */
+export const AGENT_JOIN_TIMEOUT_MS = 15_000;
 
 export interface StartVoiceAgentOptions {
   boardId: string;
@@ -75,12 +110,16 @@ export async function startVoiceAgentSession(
         error?: string;
         detail?: string;
       };
-      // If dispatch fails with 503 (e.g. LiveKit not configured), warn cleanly
       if (dispatchRes.status === 503) {
         throw new Error(errData.error || "LiveKit is not configured on this server.");
       }
-      // Non-fatal if worker is already listening/auto-dispatched, but report detail if error
-      console.warn("Agent dispatch response:", dispatchRes.status, errData);
+      // Joining a room the agent was never sent to is talking to no one: the
+      // call used to open anyway and stay silent.
+      throw new Error(
+        errData.error
+          ? `${errData.error}${errData.detail ? ` (${errData.detail})` : ""}`
+          : `The voice agent couldn't be started (error ${dispatchRes.status}).`,
+      );
     }
 
     if (stopped) throw new Error("Voice session was stopped");
@@ -158,11 +197,17 @@ export async function startVoiceAgentSession(
     room.on(
       livekit.RoomEvent.TranscriptionReceived || "transcriptionReceived",
       (segments: Array<{ text: string; final: boolean; participant?: any }>) => {
-        for (const seg of segments) {
-          const participantId =
-            typeof seg.participant === "string" ? seg.participant : seg.participant?.identity || "";
+        for (const seg of segments as Array<{
+          id?: string;
+          text: string;
+          final: boolean;
+          participant?: unknown;
+        }>) {
+          const who = seg.participant as { identity?: string } | string | undefined;
+          const participantId = typeof who === "string" ? who : who?.identity || "";
           const isAgent = participantId !== room.localParticipant?.identity;
           onTranscript?.({
+            id: seg.id ?? `${participantId}-${Date.now()}`,
             text: seg.text,
             final: seg.final,
             isAgent,
@@ -173,17 +218,41 @@ export async function startVoiceAgentSession(
     );
 
     room.on(livekit.RoomEvent.Disconnected || "disconnected", () => {
+      if (joinTimer) clearTimeout(joinTimer);
       onStateChange("disconnected");
     });
+
+    // The agent is a separate worker process; if it never joins, say so
+    // rather than leave the person talking to an empty room.
+    let joinTimer: ReturnType<typeof setTimeout> | null = null;
+    const agentArrived = () => {
+      if (joinTimer) clearTimeout(joinTimer);
+      joinTimer = null;
+    };
+    room.on(livekit.RoomEvent.ParticipantConnected || "participantConnected", agentArrived);
 
     // 7. Connect to LiveKit room and publish local microphone
     await room.connect(url, token);
     await room.localParticipant.setMicrophoneEnabled(true);
 
     onStateChange("listening");
+    const present = (room as unknown as { remoteParticipants?: Map<string, unknown> })
+      .remoteParticipants;
+    if (!present || present.size === 0) {
+      joinTimer = setTimeout(() => {
+        if (stopped) return;
+        stopped = true;
+        void room.disconnect();
+        onStateChange("error");
+        onError?.(
+          "The voice agent didn't join. Its worker isn't running on this server (npm run dev -w @lucent/voice-agent), or it has no speech key (DEEPGRAM_API_KEY). Use the mic button to talk with Lucent in the browser instead.",
+        );
+      }, AGENT_JOIN_TIMEOUT_MS);
+    }
 
     return {
       disconnect() {
+        if (joinTimer) clearTimeout(joinTimer);
         if (stopped) return;
         stopped = true;
         for (const el of attachedAudioElements) {

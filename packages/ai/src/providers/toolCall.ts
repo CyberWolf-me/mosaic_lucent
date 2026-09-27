@@ -17,6 +17,7 @@ import { externalPlanArgumentsSchema } from "../externalPlan.js";
 interface ToolArgs {
   operations?: unknown;
   explanation?: unknown;
+  reply?: unknown;
 }
 
 /**
@@ -64,6 +65,9 @@ function toResult(parsed: ToolArgs, source: string, meta?: CompletionMeta): Gene
   return {
     operations: result.data,
     ...(typeof parsed.explanation === "string" ? { explanation: parsed.explanation } : {}),
+    ...(typeof parsed.reply === "string" && parsed.reply.trim()
+      ? { reply: parsed.reply.trim() }
+      : {}),
     ...(meta?.model ? { model: meta.model } : {}),
     ...(meta?.usage ? { usage: meta.usage } : {}),
   };

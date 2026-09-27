@@ -87,8 +87,11 @@ installed yet" and named libraries that were never adopted:
   separate-agents-behind-an-orchestrator design docs/04 describes. Layout and
   validation are deterministic modules, which the non-negotiables require.
 - **Speech:** three STT providers (Web Speech, on-device Whisper, LiveKit).
-  Toggle-to-talk, and there is **no intent-detection stage** — transcripts go
-  straight to the model.
+  On the canvas the mic starts a **conversation**: a pause ends a turn, Lucent
+  speaks the model's `reply` (not the change list in `explanation`) and
+  listens again until "that's all", a tap, or 30 s of silence
+  (`web/src/voiceConversation.ts`, docs/25 V10). There is **no
+  intent-detection stage** — transcripts go straight to the model.
 - **Storage:** assets upload through `POST /api/assets` to a configurable blob backend (memory for tests, disk for dev, S3/R2-compatible for prod); metadata is Postgres-backed when `LUCENT_DATABASE_URL` is set. Generated images from the AI image provider are still inlined as data URLs.
 
 Do not introduce Rust or other languages unless the user asks.

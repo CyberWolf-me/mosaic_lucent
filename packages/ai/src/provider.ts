@@ -217,6 +217,13 @@ export interface GenerateResult {
   /** Optional natural-language explanation for the conversation pane (docs/13). */
   explanation?: string;
   /**
+   * What Lucent says back in a voice conversation: talking with the person,
+   * not reading them the diff — often ending in one follow-up question. The
+   * pane keeps `explanation`; voice speaks this, and falls back to the
+   * explanation when a model leaves it out.
+   */
+  reply?: string;
+  /**
    * The model that actually answered, as the provider named it in its response
    * — not the one that was requested. Gateways silently reroute, and the meter
    * has to record what was billed (M4).
@@ -624,7 +631,7 @@ export function summarizeWorkspace(workspace: Workspace, selection?: string[]): 
  * clamping long messages. Oldest first, so the model reads it in order.
  */
 export function recentHistory(
-  entries: Array<{ role: string; text: string }>,
+  entries: Array<{ role: string; text: string; reply?: string }>,
   limit: number = SUMMARY_LIMITS.historyTurns,
 ): ConversationTurn[] {
   return entries
@@ -632,6 +639,13 @@ export function recentHistory(
     .slice(-limit)
     .map((e) => ({
       role: e.role as ConversationTurn["role"],
-      text: truncate(e.text, SUMMARY_LIMITS.historyChars),
+      // What Lucent SAID matters as much as what it did: "yes, do that"
+      // answers the question in its reply, so the reply rides along.
+      text: truncate(
+        e.reply && e.reply.trim() && e.reply.trim() !== e.text.trim()
+          ? `${e.text}\n(Said to the person: ${e.reply.trim()})`
+          : e.text,
+        SUMMARY_LIMITS.historyChars,
+      ),
     }));
 }

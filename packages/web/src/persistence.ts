@@ -129,6 +129,12 @@ export interface ChatEntry {
   role: "user" | "ai" | "error";
   text: string;
   /**
+   * On an AI reply: what Lucent says back when the person is talking to it
+   * (GenerateResult.reply) — a conversational sentence, often ending in a
+   * question, spoken instead of the change description in `text`.
+   */
+  reply?: string;
+  /**
    * On an AI reply that changed the board: what it changed (turnEffect.ts),
    * computed from the ops actually applied. The conversation then reads as
    * a log of what the team's board learned, not just of messages. Optional

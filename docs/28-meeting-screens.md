@@ -632,6 +632,20 @@ V8 transport (F4).
   extraction read the corrected words. Only editors for now — §9.4's "the
   speaker" needs speakers to be accounts, which is per-participant capture,
   the rest of A3.5 (it needs a multi-person LiveKit room to build and verify).
+- **Notes, checked end to end (2026-09-27).** The owner couldn't tell whether
+  note-taking worked, so `scripts/meeting-notes-check.mjs` now drives it:
+  notes typed during a recording save and are stamped with the turn they came
+  after; stopping writes the enhanced note (your lines in ink, Lucent's cited);
+  a reload keeps both; editing one of Lucent's lines makes it yours and saves;
+  Copy as Markdown; someone without the board gets 404 (12/12). It found three
+  bugs. A reopened meeting showed an empty notepad: the loader marked the
+  meeting as loaded before its notes arrived, and React's second effect run
+  then skipped the load. The load could also land after the first keystroke
+  and replace the typed lines with the stored (empty) copy, so the note the
+  meeting's end writes had nothing to work from; the pad is now read-only
+  until the load lands. And the meeting's proposal review floated over the
+  Notes tab; it now docks at the top of the side pane and shows the meeting
+  lines it came from, not the internal extraction prompt.
 
 ## 9. Decisions needed
 

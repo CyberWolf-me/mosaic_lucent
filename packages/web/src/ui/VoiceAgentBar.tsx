@@ -1,11 +1,12 @@
 import React from "react";
 import { Ico } from "./icons.js";
-import type { VoiceAgentState } from "../stt/voiceAgentSession.js";
+import type { TranscriptLine, VoiceAgentState } from "../stt/voiceAgentSession.js";
 
 export interface VoiceAgentBarProps {
   state: VoiceAgentState;
   muted: boolean;
-  transcript?: string;
+  /** The last few lines of the call, oldest first (withTranscriptSegment). */
+  lines?: TranscriptLine[];
   onToggleMute: () => void;
   onDisconnect: () => void;
 }
@@ -13,7 +14,7 @@ export interface VoiceAgentBarProps {
 export function VoiceAgentBar({
   state,
   muted,
-  transcript,
+  lines = [],
   onToggleMute,
   onDisconnect,
 }: VoiceAgentBarProps) {
@@ -67,27 +68,44 @@ export function VoiceAgentBar({
         animation: "voice-fade-in 0.2s ease-out",
       }}
     >
-      {/* Active Speech Subtitle Banner */}
-      {transcript && transcript.trim().length > 0 && (
+      {/* The call so far: the last few lines, each growing as it's heard.
+          It used to be one clipped line of the latest segment — a few words
+          that kept resetting. */}
+      {lines.length > 0 && (
         <div
+          aria-live="polite"
+          aria-label="Call transcript"
           style={{
-            background: "oklch(from var(--canvas-2) l c h / 0.9)",
+            background: "oklch(from var(--canvas-2) l c h / 0.92)",
             backdropFilter: "blur(16px)",
             border: "1px solid var(--stroke-2)",
             borderRadius: 12,
-            padding: "8px 16px",
+            padding: "8px 14px",
             color: "var(--ink-0)",
             fontSize: 13,
-            lineHeight: "1.4",
-            textAlign: "center",
+            lineHeight: 1.45,
             boxShadow: "var(--elev-3)",
-            maxWidth: "100%",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
+            width: "100%",
+            display: "flex",
+            flexDirection: "column",
+            gap: 4,
           }}
         >
-          {transcript}
+          {lines.map((l) => (
+            <p
+              key={l.id}
+              style={{
+                margin: 0,
+                opacity: l.final ? 1 : 0.75,
+                overflowWrap: "anywhere",
+              }}
+            >
+              <strong style={{ color: l.isAgent ? "var(--bloom-2)" : "var(--ink-1)" }}>
+                {l.isAgent ? "Lucent" : "You"}:
+              </strong>{" "}
+              {l.text}
+            </p>
+          ))}
         </div>
       )}
 

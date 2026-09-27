@@ -1251,3 +1251,14 @@ html[data-theme="dark"] .meet-search {
   font-size: 12px;
   color: var(--madder);
 }
+
+/* A pending proposal in the meeting view sits in the page, above the meeting,
+   instead of floating over the right edge where the transcript and notes are
+   (it hid the Notes tab). */
+.right-panel.docked {
+  position: static;
+  width: auto;
+  max-height: min(46vh, 460px);
+  margin: 0 0 16px;
+  inset: auto;
+}

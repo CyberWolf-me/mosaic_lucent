@@ -34,9 +34,11 @@ describe("handleGenerate", () => {
       summary: emptySummary,
     });
     expect(result.status).toBe(200);
-    const body = result.body as { operations: unknown[]; provider: string };
+    const body = result.body as { operations: unknown[]; provider: string; reply: string | null };
     expect(body.operations.length).toBeGreaterThan(0);
     expect(body.provider).toBe("mock");
+    // What Lucent says back in a voice conversation travels with the batch.
+    expect(body.reply).toMatch(/^Done\. .+\?$/);
   });
 
   it("rejects a malformed request with 400", async () => {

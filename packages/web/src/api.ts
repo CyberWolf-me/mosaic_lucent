@@ -18,6 +18,8 @@ import { apiFetch } from "./http.js";
 export interface GenerateResponse {
   operations: Operation[];
   explanation: string | null;
+  /** What Lucent says back in a voice conversation; absent from older servers. */
+  reply?: string | null;
   provider: string;
   /** How much of the monthly allowance is left, or null when none was reported. */
   allowance: Allowance | null;
@@ -529,12 +531,14 @@ export async function streamGenerate(
       const body = data as {
         operations?: Operation[];
         explanation?: string | null;
+        reply?: string | null;
         provider?: string;
         warnings?: Array<{ op: string; reason: string }>;
       };
       done = {
         operations: Array.isArray(body.operations) ? body.operations : [],
         explanation: body.explanation ?? null,
+        reply: typeof body.reply === "string" ? body.reply : null,
         provider: body.provider ?? "unknown",
         allowance: null,
         warnings: Array.isArray(body.warnings) ? body.warnings : undefined,

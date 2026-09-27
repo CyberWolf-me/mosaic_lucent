@@ -74,11 +74,21 @@ import { useSettings } from "../settings.js";
 import { useToast } from "../ui/Toast.js";
 import { generateImage } from "../api.js";
 import { WireframeRenderer } from "../ui/WireframeRenderer.js";
-import { speakAnswer, isTtsSpeaking } from "../tts.js";
+import { speakAnswer, isTtsSpeaking, type TtsPlayback } from "../tts.js";
+import {
+  END_OF_TURN_MS,
+  IDLE_END_MS,
+  INTERIM_GRACE_MS,
+  isEndOfConversation,
+  spokenReply,
+  type VoicePhase,
+} from "../voiceConversation.js";
 import { getSttProvider, isAnyVoiceSupported, type VoiceSession } from "../stt/index.js";
 import { VoiceAgentBar } from "../ui/VoiceAgentBar.js";
 import {
   startVoiceAgentSession,
+  withTranscriptSegment,
+  type TranscriptLine,
   type VoiceAgentController,
   type VoiceAgentState,
 } from "../stt/voiceAgentSession.js";
@@ -430,6 +440,12 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
   const voiceSilenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const voiceSessionIdRef = useRef(0);
   const lastSpokenChatIndexRef = useRef(chat.length);
+  // A voice conversation is on (voiceConversation.ts): Lucent answers aloud,
+  // then listens again, until the person is done.
+  const conversingRef = useRef(false);
+  const [voicePhase, setVoicePhase] = useState<VoicePhase>("idle");
+  const voicePlaybackRef = useRef<TtsPlayback | null>(null);
+  const voiceIdleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const shapes = Object.values(workspace.shapes);
   const nodeCount = Object.keys(workspace.nodes).length;
@@ -447,13 +463,20 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
     }
   }, [chat, notify]);
 
-  // Speak the AI's explanation aloud ONLY when AI sound is explicitly enabled in settings
+  // Typed turns: speak Lucent's reply aloud only when "AI sound" is on. A
+  // voice conversation speaks its own replies (and listens again after).
   useEffect(() => {
     if (chat.length > lastSpokenChatIndexRef.current) {
       const latest = chat[chat.length - 1];
       lastSpokenChatIndexRef.current = chat.length;
+      if (conversingRef.current) {
+        voiceInitiatedRef.current = false;
+        return;
+      }
       if (latest && latest.role === "ai" && latest.text) {
-        const toSpeak = latest.text.replace(/— review \d+ proposed changes\./i, "").trim();
+        const toSpeak = (latest.reply ?? latest.text)
+          .replace(/— review \d+ proposed changes\./i, "")
+          .trim();
         if (toSpeak && settings.aiSound) {
           try {
             voiceRef.current?.stop();
@@ -758,9 +781,9 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
   // AI image generation (Phase E): prompt → server → image shape on the canvas.
   // Supports both manual toolbar prompt and conversational voice/chat prompts.
   const generateImageShape = useCallback(
-    async (customPrompt?: string) => {
+    async (customPrompt?: string): Promise<string | null> => {
       const rawPrompt = customPrompt ?? window.prompt("Describe an image for Lucent to generate:");
-      if (!rawPrompt) return;
+      if (!rawPrompt) return null;
       const prompt = enrichImagePromptWithContext(rawPrompt, workspace, chat, projectName);
       notify("Generating reference image with Lucent Imagine…");
       try {
@@ -795,13 +818,16 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
         );
         if (explanation) {
           notify(explanation);
-          if (settings.aiSound || voiceInitiatedRef.current) {
+          // A voice conversation says it itself, then listens again.
+          if ((settings.aiSound || voiceInitiatedRef.current) && !conversingRef.current) {
             void speakAnswer(explanation);
             voiceInitiatedRef.current = false;
           }
         }
+        return explanation ?? "I've added the image to the board.";
       } catch (err) {
         notify((err as Error).message);
+        return `I couldn't make that image: ${(err as Error).message}`;
       }
     },
     [
@@ -869,12 +895,21 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
     notify,
   ]);
 
-  const stopVoiceSession = useCallback(() => {
-    voiceSessionIdRef.current++;
+  const clearVoiceTimers = () => {
     if (voiceSilenceTimerRef.current) {
       clearTimeout(voiceSilenceTimerRef.current);
       voiceSilenceTimerRef.current = null;
     }
+    if (voiceIdleTimerRef.current) {
+      clearTimeout(voiceIdleTimerRef.current);
+      voiceIdleTimerRef.current = null;
+    }
+  };
+
+  /** Stop the recognizer (one turn's listening); the conversation may go on. */
+  const stopVoiceSession = useCallback(() => {
+    voiceSessionIdRef.current++;
+    clearVoiceTimers();
     try {
       voiceRef.current?.stop();
     } catch {
@@ -884,46 +919,67 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
     setListening(false);
   }, [setListening]);
 
-  const commitVoiceTurn = useCallback(() => {
+  /** End the conversation: stop listening, stop talking. */
+  const endConversation = useCallback(
+    (note?: string) => {
+      conversingRef.current = false;
+      stopVoiceSession();
+      voicePlaybackRef.current?.stop();
+      voicePlaybackRef.current = null;
+      accumulatedVoiceTextRef.current = "";
+      setVoicePhase("idle");
+      if (note) notify(note);
+    },
+    [stopVoiceSession, notify],
+  );
+
+  // The conversation's steps call each other (listen → take the turn → answer
+  // → listen); refs keep each one current without a dependency cycle.
+  const listenRef = useRef<() => void>(() => {});
+  const takeTurnRef = useRef<() => void>(() => {});
+
+  /** The person finished speaking: send it, answer out loud, listen again. */
+  const commitVoiceTurn = useCallback(async () => {
     const text = (accumulatedVoiceTextRef.current || message).trim();
     stopVoiceSession();
     accumulatedVoiceTextRef.current = "";
-    if (!text) return;
+    if (!text) {
+      if (conversingRef.current) listenRef.current();
+      return;
+    }
     setMessage("");
+    if (conversingRef.current && isEndOfConversation(text)) {
+      endConversation();
+      void speakAnswer("Okay. I'm here when you need me.");
+      return;
+    }
     voiceInitiatedRef.current = true;
+    if (conversingRef.current) setVoicePhase("thinking");
+    let say: string | null;
     if (pillMode === "ask") {
-      void ask(text);
+      say = await ask(text);
     } else {
       const imgPrompt = parseExplicitImageIntent(text);
-      if (imgPrompt) {
-        void generateImageShape(imgPrompt);
-      } else {
-        void send(text);
-      }
+      say = imgPrompt ? await generateImageShape(imgPrompt) : spokenReply(await send(text));
     }
-  }, [stopVoiceSession, message, pillMode, ask, generateImageShape, send]);
+    if (!conversingRef.current) return;
+    if (say) {
+      setVoicePhase("speaking");
+      const spoken = await speakAnswer(say);
+      if (spoken.reason && spoken.reason !== "nothing to speak") notify(`Voice: ${spoken.reason}`);
+      voicePlaybackRef.current = spoken.playback;
+      await spoken.playback?.done.catch(() => {});
+      voicePlaybackRef.current = null;
+    }
+    if (conversingRef.current) listenRef.current();
+  }, [stopVoiceSession, endConversation, message, pillMode, ask, generateImageShape, send, notify]);
+  takeTurnRef.current = () => void commitVoiceTurn();
 
-  const toggleVoice = useCallback(() => {
-    if (listening) {
-      if ((accumulatedVoiceTextRef.current || message).trim()) {
-        commitVoiceTurn();
-      } else {
-        stopVoiceSession();
-      }
-      return;
-    }
-    if (!voiceSupported) {
-      notify(
-        "Voice input isn't supported in this browser — try Chrome or Edge, or type your idea.",
-      );
-      return;
-    }
+  /** Listen for the person's next turn. */
+  const startListening = useCallback(() => {
     const sessionId = ++voiceSessionIdRef.current;
     accumulatedVoiceTextRef.current = "";
-    if (voiceSilenceTimerRef.current) {
-      clearTimeout(voiceSilenceTimerRef.current);
-      voiceSilenceTimerRef.current = null;
-    }
+    clearVoiceTimers();
     const provider = getSttProvider(settings.sttProvider);
     // Hosted providers need their connection details before start(); settings is
     // the only place they live, and the browser never sees a LiveKit secret.
@@ -932,27 +988,45 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
       tokenUrl: settings.livekitTokenUrl,
       room: settings.livekitRoom,
     });
+    const current = () => voiceSessionIdRef.current === sessionId;
+    // The turn ends after a pause; a long silence ends the conversation.
+    const endTurnIn = (ms: number) => {
+      if (voiceSilenceTimerRef.current) clearTimeout(voiceSilenceTimerRef.current);
+      voiceSilenceTimerRef.current = setTimeout(() => {
+        if (current() && !isTtsSpeaking()) takeTurnRef.current();
+      }, ms);
+    };
+    const heard = () => {
+      if (voiceIdleTimerRef.current) clearTimeout(voiceIdleTimerRef.current);
+      voiceIdleTimerRef.current = setTimeout(() => {
+        if (current() && !accumulatedVoiceTextRef.current.trim()) {
+          endConversation("Voice conversation ended — tap the mic to talk again.");
+        }
+      }, IDLE_END_MS);
+    };
+    heard();
+    setVoicePhase("listening");
     const session = provider.start({
       onStart: () => {
-        if (voiceSessionIdRef.current !== sessionId) return;
+        if (!current()) return;
         setListening(true);
       },
       onInterim: (t) => {
-        if (voiceSessionIdRef.current !== sessionId || isTtsSpeaking()) return;
-        const current = accumulatedVoiceTextRef.current;
-        setMessage(current ? `${current} ${t}` : t);
-        if (voiceSilenceTimerRef.current) {
-          clearTimeout(voiceSilenceTimerRef.current);
-          voiceSilenceTimerRef.current = null;
-        }
+        if (!current() || isTtsSpeaking()) return;
+        heard();
+        const said = accumulatedVoiceTextRef.current;
+        setMessage(said ? `${said} ${t}` : t);
+        // Words still coming: wait for them, but not forever.
+        endTurnIn(INTERIM_GRACE_MS);
       },
       onStatus: (s) => {
-        if (voiceSessionIdRef.current !== sessionId) return;
+        if (!current()) return;
         if (s === "transcribing") notify("Transcribing on device…");
         if (s === "connecting") notify("Connecting to LiveKit…");
       },
       onFinal: (t) => {
-        if (voiceSessionIdRef.current !== sessionId || isTtsSpeaking()) return;
+        if (!current() || isTtsSpeaking()) return;
+        heard();
         const cleaned = t.trim();
         if (cleaned) {
           accumulatedVoiceTextRef.current = (
@@ -962,37 +1036,18 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
           ).trim();
           setMessage(accumulatedVoiceTextRef.current);
         }
-        if (voiceSilenceTimerRef.current) {
-          clearTimeout(voiceSilenceTimerRef.current);
-        }
-        // 4.0s natural pause window before committing turn, giving the user ample time to speak
-        voiceSilenceTimerRef.current = setTimeout(() => {
-          if (voiceSessionIdRef.current === sessionId && !isTtsSpeaking()) {
-            commitVoiceTurn();
-          }
-        }, 4000);
+        endTurnIn(END_OF_TURN_MS);
       },
       onError: (msg) => {
-        if (voiceSessionIdRef.current !== sessionId) return;
-        stopVoiceSession();
-        if (msg) notify(msg);
+        if (!current()) return;
+        // The provider reports only what won't fix itself (a blocked mic).
+        endConversation(msg || undefined);
       },
     });
-    if (session) {
-      voiceRef.current = session;
-      if (provider.id === "whisper") {
-        notify("Listening — on-device Whisper. Speak your prompt…");
-      }
-      if (provider.id === "browser") {
-        notify("Listening — speak naturally. Tap mic again or hit Enter when done.");
-      }
-    }
+    if (session) voiceRef.current = session;
+    else endConversation();
   }, [
-    listening,
-    message,
-    commitVoiceTurn,
-    stopVoiceSession,
-    voiceSupported,
+    endConversation,
     notify,
     settings.sttProvider,
     settings.livekitUrl,
@@ -1000,11 +1055,59 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
     settings.livekitRoom,
     setListening,
   ]);
+  listenRef.current = startListening;
+
+  /**
+   * The mic button. Off: start a conversation. While listening with words
+   * heard: take them now. Otherwise (listening in silence, thinking,
+   * speaking): end the conversation.
+   */
+  const toggleVoice = useCallback(() => {
+    if (conversingRef.current) {
+      if (listening && (accumulatedVoiceTextRef.current || message).trim()) {
+        void commitVoiceTurn();
+        return;
+      }
+      endConversation();
+      return;
+    }
+    if (!voiceSupported) {
+      notify(
+        "Voice input isn't supported in this browser — try Chrome or Edge, or type your idea.",
+      );
+      return;
+    }
+    conversingRef.current = true;
+    startListening();
+  }, [
+    listening,
+    message,
+    commitVoiceTurn,
+    endConversation,
+    startListening,
+    voiceSupported,
+    notify,
+  ]);
+
+  // Leaving the canvas ends the conversation (and stops Lucent mid-sentence).
+  useEffect(
+    () => () => {
+      conversingRef.current = false;
+      voicePlaybackRef.current?.stop();
+      clearVoiceTimers();
+      try {
+        voiceRef.current?.stop();
+      } catch {
+        /* ignore */
+      }
+    },
+    [],
+  );
 
   // LiveKit Duplex Voice Agent State
   const [voiceAgentState, setVoiceAgentState] = useState<VoiceAgentState>("idle");
   const [voiceAgentMuted, setVoiceAgentMuted] = useState(false);
-  const [voiceAgentTranscript, setVoiceAgentTranscript] = useState("");
+  const [voiceAgentLines, setVoiceAgentLines] = useState<TranscriptLine[]>([]);
   const voiceAgentCtrlRef = useRef<VoiceAgentController | null>(null);
 
   const toggleVoiceAgent = useCallback(async () => {
@@ -1032,6 +1135,7 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
     }
 
     try {
+      setVoiceAgentLines([]);
       notify("Connecting to LiveKit Voice Agent…");
       const ctrl = await startVoiceAgentSession({
         boardId: activeBoardId,
@@ -1039,7 +1143,7 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
           setVoiceAgentState(st);
         },
         onTranscript: (t) => {
-          setVoiceAgentTranscript(`${t.isAgent ? "Lucent: " : "You: "}${t.text}`);
+          setVoiceAgentLines((prev) => withTranscriptSegment(prev, t));
         },
         onError: (err) => {
           notify(`Voice Agent: ${err}`);
@@ -2789,6 +2893,7 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
               voiceAgentState !== "error"
             }
             listening={listening}
+            voicePhase={voicePhase}
             onGenImage={() => generateImageShape()}
             onBlankBoard={() => setBlankBoardStarted(true)}
             failedAttempt={heroFailure}
@@ -3341,7 +3446,7 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
           <VoiceAgentBar
             state={voiceAgentState}
             muted={voiceAgentMuted}
-            transcript={voiceAgentTranscript}
+            lines={voiceAgentLines}
             onToggleMute={toggleVoiceAgentMute}
             onDisconnect={() => {
               voiceAgentCtrlRef.current?.disconnect();
@@ -3370,6 +3475,7 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
               onCitation={onCitation}
               listening={listening}
               onToggleMic={toggleVoice}
+              voicePhase={voicePhase}
               voiceSupported={voiceSupported}
               onToggleVoiceAgent={toggleVoiceAgent}
               voiceAgentActive={

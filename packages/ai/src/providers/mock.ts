@@ -1265,6 +1265,27 @@ const answerScripts: AnswerScript[] = [
   },
 ];
 
+/**
+ * What the mock says back in a voice conversation (`GenerateResult.reply`):
+ * an answer or a question passes through as it is; a change is confirmed
+ * in a sentence and followed by one question about the thing it just made,
+ * the way the prompt asks a real model to talk with the person.
+ */
+export function mockReply(result: GenerateResult): string {
+  const said = (result.explanation ?? "").trim();
+  if (result.operations.length === 0) return said || "I'm not sure what you'd like changed.";
+  const created = result.operations.flatMap((op) =>
+    op.op === "CREATE_NODE" && typeof op.label === "string" && op.label.trim() ? [op.label] : [],
+  );
+  const first = said.split(/(?<=[.!?])\s/)[0] ?? said;
+  const confirm = first ? `Done. ${first.replace(/\s*$/, "")}` : "Done.";
+  const subject = created[created.length - 1];
+  const ask = subject
+    ? `Should I add what happens when ${subject.toLowerCase()} fails?`
+    : "Anything you'd like me to change?";
+  return `${confirm} ${ask}`;
+}
+
 export class MockProvider implements LLMProvider {
   readonly name = "mock";
 
@@ -1338,6 +1359,11 @@ export class MockProvider implements LLMProvider {
   }
 
   async generateOperations(request: GenerateRequest): Promise<GenerateResult> {
+    const result = await this.scripted(request);
+    return result.reply ? result : { ...result, reply: mockReply(result) };
+  }
+
+  private async scripted(request: GenerateRequest): Promise<GenerateResult> {
     const script = scripts.find((s) => s.match(request.message));
     if (script) return script.build(request);
 
@@ -1389,6 +1415,7 @@ export class MockProvider implements LLMProvider {
     const payload = JSON.stringify({
       operations: result.operations,
       explanation: result.explanation ?? null,
+      reply: result.reply ?? null,
     });
     for (let i = 0; i < payload.length; i += 64) {
       callbacks.onDelta(payload.slice(i, i + 64));
