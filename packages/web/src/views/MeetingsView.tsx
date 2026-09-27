@@ -49,7 +49,7 @@ export function MeetingsView({ onOpenSettings }: { onOpenSettings: (section?: st
     const rows = state.kind === "ready" ? state.meetings : [];
     return {
       live: rows.filter((m) => m.status === "live"),
-      past: rows.filter((m) => m.status === "ended"),
+      past: rows.filter((m) => m.status !== "live"),
     };
   }, [state]);
 
@@ -170,6 +170,7 @@ function MeetingRow({ meeting: m, onOpen }: { meeting: MeetingSummary; onOpen: (
   const detail = [
     `${m.turnCount} ${m.turnCount === 1 ? "line" : "lines"}`,
     m.status === "live" ? "recording now" : minutes !== null ? `${minutes} min` : null,
+    m.status === "summarized" ? "summary ready" : null,
   ]
     .filter(Boolean)
     .join(" · ");

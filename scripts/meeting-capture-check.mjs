@@ -140,6 +140,22 @@ check(
   texts(list?.[0]).join(" | "),
 );
 
+// --- A3.3: the ended meeting gets its summary, written server-side ---
+// MeetingEnded → the outbox consumer → the meeting.recap job → the store;
+// the saved-meeting view polls until it lands.
+let summarized = false;
+for (let i = 0; i < 40 && !summarized; i++) {
+  await page.waitForTimeout(1000);
+  const shownText = await page.locator("body").innerText();
+  summarized = /summary/i.test(shownText) && !/writing the summary/i.test(shownText);
+}
+const withRecap = (await meetings())?.find((m) => m.id === firstId);
+check(
+  "the ended meeting gets its summary, written by the server",
+  summarized && !!withRecap?.recap,
+  `recap=${!!withRecap?.recap} by=${withRecap?.recap?.by}`,
+);
+
 // --- capture 2: a reload mid-meeting loses nothing ---
 await page
   .getByRole("button", { name: /start recording|new recording/i })

@@ -29,6 +29,8 @@ export const registerMeetingRoutes: RegisterRoutes = (router, s) => {
     meetingConnectors,
     userStore,
     boardStore,
+    writeMeetingRecap,
+    announceMeetingEnded,
   } = s;
 
   router.post("/api/boards/:id/meetings", async (ctx) => {
@@ -102,6 +104,11 @@ export const registerMeetingRoutes: RegisterRoutes = (router, s) => {
       createdBy: guard.user.id,
       createdAt: Date.now(),
     });
+    // Saved whole with an end (the one-shot save): it is already over, so
+    // the end-of-meeting pass starts now (docs/28 A3.3).
+    if (saved.endedAt !== null) {
+      announceMeetingEnded({ boardId, orgId: guard.board.orgId, meetingId: saved.id });
+    }
     send(res, 201, saved);
   });
 
@@ -212,7 +219,41 @@ export const registerMeetingRoutes: RegisterRoutes = (router, s) => {
       send(res, 404, { error: "meeting not found" });
       return;
     }
+    // docs/28 A3.3: the first end (not an idempotent re-end) starts the
+    // end-of-meeting pass.
+    if (existing.endedAt === null && row.endedAt !== null) {
+      announceMeetingEnded({ boardId, orgId: guard.board.orgId, meetingId: mid });
+    }
     send(res, 200, row);
+  });
+
+  // docs/28 A3.3 / S9: write — or rewrite — the end-of-meeting summary now.
+  // Editor, like every meeting write; the job does the same work after an
+  // end, and this is how a person asks for it again (or for a capture the
+  // idle sweep ended). Always answers with the meeting.
+  router.post("/api/boards/:id/meetings/:mid/summary", async (ctx) => {
+    const { req, res } = ctx;
+    const route = "/api/boards/:id/meetings/:mid/summary";
+    if (!requireCsrf(req, res, route)) return;
+    const boardId = ctx.param("id");
+    const guard = await requireBoardRole(req, res, boardId, "editor", route);
+    if (!guard.ok) return;
+    if (!meetings) return send(res, 503, { error: "meeting transcripts are not configured" });
+    const result = await writeMeetingRecap(boardId, ctx.param("mid"), { replace: true });
+    switch (result.outcome) {
+      case "written":
+        return send(res, 200, result.meeting);
+      case "not-found":
+        return send(res, 404, { error: "meeting not found" });
+      case "not-ended":
+        return send(res, 409, { error: "the meeting is still running — end it first" });
+      case "record-mode":
+        return send(res, 422, { error: "Record mode keeps the transcript only" });
+      case "empty":
+        return send(res, 422, { error: "nothing was said in this meeting" });
+      case "unavailable":
+        return send(res, 503, { error: "meeting transcripts are not configured" });
+    }
   });
 
   router.get("/api/boards/:id/meetings/:mid", async (ctx) => {
@@ -319,6 +360,7 @@ export const registerMeetingRoutes: RegisterRoutes = (router, s) => {
       // The source's own name for the meeting, when it gives a usable one.
       ...(importedTitle.ok && importedTitle.title ? { title: importedTitle.title } : {}),
     });
+    announceMeetingEnded({ boardId, orgId: guard.board.orgId, meetingId: saved.id });
     send(res, 201, { ...saved, source: source.name });
   });
 

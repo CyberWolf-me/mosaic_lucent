@@ -99,6 +99,14 @@ export interface RouteServices {
   readonly usageStore: UsageStore | undefined;
   /** E3/R3: meeting transcripts; undefined → the meetings routes answer 503. */
   readonly meetings: MeetingStore | undefined;
+  /** docs/28 A3.3: write (or, with replace, rewrite) a meeting's summary. */
+  writeMeetingRecap(
+    boardId: string,
+    meetingId: string,
+    options?: { replace?: boolean },
+  ): Promise<import("../meetings.js").RecapOutcome>;
+  /** docs/28 A3.3: announce MeetingEnded to the outbox (a no-op without one). */
+  announceMeetingEnded(ref: { boardId: string; orgId: string; meetingId: string }): void;
   /** docs/27 N1: one person's notes per meeting; undefined → the notes routes answer 503. */
   readonly meetingNotes: import("../meetingNotes.js").MeetingNotesStore | undefined;
   /**

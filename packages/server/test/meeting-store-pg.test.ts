@@ -96,4 +96,31 @@ describeIf("meeting store parity: titles and the workspace list", () => {
     });
     expect(results[1]).toEqual(results[0]);
   });
+
+  it("stores the end-of-meeting summary and reads it back as summarized (docs/28 A3.3)", async () => {
+    const recap = {
+      template: "general" as const,
+      sections: [
+        {
+          title: "Decisions",
+          items: [
+            { text: "Ada: we agreed", source: "ai" as const, turns: [0, 0] as [number, number] },
+          ],
+        },
+      ],
+      generatedAt: 5,
+      by: "fallback" as const,
+      offline: "no-model" as const,
+    };
+    const results: unknown[] = [];
+    for (const store of [new PostgresMeetingStore(db), new InMemoryMeetingStore()] as const) {
+      const m = await seed(store, boardA, 7_000);
+      const written = await store.setRecap(boardA, m.id, recap);
+      const missing = await store.setRecap(boardB, m.id, recap);
+      const read = await store.get(boardA, m.id);
+      results.push({ written: written?.recap, missing, read: read?.recap });
+    }
+    expect(results[0]).toEqual({ written: recap, missing: undefined, read: recap });
+    expect(results[1]).toEqual(results[0]);
+  });
 });

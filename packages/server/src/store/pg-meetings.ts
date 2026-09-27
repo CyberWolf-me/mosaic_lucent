@@ -5,6 +5,7 @@ import {
   MEETING_LIST_LIMIT,
   lastActivity,
   newMeetingId,
+  type MeetingRecap,
   type MeetingStore,
   type MeetingTranscript,
   type MeetingTurn,
@@ -75,6 +76,19 @@ export class PostgresMeetingStore implements MeetingStore {
     const rows = await this.target.db
       .update(meetingTranscripts)
       .set({ title })
+      .where(and(eq(meetingTranscripts.boardId, boardId), eq(meetingTranscripts.id, id)))
+      .returning();
+    return rows[0] ? toRow(rows[0]) : undefined;
+  }
+
+  async setRecap(
+    boardId: string,
+    id: string,
+    recap: MeetingRecap,
+  ): Promise<MeetingTranscript | undefined> {
+    const rows = await this.target.db
+      .update(meetingTranscripts)
+      .set({ summary: recap })
       .where(and(eq(meetingTranscripts.boardId, boardId), eq(meetingTranscripts.id, id)))
       .returning();
     return rows[0] ? toRow(rows[0]) : undefined;
@@ -226,5 +240,7 @@ function toRow(row: typeof meetingTranscripts.$inferSelect): MeetingTranscript {
       : {}),
     // Untitled rows read NULL: absence, like mode (ADR 0045).
     ...(row.title ? { title: row.title } : {}),
+    // No summary yet (or Record mode) reads NULL (docs/28 A3.3).
+    ...(row.summary ? { recap: row.summary as MeetingRecap } : {}),
   };
 }

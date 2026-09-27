@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import type { EnhancedNote } from "@lucent/ai";
 
 /**
  * Meeting transcripts (E3 / R3): the diarised record of one meeting held on
@@ -42,7 +43,33 @@ export interface MeetingTranscript {
   mode?: MeetingMode;
   /** The meeting's name (ADR 0045). Absent means untitled. */
   title?: string;
+  /** The end-of-meeting summary (docs/28 A3.3). Absent until it is written. */
+  recap?: MeetingRecap;
 }
+
+/**
+ * Why a summary was written without the model: the board's AI boundary or
+ * the org's provider policy refused it, no model is configured, the monthly
+ * allowance is spent, or the model call failed. The offline enhancer's note
+ * is still honest — quoted turns, cited — and says which of these applied.
+ */
+export type RecapOffline = "policy" | "no-model" | "limit" | "model-failed";
+
+/**
+ * The end-of-meeting summary (docs/28 S8/S9): the notes enhancer's cited note
+ * (docs/27 N1) over the whole transcript with no personal lines — every line
+ * cites the turns it came from, uncited lines are dropped.
+ */
+export interface MeetingRecap extends EnhancedNote {
+  offline?: RecapOffline;
+}
+
+/** What writing a summary did (docs/28 A3.3). */
+export type RecapOutcome =
+  | { outcome: "written"; meeting: MeetingTranscript }
+  /** Record mode keeps the transcript only — no summary, by the profile. */
+  | { outcome: "record-mode" }
+  | { outcome: "not-found" | "not-ended" | "empty" | "unavailable" };
 
 export interface NewMeetingTranscript {
   boardId: string;
@@ -80,10 +107,13 @@ export function validateMeetingTitle(
  * feature needs a stored lifecycle — scheduling adds `scheduled`, the
  * end-of-meeting pass `summarized`, the review center `reviewed`.
  */
-export type MeetingStatus = "live" | "ended";
+export type MeetingStatus = "live" | "ended" | "summarized";
 
-export function meetingStatus(meeting: Pick<MeetingTranscript, "endedAt">): MeetingStatus {
-  return meeting.endedAt === null ? "live" : "ended";
+export function meetingStatus(
+  meeting: Pick<MeetingTranscript, "endedAt" | "recap">,
+): MeetingStatus {
+  if (meeting.endedAt === null) return "live";
+  return meeting.recap ? "summarized" : "ended";
 }
 
 /** One row of the workspace meetings list: everything but the turns. */
@@ -158,6 +188,12 @@ export interface MeetingStore {
     boardId: string,
     id: string,
     title: string | null,
+  ): Promise<MeetingTranscript | undefined>;
+  /** Store the end-of-meeting summary (docs/28 A3.3), replacing any earlier one. */
+  setRecap(
+    boardId: string,
+    id: string,
+    recap: MeetingRecap,
   ): Promise<MeetingTranscript | undefined>;
   /** One transcript, scoped to its board so a leaked id is not a read. */
   get(boardId: string, id: string): Promise<MeetingTranscript | undefined>;
@@ -314,6 +350,17 @@ export class InMemoryMeetingStore implements MeetingStore {
     if (!row || row.boardId !== boardId) return undefined;
     if (title === null) delete row.title;
     else row.title = title;
+    return { ...row, turns: [...row.turns] };
+  }
+
+  async setRecap(
+    boardId: string,
+    id: string,
+    recap: MeetingRecap,
+  ): Promise<MeetingTranscript | undefined> {
+    const row = this.rows.get(id);
+    if (!row || row.boardId !== boardId) return undefined;
+    row.recap = recap;
     return { ...row, turns: [...row.turns] };
   }
 

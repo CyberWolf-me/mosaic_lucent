@@ -40,13 +40,17 @@ interface Harness {
 
 async function harness(
   connectors?: import("../src/meetingConnectors.js").MeetingConnectorRegistry,
+  extra: {
+    outbox?: import("../src/outbox.js").OutboxStore;
+    provider?: import("@lucent/ai").LLMProvider;
+  } = {},
 ): Promise<Harness> {
   const limits = limitsFromEnv();
   const config = { ...readConfig({ LUCENT_REQUIRE_AUTH: "1" }), requireAuth: true };
   const boardStore = new InMemoryBoardStore();
   const { server, close } = createApp({
     config,
-    provider: new MockProvider(),
+    provider: extra.provider ?? new MockProvider(),
     imageProvider: new MockImageProvider(),
     userStore: new InMemoryUserStore(),
     boardStore,
@@ -59,6 +63,7 @@ async function harness(
     sessionStore: new InMemorySessionStore(),
     meetings: new InMemoryMeetingStore(),
     ...(connectors ? { meetingConnectors: connectors } : {}),
+    ...(extra.outbox ? { outbox: extra.outbox } : {}),
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const { port } = server.address() as AddressInfo;
@@ -711,5 +716,144 @@ describe("meetings as workspace objects (A3.1)", () => {
     expect(strangerList.body.meetings).toEqual([]);
 
     expect((await h.api(`/api/orgs/${orgId}/meetings`, {})).status).toBe(401);
+  });
+});
+
+/**
+ * docs/28 A3.3: a meeting that ends gets a cited summary. Ending announces
+ * MeetingEnded (once — a re-end is idempotent); the summary is the notes
+ * enhancer's cited note over the transcript, with the offline note (and why)
+ * whenever the model cannot or may not run; Record mode gets none.
+ */
+describe("the end-of-meeting summary (A3.3)", () => {
+  let h: Harness | null = null;
+  afterEach(async () => {
+    if (h) await h.close();
+    h = null;
+  });
+
+  // Turns the offline draft (the mock's notes) can cite: a decision, an
+  // action, a risk. Plain talk with no cue gets an honest, empty summary.
+  const CUED = [
+    { speaker: "Ada", at: 1_000, text: "We agreed to move billing to Stripe." },
+    { speaker: "Grace", at: 5_000, text: "I'll draft the migration plan by Friday." },
+    { speaker: "Ada", at: 9_000, text: "Risk: the webhooks might break during the cutover." },
+  ];
+  const open = async (hh: Harness, token: string, boardId: string, mode?: string) => {
+    const res = await hh.api(`/api/boards/${boardId}/meetings`, {
+      method: "POST",
+      token,
+      body: JSON.stringify({ turns: CUED, startedAt: 1_000, ...(mode ? { mode } : {}) }),
+    });
+    expect(res.status).toBe(201);
+    return res.body.id as string;
+  };
+  const end = (hh: Harness, token: string, boardId: string, mid: string) =>
+    hh.api(`/api/boards/${boardId}/meetings/${mid}/end`, {
+      method: "POST",
+      token,
+      body: JSON.stringify({ endedAt: 60_000 }),
+    });
+  const summarize = (hh: Harness, token: string, boardId: string, mid: string) =>
+    hh.api(`/api/boards/${boardId}/meetings/${mid}/summary`, { method: "POST", token });
+
+  it("announces MeetingEnded once per meeting — on the first end, and on a one-shot save", async () => {
+    const { InMemoryOutbox } = await import("../src/outbox.js");
+    const outbox = new InMemoryOutbox();
+    h = await harness(undefined, { outbox });
+    const owner = await h.signup("recap.announce@example.com");
+    const boardId = await h.seedBoard(owner.token);
+    const mid = await open(h, owner.token, boardId);
+    expect(await outbox.pending(10)).toHaveLength(0);
+    await end(h, owner.token, boardId, mid);
+    await end(h, owner.token, boardId, mid); // idempotent re-end
+    const oneShot = await h.api(`/api/boards/${boardId}/meetings`, {
+      method: "POST",
+      token: owner.token,
+      body: JSON.stringify({ turns: TURNS, startedAt: 1_000, endedAt: 9_000 }),
+    });
+    const events = await outbox.pending(10);
+    expect(events.map((e) => [e.type, e.boardId, e.payload.meetingId])).toEqual([
+      ["MeetingEnded", boardId, mid],
+      ["MeetingEnded", boardId, oneShot.body.id],
+    ]);
+  });
+
+  it("writes a cited summary for an ended meeting, and lists it as summarized", async () => {
+    h = await harness();
+    const owner = await h.signup("recap.write@example.com");
+    const boardId = await h.seedBoard(owner.token);
+    const mid = await open(h, owner.token, boardId);
+    expect((await summarize(h, owner.token, boardId, mid)).status).toBe(409); // still running
+    await end(h, owner.token, boardId, mid);
+    const res = await summarize(h, owner.token, boardId, mid);
+    expect(res.status).toBe(200);
+    const recap = res.body.recap as {
+      by: string;
+      offline?: string;
+      sections: Array<{ items: Array<{ source: string; turns?: [number, number] }> }>;
+    };
+    expect(recap.by).toBe("model");
+    expect(recap.offline).toBeUndefined();
+    const items = recap.sections.flatMap((s) => s.items);
+    expect(items.length).toBeGreaterThan(0);
+    // Every line cites turns inside the transcript.
+    for (const item of items) {
+      expect(item.source).toBe("ai");
+      expect(item.turns![0]).toBeGreaterThanOrEqual(0);
+      expect(item.turns![1]).toBeLessThan(CUED.length);
+    }
+    const list = await h.api(`/api/orgs/org_personal_${owner.id}/meetings`, { token: owner.token });
+    expect(list.body.meetings[0]).toMatchObject({ id: mid, status: "summarized" });
+  });
+
+  it("Record mode keeps the transcript only; a viewer cannot write a summary", async () => {
+    h = await harness();
+    const owner = await h.signup("recap.record@example.com");
+    const viewer = await h.signup("recap.viewer@example.com");
+    const boardId = await h.seedBoard(owner.token);
+    const recorded = await open(h, owner.token, boardId, "record");
+    await end(h, owner.token, boardId, recorded);
+    const res = await summarize(h, owner.token, boardId, recorded);
+    expect(res.status).toBe(422);
+    expect(res.body.error).toBe("Record mode keeps the transcript only");
+
+    const mid = await open(h, owner.token, boardId);
+    await end(h, owner.token, boardId, mid);
+    await h.boardStore.setMember({
+      boardId,
+      userId: viewer.id,
+      role: "viewer",
+      invitedBy: null,
+      createdAt: 1,
+    });
+    expect((await summarize(h, viewer.token, boardId, mid)).status).toBe(404);
+  });
+
+  it("says why when the model can't write it: no model, or a failed call", async () => {
+    const { MockProvider } = await import("@lucent/ai");
+    const noNotes = Object.assign(new MockProvider(), { generateNotes: undefined });
+    h = await harness(undefined, { provider: noNotes });
+    const owner = await h.signup("recap.nomodel@example.com");
+    const boardId = await h.seedBoard(owner.token);
+    const mid = await open(h, owner.token, boardId);
+    await end(h, owner.token, boardId, mid);
+    const res = await summarize(h, owner.token, boardId, mid);
+    expect(res.body.recap).toMatchObject({ by: "fallback", offline: "no-model" });
+    await h.close();
+
+    const failing = Object.assign(new MockProvider(), {
+      generateNotes: async () => {
+        throw new Error("upstream 500");
+      },
+    });
+    h = await harness(undefined, { provider: failing });
+    const owner2 = await h.signup("recap.failed@example.com");
+    const board2 = await h.seedBoard(owner2.token);
+    const mid2 = await open(h, owner2.token, board2);
+    await end(h, owner2.token, board2, mid2);
+    const failed = await summarize(h, owner2.token, board2, mid2);
+    expect(failed.status).toBe(200);
+    expect(failed.body.recap).toMatchObject({ by: "fallback", offline: "model-failed" });
   });
 });

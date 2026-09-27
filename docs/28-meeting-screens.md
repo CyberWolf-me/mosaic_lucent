@@ -98,20 +98,20 @@ against every file their row cites.
  S12 Import transcript ──► S8
 ```
 
-| Screen                             | Spec        |           Today            |
-| ---------------------------------- | ----------- | :------------------------: |
-| S1 Meetings (workspace list)       | §65, §121   | ✅ A3.1 (Live now · Past)  |
-| S2 Schedule                        | §16         |             ❌             |
-| S3 Meeting page (upcoming)         | §16, §122   |             ❌             |
-| S4 Lobby                           | §17         |       🟡 two toggles       |
-| S5 Room                            | §18–21      |             🟡             |
-| S6 Dock (call outside the meeting) | —           |        ✅ with F25         |
-| S7 Capture panel                   | §22–25      |  🟡 today's `MeetingView`  |
-| S8 Ending                          | §120        |        🟡 Stop only        |
-| S9 Review                          | §26–27, §57 |             ❌             |
-| S10 Past meeting                   | §121        |     ✅ A3.1 (+ rename)     |
-| S11 Follow-up                      | §57         |    🟡 pieces elsewhere     |
-| S12 Import transcript              | §64         | 🟡 route, mock only, no UI |
+| Screen                             | Spec        |             Today             |
+| ---------------------------------- | ----------- | :---------------------------: |
+| S1 Meetings (workspace list)       | §65, §121   |   ✅ A3.1 (Live now · Past)   |
+| S2 Schedule                        | §16         |              ❌               |
+| S3 Meeting page (upcoming)         | §16, §122   |              ❌               |
+| S4 Lobby                           | §17         |        🟡 two toggles         |
+| S5 Room                            | §18–21      |              🟡               |
+| S6 Dock (call outside the meeting) | —           |          ✅ with F25          |
+| S7 Capture panel                   | §22–25      |   🟡 today's `MeetingView`    |
+| S8 Ending                          | §120        |     ✅ A3.3 (server job)      |
+| S9 Review                          | §26–27, §57 | 🟡 A3.3 summary; review is A2 |
+| S10 Past meeting                   | §121        |      ✅ A3.1 (+ rename)       |
+| S11 Follow-up                      | §57         |      🟡 pieces elsewhere      |
+| S12 Import transcript              | §64         |  🟡 route, mock only, no UI   |
 
 ## 4. State machines every screen shares
 
@@ -530,6 +530,18 @@ V8 transport (F4).
   rows open the meeting on its own board. Upcoming and Needs review are
   absent until scheduling (A3.4) and the end-of-meeting pass (A3.3) give
   them something to show. `scripts/meeting-capture-check.mjs` 28/28.
+- **A3.3 — done (2026-09-27): the summary half of S8/S9.** Ending a meeting
+  (Stop, a one-shot save, an import) appends `MeetingEnded` to the outbox —
+  its first consumer — which queues a `meeting.recap` AI-family job (retried,
+  deduped per meeting). The job writes the summary: the notes enhancer's cited
+  note over the whole transcript (template "general", no personal lines), with
+  the offline note and its reason when the board boundary, the provider policy,
+  the allowance or the model says no; Record mode gets none. It is stored on the
+  meeting (`summary`, migration 0033) and the status reads `summarized`
+  (derived from the stored summary, ADR 0045). The past-meeting page shows it
+  above the Brief with turn chips, says "Writing the summary" while the job runs,
+  and lets an editor Write it now / Rewrite (`POST …/summary`). Per-item review
+  of candidates with trust stays A2 (J5). `scripts/meeting-capture-check.mjs` 29/29.
 
 ## 9. Decisions needed
 

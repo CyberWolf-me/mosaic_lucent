@@ -32,6 +32,53 @@ export interface MeetingTranscript {
   mode?: string;
   /** The meeting's name (ADR 0045); absent means untitled. */
   title?: string;
+  /** The end-of-meeting summary (docs/28 A3.3); absent until written. */
+  recap?: MeetingRecap;
+}
+
+/**
+ * The end-of-meeting summary: the notes enhancer's cited note over the whole
+ * transcript. Every line cites the turns it came from; `offline` says why the
+ * model didn't write it, when it didn't.
+ */
+export interface MeetingRecap {
+  sections: Array<{
+    title: string;
+    items: Array<{ text: string; source: "user" | "ai"; turns?: [number, number] }>;
+  }>;
+  generatedAt: number;
+  by: "model" | "fallback";
+  model?: string;
+  offline?: "policy" | "no-model" | "limit" | "model-failed";
+}
+
+/** One meeting with its transcript (and summary); null when it can't be read. */
+export async function fetchMeeting(
+  boardId: string,
+  meetingId: string,
+): Promise<MeetingTranscript | null> {
+  const res = await apiFetch(
+    `/api/boards/${encodeURIComponent(boardId)}/meetings/${encodeURIComponent(meetingId)}`,
+  );
+  if (!res.ok) return null;
+  return (await res.json()) as MeetingTranscript;
+}
+
+/**
+ * Write (or rewrite) the end-of-meeting summary now (docs/28 S9). The error
+ * is the server's own words — "Record mode keeps the transcript only".
+ */
+export async function writeMeetingSummary(
+  boardId: string,
+  meetingId: string,
+): Promise<{ ok: true; meeting: MeetingTranscript } | { ok: false; error: string }> {
+  const res = await apiFetch(
+    `/api/boards/${encodeURIComponent(boardId)}/meetings/${encodeURIComponent(meetingId)}/summary`,
+    { method: "POST" },
+  );
+  if (res.ok) return { ok: true, meeting: (await res.json()) as MeetingTranscript };
+  const body = (await res.json().catch(() => ({}))) as { error?: string };
+  return { ok: false, error: body.error ?? "Couldn't write the summary — try again." };
 }
 
 /** One row of the workspace meetings list (ADR 0045): no turns. */
@@ -40,7 +87,7 @@ export interface MeetingSummary {
   boardId: string;
   boardName: string;
   title: string | null;
-  status: "live" | "ended";
+  status: "live" | "ended" | "summarized";
   startedAt: number;
   endedAt: number | null;
   turnCount: number;

@@ -281,6 +281,12 @@ export interface AppDeps {
   /** docs/27 N1: meeting notes; defaults to an in-memory store beside `meetings`. */
   meetingNotes?: import("./meetingNotes.js").MeetingNotesStore;
   /**
+   * P2's outbox. When present, ending a meeting announces `MeetingEnded`
+   * (docs/28 A3.3) and main.ts's consumer queues its summary. Absent in most
+   * tests: the summary then only runs when an editor asks for it.
+   */
+  outbox?: import("./outbox.js").OutboxStore;
+  /**
    * docs/24 Phase E: external meeting connectors. Optional in deps —
    * omitted means the mock-only registry, so every existing harness keeps
    * working and tests inject scripted sources. main.ts takes the default.
@@ -359,6 +365,12 @@ export interface App {
   realtime: RealtimeServer;
   /** The registry this app records into, so a test can assert on samples. */
   metrics: MetricsRegistry;
+  /** docs/28 A3.3: the summary core, for the `meeting.recap` job (main.ts). */
+  writeMeetingRecap(
+    boardId: string,
+    meetingId: string,
+    options?: { replace?: boolean },
+  ): Promise<import("./meetings.js").RecapOutcome>;
   close(): Promise<void>;
 }
 
@@ -1885,6 +1897,97 @@ export function createApp(deps: AppDeps): App {
     return false;
   }
 
+  /**
+   * docs/28 A3.3: write a meeting's end-of-meeting summary — the notes
+   * enhancer's cited note (docs/27 N1) over the whole transcript, with no
+   * personal lines. One core for both ways it runs: the `meeting.recap` job
+   * on MeetingEnded, and an editor's POST …/summary. Both apply the same
+   * boundaries: the board's AI boundary and the org's provider policy refuse
+   * the model (the offline note, labelled "policy"); a spent monthly allowance
+   * gets the offline note labelled "limit" — a background job has nobody to
+   * show a 402 to; a model write is metered. Record mode keeps the transcript
+   * only, so it gets no summary at all.
+   */
+  async function writeMeetingRecap(
+    boardId: string,
+    meetingId: string,
+    options: { replace?: boolean } = {},
+  ): Promise<import("./meetings.js").RecapOutcome> {
+    if (!meetings) return { outcome: "unavailable" };
+    const board = await boardStore.get(boardId);
+    const meeting = board ? await meetings.get(boardId, meetingId) : undefined;
+    if (!board || !meeting) return { outcome: "not-found" };
+    if (meeting.endedAt === null) return { outcome: "not-ended" };
+    if (meeting.mode === "record") return { outcome: "record-mode" };
+    if (meeting.turns.length === 0) return { outcome: "empty" };
+    // The job path never rewrites a summary (an at-least-once replay costs
+    // nothing); an editor asking again does.
+    if (meeting.recap && !options.replace) return { outcome: "written", meeting };
+    const { assembleNotes, fallbackNotesDraft } = await import("@lucent/ai");
+    const request: import("@lucent/ai").NotesRequest = {
+      template: "general",
+      ...(meeting.title ? { title: meeting.title } : {}),
+      today: new Date(meeting.startedAt).toISOString().slice(0, 10),
+      transcript: meeting.turns.map((t) => ({ speaker: t.speaker, text: t.text })),
+      notes: [],
+    };
+    const now = Date.now();
+    const offline = (
+      reason: import("./meetings.js").RecapOffline,
+    ): import("./meetings.js").MeetingRecap => ({
+      ...assembleNotes(request, fallbackNotesDraft(request), "fallback", now),
+      offline: reason,
+    });
+    let recap: import("./meetings.js").MeetingRecap;
+    const boundary = await outboundRefusal(board, "ai", { provider });
+    const policy = (await orgPolicy(board.orgId)).providerPolicy;
+    const refusedByPolicy = providerPolicyRefusal(
+      policy,
+      providerFact({ provider, byok: false }, config.aiSelfHosted),
+    );
+    if (boundary || refusedByPolicy) {
+      recap = offline("policy");
+    } else if (!provider.generateNotes) {
+      recap = offline("no-model");
+    } else {
+      const allowance = entitlements
+        ? await entitlements.checkMonthly(board.orgId, "ai.generationsPerMonth", 1)
+        : null;
+      if (allowance && !allowance.allowed) {
+        recap = offline("limit");
+      } else {
+        try {
+          const draft = await provider.generateNotes(request);
+          recap = assembleNotes(request, draft, "model", now, draft.model);
+          meterUsage(board.orgId, "ai.generation", 1, {
+            boardId,
+            provider: provider.name,
+            mode: "meeting-summary",
+            ...(draft.model ? { model: draft.model } : {}),
+          });
+        } catch {
+          recap = offline("model-failed");
+        }
+      }
+    }
+    const saved = await meetings.setRecap(boardId, meetingId, recap);
+    return saved ? { outcome: "written", meeting: saved } : { outcome: "not-found" };
+  }
+
+  /** docs/28 A3.3: tell the outbox a meeting ended; its consumer queues the summary. */
+  function announceMeetingEnded(ref: { boardId: string; orgId: string; meetingId: string }): void {
+    void deps.outbox
+      ?.append({
+        type: "MeetingEnded",
+        boardId: ref.boardId,
+        orgId: ref.orgId,
+        payload: { meetingId: ref.meetingId },
+      })
+      .catch(() => {
+        // Announcing is best-effort: an editor can still ask for the summary.
+      });
+  }
+
   const services: RouteServices = {
     config,
     logger,
@@ -1905,6 +2008,8 @@ export function createApp(deps: AppDeps): App {
     notificationStore,
     usageStore,
     meetings,
+    writeMeetingRecap,
+    announceMeetingEnded,
     // Notes live beside transcripts: with a meeting store and no notes store
     // (tests, in-memory dev), keep notes in memory rather than refusing them.
     meetingNotes: deps.meetingNotes ?? (meetings ? new InMemoryMeetingNotesStore() : undefined),
@@ -4633,6 +4738,7 @@ export function createApp(deps: AppDeps): App {
     server,
     realtime,
     metrics,
+    writeMeetingRecap,
     async close(): Promise<void> {
       await new Promise<void>((resolve) => server.close(() => resolve()));
       realtime.close();

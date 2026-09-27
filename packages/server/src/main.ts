@@ -504,6 +504,25 @@ const outbox: import("./outbox.js").OutboxStore = db
   : new (await import("./outbox.js")).InMemoryOutbox();
 const outboxDispatcher = new (await import("./outbox.js")).OutboxDispatcher({ store: outbox });
 
+// The job queue (P3). Built here, beside the outbox, so the outbox's
+// consumers can queue work before the dispatcher starts: an event drained
+// with no consumer registered is marked dispatched and gone.
+const jobQueue: JobQueue = db ? new PostgresJobQueue(db) : new InMemoryJobQueue();
+
+// docs/28 A3.3 — the outbox's first consumer. A meeting that ended queues its
+// end-of-meeting summary as an AI-family job: retried with backoff, and
+// deduped per meeting so an at-least-once redelivery queues nothing new.
+outboxDispatcher.subscribe("MeetingEnded", async (event) => {
+  const meetingId = event.payload.meetingId;
+  if (typeof meetingId !== "string" || !event.boardId) return;
+  await jobQueue.enqueue({
+    type: "meeting.recap",
+    family: "ai",
+    payload: { boardId: event.boardId, meetingId },
+    dedupeKey: `meeting.recap:${meetingId}`,
+  });
+});
+
 // M7 / M4 storage: the asset gateway. Stage B6 closes the deferred gap: the
 // metadata store is Postgres when a database is configured (the `assets` table
 // was always there; every uploaded asset row previously evaporated with the
@@ -559,7 +578,7 @@ const imageProvider = selectImageProvider();
 const vectorProvider = selectVectorProvider();
 console.log(`[lucent] vector: ${vectorProvider ? vectorProvider.name : "off"}`);
 
-const { server, realtime } = createApp({
+const { server, realtime, writeMeetingRecap } = createApp({
   config,
   provider,
   imageProvider,
@@ -592,6 +611,8 @@ const { server, realtime } = createApp({
   // E3/R3: meeting transcripts, on the same store-per-database rule as the rest.
   meetings: stores.meetings,
   meetingNotes: stores.meetingNotes,
+  // docs/28 A3.3: ending a meeting announces MeetingEnded here.
+  outbox,
   // Stage B3: review-gate proposals, same rule — the server is now the
   // record for what Lucent wants to change on a shared board.
   proposals: stores.proposals,
@@ -924,7 +945,7 @@ async function sweepIntegration(): Promise<void> {
 // partial unique index makes a second scheduler's enqueue a no-op. That is
 // why there is no leader election here — the claim already provides it.
 const role = parseRole(process.env.LUCENT_ROLE);
-const jobQueue: JobQueue = db ? new PostgresJobQueue(db) : new InMemoryJobQueue();
+// (jobQueue is built beside the outbox above, so its consumers can queue work.)
 
 async function runSchedulerTick(): Promise<void> {
   try {
@@ -996,6 +1017,14 @@ const jobRunner = runsJobs(role)
           const { sweepIdleCaptures } = await import("./sweeps.js");
           const ended = await sweepIdleCaptures({ meetings: stores.meetings });
           if (ended > 0) logger.info("meetings.ended-idle", { ended });
+        },
+        // docs/28 A3.3: the end-of-meeting summary, queued by the MeetingEnded
+        // consumer. A throw fails the attempt; the queue retries with backoff.
+        "meeting.recap": async (job) => {
+          const { boardId, meetingId } = job.payload as { boardId?: unknown; meetingId?: unknown };
+          if (typeof boardId !== "string" || typeof meetingId !== "string") return;
+          const result = await writeMeetingRecap(boardId, meetingId);
+          logger.info("meetings.recap", { meetingId, outcome: result.outcome });
         },
       },
       ...(familiesFor(role, process.env.LUCENT_JOB_FAMILIES)

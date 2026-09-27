@@ -1059,6 +1059,12 @@ export const meetingTranscripts = pgTable(
      * reader shows the board and the date; nothing is backfilled.
      */
     title: text("title"),
+    /**
+     * docs/28 A3.3: the end-of-meeting summary — the notes enhancer's cited
+     * note over the whole transcript, written once the meeting ends. Null
+     * until then, and always in Record mode (transcript only).
+     */
+    summary: jsonb("summary"),
     /** Null when the creator has been deleted; the transcript stays. */
     createdBy: text("created_by").references(() => users.id, { onDelete: "set null" }),
     createdAt: bigint("created_at", { mode: "number" }).notNull(),

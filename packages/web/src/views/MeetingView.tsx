@@ -43,10 +43,13 @@ import {
   appendMeetingTurns,
   classifyTurn,
   endMeeting,
+  fetchMeeting,
   listMeetings,
   promptFromTranscript,
   renameMeeting,
   saveMeeting,
+  writeMeetingSummary,
+  type MeetingRecap,
   type MeetingTranscript,
   type MeetingTurn,
 } from "../meetings.js";
@@ -214,6 +217,21 @@ function prefersReducedMotion(): boolean {
  */
 const VIEWER_CAPTURE_REASON =
   "You can view this board: you can join the call, read the transcript and take private notes, but only editors record, save or extract meetings.";
+
+/** How long the view waits for the summary job before offering "Write it now". */
+const RECAP_WAIT_MS = 45_000;
+
+/** Why a summary was written without the model, said plainly (docs/28 §4.4). */
+const RECAP_OFFLINE: Record<NonNullable<MeetingRecap["offline"]>, string> = {
+  policy:
+    "Written without the model: this board's AI boundary or your organization's policy keeps it out. The lines are quoted from the transcript.",
+  "no-model":
+    "Written without the model: none is configured on this server. The lines are quoted from the transcript.",
+  limit:
+    "Written without the model: this month's AI allowance is used up. The lines are quoted from the transcript.",
+  "model-failed":
+    "Written without the model: it didn't answer. The lines are quoted from the transcript — Rewrite to try again.",
+};
 
 export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: string) => void }) {
   const {
@@ -1353,15 +1371,151 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
           (extractQueued > 0 ? `${plural(extractQueued, "turn")} pending` : "Listening…"))
     : null;
 
-  const renderCitations = (item: BriefItem): ReactNode => {
-    if (!item.turnRange) return null;
-    const cite = citationTurns(item.turnRange);
+  const renderCitations = (item: BriefItem): ReactNode =>
+    item.turnRange ? renderTurnChips(item.turnRange, item.quote) : null;
+
+  // ---- The end-of-meeting summary (docs/28 S8/S9, A3.3) ------------------
+  // The server writes it as a job once the meeting ends, so closing the tab
+  // doesn't stop it. While it is being written this view polls for it; after
+  // RECAP_WAIT_MS an editor can write it now instead.
+  const recapPending =
+    phase === "saved" &&
+    shown !== null &&
+    shown.endedAt !== null &&
+    !shown.recap &&
+    shown.mode !== "record" &&
+    shown.turns.length > 0;
+  const [recapWaitOver, setRecapWaitOver] = useState(false);
+  const [writingRecap, setWritingRecap] = useState(false);
+  useEffect(() => {
+    setRecapWaitOver(false);
+    if (!recapPending || !boardId || !shown) return;
+    const started = Date.now();
+    const id = shown.id;
+    const tick = setInterval(() => {
+      void (async () => {
+        const fresh = await fetchMeeting(boardId, id);
+        if (fresh?.recap) {
+          clearInterval(tick);
+          setSelectedMeeting((cur) => (cur?.id === id ? fresh : cur));
+          setSaved((prev) => prev.map((m) => (m.id === id ? fresh : m)));
+        } else if (Date.now() - started > RECAP_WAIT_MS) {
+          clearInterval(tick);
+          setRecapWaitOver(true);
+        }
+      })();
+    }, 3_000);
+    return () => clearInterval(tick);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [recapPending, boardId, shown?.id]);
+
+  const writeRecapNow = async (): Promise<void> => {
+    if (!shown || !boardId || writingRecap) return;
+    setWritingRecap(true);
+    const result = await writeMeetingSummary(boardId, shown.id);
+    setWritingRecap(false);
+    if (!result.ok) {
+      notify(result.error);
+      return;
+    }
+    setSelectedMeeting(result.meeting);
+    setSaved((prev) => prev.map((m) => (m.id === result.meeting.id ? result.meeting : m)));
+  };
+
+  const renderSummary = (): ReactNode => {
+    if (phase !== "saved" || !shown || shown.endedAt === null) return null;
+    if (shown.mode === "record") return null; // the brief says what Record mode keeps
+    const recap = shown.recap;
+    const lines = recap?.sections.flatMap((s) => s.items) ?? [];
+    return (
+      <section className="meet-brief meet-summary" aria-labelledby="meet-summary-title">
+        <div className="meet-brief-head">
+          <h2 className="meet-h2" id="meet-summary-title">
+            Summary
+          </h2>
+          {recap && boardId && !readOnly && (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => void writeRecapNow()}
+              disabled={writingRecap}
+            >
+              {writingRecap ? "Writing…" : "Rewrite"}
+            </Button>
+          )}
+        </div>
+        {!recap && !recapWaitOver && (
+          <p className="meet-note" role="status">
+            <span className="meet-listen" aria-hidden /> Writing the summary — every line will cite
+            the turns it came from.
+          </p>
+        )}
+        {!recap && recapWaitOver && (
+          <EmptyState
+            compact
+            title="The summary isn't ready yet"
+            body={
+              readOnly
+                ? "Lucent writes it after the meeting ends. Check back in a moment."
+                : "Lucent writes it after the meeting ends; it's taking longer than usual. You can write it now."
+            }
+            action={
+              boardId && !readOnly ? (
+                <Button
+                  size="sm"
+                  variant="primary"
+                  onClick={() => void writeRecapNow()}
+                  disabled={writingRecap}
+                >
+                  {writingRecap ? "Writing…" : "Write it now"}
+                </Button>
+              ) : undefined
+            }
+          />
+        )}
+        {recap?.offline && <p className="meet-note">{RECAP_OFFLINE[recap.offline]}</p>}
+        {recap && lines.length === 0 && (
+          <EmptyState
+            compact
+            title="Nothing to cite"
+            body="Lucent found no decisions, actions, questions or risks in this transcript to summarize — and it never writes a line it can't point to."
+          />
+        )}
+        {recap?.sections
+          .filter((s) => s.items.length > 0)
+          .map((section) => (
+            <div key={section.title} className="meet-brief-section">
+              <h3 className="meet-h3">
+                {section.title}
+                <span className="section-count">{section.items.length}</span>
+              </h3>
+              <ul className="meet-items">
+                {section.items.map((item, i) => (
+                  <li key={i} className="meet-item">
+                    <div className="meet-item-line">
+                      <span className="meet-item-text">
+                        <span className="meet-item-label">{item.text}</span>
+                        {item.turns && renderTurnChips(item.turns)}
+                      </span>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+      </section>
+    );
+  };
+
+  /** Turn chips for a cited range: each jumps to its words in the transcript. */
+  const renderTurnChips = (range: [number, number], quote?: string): ReactNode => {
+    const cite = citationTurns(range);
     const turnTitle = (n: number): string => {
       const t = displayTurns[n];
       return t ? `Turn ${n + 1} · ${t.speaker}: ${t.text}` : `Turn ${n + 1}`;
     };
     return (
-      <span className="meet-cites" title={item.quote ? `“${item.quote}”` : undefined}>
+      <span className="meet-cites" title={quote ? `“${quote}”` : undefined}>
         {cite.kind === "turns" ? (
           cite.turns.map((n) => (
             <button
@@ -1952,6 +2106,7 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
             </>
           )}
 
+          {renderSummary()}
           {renderBrief()}
 
           {!shown && openQuestions.total > 0 && (
