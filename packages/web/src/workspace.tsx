@@ -93,6 +93,7 @@ export type View =
   | "canvas"
   | "history"
   | "meeting"
+  | "meetings"
   | "intelligence"
   | "execution"
   | "wireframe"

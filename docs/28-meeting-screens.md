@@ -100,7 +100,7 @@ against every file their row cites.
 
 | Screen                             | Spec        |           Today            |
 | ---------------------------------- | ----------- | :------------------------: |
-| S1 Meetings (workspace list)       | §65, §121   |  ❌ per-board lists only   |
+| S1 Meetings (workspace list)       | §65, §121   | ✅ A3.1 (Live now · Past)  |
 | S2 Schedule                        | §16         |             ❌             |
 | S3 Meeting page (upcoming)         | §16, §122   |             ❌             |
 | S4 Lobby                           | §17         |       🟡 two toggles       |
@@ -109,7 +109,7 @@ against every file their row cites.
 | S7 Capture panel                   | §22–25      |  🟡 today's `MeetingView`  |
 | S8 Ending                          | §120        |        🟡 Stop only        |
 | S9 Review                          | §26–27, §57 |             ❌             |
-| S10 Past meeting                   | §121        |        🟡 per board        |
+| S10 Past meeting                   | §121        |     ✅ A3.1 (+ rename)     |
 | S11 Follow-up                      | §57         |    🟡 pieces elsewhere     |
 | S12 Import transcript              | §64         | 🟡 route, mock only, no UI |
 
@@ -514,6 +514,22 @@ A3.0 comes first and is small (no schema). A3.1 gates A3.3, A3.4 and A3.5,
 since all three need a meeting object. A3.2 and A3.6 can run beside them.
 Per-item review with trust is A2 (J5), and captions and barge-in wait for the
 V8 transport (F4).
+
+### Status
+
+- **A3.0 — done (2026-09-27):** F13–F17 (§2).
+- **A3.6 — done (2026-09-27):** F20 (outside playback), F21, F22 (§2).
+- **A3.1 — done (2026-09-27), per ADR 0045.** The meeting stays its
+  transcript record, so its id — which provenance, proposals, notes and deep
+  links already use — never changes; J1's fields arrive as columns with the
+  features that use them. Shipped: a nullable `title` (migration 0032) with
+  rename on the past-meeting page (S10); a derived `live` / `ended` status;
+  `GET /api/orgs/:id/meetings`, every meeting on the boards the caller can
+  read (the same two scopes as the board list), as summaries; and S1, the
+  workspace Meetings view (Live now · Past; the rail's Meetings item) whose
+  rows open the meeting on its own board. Upcoming and Needs review are
+  absent until scheduling (A3.4) and the end-of-meeting pass (A3.3) give
+  them something to show. `scripts/meeting-capture-check.mjs` 28/28.
 
 ## 9. Decisions needed
 

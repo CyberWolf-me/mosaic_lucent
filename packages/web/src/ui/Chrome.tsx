@@ -690,7 +690,9 @@ const RAIL_ITEMS: { id: string; icon: keyof typeof Ico; label: string; view: Vie
   { id: "home", icon: "Home", label: "Home", view: "home" },
   { id: "boards", icon: "Folder", label: "Boards", view: "dashboard" },
   { id: "canvas", icon: "Layers", label: "Canvas", view: "canvas" },
-  { id: "meeting", icon: "Present", label: "Meeting", view: "meeting" },
+  // docs/28 S1: the rail opens the workspace's meetings; a board's own
+  // meeting is one click from there (and from the top bar).
+  { id: "meeting", icon: "Present", label: "Meetings", view: "meetings" },
   { id: "intelligence", icon: "Sparkle", label: "Intelligence", view: "intelligence" },
   { id: "execution", icon: "Gauge", label: "Execution", view: "execution" },
   { id: "history", icon: "History", label: "History", view: "history" },
@@ -757,7 +759,12 @@ export function LeftRail({
         </button>
         {RAIL_ITEMS.map((it) => {
           const Icon = Ico[it.icon];
-          const active = it.id === "canvas" ? onCanvas : view === it.view;
+          const active =
+            it.id === "canvas"
+              ? onCanvas
+              : it.id === "meeting"
+                ? view === "meetings" || view === "meeting"
+                : view === it.view;
           return (
             <div key={it.id} className="rail-group">
               <button

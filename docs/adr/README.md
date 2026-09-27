@@ -51,3 +51,4 @@ back to it.
 | [0042](0042-conversation-is-evidence.md)                          | A conversation request is evidence, too: the third provenance family (Atelier)                                                     | Accepted |
 | [0043](0043-icons-are-registry-references.md)                     | A node's icon is a registry reference, never markup (docs/26 §6.2)                                                                 | Accepted |
 | [0044](0044-vectors-are-structured-paths.md)                      | An editable vector is structured paths, and SVG enters through one door (docs/26 §6.3)                                             | Accepted |
+| [0045](0045-a-meeting-is-its-record.md)                           | A meeting is its transcript record; J1's fields arrive as columns with the features that use them (docs/26 J1, A3.1)               | Accepted |

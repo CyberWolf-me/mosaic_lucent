@@ -30,6 +30,63 @@ export interface MeetingTranscript {
   createdAt: number;
   /** Capture profile in force when recorded (docs/24 Phase D); absent on older rows. */
   mode?: string;
+  /** The meeting's name (ADR 0045); absent means untitled. */
+  title?: string;
+}
+
+/** One row of the workspace meetings list (ADR 0045): no turns. */
+export interface MeetingSummary {
+  id: string;
+  boardId: string;
+  boardName: string;
+  title: string | null;
+  status: "live" | "ended";
+  startedAt: number;
+  endedAt: number | null;
+  turnCount: number;
+  mode: string | null;
+  createdBy: string | null;
+}
+
+/**
+ * What a meeting is called where a person reads it: its title, or — for an
+ * untitled one — the board and the day it started.
+ */
+export function meetingName(
+  meeting: { title?: string | null; startedAt: number },
+  boardName?: string,
+): string {
+  if (meeting.title) return meeting.title;
+  const day = new Date(meeting.startedAt).toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+  });
+  return boardName ? `${boardName} · ${day}` : `Meeting · ${day}`;
+}
+
+/**
+ * Every meeting on the boards this person can read in the org, newest first
+ * (docs/28 S1). Null when the call fails, so the view can say so.
+ */
+export async function listWorkspaceMeetings(orgId: string): Promise<MeetingSummary[] | null> {
+  const res = await apiFetch(`/api/orgs/${encodeURIComponent(orgId)}/meetings?limit=100`);
+  if (!res.ok) return null;
+  const body = (await res.json()) as { meetings?: MeetingSummary[] };
+  return Array.isArray(body.meetings) ? body.meetings : [];
+}
+
+/** Name a meeting; an empty title makes it untitled again. Null on failure. */
+export async function renameMeeting(
+  boardId: string,
+  meetingId: string,
+  title: string,
+): Promise<MeetingTranscript | null> {
+  const res = await apiFetch(
+    `/api/boards/${encodeURIComponent(boardId)}/meetings/${encodeURIComponent(meetingId)}`,
+    { method: "PATCH", body: JSON.stringify({ title }) },
+  );
+  if (!res.ok) return null;
+  return (await res.json()) as MeetingTranscript;
 }
 
 /**

@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { classifyTurn, promptFromTranscript, type MeetingTranscript } from "../src/meetings.js";
+import {
+  classifyTurn,
+  meetingName,
+  promptFromTranscript,
+  type MeetingTranscript,
+} from "../src/meetings.js";
 
 /**
  * The meeting flow's pure decisions (E3 / R3): the classification heuristic
@@ -68,5 +73,15 @@ describe("promptFromTranscript", () => {
     const instructionAt = prompt.indexOf("Build a diagram");
     const transcriptAt = prompt.indexOf("Transcript:");
     expect(instructionAt).toBeLessThan(transcriptAt);
+  });
+});
+
+describe("meetingName (ADR 0045)", () => {
+  const at = new Date(2026, 8, 27, 9, 2).getTime();
+  it("a title wins; an untitled meeting reads as its day, with the board when asked", () => {
+    expect(meetingName({ title: "Pricing sync", startedAt: at }, "Board A")).toBe("Pricing sync");
+    expect(meetingName({ startedAt: at })).toMatch(/^Meeting · /);
+    expect(meetingName({ title: null, startedAt: at }, "Board A")).toMatch(/^Board A · /);
+    expect(meetingName({ title: "", startedAt: at })).toMatch(/^Meeting · /);
   });
 });

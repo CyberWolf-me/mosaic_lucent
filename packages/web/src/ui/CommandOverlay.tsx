@@ -205,6 +205,13 @@ export function CommandOverlay({
         run: { kind: "view", view: "history" },
       },
       {
+        id: "v-meetings",
+        label: "Open meetings",
+        hint: "Every meeting in the workspace",
+        group: "view",
+        run: { kind: "view", view: "meetings" },
+      },
+      {
         id: "v-notifications",
         label: "Open notifications",
         hint: "Invites · Mentions · Replies",

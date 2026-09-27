@@ -272,6 +272,27 @@ button.meet-rec:hover {
   flex-direction: column;
   gap: 6px;
 }
+/* Naming a past meeting in place (ADR 0045, docs/28 S10). */
+.meet-rename {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.meet-rename input {
+  flex: 1 1 280px;
+  min-width: 0;
+  font: inherit;
+  color: var(--ink-0);
+  background: var(--paper-0);
+  border: 1px solid var(--stroke-1);
+  border-radius: var(--r-sm);
+  padding: 4px 10px;
+}
+.meet-rename input:focus-visible {
+  outline: 2px solid var(--bloom-wash-2);
+  outline-offset: 1px;
+}
 .meet-past {
   display: flex;
   align-items: baseline;

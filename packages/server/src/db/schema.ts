@@ -1054,6 +1054,11 @@ export const meetingTranscripts = pgTable(
      * as unknown — never backfilled.
      */
     mode: text("mode"),
+    /**
+     * ADR 0045 (docs/26 J1): the meeting's name. Null means untitled — the
+     * reader shows the board and the date; nothing is backfilled.
+     */
+    title: text("title"),
     /** Null when the creator has been deleted; the transcript stays. */
     createdBy: text("created_by").references(() => users.id, { onDelete: "set null" }),
     createdAt: bigint("created_at", { mode: "number" }).notNull(),

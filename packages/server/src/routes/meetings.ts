@@ -18,8 +18,18 @@ import type { RegisterRoutes } from "./context.js";
  * through it by design, as everywhere else.
  */
 export const registerMeetingRoutes: RegisterRoutes = (router, s) => {
-  const { send, requireBoardRole, requireCsrf, readBody, meetings, orgPolicy, meetingConnectors } =
-    s;
+  const {
+    send,
+    requireBoardRole,
+    requireCsrf,
+    requireUser,
+    readBody,
+    meetings,
+    orgPolicy,
+    meetingConnectors,
+    userStore,
+    boardStore,
+  } = s;
 
   router.post("/api/boards/:id/meetings", async (ctx) => {
     const { req, res } = ctx;
@@ -278,7 +288,7 @@ export const registerMeetingRoutes: RegisterRoutes = (router, s) => {
     const credential =
       typeof body.credential === "string" && body.credential !== "" ? body.credential : undefined;
 
-    const { validateTurns } = await import("../meetings.js");
+    const { validateTurns, validateMeetingTitle } = await import("../meetings.js");
     let fetched: { turns: unknown; title?: string };
     try {
       fetched = await source.fetchTranscript(
@@ -297,6 +307,7 @@ export const registerMeetingRoutes: RegisterRoutes = (router, s) => {
       send(res, 502, { error: "meeting source returned unusable turns", detail: checked.error });
       return;
     }
+    const importedTitle = validateMeetingTitle(fetched.title ?? null);
     const saved = await meetings.insert({
       boardId,
       orgId: guard.board.orgId,
@@ -305,7 +316,69 @@ export const registerMeetingRoutes: RegisterRoutes = (router, s) => {
       turns: checked.turns,
       createdBy: guard.user.id,
       createdAt: Date.now(),
+      // The source's own name for the meeting, when it gives a usable one.
+      ...(importedTitle.ok && importedTitle.title ? { title: importedTitle.title } : {}),
     });
     send(res, 201, { ...saved, source: source.name });
+  });
+
+  // ADR 0045 (docs/26 J1): name a meeting. Editor, like every meeting write;
+  // null or "" makes it untitled again.
+  router.patch("/api/boards/:id/meetings/:mid", async (ctx) => {
+    const { req, res } = ctx;
+    const route = "/api/boards/:id/meetings/:mid";
+    if (!requireCsrf(req, res, route)) return;
+    const boardId = ctx.param("id");
+    const guard = await requireBoardRole(req, res, boardId, "editor", route);
+    if (!guard.ok) return;
+    if (!meetings) return send(res, 503, { error: "meeting transcripts are not configured" });
+    let body: { title?: unknown };
+    try {
+      const raw = await readBody(req);
+      body = raw ? (JSON.parse(raw) as typeof body) : {};
+    } catch (err) {
+      send(res, 400, { error: "bad request", detail: (err as Error).message });
+      return;
+    }
+    if (!("title" in body)) {
+      send(res, 400, { error: "title is required (null clears it)" });
+      return;
+    }
+    const { validateMeetingTitle } = await import("../meetings.js");
+    const checked = validateMeetingTitle(body.title);
+    if (!checked.ok) {
+      send(res, 400, { error: checked.error });
+      return;
+    }
+    const updated = await meetings.setTitle(boardId, ctx.param("mid"), checked.title);
+    if (!updated) return send(res, 404, { error: "meeting not found" });
+    send(res, 200, updated);
+  });
+
+  // ADR 0045 (docs/26 J1, docs/28 S1): every meeting in the workspace the
+  // caller can read, as summaries (no turns), newest first. The same two
+  // scopes as GET /api/boards: an org member reads every board in the org;
+  // an outside collaborator only the boards they were given — so a
+  // non-member learns nothing beyond their own grants.
+  router.get("/api/orgs/:id/meetings", async (ctx) => {
+    const { req, res } = ctx;
+    const user = await requireUser(req, res);
+    if (!user) return;
+    if (!meetings) return send(res, 503, { error: "meeting transcripts are not configured" });
+    const orgId = ctx.param("id");
+    const member = (await userStore.membershipsFor(user.id)).some((m) => m.orgId === orgId);
+    const boards = member
+      ? await boardStore.listForOrg(orgId)
+      : await boardStore.listForUser(orgId, user.id);
+    const url = new URL(req.url ?? "/", "http://localhost");
+    const requested = Number(url.searchParams.get("limit"));
+    const limit = Number.isInteger(requested) && requested > 0 ? Math.min(requested, 200) : 50;
+    const names = new Map(boards.map((b) => [b.id, b.name] as const));
+    const rows = await meetings.forBoards([...names.keys()], limit);
+    const { summarizeMeeting } = await import("../meetings.js");
+    send(res, 200, {
+      orgId,
+      meetings: rows.map((m) => summarizeMeeting(m, names.get(m.boardId) ?? "")),
+    });
   });
 };

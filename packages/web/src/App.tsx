@@ -11,6 +11,7 @@ import { AdminView } from "./views/AdminView.js";
 import { AnalyticsView } from "./views/AnalyticsView.js";
 import { MobileGate } from "./views/MobileBoardView.js";
 import { MeetingView } from "./views/MeetingView.js";
+import { MeetingsView } from "./views/MeetingsView.js";
 import { IntelligenceView } from "./views/IntelligenceView.js";
 import { ExecutionView } from "./views/ExecutionView.js";
 import { WireframeView } from "./views/WireframeView.js";
@@ -128,6 +129,8 @@ function ViewFor({
       return <DashboardView onOpenSettings={onOpenSettings} />;
     case "history":
       return <HistoryView onOpenSettings={onOpenSettings} />;
+    case "meetings":
+      return <MeetingsView onOpenSettings={onOpenSettings} />;
     case "intelligence":
       return <IntelligenceView onOpenSettings={onOpenSettings} />;
     case "execution":

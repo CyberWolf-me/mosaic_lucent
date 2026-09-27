@@ -552,3 +552,164 @@ describe("external import (docs/24 Phase E)", () => {
     expect(res.status).toBe(404);
   });
 });
+
+/**
+ * ADR 0045 (docs/26 J1, docs/28 S1/S10): a meeting is its record, with a
+ * name, listed across the workspace — on exactly the boards the caller can
+ * read.
+ */
+describe("meetings as workspace objects (A3.1)", () => {
+  let h: Harness | null = null;
+  afterEach(async () => {
+    if (h) await h.close();
+    h = null;
+  });
+
+  const save = async (
+    hh: Harness,
+    token: string,
+    boardId: string,
+    startedAt: number,
+    ended = true,
+  ) => {
+    const res = await hh.api(`/api/boards/${boardId}/meetings`, {
+      method: "POST",
+      token,
+      body: JSON.stringify({
+        turns: TURNS.slice(0, 2),
+        startedAt,
+        ...(ended ? { endedAt: startedAt + 60_000 } : {}),
+      }),
+    });
+    expect(res.status).toBe(201);
+    return res.body.id as string;
+  };
+
+  it("names a meeting, clears the name, and refuses a bad one", async () => {
+    h = await harness();
+    const owner = await h.signup("title.owner@example.com");
+    const boardId = await h.seedBoard(owner.token);
+    const mid = await save(h, owner.token, boardId, 1_000);
+    const path = `/api/boards/${boardId}/meetings/${mid}`;
+
+    const named = await h.api(path, {
+      method: "PATCH",
+      token: owner.token,
+      body: JSON.stringify({ title: "  Pricing review " }),
+    });
+    expect(named.status).toBe(200);
+    expect(named.body.title).toBe("Pricing review");
+    expect((await h.api(path, { token: owner.token })).body.title).toBe("Pricing review");
+
+    const cleared = await h.api(path, {
+      method: "PATCH",
+      token: owner.token,
+      body: JSON.stringify({ title: "" }),
+    });
+    expect(cleared.body.title).toBeUndefined();
+
+    const long = await h.api(path, {
+      method: "PATCH",
+      token: owner.token,
+      body: JSON.stringify({ title: "x".repeat(121) }),
+    });
+    expect(long.status).toBe(400);
+    const missing = await h.api(path, {
+      method: "PATCH",
+      token: owner.token,
+      body: JSON.stringify({}),
+    });
+    expect(missing.status).toBe(400);
+    const unknown = await h.api(`/api/boards/${boardId}/meetings/mtg_nope`, {
+      method: "PATCH",
+      token: owner.token,
+      body: JSON.stringify({ title: "x" }),
+    });
+    expect(unknown.status).toBe(404);
+  });
+
+  it("a viewer cannot rename a meeting", async () => {
+    h = await harness();
+    const owner = await h.signup("title.owner2@example.com");
+    const viewer = await h.signup("title.viewer@example.com");
+    const boardId = await h.seedBoard(owner.token);
+    const mid = await save(h, owner.token, boardId, 1_000);
+    await h.boardStore.setMember({
+      boardId,
+      userId: viewer.id,
+      role: "viewer",
+      invitedBy: null,
+      createdAt: 1,
+    });
+    const res = await h.api(`/api/boards/${boardId}/meetings/${mid}`, {
+      method: "PATCH",
+      token: viewer.token,
+      body: JSON.stringify({ title: "mine now" }),
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it("lists every meeting on the boards the caller can read, newest first, without turns", async () => {
+    h = await harness();
+    const owner = await h.signup("list.owner@example.com");
+    const orgId = `org_personal_${owner.id}`;
+    const a = await h.seedBoard(owner.token, "Board A");
+    const b = await h.seedBoard(owner.token, "Board B");
+    const older = await save(h, owner.token, a, 1_000);
+    const live = await save(h, owner.token, b, 5_000, false);
+    await h.api(`/api/boards/${a}/meetings/${older}`, {
+      method: "PATCH",
+      token: owner.token,
+      body: JSON.stringify({ title: "Kickoff" }),
+    });
+
+    const list = await h.api(`/api/orgs/${orgId}/meetings`, { token: owner.token });
+    expect(list.status).toBe(200);
+    const rows = list.body.meetings as Array<Record<string, unknown>>;
+    expect(rows.map((r) => r.id)).toEqual([live, older]);
+    expect(rows[0]).toMatchObject({
+      boardId: b,
+      boardName: "Board B",
+      status: "live",
+      title: null,
+      turnCount: 2,
+      endedAt: null,
+    });
+    expect(rows[1]).toMatchObject({
+      boardId: a,
+      boardName: "Board A",
+      status: "ended",
+      title: "Kickoff",
+    });
+    expect(rows[0]).not.toHaveProperty("turns");
+  });
+
+  it("an outside collaborator sees only the boards they were given; a stranger sees nothing", async () => {
+    h = await harness();
+    const owner = await h.signup("scope.owner@example.com");
+    const guest = await h.signup("scope.guest@example.com");
+    const stranger = await h.signup("scope.stranger@example.com");
+    const orgId = `org_personal_${owner.id}`;
+    const shared = await h.seedBoard(owner.token, "Shared");
+    const privateBoard = await h.seedBoard(owner.token, "Private");
+    const onShared = await save(h, owner.token, shared, 1_000);
+    await save(h, owner.token, privateBoard, 2_000);
+    await h.boardStore.setMember({
+      boardId: shared,
+      userId: guest.id,
+      role: "viewer",
+      invitedBy: null,
+      createdAt: 1,
+    });
+
+    const guestList = await h.api(`/api/orgs/${orgId}/meetings`, { token: guest.token });
+    expect(guestList.status).toBe(200);
+    expect((guestList.body.meetings as Array<{ id: string }>).map((m) => m.id)).toEqual([onShared]);
+
+    const strangerList = await h.api(`/api/orgs/${orgId}/meetings`, { token: stranger.token });
+    expect(strangerList.status).toBe(200);
+    expect(strangerList.body.meetings).toEqual([]);
+
+    expect((await h.api(`/api/orgs/${orgId}/meetings`, {})).status).toBe(401);
+  });
+});

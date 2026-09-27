@@ -45,6 +45,7 @@ import {
   endMeeting,
   listMeetings,
   promptFromTranscript,
+  renameMeeting,
   saveMeeting,
   type MeetingTranscript,
   type MeetingTurn,
@@ -1025,6 +1026,35 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
 
   const shown = selectedMeeting;
   const displayTurns = shown ? shown.turns : turns;
+
+  // Naming a past meeting (ADR 0045, docs/28 S10).
+  const [renaming, setRenaming] = useState(false);
+  const [titleDraft, setTitleDraft] = useState("");
+  const saveTitle = async (): Promise<void> => {
+    if (!shown || !boardId) return;
+    const updated = await renameMeeting(boardId, shown.id, titleDraft);
+    if (!updated) {
+      notify("Couldn't rename the meeting — try again.");
+      return;
+    }
+    setSelectedMeeting(updated);
+    setSaved((prev) => prev.map((m) => (m.id === updated.id ? updated : m)));
+    setRenaming(false);
+  };
+  useEffect(() => setRenaming(false), [shown?.id]);
+
+  // Opening a meeting from the workspace list (docs/28 S1) sets ?meeting=
+  // and shows this view. The list effect above reads it when the BOARD's
+  // meetings load; when the board didn't change — or this view was kept
+  // mounted by a running capture (F14) — read it again as the view appears.
+  useEffect(() => {
+    if (view !== "meeting") return;
+    const wanted = new URL(window.location.href).searchParams.get("meeting");
+    if (!wanted || selectedMeeting?.id === wanted) return;
+    const match = saved.find((m) => m.id === wanted);
+    if (match) setSelectedMeeting(match);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, saved]);
   // V9 (M6.4), first proactive surface: the board's open questions, shown
   // only in Participant mode and only while capturing live. Text panel,
   // never speech — nothing here speaks unprompted (docs/25 §V9).
@@ -1267,8 +1297,9 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
   const phase: "live" | "saved" | "unsaved" | "none" =
     recording && !shown ? "live" : shown ? "saved" : turns.length > 0 ? "unsaved" : "none";
   const meetingStart = shown?.startedAt ?? startedAt ?? displayTurns[0]?.at ?? null;
-  const title =
-    meetingStart !== null
+  const title = shown?.title
+    ? shown.title
+    : meetingStart !== null
       ? `Meeting · ${fmtDay(meetingStart)}, ${fmtClock(meetingStart)}`
       : "Meeting";
   const shownMode = shown?.mode && isMeetingMode(shown.mode) ? shown.mode : null;
@@ -1519,7 +1550,7 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
           onClick={() => openMeeting(viewing ? null : m)}
         >
           <span className="meet-past-title">
-            {fmtDay(m.startedAt)}, {fmtClock(m.startedAt)}
+            {m.title ?? `${fmtDay(m.startedAt)}, ${fmtClock(m.startedAt)}`}
           </span>
           <span className="mono meet-past-meta">
             {plural(m.turns.length, "turn")}
@@ -1645,7 +1676,52 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
                   ? `Saved meeting · ${projectName}`
                   : `Meeting · ${projectName}`
             }
-            title={title}
+            title={
+              renaming ? (
+                <form
+                  className="meet-rename"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    void saveTitle();
+                  }}
+                >
+                  <input
+                    autoFocus
+                    aria-label="Meeting title"
+                    value={titleDraft}
+                    maxLength={120}
+                    placeholder="Untitled — shows the date"
+                    onChange={(e) => setTitleDraft(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Escape") setRenaming(false);
+                    }}
+                  />
+                  <Button size="sm" variant="primary" type="submit">
+                    Save
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => setRenaming(false)}>
+                    Cancel
+                  </Button>
+                </form>
+              ) : (
+                title
+              )
+            }
+            actions={
+              // docs/28 S10: an editor names a past meeting (ADR 0045).
+              phase === "saved" && shown && boardId && !readOnly && !renaming ? (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => {
+                    setTitleDraft(shown.title ?? "");
+                    setRenaming(true);
+                  }}
+                >
+                  Rename
+                </Button>
+              ) : undefined
+            }
             lede={
               phase === "live"
                 ? extracts

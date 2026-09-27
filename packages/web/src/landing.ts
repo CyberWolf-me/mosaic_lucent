@@ -10,6 +10,7 @@ export const VALID_VIEWS: ReadonlySet<string> = new Set<View>([
   "canvas",
   "history",
   "meeting",
+  "meetings",
   "intelligence",
   "execution",
   "wireframe",

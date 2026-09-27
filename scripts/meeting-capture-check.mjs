@@ -391,6 +391,42 @@ check(
   `turns=${savedOnA?.turns.length} endedAt=${savedOnA?.endedAt}`,
 );
 
+// --- A3.1 (ADR 0045, docs/28 S1/S10): the workspace list, open, rename ---
+await page.goto(`${base}/?view=meetings`, { waitUntil: "networkidle" });
+const pastSection = page.getByRole("region", { name: "Past" });
+await pastSection.waitFor({ timeout: 10000 }).catch(() => {});
+const pastRows = pastSection.getByRole("button");
+check(
+  "the workspace Meetings list shows every past meeting",
+  (await pastRows.count()) >= 5,
+  `${await pastRows.count()} past rows`,
+);
+await pastRows.first().click();
+await page.waitForTimeout(1200);
+check(
+  "a row opens that meeting on its board",
+  /saved meeting/i.test(await statusText()) && new URL(page.url()).searchParams.has("meeting"),
+);
+const openedId = new URL(page.url()).searchParams.get("meeting");
+await page.getByRole("button", { name: "Rename" }).click();
+await page.getByLabel("Meeting title").fill("Pricing sync");
+await page.getByRole("button", { name: "Save" }).click();
+await page.waitForTimeout(800);
+const renamed = (await meetings())?.find((m) => m.id === openedId);
+check(
+  "renaming names the meeting on the server",
+  renamed?.title === "Pricing sync",
+  renamed?.title,
+);
+await page.goto(`${base}/?view=meetings`, { waitUntil: "networkidle" });
+await page.waitForTimeout(800);
+check(
+  "the list shows the new name",
+  (await page.getByRole("region", { name: "Past" }).innerText()).includes("Pricing sync"),
+);
+if (process.env.SHOT_DIR)
+  await page.screenshot({ path: `${process.env.SHOT_DIR}/meetings-list.png` });
+
 // --- F22: a capture that works with less says so ---
 // Ask for on-device Whisper in a page where it can't run (no MediaRecorder):
 // the browser recognizer takes over, and the fallback used to be silent.

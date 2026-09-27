@@ -40,6 +40,8 @@ export interface MeetingTranscript {
    * backfilled (a guess about history would be a lie about it).
    */
   mode?: MeetingMode;
+  /** The meeting's name (ADR 0045). Absent means untitled. */
+  title?: string;
 }
 
 export interface NewMeetingTranscript {
@@ -51,6 +53,66 @@ export interface NewMeetingTranscript {
   createdBy: string;
   createdAt: number;
   mode?: MeetingMode;
+  title?: string;
+}
+
+/** How long a meeting title may be. */
+export const MAX_MEETING_TITLE = 120;
+
+/**
+ * A title from the wire: trimmed; empty or null clears it (back to
+ * untitled); anything else must be a string of at most MAX_MEETING_TITLE.
+ */
+export function validateMeetingTitle(
+  input: unknown,
+): { ok: true; title: string | null } | { ok: false; error: string } {
+  if (input === null) return { ok: true, title: null };
+  if (typeof input !== "string") return { ok: false, error: "title must be a string or null" };
+  const title = input.trim();
+  if (title.length > MAX_MEETING_TITLE) {
+    return { ok: false, error: `title exceeds ${MAX_MEETING_TITLE} characters` };
+  }
+  return { ok: true, title: title === "" ? null : title };
+}
+
+/**
+ * Where a meeting is in its life (ADR 0045): derived from `endedAt` until a
+ * feature needs a stored lifecycle — scheduling adds `scheduled`, the
+ * end-of-meeting pass `summarized`, the review center `reviewed`.
+ */
+export type MeetingStatus = "live" | "ended";
+
+export function meetingStatus(meeting: Pick<MeetingTranscript, "endedAt">): MeetingStatus {
+  return meeting.endedAt === null ? "live" : "ended";
+}
+
+/** One row of the workspace meetings list: everything but the turns. */
+export interface MeetingSummary {
+  id: string;
+  boardId: string;
+  boardName: string;
+  title: string | null;
+  status: MeetingStatus;
+  startedAt: number;
+  endedAt: number | null;
+  turnCount: number;
+  mode: MeetingMode | null;
+  createdBy: string | null;
+}
+
+export function summarizeMeeting(meeting: MeetingTranscript, boardName: string): MeetingSummary {
+  return {
+    id: meeting.id,
+    boardId: meeting.boardId,
+    boardName,
+    title: meeting.title ?? null,
+    status: meetingStatus(meeting),
+    startedAt: meeting.startedAt,
+    endedAt: meeting.endedAt,
+    turnCount: meeting.turns.length,
+    mode: meeting.mode ?? null,
+    createdBy: meeting.createdBy,
+  };
 }
 
 /**
@@ -86,6 +148,17 @@ export interface MeetingStore {
   insert(input: NewMeetingTranscript): Promise<MeetingTranscript>;
   /** A board's meetings, newest first, bounded. */
   forBoard(boardId: string, limit?: number): Promise<MeetingTranscript[]>;
+  /**
+   * The meetings of several boards together, newest first, bounded — the
+   * workspace list (ADR 0045). The caller passes only boards it may read.
+   */
+  forBoards(boardIds: readonly string[], limit?: number): Promise<MeetingTranscript[]>;
+  /** Name (or, with null, un-name) a meeting; scoped to its board like `get`. */
+  setTitle(
+    boardId: string,
+    id: string,
+    title: string | null,
+  ): Promise<MeetingTranscript | undefined>;
   /** One transcript, scoped to its board so a leaked id is not a read. */
   get(boardId: string, id: string): Promise<MeetingTranscript | undefined>;
   /**
@@ -210,17 +283,38 @@ export class InMemoryMeetingStore implements MeetingStore {
       createdBy: input.createdBy,
       createdAt: input.createdAt,
       ...(input.mode !== undefined ? { mode: input.mode } : {}),
+      ...(input.title ? { title: input.title } : {}),
     };
     this.rows.set(row.id, row);
     return { ...row, turns: [...row.turns] };
   }
 
   async forBoard(boardId: string, limit = MEETING_LIST_LIMIT): Promise<MeetingTranscript[]> {
+    return this.forBoards([boardId], limit);
+  }
+
+  async forBoards(
+    boardIds: readonly string[],
+    limit = MEETING_LIST_LIMIT,
+  ): Promise<MeetingTranscript[]> {
+    const wanted = new Set(boardIds);
     return [...this.rows.values()]
-      .filter((r) => r.boardId === boardId)
+      .filter((r) => wanted.has(r.boardId))
       .sort((a, b) => b.startedAt - a.startedAt || (a.id < b.id ? -1 : 1))
       .slice(0, limit)
       .map((r) => ({ ...r, turns: [...r.turns] }));
+  }
+
+  async setTitle(
+    boardId: string,
+    id: string,
+    title: string | null,
+  ): Promise<MeetingTranscript | undefined> {
+    const row = this.rows.get(id);
+    if (!row || row.boardId !== boardId) return undefined;
+    if (title === null) delete row.title;
+    else row.title = title;
+    return { ...row, turns: [...row.turns] };
   }
 
   async get(boardId: string, id: string): Promise<MeetingTranscript | undefined> {

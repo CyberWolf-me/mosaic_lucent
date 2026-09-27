@@ -13,7 +13,8 @@ import {
 
 /**
  * Postgres-backed meeting transcript store (E3 / R3). Parity with
- * `InMemoryMeetingStore` is pinned by the gated suite in pg-store.test.ts.
+ * `InMemoryMeetingStore` is pinned by the gated suites (LUCENT_TEST_DATABASE_URL)
+ * in meeting-store-pg.test.ts, idle-captures.test.ts and retention.test.ts.
  *
  * `turns` rides the JSONB column as-is — the meeting flow owns its shape,
  * the store only copies (the same split the workspace blob gets: the SQL
@@ -33,6 +34,7 @@ export class PostgresMeetingStore implements MeetingStore {
         endedAt: input.endedAt ?? null,
         turns: input.turns,
         ...(input.mode !== undefined ? { mode: input.mode } : {}),
+        ...(input.title ? { title: input.title } : {}),
         createdBy: input.createdBy,
         createdAt: input.createdAt,
       })
@@ -48,6 +50,34 @@ export class PostgresMeetingStore implements MeetingStore {
       .orderBy(desc(meetingTranscripts.startedAt), desc(meetingTranscripts.id))
       .limit(limit);
     return rows.map(toRow);
+  }
+
+  async forBoards(
+    boardIds: readonly string[],
+    limit = MEETING_LIST_LIMIT,
+  ): Promise<MeetingTranscript[]> {
+    // An empty IN () is not SQL; no boards means no meetings.
+    if (boardIds.length === 0) return [];
+    const rows = await this.target.db
+      .select()
+      .from(meetingTranscripts)
+      .where(inArray(meetingTranscripts.boardId, [...boardIds]))
+      .orderBy(desc(meetingTranscripts.startedAt), desc(meetingTranscripts.id))
+      .limit(limit);
+    return rows.map(toRow);
+  }
+
+  async setTitle(
+    boardId: string,
+    id: string,
+    title: string | null,
+  ): Promise<MeetingTranscript | undefined> {
+    const rows = await this.target.db
+      .update(meetingTranscripts)
+      .set({ title })
+      .where(and(eq(meetingTranscripts.boardId, boardId), eq(meetingTranscripts.id, id)))
+      .returning();
+    return rows[0] ? toRow(rows[0]) : undefined;
   }
 
   async get(boardId: string, id: string): Promise<MeetingTranscript | undefined> {
@@ -194,5 +224,7 @@ function toRow(row: typeof meetingTranscripts.$inferSelect): MeetingTranscript {
     ...(row.mode !== null && row.mode !== undefined
       ? { mode: row.mode as MeetingTranscript["mode"] }
       : {}),
+    // Untitled rows read NULL: absence, like mode (ADR 0045).
+    ...(row.title ? { title: row.title } : {}),
   };
 }
