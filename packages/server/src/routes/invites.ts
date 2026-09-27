@@ -25,6 +25,7 @@ export function registerInviteRoutes(router: AppRouter, s: RouteServices): void 
     inviteStore,
     authCtx,
     logger,
+    auditRow,
   } = s;
 
   /**
@@ -75,6 +76,8 @@ export function registerInviteRoutes(router: AppRouter, s: RouteServices): void 
         createdAt: now,
         expiresAt: now + 7 * 24 * 60 * 60 * 1000,
       });
+      // docs/26 F9: who was invited into the org, at what role.
+      void auditRow(req, guard.user.id, orgId, "org.invite.created", orgId, { email, role });
       // M2.6: an invite to an address that already has an account also lands
       // in that account's tray. The accept path rides along because the row is
       // readable only by the user it belongs to, so the card carries no
@@ -172,6 +175,7 @@ export function registerInviteRoutes(router: AppRouter, s: RouteServices): void 
     if (!guard.ok) return;
     if (!inviteStore) return send(res, 204, {});
     await inviteStore.revoke(inviteId, Date.now());
+    void auditRow(req, guard.user.id, orgId, "org.invite.revoked", inviteId);
     send(res, 204, {});
   });
 
@@ -231,6 +235,10 @@ export function registerInviteRoutes(router: AppRouter, s: RouteServices): void 
       }
       await userStore.setMembership({ userId: user.id, orgId: invite.orgId, role: invite.role });
       await inviteStore.consume(invite.id, Date.now());
+      void auditRow(req, user.id, invite.orgId, "org.member.joined_via_invite", invite.orgId, {
+        role: invite.role,
+        inviteId: invite.id,
+      });
       // M2.6: tell whoever sent the invite that it was taken up. This is the
       // one notification the joiner does not get -- they are standing in front
       // of the result of their own click.

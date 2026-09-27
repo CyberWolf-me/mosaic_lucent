@@ -1926,7 +1926,7 @@ export function createApp(deps: AppDeps): App {
     // The audit seam route modules use: the OrgStore's warn-and-continue
     // contract (a failed audit write never 500s a succeeded mutation),
     // delivered as a function so no route assembles the entry shape itself.
-    auditRow: async (req, actorId, orgId, action, targetId) => {
+    auditRow: async (req, actorId, orgId, action, targetId, metadata) => {
       await orgStore
         ?.audit({
           orgId,
@@ -1935,6 +1935,7 @@ export function createApp(deps: AppDeps): App {
           targetId,
           targetType: action.split(".")[0],
           ...requestOrigin(req),
+          ...(metadata ? { metadata } : {}),
           at: Date.now(),
         })
         .catch(() => {
@@ -3604,6 +3605,12 @@ export function createApp(deps: AppDeps): App {
             invitedBy: null,
             createdAt: Date.now(),
           });
+          // docs/26 F9: who came in through a link, with what role, is an
+          // access change the log must show.
+          void services.auditRow(req, user.id, board.orgId, "board.member.joined_via_link", id, {
+            role: link.role,
+            linkCreatedBy: link.createdBy,
+          });
         }
         // M2.6: tell the owner someone walked in through their link — only on
         // the call that actually created the grant, so a reload of the invite
@@ -3699,6 +3706,13 @@ export function createApp(deps: AppDeps): App {
         };
         await boardStore.createShareLink(link);
         telemetry.record({ kind: "product", event: "share_link_created" });
+        // The token is the capability: log a prefix to tell links apart, never
+        // the whole thing (docs/26 F9).
+        void services.auditRow(req, user.id, guard.board.orgId, "board.share_link.created", id, {
+          role,
+          expiresAt: link.expiresAt,
+          tokenPrefix: link.token.slice(0, 6),
+        });
         send(res, 201, { token: link.token, role: link.role, expiresAt: link.expiresAt });
       } catch (err) {
         send(res, 400, { error: "bad request", detail: (err as Error).message });
@@ -3720,7 +3734,14 @@ export function createApp(deps: AppDeps): App {
       const guard = await requireBoardRole(req, res, id, "owner", "/api/boards/:id/share", user);
       if (!guard.ok) return;
       const token = url.searchParams.get("token") ?? undefined;
-      send(res, 200, { revoked: await boardStore.revokeShareLinks(id, Date.now(), token) });
+      const revoked = await boardStore.revokeShareLinks(id, Date.now(), token);
+      if (revoked > 0) {
+        void services.auditRow(req, user.id, guard.board.orgId, "board.share_link.revoked", id, {
+          revoked,
+          ...(token ? { tokenPrefix: token.slice(0, 6) } : { scope: "all" }),
+        });
+      }
+      send(res, 200, { revoked });
       return;
     }
 
@@ -3805,6 +3826,13 @@ export function createApp(deps: AppDeps): App {
             return;
           }
           await boardStore.setMember({ ...current, role: body.role });
+          if (current.role !== body.role) {
+            void services.auditRow(req, user.id, board.orgId, "board.member.role_changed", id, {
+              userId: targetUserId,
+              from: current.role,
+              to: body.role,
+            });
+          }
           // M2.6: a role change is the one board event the affected user cannot
           // see for themselves until the next time something is refused.
           if (current.role !== body.role && targetUserId !== user.id) {
@@ -3868,6 +3896,18 @@ export function createApp(deps: AppDeps): App {
             invitedBy: user.id,
             createdAt: existingGrant?.createdAt ?? Date.now(),
           });
+          if (!existingGrant || existingGrant.role !== body.role) {
+            void services.auditRow(
+              req,
+              user.id,
+              board.orgId,
+              existingGrant ? "board.member.role_changed" : "board.member.added",
+              id,
+              existingGrant
+                ? { userId: target.id, from: existingGrant.role, to: body.role }
+                : { userId: target.id, role: body.role },
+            );
+          }
           if (existingGrant && existingGrant.role !== body.role) {
             // Re-granting at a different role is a role change to the person on
             // the receiving end; the card should say so rather than claim a
@@ -3903,7 +3943,14 @@ export function createApp(deps: AppDeps): App {
         return;
       }
       if (req.method === "DELETE" && targetUserId) {
+        const removedGrant = (await boardStore.members(id)).find((m) => m.userId === targetUserId);
         await boardStore.removeMember(id, targetUserId);
+        if (removedGrant) {
+          void services.auditRow(req, user.id, board.orgId, "board.member.removed", id, {
+            userId: targetUserId,
+            role: removedGrant.role,
+          });
+        }
         send(res, 200, { removed: targetUserId });
         return;
       }

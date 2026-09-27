@@ -34,6 +34,7 @@ export const registerProposalRoutes: RegisterRoutes = (router, s) => {
     proposals,
     commitForBoard,
     broadcastProposal,
+    auditRow,
   } = s;
 
   router.post("/api/boards/:id/proposals", async (ctx) => {
@@ -142,6 +143,12 @@ export const registerProposalRoutes: RegisterRoutes = (router, s) => {
           id: pid,
           status: "rejected",
           by: guard.user.id,
+        });
+        // docs/26 F9: an AI proposal's fate is a human decision the log keeps.
+        void auditRow(req, guard.user.id, guard.board.orgId, "board.proposal.rejected", boardId, {
+          proposalId: pid,
+          operations: proposal.operations.length,
+          ...(proposal.meetingId ? { meetingId: proposal.meetingId } : {}),
         });
         return send(res, 200, { proposal: decided });
       }
@@ -261,6 +268,13 @@ export const registerProposalRoutes: RegisterRoutes = (router, s) => {
         status: "approved",
         by: guard.user.id,
         appliedSeq: seq,
+      });
+      void auditRow(req, guard.user.id, guard.board.orgId, "board.proposal.approved", boardId, {
+        proposalId: pid,
+        operations: proposal.operations.length,
+        applied: ok.length,
+        ...(seq !== undefined ? { seq } : {}),
+        ...(proposal.meetingId ? { meetingId: proposal.meetingId } : {}),
       });
       send(res, 200, { proposal: decided, applied: ok.length, seq });
     };

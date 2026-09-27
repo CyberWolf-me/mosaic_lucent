@@ -141,6 +141,8 @@ export interface RouteServices {
     orgId: string,
     action: string,
     targetId: string,
+    /** What changed, for the reader of the log (old and new role, …). */
+    metadata?: Record<string, unknown>,
   ): Promise<void>;
   /** `null` when billing is unconfigured -- see the gate helpers below. */
   readonly entitlements: Entitlements | null;

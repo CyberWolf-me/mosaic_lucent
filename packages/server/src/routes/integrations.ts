@@ -156,6 +156,12 @@ export const registerIntegrationRoutes: RegisterRoutes = (router, s) => {
         },
         Date.now(),
       );
+      // docs/26 F9: connecting an external system is an access change. The
+      // credential reference is never logged — it names a secret.
+      void auditRow(req, user.id, orgId, "integration.connected", provider, {
+        provider,
+        scopes: body.scopes,
+      });
       // supportsInbound echoes here too — the PUT's response and the list's
       // must agree (the live pass caught the PUT omitting it).
       send(res, 201, {
@@ -191,6 +197,7 @@ export const registerIntegrationRoutes: RegisterRoutes = (router, s) => {
       send(res, 404, { error: "no such integration connection" });
       return;
     }
+    void auditRow(req, user.id, orgId, "integration.disconnected", provider, { provider });
     send(res, 200, { provider, status: "disabled" });
   });
 
