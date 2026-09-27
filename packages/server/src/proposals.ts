@@ -45,6 +45,8 @@ export interface StoredProposal {
   decidedAt: number | null;
   /** The op_log seq the approval committed, once applied. */
   appliedSeq: number | null;
+  /** ADR 0047: the AI run that produced it, when known. */
+  runId: string | null;
 }
 
 export interface NewProposal {
@@ -57,6 +59,7 @@ export interface NewProposal {
   provenance?: ProposalProvenance | null;
   createdBy: string;
   createdAt: number;
+  runId?: string | null;
 }
 
 /** The decision the store records; `appliedSeq` completes an approval. */
@@ -76,6 +79,8 @@ export interface ProposalStore {
   create(input: NewProposal): Promise<{ proposal: StoredProposal; supersededId: string | null }>;
   /** A board's proposals, newest first, bounded. */
   forBoard(boardId: string, limit?: number): Promise<StoredProposal[]>;
+  /** The pending proposals on these boards (at most one each), newest first. */
+  pendingForBoards(boardIds: readonly string[]): Promise<StoredProposal[]>;
   /** One proposal, scoped to its board so a leaked id is not a read. */
   get(boardId: string, id: string): Promise<StoredProposal | undefined>;
   /**
@@ -165,6 +170,10 @@ export function validateProposalInput(
     provenance = cleaned;
   }
   const meetingId = typeof v.meetingId === "string" && v.meetingId.length > 0 ? v.meetingId : null;
+  // ADR 0047: the run this proposal came from. The route keeps it only when
+  // the run is the caller's own on this board.
+  const runId =
+    typeof v.runId === "string" && v.runId.length > 0 && v.runId.length <= 64 ? v.runId : null;
   return {
     ok: true,
     value: {
@@ -180,6 +189,7 @@ export function validateProposalInput(
       provenance,
       createdBy: "", // filled by the route from the authenticated user
       createdAt: 0, // filled by the route
+      runId,
     },
   };
 }
@@ -215,6 +225,7 @@ export class InMemoryProposalStore implements ProposalStore {
       decidedBy: null,
       decidedAt: null,
       appliedSeq: null,
+      runId: input.runId ?? null,
     };
     this.rows.set(proposal.id, proposal);
     return { proposal: clone(proposal), supersededId };
@@ -225,6 +236,14 @@ export class InMemoryProposalStore implements ProposalStore {
       .filter((r) => r.boardId === boardId)
       .sort((a, b) => b.createdAt - a.createdAt || (a.id < b.id ? -1 : 1))
       .slice(0, limit)
+      .map(clone);
+  }
+
+  async pendingForBoards(boardIds: readonly string[]): Promise<StoredProposal[]> {
+    const boards = new Set(boardIds);
+    return [...this.rows.values()]
+      .filter((r) => r.status === "pending" && boards.has(r.boardId))
+      .sort((a, b) => b.createdAt - a.createdAt)
       .map(clone);
   }
 

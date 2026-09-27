@@ -21,6 +21,8 @@ import {
   createWorkspace,
   existingTopics,
   foldStatementTopics,
+  stampTrust,
+  withEditTrust,
   isConversationOnly,
   lensFor,
   parseWorkspace,
@@ -95,6 +97,7 @@ export type View =
   | "meeting"
   | "meetings"
   | "projects"
+  | "review"
   | "intelligence"
   | "execution"
   | "wireframe"
@@ -260,6 +263,8 @@ export interface SendAttachments {
    * meeting loop already stamps its evidence.
    */
   plan?: { statementIds: string[] };
+  /** Where the person asked, when it wasn't typed on the canvas (ADR 0047's run record). */
+  surface?: "voice";
   /**
    * docs/27 D2: this request's result is ALWAYS a proposal, whatever its
    * size and however empty the board — "make these stickies a flowchart"
@@ -1305,11 +1310,18 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
    * is deduped by sequence number inside BoardSync.
    */
   const commitAndShare = useCallback(
-    (next: Workspace, ops: Operation[], label: string, conversation: ChatEntry[], name: string) => {
+    (
+      next: Workspace,
+      ops: Operation[],
+      label: string,
+      conversation: ChatEntry[],
+      name: string,
+      runId?: string,
+    ) => {
       const positioned = commit(next, ops, label, conversation, name);
       if (!applyingRemote.current) {
         syncRef.current?.updateWorkspace(positioned);
-        syncRef.current?.commit(ops, label);
+        syncRef.current?.commit(ops, label, runId);
       }
     },
     [commit],
@@ -1409,17 +1421,20 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       request,
       explanation,
       provenance,
+      runId,
     }: {
       operations: Operation[];
       request: string;
       explanation: string;
       provenance?: SendAttachments["provenance"];
+      runId?: string;
     }): Promise<void> => {
       const serverRecord = boardId
         ? await createServerProposal(boardId, {
             operations,
             request,
             explanation,
+            ...(runId ? { runId } : {}),
             ...(provenance?.meetingId ? { meetingId: provenance.meetingId } : {}),
             ...(provenance?.turnRange || provenance?.turnKinds?.length || provenance?.turns?.length
               ? {
@@ -1521,6 +1536,15 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           attachments,
           aborter.signal,
           (phase) => setGenPhase(phase),
+          // ADR 0047: what the run is for — this board, and where the person asked.
+          {
+            ...(boardId ? { boardId } : {}),
+            surface: attachments?.provenance?.meetingId
+              ? "meeting"
+              : attachments?.surface === "voice"
+                ? "voice"
+                : "canvas",
+          },
         );
         setStreamChars(0);
         setGenPhase("validating");
@@ -1643,9 +1667,13 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         // touch, and local boards fold identically to shared ones (the
         // fourth boundary of the AI/MCP/WS/Web divergence). The human's
         // own edits (applyManual) never pass through here.
-        const foldedOps: Operation[] = foldStatementTopics(
-          planStampedOps,
-          existingTopics(workspace),
+        // ADR 0047: the person asked for this, so what it states is theirs —
+        // except what a meeting's extraction states, which stays a suggestion
+        // until each claim is reviewed.
+        const foldedOps: Operation[] = stampTrust(
+          foldStatementTopics(planStampedOps, existingTopics(workspace)),
+          "requested",
+          workspace,
         );
 
         // The workspace after this batch, provenance and folded topics riding the ops.
@@ -1694,6 +1722,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
             request: text,
             explanation,
             ...(provenance ? { provenance } : {}),
+            ...(result.runId ? { runId: result.runId } : {}),
           });
           // The ops themselves apply only on approval, but the request and
           // the review-gate reply are durable from this moment on.
@@ -1732,7 +1761,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           // The folded ops, not the raw model batch — the stamp and the
           // folded topic ride into history and the room with them (Stage C2
           // + C5).
-          commitAndShare(next, foldedOps, explanation, conversation, projectName);
+          commitAndShare(next, foldedOps, explanation, conversation, projectName, result.runId);
           return { outcome: "applied", ops: foldedOps.length, reply };
         }
       } catch (err) {
@@ -2020,7 +2049,13 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     // fold its topics against the workspace before applying, mirroring the
     // server's approve-time fold. (The server path above folds at commit;
     // this browser-local path is local boards' only fold site.)
-    const foldedProposalOps = foldStatementTopics(candidateOps, existingTopics(workspace));
+    // ADR 0047, the local twin of the server's approve: a meeting's
+    // extraction stays a suggestion; a request the person reviewed is theirs.
+    const foldedProposalOps = stampTrust(
+      foldStatementTopics(candidateOps, existingTopics(workspace)),
+      proposal.meetingId ? "agent" : "requested",
+      workspace,
+    );
     const partial = applyValidOperations(workspace, foldedProposalOps);
     const appliedOps = partial.applied.length > 0 ? partial.applied : foldedProposalOps;
     const next = partial.workspace;
@@ -2147,11 +2182,14 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       // here keeps local state from diverging from the room in the meantime.
       // A commenter's comments, reactions and votes go through (docs/26 F8).
       if (readOnly && !(canComment && isConversationOnly(ops))) return false;
-      const errors = validateOperations(workspace, ops);
+      // ADR 0047: a person's own statement is human-created; relabelling one
+      // the AI suggested makes it human-edited.
+      const stamped = stampTrust(withEditTrust(ops, workspace), "manual", workspace);
+      const errors = validateOperations(workspace, stamped);
       if (errors.length > 0) return false;
-      const next = applyOperations(workspace, ops);
+      const next = applyOperations(workspace, stamped);
       // Manual edits do not add chat turns; commit to history + persist + share.
-      commitAndShare(next, ops, label, chat, projectName);
+      commitAndShare(next, stamped, label, chat, projectName);
       return true;
     },
     [workspace, chat, commitAndShare, projectName, readOnly, canComment],

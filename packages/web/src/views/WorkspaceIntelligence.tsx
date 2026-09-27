@@ -299,6 +299,14 @@ function WorkspaceRow({ row, onOpen }: { row: WorkspaceStatement; onOpen: () => 
           <span className="boards-notif-meta">
             <span className="mono-caps">{row.boardName || "Board"}</span>
             <KindBadge kind={row.kind} status={row.status} showKind={false} />
+            {row.trust === "ai-suggested" && (
+              <span
+                className="trust-chip"
+                title="Lucent suggested this; no one has reviewed it yet"
+              >
+                Suggested
+              </span>
+            )}
           </span>
           <span className="boards-notif-title">{row.label}</span>
           {detail && <span className="boards-notif-body">{detail}</span>}

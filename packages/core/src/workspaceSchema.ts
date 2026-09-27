@@ -89,6 +89,10 @@ const nodeSchema = z.object({
       status: z.enum(["open", "resolved", "rejected", "superseded"]),
       topic: z.string().min(1).max(60).optional(),
       supersedes: z.array(z.string().min(1)).max(10).optional(),
+      // ADR 0047: dropped here, a board would lose every review on reload.
+      trust: z
+        .enum(["ai-suggested", "human-approved", "human-edited", "human-created", "system"])
+        .optional(),
       // Stage D2: createdFrom joins the family. The load path is deliberately
       // LOOSER than the op schema (meetingId optional, no at-least-one
       // refine): a stored board whose provenance predates either contract

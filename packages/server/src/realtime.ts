@@ -44,6 +44,12 @@ interface ClientMsg {
    * instead of a second effect.
    */
   requestId?: string;
+  /**
+   * ADR 0047: the AI run this batch is the output of, when the person is
+   * committing what they asked Lucent for. Honoured only for their own run on
+   * this board; it makes the log say "AI, asked and approved by them".
+   */
+  runId?: string;
   cursor?: { x: number; y: number } | null;
   selection?: string[];
 }
@@ -73,6 +79,8 @@ export type NotifyFn = (event: NotifyEvent<NotificationKind>) => void;
 export interface RealtimeDeps {
   userStore: UserStore;
   boardStore: BoardStore;
+  /** ADR 0047: AI run records, linked when a commit names its run. */
+  aiRuns?: import("./aiRuns.js").AiRunStore;
   secret: string;
   tickets: TicketStore;
   /**
@@ -391,8 +399,28 @@ export class RealtimeServer {
       return;
     }
 
+    // A run the person started, on this board: the batch is Lucent's output
+    // they asked for, so the log records AI initiated and approved by them.
+    // Anything else — someone else's run, another board's — is ignored, and
+    // the batch is logged as theirs, as before.
+    const run =
+      typeof msg.runId === "string" && msg.runId.length <= 64 && this.deps.aiRuns
+        ? await this.deps.aiRuns.get(msg.runId)
+        : undefined;
+    const ownRun =
+      run && run.initiatedBy === conn.userId && run.boardId === conn.boardId ? run : undefined;
     const result = await room.commit(conn.userId, parsed.data, msg.label ?? "", {
       ...(requestId !== undefined ? { requestId } : {}),
+      ...(ownRun
+        ? {
+            actor: {
+              actorType: "ai" as const,
+              actorId: "lucent",
+              initiatedBy: conn.userId,
+              approvedBy: conn.userId,
+            },
+          }
+        : {}),
     });
     if (!result.ok) {
       // Correlated refusal (Stage B): the client knows WHICH submit failed,
@@ -421,6 +449,11 @@ export class RealtimeServer {
         duplicate: true,
       });
       return;
+    }
+    if (ownRun && result.entry) {
+      void this.deps
+        .aiRuns!.linkCommit(ownRun.id, result.entry.seq, conn.userId, Date.now())
+        .catch(() => {});
     }
     // The explicit ack (Stage B): "I sent it, therefore it happened" was never
     // a safe client assumption. The ack names the submit's requestId, the seq

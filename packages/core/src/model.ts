@@ -562,7 +562,28 @@ export interface StatementFields {
   supersedes?: string[];
   /** Evidence for the statement itself (meeting loop enrichment). */
   provenance?: ProvenanceFields;
+  /**
+   * How this statement came to be trusted (docs/26 J5, ADR 0047) — a ladder
+   * beside the lifecycle, not a status. Stamped by whoever commits it, never
+   * by the model. Absent: the statement predates trust, and is neither
+   * listed for review nor presented as reviewed.
+   */
+  trust?: StatementTrust;
 }
+
+/**
+ * The trust ladder (docs/26 rule 1). `ai-suggested`: the AI produced it and
+ * no person has looked at it on its own (meeting extraction, the voice agent,
+ * MCP). `human-approved`: a person asked for it or reviewed it.
+ * `human-edited`: a person changed what the AI said. `human-created`: a person
+ * wrote it. `system`: an integration brought it in.
+ */
+export type StatementTrust =
+  | "ai-suggested"
+  | "human-approved"
+  | "human-edited"
+  | "human-created"
+  | "system";
 
 /**
  * Creation evidence on a node (Stage C2, ADR 0022): which meeting, which

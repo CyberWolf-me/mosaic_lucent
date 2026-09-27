@@ -31,6 +31,18 @@ export interface GenerateResponse {
    * the old all-or-nothing 422 did.
    */
   warnings?: Array<{ op: string; reason: string }>;
+  /**
+   * ADR 0047: the AI run this answer is, for committing its operations under
+   * (the log then records AI, asked for and approved by this person). Absent
+   * from older servers and from anonymous use.
+   */
+  runId?: string;
+}
+
+/** What an AI run is for: the board the person is on, and where they asked. */
+export interface RunContext {
+  boardId?: string;
+  surface?: "canvas" | "meeting" | "voice";
 }
 
 /**
@@ -383,6 +395,7 @@ export async function generate(
   selection?: string[],
   history?: ChatEntry[],
   attachments?: { images?: ImageAttachment[]; documents?: DocumentAttachment[] },
+  run?: RunContext,
 ): Promise<GenerateResponse> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), GENERATE_TIMEOUT_MS);
@@ -400,6 +413,7 @@ export async function generate(
         ...(turns.length ? { history: turns } : {}),
         ...(attachments?.images?.length ? { images: attachments.images } : {}),
         ...(attachments?.documents?.length ? { documents: attachments.documents } : {}),
+        ...(run ? { run } : {}),
       }),
       signal: controller.signal,
     });
@@ -448,6 +462,7 @@ export async function streamGenerate(
     phase: "understanding" | "constructing" | "validating" | "applying",
     message?: string,
   ) => void,
+  run?: RunContext,
 ): Promise<GenerateResponse> {
   const controller = new AbortController();
   // UX-2: user cancellation shares the abort path with the activity timeout.
@@ -482,6 +497,7 @@ export async function streamGenerate(
         ...(turns.length ? { history: turns } : {}),
         ...(attachments?.images?.length ? { images: attachments.images } : {}),
         ...(attachments?.documents?.length ? { documents: attachments.documents } : {}),
+        ...(run ? { run } : {}),
       }),
       signal: controller.signal,
     });
@@ -534,8 +550,10 @@ export async function streamGenerate(
         reply?: string | null;
         provider?: string;
         warnings?: Array<{ op: string; reason: string }>;
+        runId?: unknown;
       };
       done = {
+        ...(typeof body.runId === "string" ? { runId: body.runId } : {}),
         operations: Array.isArray(body.operations) ? body.operations : [],
         explanation: body.explanation ?? null,
         reply: typeof body.reply === "string" ? body.reply : null,

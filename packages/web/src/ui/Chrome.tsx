@@ -682,10 +682,10 @@ export function requestSettings(section?: string): void {
 }
 
 /**
- * The eight places a team works (Atelier IA). Ordered by the product's own
+ * The nine places a team works (Atelier IA). Ordered by the product's own
  * loop: see what needs you → see what the team is working toward → pick a
- * board → shape it → talk it through → understand what was decided → carry
- * it out → trace how it got here.
+ * board → shape it → talk it through → review what the AI suggested →
+ * understand what was decided → carry it out → trace how it got here.
  */
 const RAIL_ITEMS: { id: string; icon: keyof typeof Ico; label: string; view: View }[] = [
   { id: "home", icon: "Home", label: "Home", view: "home" },
@@ -696,6 +696,8 @@ const RAIL_ITEMS: { id: string; icon: keyof typeof Ico; label: string; view: Vie
   // docs/28 S1: the rail opens the workspace's meetings; a board's own
   // meeting is one click from there (and from the top bar).
   { id: "meeting", icon: "Present", label: "Meetings", view: "meetings" },
+  // docs/26 J5 (ADR 0047): what the AI suggested, waiting on a person.
+  { id: "review", icon: "Check", label: "Review", view: "review" },
   { id: "intelligence", icon: "Sparkle", label: "Intelligence", view: "intelligence" },
   { id: "execution", icon: "Gauge", label: "Execution", view: "execution" },
   { id: "history", icon: "History", label: "History", view: "history" },

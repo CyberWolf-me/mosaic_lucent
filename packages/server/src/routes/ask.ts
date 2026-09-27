@@ -2,6 +2,7 @@ import * as z from "zod/v4";
 import type { AnswerCitation } from "@lucent/ai";
 import { REQUEST_LIMITS, type AnswerRequest } from "@lucent/ai";
 import type { RegisterRoutes } from "./context.js";
+import { outputHash } from "../aiRuns.js";
 import { providerFact } from "../modelRouter.js";
 import { actorNamesFor, loadVisibleLog } from "../historyView.js";
 import { buildAnswerRequest } from "../askContext.js";
@@ -288,6 +289,20 @@ export const registerAskRoutes: RegisterRoutes = (router, s) => {
       provider: provider.name,
       mode: "ask",
       ...(result.model ? { model: result.model } : {}),
+    });
+    // ADR 0047: an answer is an AI run too — read-only, so no ops to link.
+    void s.recordRun({
+      orgId: billTo,
+      boardId,
+      initiatedBy: guard.user.id,
+      surface: "ask",
+      provider: provider.name,
+      model: result.model ?? null,
+      contextScope: "board",
+      tools: [],
+      outputHash: outputHash(result.answer),
+      opCount: 0,
+      createdAt: Date.now(),
     });
     telemetry.record({
       kind: "ask",

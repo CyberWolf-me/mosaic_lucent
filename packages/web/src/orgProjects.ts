@@ -57,6 +57,8 @@ export interface WorkspaceStatement {
   executionStatus?: string;
   drivesActions?: number;
   provenance?: { meetingId: string; turnRange?: [number, number] };
+  /** ADR 0047: how it came to be trusted; absent before trust existed. */
+  trust?: import("@lucent/core").StatementTrust;
 }
 
 export interface WorkspaceIntelligence {

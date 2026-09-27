@@ -1,4 +1,4 @@
-import { and, asc, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import type { Db } from "../db/client.js";
 import { proposals } from "../db/schema.js";
 import {
@@ -51,8 +51,8 @@ export class PostgresProposalStore implements ProposalStore {
       await conn.query(
         `insert into "proposals"
            ("id", "org_id", "board_id", "meeting_id", "status", "operations",
-            "request", "explanation", "provenance", "created_by", "created_at")
-         values ($1, $2, $3, $4::text, 'pending', $5::jsonb, $6, $7::text, $8::jsonb, $9, $10::bigint)`,
+            "request", "explanation", "provenance", "created_by", "created_at", "run_id")
+         values ($1, $2, $3, $4::text, 'pending', $5::jsonb, $6, $7::text, $8::jsonb, $9, $10::bigint, $11::text)`,
         [
           id,
           input.orgId,
@@ -64,6 +64,7 @@ export class PostgresProposalStore implements ProposalStore {
           input.provenance ? JSON.stringify(input.provenance) : null,
           input.createdBy,
           String(input.createdAt),
+          input.runId ?? null,
         ],
       );
       await conn.query("commit");
@@ -88,6 +89,16 @@ export class PostgresProposalStore implements ProposalStore {
       .where(eq(proposals.boardId, boardId))
       .orderBy(desc(proposals.createdAt), asc(proposals.id))
       .limit(limit);
+    return rows.map(toRow);
+  }
+
+  async pendingForBoards(boardIds: readonly string[]): Promise<StoredProposal[]> {
+    if (boardIds.length === 0) return [];
+    const rows = await this.target.db
+      .select()
+      .from(proposals)
+      .where(and(inArray(proposals.boardId, [...boardIds]), eq(proposals.status, "pending")))
+      .orderBy(desc(proposals.createdAt));
     return rows.map(toRow);
   }
 
@@ -149,5 +160,6 @@ function toRow(row: typeof proposals.$inferSelect): StoredProposal {
     decidedBy: row.decidedBy,
     decidedAt: row.decidedAt,
     appliedSeq: row.appliedSeq,
+    runId: row.runId,
   };
 }

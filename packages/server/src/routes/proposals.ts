@@ -1,4 +1,4 @@
-import { applyValidOperations, repairOperations } from "@lucent/core";
+import { applyValidOperations, repairOperations, stampTrust, withoutTrust } from "@lucent/core";
 import type { RegisterRoutes } from "./context.js";
 
 /**
@@ -69,10 +69,19 @@ export const registerProposalRoutes: RegisterRoutes = (router, s) => {
       return;
     }
 
+    // ADR 0047: a run id is kept only when the run is the caller's own, on
+    // this board — a proposal can't borrow someone else's run.
+    let runId: string | null = null;
+    if (checked.value.runId) {
+      const run = await s.aiRuns.get(checked.value.runId);
+      if (run && run.initiatedBy === guard.user.id && run.boardId === boardId) runId = run.id;
+    }
+
     let record;
     try {
       record = await proposals.create({
         ...checked.value,
+        runId,
         boardId,
         orgId: guard.board.orgId,
         createdBy: guard.user.id,
@@ -85,6 +94,8 @@ export const registerProposalRoutes: RegisterRoutes = (router, s) => {
       send(res, 409, { error: "another proposal is pending; refresh to see it" });
       return;
     }
+
+    if (runId) await s.aiRuns.linkProposal(runId, record.proposal.id).catch(() => {});
 
     // Fan the new proposal out to every connected peer: their panel opens
     // without a refresh. Durable either way — the next GET finds it.
@@ -191,7 +202,16 @@ export const registerProposalRoutes: RegisterRoutes = (router, s) => {
       // lands through the room must converge for every peer. A proposal
       // stored before C5 with a variant topic folds on approval.
       const folded = foldStatementTopics(enriched, existingTopics(guard.board.workspace));
-      const repaired = repairOperations(folded);
+      // ADR 0047: a proposal is the model's output — whatever trust it carries
+      // is dropped, then stamped for what approving it means. A meeting's
+      // extraction applied as a whole stays a suggestion until each claim is
+      // reviewed; a canvas request the person reviewed in the panel is theirs.
+      const trusted = stampTrust(
+        withoutTrust(folded),
+        proposal.meetingId ? "agent" : "requested",
+        guard.board.workspace,
+      );
+      const repaired = repairOperations(trusted);
       const partial = applyValidOperations(guard.board.workspace, repaired);
       if (partial.applied.length === 0) {
         send(res, 422, {
@@ -269,6 +289,10 @@ export const registerProposalRoutes: RegisterRoutes = (router, s) => {
         by: guard.user.id,
         appliedSeq: seq,
       });
+      // ADR 0047: the run learns what it became, and who approved it.
+      if (proposal.runId && seq !== undefined) {
+        await s.aiRuns.linkCommit(proposal.runId, seq, guard.user.id, Date.now()).catch(() => {});
+      }
       void auditRow(req, guard.user.id, guard.board.orgId, "board.proposal.approved", boardId, {
         proposalId: pid,
         operations: proposal.operations.length,

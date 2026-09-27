@@ -32,6 +32,9 @@ const ICON_FOR: Record<NotificationIcon, ReactNode> = {
   member: <Ico.Team />,
   role: <Ico.Lock />,
   comment: <Ico.Comment />,
+  meeting: <Ico.Present />,
+  work: <Ico.Gauge />,
+  review: <Ico.Check />,
   bell: <ToolIco.Bell />,
 };
 

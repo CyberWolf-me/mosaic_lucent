@@ -11,6 +11,7 @@ import {
 import { providerFact } from "../modelRouter.js";
 import { notesPutSchema, sanitizeEnhanced, type MeetingNotesRecord } from "../meetingNotes.js";
 import type { RegisterRoutes } from "./context.js";
+import { outputHash } from "../aiRuns.js";
 
 /**
  * Meeting notes routes (docs/27 N1) — one person's notes on one meeting:
@@ -179,6 +180,19 @@ export const registerMeetingNotesRoutes: RegisterRoutes = (router, s) => {
           provider: provider.name,
           mode: "notes",
           ...(draft.model ? { model: draft.model } : {}),
+        });
+        void s.recordRun({
+          orgId: billTo,
+          boardId: got.board.id,
+          initiatedBy: got.user.id,
+          surface: "notes",
+          provider: provider.name,
+          model: draft.model ?? null,
+          contextScope: "meeting",
+          tools: [],
+          outputHash: outputHash(draft),
+          opCount: 0,
+          createdAt: now,
         });
       } catch {
         // A model failure still leaves the person with their notes, placed

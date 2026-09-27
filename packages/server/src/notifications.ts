@@ -134,6 +134,34 @@ export interface NotificationPayloads {
     durationMin: number;
     byName: string;
   };
+  /** A meeting you held has its summary (docs/28 A3.3, ADR 0047). */
+  "meeting.summarized": {
+    boardId: string;
+    boardName: string;
+    meetingId: string;
+    title: string;
+  };
+  /** Work on a board names you as its owner (ADR 0047). */
+  "work.assigned": {
+    boardId: string;
+    boardName: string;
+    nodeId: string;
+    label: string;
+    dueDate: string | null;
+  };
+  /** Work you own is now blocked — by hand, or by what it waits on. */
+  "work.blocked": {
+    boardId: string;
+    boardName: string;
+    nodeId: string;
+    label: string;
+  };
+  /** New AI suggestions on your board wait for review (docs/26 J5). */
+  "review.pending": {
+    boardId: string;
+    boardName: string;
+    count: number;
+  };
 }
 
 export type NotificationKind = keyof NotificationPayloads;
@@ -154,6 +182,10 @@ export const NOTIFICATION_KINDS = [
   "comment.reply",
   "meeting.invited",
   "meeting.cancelled",
+  "meeting.summarized",
+  "work.assigned",
+  "work.blocked",
+  "review.pending",
 ] as const;
 
 type ListedKind = (typeof NOTIFICATION_KINDS)[number];
@@ -361,6 +393,52 @@ export const NOTIFICATION_CATALOGUE: {
       title: `${p.byName} cancelled "${p.title}"`,
       body: `It was set for ${meetingWhen(p.scheduledFor, p.durationMin)}.`,
       link: meetingPath(p.boardId, p.meetingId),
+    }),
+  },
+  "meeting.summarized": {
+    label: "Meeting summaries",
+    description: "When a meeting you recorded has its summary.",
+    // In-app only: the person was in the meeting, and the summary waits for them.
+    defaults: { inApp: "on", email: "off" },
+    compose: (p) => ({
+      title: `"${p.title}" has its summary`,
+      body: `On ${p.boardName}: what was decided and what's next, each line cited.`,
+      link: meetingPath(p.boardId, p.meetingId),
+    }),
+  },
+  "work.assigned": {
+    label: "Work assigned to you",
+    description: "When work on a board names you as its owner.",
+    // A direct address to a person, like an @mention.
+    defaults: { inApp: "on", email: "on" },
+    compose: (p) => ({
+      title: `You own "${p.label}"`,
+      body: p.dueDate ? `On ${p.boardName}, due ${p.dueDate}.` : `On ${p.boardName}.`,
+      link: `${boardPath(p.boardId)}&reveal=${encodeURIComponent(p.nodeId)}`,
+    }),
+  },
+  "work.blocked": {
+    label: "Your work is blocked",
+    description: "When work you own is blocked, or waits on work that is.",
+    defaults: { inApp: "on", email: "off" },
+    compose: (p) => ({
+      title: `"${p.label}" is blocked`,
+      body: `On ${p.boardName}. Open it to see what it's waiting on.`,
+      link: `${boardPath(p.boardId)}&reveal=${encodeURIComponent(p.nodeId)}`,
+    }),
+  },
+  "review.pending": {
+    label: "Suggestions to review",
+    description: "When Lucent's suggestions on your board wait for a person to review them.",
+    // Volume scales with meetings and agents: in-app, and at most hourly per board.
+    defaults: { inApp: "on", email: "off" },
+    compose: (p) => ({
+      title:
+        p.count === 1
+          ? `A suggestion on ${p.boardName} waits for review`
+          : `${p.count} suggestions on ${p.boardName} wait for review`,
+      body: "Approve, edit or reject what the AI extracted — nothing it suggested is trusted until a person looks.",
+      link: "/?view=review",
     }),
   },
 };

@@ -594,6 +594,49 @@ a much better product — not rewriting the layout engine.
     `GET /api/boards/:id/projects` is there), member management beyond the
     lead, a project dashboard with plans and integrations (A5), and search and
     scoped Ask over the index (A4).
+- **A2 — done (2026-09-27), per ADR 0047.** Nothing AI-extracted is trusted
+  without a person's step.
+  - _J5, trust._ Statements carry `trust` (ai-suggested · human-approved ·
+    human-edited · human-created · system), stamped by whoever commits: the
+    model's output never carries it (stripped at generate); what a person
+    asked for is theirs, except what a meeting's extraction states, which
+    stays a suggestion even after "Apply all"; the voice agent's and MCP's
+    writes are suggestions whatever they claim, and they can't promote; a
+    person's own statement is human-created, and relabelling a suggestion
+    makes it human-edited. Promotion is an ordinary `UPDATE_STATEMENT` —
+    logged, undoable. The index stores trust (migration 0037).
+  - _The Review center_ (rail, ⌘K): every suggestion, pending proposal,
+    outgoing external action and inbound change on the boards you can read.
+    Suggestions are grouped by board and meeting; approve (one or all),
+    reword, assign (owner and due date), or reject (removed; undo restores),
+    each composed into operations on the server and committed as the person
+    who decided (`POST /api/boards/:id/review`, audited). Proposals and
+    inbound changes are decided inline; an external action opens on its board,
+    where its preview and warnings are. Intelligence rows mark suggestions.
+  - _J6, AI runs._ `ai_runs` records every model call and agent write:
+    canvas, meeting and spoken requests, Ask, notes, the meeting summary, the
+    voice agent and MCP — who started it, provider, model, context, a hash of
+    the output. Generation returns a `runId`; the browser commits the output
+    under it, so the op log records AI asked for and approved by the person
+    (canvas AI batches used to be logged as the user's own), and the run
+    learns its seqs; a proposal carries its run, so approving it records the
+    approver. A run id is honoured only for its own user and board. The admin
+    page lists the workspace's runs (owner).
+  - _Notifications:_ work that names you (`work.assigned`, matched exactly
+    to one member by name or email) and your work becoming blocked, from the
+    index's per-board diff; a meeting's summary to whoever recorded it;
+    suggestions waiting on your board, at most hourly.
+  - The ops route's commit is now one helper (`commitBatch`), shared with the
+    review actions; MCP writes are logged as an AI actor.
+  - Evidence: core `trust.test.ts` (10), server `trust-review.test.ts` (the
+    stamping on every path, the Review center matrix, a run committed over
+    the WebSocket, an index notification) and `pg-trust.test.ts` (the stores
+    against Postgres), and `scripts/review-check.mjs` in the running app
+    (8/8: an agent's claims overridden, the owner told, approve/reword/reject
+    through the UI, the canvas run on record as approved by its asker).
+  - Not yet: `decision.superseded` (statements have no author to tell),
+    per-item review of the end-of-meeting candidates (the recap still writes
+    a summary, not candidates), and trust on nodes that aren't statements.
 
 ## 12. Decisions (locked 2026-09-24)
 

@@ -594,6 +594,14 @@ function BoardIntelligenceView({
         <div className="intel-row-body">
           <div className="intel-row-top">
             <KindBadge kind={row.kind} status={row.status} />
+            {row.trust === "ai-suggested" && (
+              <span
+                className="trust-chip"
+                title="Lucent suggested this; no one has reviewed it yet"
+              >
+                Suggested
+              </span>
+            )}
             {row.topic && (
               <span className="intel-topic mono" title="Topic">
                 {row.topic}

@@ -47,6 +47,10 @@ export const NOTIFICATION_KINDS = [
   "comment.reply",
   "meeting.invited",
   "meeting.cancelled",
+  "meeting.summarized",
+  "work.assigned",
+  "work.blocked",
+  "review.pending",
 ] as const;
 
 export type NotificationKind = (typeof NOTIFICATION_KINDS)[number];
@@ -280,7 +284,15 @@ function readOutcome(res: NotificationResult<unknown>): NotificationResult<MarkR
  * Icon slot for a card. Names rather than components: this module has no JSX in
  * it and is the half of the feature that tests can reach without a DOM.
  */
-export type NotificationIcon = "invite" | "member" | "role" | "comment" | "bell";
+export type NotificationIcon =
+  | "invite"
+  | "member"
+  | "role"
+  | "comment"
+  | "meeting"
+  | "work"
+  | "review"
+  | "bell";
 
 export interface NotificationView {
   id: string;
@@ -318,6 +330,10 @@ const KIND_COPY: {
   "comment.reply": { category: "Reply", icon: "comment" },
   "meeting.invited": { category: "Meeting", icon: "invite" },
   "meeting.cancelled": { category: "Meeting cancelled", icon: "invite" },
+  "meeting.summarized": { category: "Meeting summary", icon: "meeting" },
+  "work.assigned": { category: "Assigned to you", icon: "work" },
+  "work.blocked": { category: "Blocked", icon: "work" },
+  "review.pending": { category: "To review", icon: "review" },
 };
 
 /**

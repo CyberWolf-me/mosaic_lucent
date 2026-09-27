@@ -103,7 +103,7 @@ export interface RouteServices {
   writeMeetingRecap(
     boardId: string,
     meetingId: string,
-    options?: { replace?: boolean },
+    options?: { replace?: boolean; by?: string },
   ): Promise<import("../meetings.js").RecapOutcome>;
   /** docs/28 A3.3: announce MeetingEnded to the outbox (a no-op without one). */
   announceMeetingEnded(ref: { boardId: string; orgId: string; meetingId: string }): void;
@@ -113,6 +113,10 @@ export interface RouteServices {
   readonly projects: import("../projects.js").ProjectStore;
   /** docs/26 J3 (ADR 0046): the workspace intelligence index and its maintainer. */
   readonly intelligence: import("../statementIndex.js").StatementIndexer;
+  /** docs/26 J6 (ADR 0047): AI run records. */
+  readonly aiRuns: import("../aiRuns.js").AiRunStore;
+  /** Write a run; resolves null (and logs) rather than failing the request. */
+  recordRun(run: import("../aiRuns.js").NewAiRun): Promise<string | null>;
   /**
    * The boards a user can read in an org — every board for a member, only
    * the boards shared with them for an outside collaborator. Every

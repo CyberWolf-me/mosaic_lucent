@@ -1,5 +1,5 @@
 import { and, asc, eq, inArray } from "drizzle-orm";
-import type { StatementKind, StatementRow, StatementStatus } from "@lucent/core";
+import type { StatementKind, StatementRow, StatementStatus, StatementTrust } from "@lucent/core";
 import { isBlockedRow } from "@lucent/core";
 import type { Db } from "../db/client.js";
 import { statementIndex, statementIndexState } from "../db/schema.js";
@@ -43,6 +43,7 @@ export class PostgresStatementIndexStore implements StatementIndexStore {
             meetingId: r.provenance?.meetingId ?? null,
             turnStart: r.provenance?.turnRange?.[0] ?? null,
             turnEnd: r.provenance?.turnRange?.[1] ?? null,
+            trust: r.trust ?? null,
           })),
         );
       }
@@ -98,6 +99,7 @@ export class PostgresStatementIndexStore implements StatementIndexStore {
       orgId: r.orgId,
       blocked: r.blocked,
       ...(r.topic ? { topic: r.topic } : {}),
+      ...(r.trust ? { trust: r.trust as StatementTrust } : {}),
       ...(Array.isArray(r.supersedes) && r.supersedes.length
         ? { supersedes: r.supersedes as string[] }
         : {}),

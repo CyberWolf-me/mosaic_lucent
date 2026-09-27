@@ -90,11 +90,16 @@ export interface AgentContextConfig {
    */
   grant: string;
   serverUrl: string;
+  /** The model the agent talks to, reported on its writes (ADR 0047's run record). */
+  model?: string;
 }
 
 /** The request headers the agent's server calls carry. */
 function authHeaders(config: AgentContextConfig): Record<string, string> {
-  return config.grant ? { authorization: `Agent ${config.grant}` } : {};
+  return {
+    ...(config.grant ? { authorization: `Agent ${config.grant}` } : {}),
+    ...(config.model ? { "x-lucent-model": config.model } : {}),
+  };
 }
 
 const NO_GRANT = {
@@ -323,6 +328,7 @@ export default defineAgent({
     // hardcoded third party (it used to default to an external gateway, so
     // board content left the deployment for a model nobody chose).
     const llmConfig = resolveLlmConfig(process.env);
+    config.model = llmConfig.model;
 
     const stt = new deepgram.STT({
       apiKey: deepgramKey,

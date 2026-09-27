@@ -2,7 +2,17 @@ import { useEffect, useMemo, useState } from "react";
 import { apiFetch } from "../http.js";
 import { Ico } from "../ui/icons.js";
 import { requestSettings } from "../ui/Chrome.js";
-import { Avatar, Button, Card, EmptyState, FilterChips, Page, PageHeader, SectionLabel } from "../ui/kit.js";
+import {
+  Avatar,
+  Button,
+  Card,
+  EmptyState,
+  FilterChips,
+  Page,
+  PageHeader,
+  SectionLabel,
+} from "../ui/kit.js";
+import { loadOrgRuns, type AiRunView } from "../review.js";
 import { getCurrentOrgId } from "../orgs.js";
 import { useWorkspace } from "../workspace.js";
 
@@ -176,8 +186,7 @@ export function AdminView({ onBack }: { onBack: () => void }) {
   }, [org]);
 
   const members = useMemo(
-    () =>
-      (org?.members ?? []).filter((m) => roleFilter === "all" || m.role === roleFilter),
+    () => (org?.members ?? []).filter((m) => roleFilter === "all" || m.role === roleFilter),
     [org, roleFilter],
   );
 
@@ -233,15 +242,16 @@ export function AdminView({ onBack }: { onBack: () => void }) {
           Loading members…
         </p>
       ) : null}
-      {org && memberCount === 0 ? (
-        <EmptyState compact title="No members yet" />
-      ) : null}
+      {org && memberCount === 0 ? <EmptyState compact title="No members yet" /> : null}
       {org && memberCount > 0 ? (
         <>
           {roleItems.length > 1 && (
             <div className="boards-admin-filters">
               <FilterChips
-                items={[{ id: "all" as RoleFilter, label: "All", count: memberCount }, ...roleItems]}
+                items={[
+                  { id: "all" as RoleFilter, label: "All", count: memberCount },
+                  ...roleItems,
+                ]}
                 value={roleFilter}
                 onChange={setRoleFilter}
                 label="Filter members by role"
@@ -342,9 +352,111 @@ export function AdminView({ onBack }: { onBack: () => void }) {
           </Card>
         ))}
 
+      <SectionLabel>AI activity</SectionLabel>
+      <AiActivitySection org={org} />
+
       <SectionLabel>Single sign-on</SectionLabel>
       <SsoSection state={sso} hasOrg={org !== null} />
     </Page>
+  );
+}
+
+const SURFACE_WORD: Record<string, string> = {
+  canvas: "Canvas request",
+  meeting: "Meeting extraction",
+  voice: "Voice",
+  mcp: "MCP agent",
+  ask: "Ask",
+  notes: "Meeting notes",
+  recap: "Meeting summary",
+};
+
+/**
+ * Every AI run in the workspace (docs/26 J6, ADR 0047): which model, on
+ * which board, who started it, what it became and who approved it. Owners
+ * only, like the activity log.
+ */
+function AiActivitySection({ org }: { org: OrgSummary | null }) {
+  const [runs, setRuns] = useState<AiRunView[] | null | "failed">(null);
+  useEffect(() => {
+    if (!org || org.role !== "owner") return;
+    void loadOrgRuns(org.id).then((r) => setRuns(r ?? "failed"));
+  }, [org]);
+  if (!org) return null;
+  if (org.role !== "owner") {
+    return <EmptyState compact title="AI activity is visible to workspace owners" />;
+  }
+  if (runs === null) {
+    return (
+      <p className="boards-admin-muted" role="status">
+        Loading AI activity…
+      </p>
+    );
+  }
+  if (runs === "failed") {
+    return (
+      <p className="boards-admin-muted" role="alert">
+        Couldn&apos;t load AI activity.
+      </p>
+    );
+  }
+  if (runs.length === 0) {
+    return (
+      <EmptyState
+        compact
+        title="No AI runs yet"
+        body="Every time Lucent's model builds, answers, summarizes, or an agent writes on a board, it is recorded here — with the model, who asked, and who approved what it produced."
+      />
+    );
+  }
+  return (
+    <Card className="boards-admin-card">
+      <ol className="boards-audit" aria-label="AI runs">
+        {runs.slice(0, 50).map((run) => {
+          const outcome =
+            run.opCount === 0
+              ? "answer"
+              : run.opSeqs.length > 0
+                ? `${run.opCount} ${run.opCount === 1 ? "change" : "changes"} · ${
+                    run.approvedByName ? `approved by ${run.approvedByName}` : "applied, no review"
+                  }`
+                : run.proposalId
+                  ? `${run.opCount} proposed`
+                  : `${run.opCount} not applied`;
+          return (
+            <li key={run.id} className="boards-audit-row">
+              <time
+                className="boards-audit-when mono"
+                dateTime={new Date(run.createdAt).toISOString()}
+                title={new Date(run.createdAt).toLocaleString()}
+              >
+                {formatWhen(run.createdAt)}
+              </time>
+              <span className="boards-audit-actor">
+                {run.initiatedByName ? (
+                  <>
+                    <Avatar name={run.initiatedByName} size={20} />
+                    {run.initiatedByName}
+                  </>
+                ) : (
+                  "Lucent"
+                )}
+              </span>
+              <span
+                className="boards-audit-action mono"
+                title={`${run.provider} · ${run.model ?? "model not reported"}`}
+              >
+                {SURFACE_WORD[run.surface] ?? run.surface} · {run.model ?? run.provider}
+              </span>
+              <span className="boards-audit-subject mono" title={run.boardName ?? undefined}>
+                {run.boardName ? `${run.boardName.slice(0, 20)} · ` : ""}
+                {outcome}
+              </span>
+            </li>
+          );
+        })}
+      </ol>
+    </Card>
   );
 }
 

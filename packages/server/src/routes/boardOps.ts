@@ -1,14 +1,16 @@
 import type { Operation } from "@lucent/core";
 import {
-  applyOperations,
   existingTopics,
   foldStatementTopics,
   isHumanOnlyOperation,
   repairOperations,
   safeParseProgrammaticOperations,
   stampAuthorship,
+  stampTrust,
   validateOperations,
 } from "@lucent/core";
+import { commitBatch } from "../commitBatch.js";
+import { outputHash } from "../aiRuns.js";
 import type { RegisterRoutes } from "./context.js";
 
 /**
@@ -63,9 +65,14 @@ export const registerBoardOpsRoutes: RegisterRoutes = (router, s) => {
     if (!meter(req, res, "/api/boards/:id/ops")) return;
     // A voice-agent grant writes AS AI on the user's behalf (ADR 0017): the
     // history shows Lucent made it and who started the agent, not a human edit.
+    // The MCP client says who it is (x-lucent-client: mcp) and is an agent too
+    // (ADR 0047): its model's output, on its user's token.
+    const viaMcp = req.headers["x-lucent-client"] === "mcp";
     const actor = viaAgent
       ? ({ actorType: "ai", actorId: "voice-agent", initiatedBy: user.id } as const)
-      : ({ actorType: "user", actorId: user.id, initiatedBy: user.id } as const);
+      : viaMcp
+        ? ({ actorType: "ai", actorId: "mcp", initiatedBy: user.id } as const)
+        : ({ actorType: "user", actorId: user.id, initiatedBy: user.id } as const);
     const guard = await requireBoardRole(req, res, boardId, "editor", "/api/boards/:id/ops", user);
     if (!guard.ok) return;
     // docs/23 S1/S2: the agent boundary. This route is the agent surface —
@@ -178,7 +185,13 @@ export const registerBoardOpsRoutes: RegisterRoutes = (router, s) => {
     // The caller's real user id, not ASSISTANT_AUTHOR: this is an
     // authenticated human's (or their agent's) act on their board, and the
     // authorship stamp is what comments/votes/reactions attribute to.
-    const stamped = stampAuthorship(filtered, user.id);
+    // ADR 0047: an agent's statements are suggestions and it can't promote
+    // any; a person's own are human-created.
+    const stamped = stampTrust(
+      stampAuthorship(filtered, user.id),
+      viaAgent || viaMcp ? "agent" : "manual",
+      guard.board.workspace,
+    );
     // The topic fold (Stage C5): agent-submitted ops are machine-authored —
     // they are a model's output riding a human's token — so they fold
     // against the board's existing authored topic keys like any other model
@@ -206,62 +219,41 @@ export const registerBoardOpsRoutes: RegisterRoutes = (router, s) => {
     // ws joiners. The room is now the primary writer (the B3 approve's own
     // dual-path pattern); the store-only path is the fallback when no room
     // is live or the caller has no role in it.
-    const roomResult = await s.commitForBoard(boardId, user.id, operations, label, {
-      // No expectedSeq: the room validates against its own head, which is
-      // fresher than anything the HTTP caller's earlier read can name. The
-      // caller's expectedSeq rides the store fallback below.
-      ...(requestId !== undefined ? { requestId } : {}),
-      actor,
-    });
-    if (roomResult?.ok && roomResult.entry) {
-      // The broadcast + persistence the room's ordinary caller (realtime.ts)
-      // performs; this seam runs outside applyOp so the work is repeated
-      // here, per the approve dual-path precedent.
-      for (const absorbed of roomResult.absorbed ?? []) {
-        s.broadcastProposal(boardId, { type: "op", entry: absorbed });
-      }
-      s.broadcastProposal(boardId, { type: "op", entry: roomResult.entry });
-      const updated = applyOperations(guard.board.workspace, operations);
-      await boardStore.put({ ...guard.board, workspace: updated, updatedAt: Date.now() });
-      send(res, 200, {
-        seq: roomResult.entry.seq,
-        applied: operations.length,
-        updatedAt: Date.now(),
-        ...(roomResult.entry.operationId !== undefined
-          ? { operationId: roomResult.entry.operationId }
-          : {}),
-        ...(requestId !== undefined ? { requestId } : {}),
-      });
-      return;
-    }
-    if (roomResult && !roomResult.ok && roomResult.head !== undefined) {
-      // The live room refused (stale or role): the caller re-reads and
-      // re-validates, same as the store's 409 below.
-      send(res, 409, { error: "stale board", reason: roomResult.error, head: roomResult.head });
-      return;
-    }
-    const append = await boardStore.appendOp({
-      boardId,
-      ops: operations,
-      by: user.id,
-      label,
-      at: Date.now(),
+    const outcome = await commitBatch(s, guard.board, user.id, operations, label, actor, {
       ...(typeof body.expectedSeq === "number" ? { expectedSeq: body.expectedSeq } : {}),
       ...(requestId !== undefined ? { requestId } : {}),
-      actor,
     });
-    if (!append.ok) {
+    // ADR 0047: an agent's write is an AI run — its model is the agent's own,
+    // named by the agent when it says (the voice agent does); nobody approved it.
+    if (outcome.ok && !outcome.duplicate && (viaAgent || viaMcp)) {
+      const model = req.headers["x-lucent-model"];
+      const runId = await s.recordRun({
+        orgId: guard.board.orgId,
+        boardId,
+        initiatedBy: user.id,
+        surface: viaAgent ? "voice" : "mcp",
+        provider: viaAgent ? "voice-agent" : "mcp-client",
+        model: typeof model === "string" && model.length <= 120 ? model : null,
+        contextScope: "board",
+        tools: ["apply_canvas_operations"],
+        outputHash: outputHash(operations),
+        opCount: operations.length,
+        createdAt: Date.now(),
+      });
+      if (runId) await s.aiRuns.linkCommit(runId, outcome.seq, null, Date.now()).catch(() => {});
+    }
+    if (!outcome.ok) {
       // Stale or raced: the caller re-reads and re-validates. `head` is
-      // included so the retry saves the round trip, per AppendResult.
-      send(res, 409, { error: "stale board", reason: append.reason, head: append.head });
+      // included so the retry saves the round trip.
+      send(res, 409, { error: "stale board", reason: outcome.reason, head: outcome.head });
       return;
     }
-    // A replayed requestId: the original submit already applied and
-    // persisted; answer with its outcome and change nothing. The 200 (not
-    // 409) is deliberate — from the caller's side the request succeeded.
-    if (append.duplicate) {
+    // A replayed requestId: the original submit already applied; answer with
+    // its outcome and change nothing (200, not 409 — from the caller's side
+    // the request succeeded).
+    if (outcome.duplicate) {
       send(res, 200, {
-        seq: append.seq,
+        seq: outcome.seq,
         applied: 0,
         updatedAt: Date.now(),
         duplicate: true,
@@ -269,8 +261,6 @@ export const registerBoardOpsRoutes: RegisterRoutes = (router, s) => {
       });
       return;
     }
-    const updated = applyOperations(guard.board.workspace, operations);
-    await boardStore.put({ ...guard.board, workspace: updated, updatedAt: Date.now() });
 
     // Audit: who drove an agent over whose board is exactly the question an
     // org owner asks after a bad batch, and it is not answerable from the op
@@ -292,10 +282,10 @@ export const registerBoardOpsRoutes: RegisterRoutes = (router, s) => {
       });
 
     send(res, 200, {
-      seq: append.seq,
+      seq: outcome.seq,
       applied: operations.length,
       updatedAt: Date.now(),
-      ...(append.operationId !== undefined ? { operationId: append.operationId } : {}),
+      ...(outcome.operationId !== undefined ? { operationId: outcome.operationId } : {}),
       ...(requestId !== undefined ? { requestId } : {}),
     });
   });

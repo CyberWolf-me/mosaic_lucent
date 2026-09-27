@@ -118,3 +118,48 @@ html[data-theme="dark"] .projects-form {
 .wsi-toggle select {
   min-width: 180px;
 }
+
+/* ------------------------------------------------- the Review center */
+
+.review-group + .review-group {
+  margin-top: 18px;
+}
+.review-group-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 0 8px;
+  color: var(--ink-2);
+}
+.review-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.review-actions,
+.review-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.review-form input {
+  flex: 1 1 180px;
+  min-width: 0;
+}
+.review-form input[type="date"] {
+  flex: 0 0 auto;
+}
+/* An AI suggestion no person has reviewed yet (ADR 0047). */
+.trust-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  letter-spacing: 0.02em;
+  color: var(--bloom-2);
+  background: var(--bloom-wash);
+}

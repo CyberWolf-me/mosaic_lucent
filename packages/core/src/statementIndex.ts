@@ -1,4 +1,4 @@
-import type { StatementKind, StatementStatus, Workspace } from "./model.js";
+import type { StatementKind, StatementStatus, StatementTrust, Workspace } from "./model.js";
 import { actionsFromDecision, derivedExecution, statementNodes } from "./model.js";
 
 /**
@@ -36,6 +36,8 @@ export interface StatementRow {
   drivesActions?: number;
   /** Creation evidence: the meeting and turns it came from. */
   provenance?: { meetingId: string; turnRange?: [number, number] };
+  /** How it came to be trusted (ADR 0047); absent before trust existed. */
+  trust?: StatementTrust;
 }
 
 /** Is this row's work blocked — marked so itself, or waiting on blocked work? */
@@ -59,6 +61,7 @@ export function statementRows(workspace: Workspace): StatementRow[] {
       label: node.label,
       status: statement.status,
       ...(statement.topic ? { topic: statement.topic } : {}),
+      ...(statement.trust ? { trust: statement.trust } : {}),
       ...(statement.supersedes?.length ? { supersedes: [...statement.supersedes] } : {}),
       ...(node.issue?.assignee ? { assignee: node.issue.assignee } : {}),
       ...(node.issue?.dueDate ? { dueDate: node.issue.dueDate } : {}),

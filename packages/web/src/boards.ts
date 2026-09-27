@@ -328,6 +328,8 @@ export async function createServerProposal(
       turnRange?: [number, number];
       turnKinds?: string[];
     };
+    /** ADR 0047: the AI run the proposal came from, so its approval is on record. */
+    runId?: string;
   },
 ): Promise<ServerProposal | null> {
   const res = await authed(`/api/boards/${encodeURIComponent(boardId)}/proposals`, {

@@ -960,7 +960,9 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
       say = await ask(text);
     } else {
       const imgPrompt = parseExplicitImageIntent(text);
-      say = imgPrompt ? await generateImageShape(imgPrompt) : spokenReply(await send(text));
+      say = imgPrompt
+        ? await generateImageShape(imgPrompt)
+        : spokenReply(await send(text, undefined, { surface: "voice" }));
     }
     if (!conversingRef.current) return;
     if (say) {

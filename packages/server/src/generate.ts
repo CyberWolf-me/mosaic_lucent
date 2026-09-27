@@ -10,6 +10,7 @@ import {
   applyValidOperations,
   repairOperations,
   isHumanOnlyOperation,
+  withoutTrust,
   stampAuthorship,
   existingTopics,
   foldStatementTopics,
@@ -198,6 +199,17 @@ export const generateRequestSchema = z.object({
    * stored board (authoritative) instead of this request's summary.
    */
   boardId: z.string().min(1).max(REQUEST_LIMITS.idChars).optional(),
+  /**
+   * ADR 0047: what the AI run is for — the board the person is on and where
+   * they asked (the canvas, a meeting, by voice). Recorded on the run only;
+   * unlike `boardId` it changes nothing about validation.
+   */
+  run: z
+    .object({
+      boardId: z.string().min(1).max(REQUEST_LIMITS.idChars).optional(),
+      surface: z.enum(["canvas", "meeting", "voice"]).optional(),
+    })
+    .optional(),
   /** The requester's local date (YYYY-MM-DD), so "by Friday" resolves to
    * a real dueDate (packages/ai GenerateRequest.today). */
   today: z
@@ -660,7 +672,8 @@ async function runGeneratePipeline(
   // authenticated caller, or the assistant when there is no user to attribute an
   // AI-written comment to. The same helper Room.commit uses, so both entry paths
   // attribute identically.
-  const filtered = result.operations.filter((op) => !isHumanOnlyOperation(op.op));
+  // ADR 0047: the model never sets a statement's trust — the committer does.
+  const filtered = withoutTrust(result.operations.filter((op) => !isHumanOnlyOperation(op.op)));
   const permitted = stampAuthorship(filtered, userId ?? ASSISTANT_AUTHOR);
 
   // Authoritative when a stored board backs this request AND belongs to the
@@ -701,7 +714,7 @@ async function runGeneratePipeline(
       repaired = true;
       result = second;
       const repairedPermitted = stampAuthorship(
-        second.operations.filter((op) => !isHumanOnlyOperation(op.op)),
+        withoutTrust(second.operations.filter((op) => !isHumanOnlyOperation(op.op))),
         userId ?? ASSISTANT_AUTHOR,
       );
       // The repaired re-emission folds too (Stage C5): a second chance at
@@ -797,6 +810,16 @@ export async function handleGenerateStream(
   userId?: string,
   authoritative?: AuthoritativeContext,
   send?: (event: "start" | "delta" | "done" | "error" | "phase", data: unknown) => void,
+  /**
+   * Runs after validation, before the done frame: its fields ride the frame.
+   * The route records the AI run here (ADR 0047), so the client gets its run
+   * id with the operations it will commit.
+   */
+  beforeDone?: (result: {
+    operations: Operation[];
+    provider: string;
+    model: string | undefined;
+  }) => Promise<Record<string, unknown>>,
 ): Promise<{
   status: number;
   provider: string;
@@ -833,7 +856,15 @@ export async function handleGenerateStream(
   }
   emit("phase", { phase: "validating", message: "Optimizing layout..." });
   emit("phase", { phase: "applying", message: "Rendering nodes..." });
+  const extra = beforeDone
+    ? await beforeDone({
+        operations: outcome.operations,
+        provider: outcome.provider,
+        model: outcome.completion.model,
+      }).catch(() => ({}))
+    : {};
   emit("done", {
+    ...extra,
     operations: outcome.operations,
     explanation: outcome.explanation,
     reply: outcome.reply,

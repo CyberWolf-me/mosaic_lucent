@@ -791,6 +791,21 @@ const SAMPLE_PAYLOADS: { [K in NotificationKind]: NotificationPayloads[K] } = {
     durationMin: 30,
     byName: "Ada",
   },
+  "meeting.summarized": {
+    boardId: "brd_1",
+    boardName: "Roadmap",
+    meetingId: "mtg_1",
+    title: "Launch sync",
+  },
+  "work.assigned": {
+    boardId: "brd_1",
+    boardName: "Roadmap",
+    nodeId: "n1",
+    label: "Write the announcement",
+    dueDate: "2026-10-01",
+  },
+  "work.blocked": { boardId: "brd_1", boardName: "Roadmap", nodeId: "n1", label: "Ship it" },
+  "review.pending": { boardId: "brd_1", boardName: "Roadmap", count: 3 },
 };
 
 function samplePayload<K extends NotificationKind>(kind: K): NotificationPayloads[K] {
@@ -823,6 +838,13 @@ describe("notification catalogue", () => {
       // docs/28 A3.4: the mail carries the calendar invite.
       "meeting.invited": { inApp: "on", email: "on" },
       "meeting.cancelled": { inApp: "on", email: "on" },
+      // ADR 0047: a summary waits in the app; being named as an owner is
+      // addressed to you, like a mention; blocked work and review volume
+      // scale with activity.
+      "meeting.summarized": { inApp: "on", email: "off" },
+      "work.assigned": { inApp: "on", email: "on" },
+      "work.blocked": { inApp: "on", email: "off" },
+      "review.pending": { inApp: "on", email: "off" },
     };
     for (const kind of NOTIFICATION_KINDS) expect(defaultPreference(kind)).toEqual(expected[kind]);
     // In-app is on everywhere: the tray is the cheap, pull-based channel.
@@ -836,6 +858,7 @@ describe("notification catalogue", () => {
       "comment.mention",
       "meeting.invited",
       "meeting.cancelled",
+      "work.assigned",
     ]);
   });
 

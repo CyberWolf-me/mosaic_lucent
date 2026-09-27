@@ -739,6 +739,14 @@ function StatementRow({
         <span className="boards-notif-main">
           <span className="boards-notif-meta">
             <KindBadge kind={row.kind} status={row.status} />
+            {row.trust === "ai-suggested" && (
+              <span
+                className="trust-chip"
+                title="Lucent suggested this; no one has reviewed it yet"
+              >
+                Suggested
+              </span>
+            )}
           </span>
           <span className="boards-notif-title">{row.label}</span>
           {detail && <span className="boards-notif-body">{detail}</span>}

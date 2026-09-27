@@ -1245,6 +1245,8 @@ export const proposals = pgTable(
     decidedAt: bigint("decided_at", { mode: "number" }),
     /** The op_log seq the approval committed, once applied. */
     appliedSeq: bigint("applied_seq", { mode: "number" }),
+    /** ADR 0047: the AI run that produced this proposal, when known. */
+    runId: text("run_id"),
   },
   (t) => ({
     // One pending proposal per board, enforced by the database rather than by
@@ -1714,6 +1716,8 @@ export const statementIndex = pgTable(
     meetingId: text("meeting_id"),
     turnStart: bigint("turn_start", { mode: "number" }),
     turnEnd: bigint("turn_end", { mode: "number" }),
+    /** ADR 0047: how the statement came to be trusted; null before trust existed. */
+    trust: text("trust"),
   },
   (t) => ({
     pk: primaryKey({ columns: [t.boardId, t.nodeId] }),
@@ -1734,3 +1738,39 @@ export const statementIndexState = pgTable("statement_index_state", {
   sourceAt: bigint("source_at", { mode: "number" }).notNull(),
   indexedAt: bigint("indexed_at", { mode: "number" }).notNull(),
 });
+
+/**
+ * AI runs (docs/26 J6, ADR 0047): one row wherever a model is called or an
+ * agent writes on a board — which model, what context, who started it, what
+ * came of it, and who approved. Governance, not billing (usage_events keeps
+ * the meter): a run's `op_seqs` are the op-log entries its output became.
+ */
+export const aiRuns = pgTable(
+  "ai_runs",
+  {
+    id: text("id").primaryKey(),
+    orgId: text("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    boardId: text("board_id").references(() => boards.id, { onDelete: "set null" }),
+    initiatedBy: text("initiated_by").references(() => users.id, { onDelete: "set null" }),
+    surface: text("surface").notNull(),
+    provider: text("provider").notNull(),
+    model: text("model"),
+    contextScope: text("context_scope").notNull(),
+    tools: jsonb("tools").notNull().default(sql`'[]'::jsonb`),
+    outputHash: text("output_hash"),
+    opCount: bigint("op_count", { mode: "number" }).notNull().default(0),
+    proposalId: text("proposal_id"),
+    opSeqs: jsonb("op_seqs").notNull().default(sql`'[]'::jsonb`),
+    approvedBy: text("approved_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: bigint("created_at", { mode: "number" }).notNull(),
+    decidedAt: bigint("decided_at", { mode: "number" }),
+  },
+  (t) => ({
+    orgIdx: index("ai_runs_org_idx").on(t.orgId, t.createdAt),
+    boardIdx: index("ai_runs_board_idx").on(t.boardId, t.createdAt),
+  }),
+);
+
+export type DbAiRun = typeof aiRuns.$inferSelect;

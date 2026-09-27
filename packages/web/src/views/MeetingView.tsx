@@ -684,7 +684,7 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
     // send of that render would work from the board as it was at Start.
     const runVoiceCommand = async (speaker: string, instruction: string): Promise<void> => {
       notify("Applying voice instruction to canvas…");
-      const result = await sendRef.current(instruction);
+      const result = await sendRef.current(instruction, undefined, { surface: "voice" });
       // Lucent talks back after a change too — what it did, and often a
       // question — not only when it answers (it used to go silent).
       const reply = spokenReply(result);

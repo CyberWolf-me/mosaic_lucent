@@ -144,6 +144,15 @@ export const statementKindSchema = z.enum([
  */
 export const statementStatusSchema = z.enum(["open", "resolved", "rejected", "superseded"]);
 
+/** The trust ladder (ADR 0047). Stamped at commit — the model never sets it. */
+export const statementTrustSchema = z.enum([
+  "ai-suggested",
+  "human-approved",
+  "human-edited",
+  "human-created",
+  "system",
+]);
+
 const statementFieldsSchema = z.object({
   kind: statementKindSchema,
   status: statementStatusSchema,
@@ -159,6 +168,8 @@ const statementFieldsSchema = z.object({
   supersedes: z.array(z.string().min(1)).max(10).optional(),
   /** Evidence for the statement itself, when the meeting loop enriched it. */
   provenance: provenanceFieldsSchema.optional(),
+  /** How it came to be trusted (ADR 0047). Stamped by the committer. */
+  trust: statementTrustSchema.optional(),
 });
 
 /** Characters a node's details carry in titles and items — what `totalChars` caps. */
@@ -428,6 +439,8 @@ const operationSchema = z.discriminatedUnion("op", [
       .nullable()
       .optional(),
     supersedes: z.array(z.string().min(1)).max(10).optional(),
+    /** A review's promotion (ADR 0047): approve, edit. Never from an agent. */
+    trust: statementTrustSchema.optional(),
   }),
   /**
    * A user dragging a node by hand. This is the one operation that carries

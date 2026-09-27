@@ -275,6 +275,7 @@ export function applyOperation(workspace: Workspace, op: Operation): Workspace {
           else statement.topic = op.topic;
         }
         if (op.supersedes !== undefined) statement.supersedes = op.supersedes;
+        if (op.trust !== undefined) statement.trust = op.trust;
         next.nodes[op.id] = { ...node, statement };
         // The same visible supersession as SET_STATEMENT, applied on the patch
         // path — a "we went with the other option" edit marks the replaced

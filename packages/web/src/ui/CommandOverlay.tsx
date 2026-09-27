@@ -205,6 +205,13 @@ export function CommandOverlay({
         run: { kind: "view", view: "history" },
       },
       {
+        id: "v-review",
+        label: "Open review",
+        hint: "What Lucent suggested, waiting on a person",
+        group: "view",
+        run: { kind: "view", view: "review" },
+      },
+      {
         id: "v-projects",
         label: "Open projects",
         hint: "What the team is working toward, across boards",

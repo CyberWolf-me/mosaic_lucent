@@ -13,6 +13,7 @@ import { MobileGate } from "./views/MobileBoardView.js";
 import { MeetingView } from "./views/MeetingView.js";
 import { MeetingsView } from "./views/MeetingsView.js";
 import { ProjectsView } from "./views/ProjectsView.js";
+import { ReviewView } from "./views/ReviewView.js";
 import { IntelligenceView } from "./views/IntelligenceView.js";
 import { ExecutionView } from "./views/ExecutionView.js";
 import { WireframeView } from "./views/WireframeView.js";
@@ -134,6 +135,8 @@ function ViewFor({
       return <MeetingsView onOpenSettings={onOpenSettings} />;
     case "projects":
       return <ProjectsView onOpenSettings={onOpenSettings} />;
+    case "review":
+      return <ReviewView onOpenSettings={onOpenSettings} />;
     case "intelligence":
       return <IntelligenceView onOpenSettings={onOpenSettings} />;
     case "execution":

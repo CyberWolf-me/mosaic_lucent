@@ -301,7 +301,10 @@ export const registerMeetingRoutes: RegisterRoutes = (router, s) => {
     const guard = await requireBoardRole(req, res, boardId, "editor", route);
     if (!guard.ok) return;
     if (!meetings) return send(res, 503, { error: "meeting transcripts are not configured" });
-    const result = await writeMeetingRecap(boardId, ctx.param("mid"), { replace: true });
+    const result = await writeMeetingRecap(boardId, ctx.param("mid"), {
+      replace: true,
+      by: guard.user.id,
+    });
     switch (result.outcome) {
       case "written":
         return send(res, 200, result.meeting);

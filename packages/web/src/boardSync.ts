@@ -293,13 +293,21 @@ export class BoardSync {
   }
 
   /** Send a committed local batch to the server for sequencing. */
-  commit(ops: Operation[], label = ""): void {
+  commit(ops: Operation[], label = "", runId?: string): void {
     if (ops.length === 0) return;
     // Stage B: every submit is idempotent by id. The same batch retried over a
     // flapping socket (a later batch) replays this id and is answered with the
     // original outcome — the client never needs to guess whether "it sent".
     const requestId = newRequestId();
-    const msg: Record<string, unknown> = { type: "op", ops, label, requestId };
+    // ADR 0047: Lucent's output the person asked for names its run, so the
+    // log records AI asked for and approved by them.
+    const msg: Record<string, unknown> = {
+      type: "op",
+      ops,
+      label,
+      requestId,
+      ...(runId ? { runId } : {}),
+    };
     // Stage B4: never drop a user edit again. Socket open → send now;
     // closed → queue for the reconnect replay above. Optimistic local state
     // already holds the edit (workspace.tsx applies first), so this is purely

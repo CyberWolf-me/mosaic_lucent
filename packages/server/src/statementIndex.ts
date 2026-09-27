@@ -193,10 +193,31 @@ export class StatementIndexer {
     this.pending.delete(boardId);
   }
 
+  /**
+   * Told what changed on a board that was already indexed — before and after,
+   * in the stored form (ADR 0047's notifications). Never for a board indexed
+   * for the first time: that is catching up, not news.
+   */
+  onChange?: (
+    board: StoredBoard,
+    before: readonly IndexedStatement[],
+    after: readonly IndexedStatement[],
+  ) => void;
+
   /** Derive and store one board's rows now. */
   async indexBoard(board: StoredBoard): Promise<void> {
     const rows = statementRows(board.workspace);
+    const watching = this.onChange;
+    const known = watching ? (await this.store.sourcesFor([board.id])).has(board.id) : false;
+    const before = watching && known ? await this.store.query([board.id]) : [];
     await this.store.replaceBoard(board.id, board.orgId, rows, board.updatedAt, this.now());
+    if (watching && known) {
+      try {
+        watching(board, before, await this.store.query([board.id]));
+      } catch (err) {
+        this.onError(err, board.id);
+      }
+    }
   }
 
   /** Run every pending re-derivation now (tests, shutdown). */

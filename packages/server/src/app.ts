@@ -159,8 +159,11 @@ import {
 } from "./integrations/webhook.js";
 import { ingestInboundChange } from "./integrations/inbound.js";
 import { InMemoryProjectStore } from "./projects.js";
+import { InMemoryAiRunStore, outputHash, type NewAiRun } from "./aiRuns.js";
+import { TOOL_NAME } from "@lucent/core";
 import { registerProjectRoutes } from "./routes/projects.js";
 import { registerIntelligenceRoutes } from "./routes/intelligence.js";
+import { registerReviewRoutes } from "./routes/review.js";
 import { InMemoryStatementIndexStore, StatementIndexer } from "./statementIndex.js";
 import { openPortal, startCheckout, type BillingIntegration } from "./billing/service.js";
 
@@ -297,6 +300,8 @@ export interface AppDeps {
   projects?: import("./projects.js").ProjectStore;
   /** docs/26 J3 (ADR 0046): the workspace intelligence index. Defaults to in-memory. */
   statementIndex?: import("./statementIndex.js").StatementIndexStore;
+  /** docs/26 J6 (ADR 0047): AI run records. Defaults to in-memory. */
+  aiRuns?: import("./aiRuns.js").AiRunStore;
   /**
    * P2's outbox. When present, ending a meeting announces `MeetingEnded`
    * (docs/28 A3.3) and main.ts's consumer queues its summary. Absent in most
@@ -392,7 +397,7 @@ export interface App {
   writeMeetingRecap(
     boardId: string,
     meetingId: string,
-    options?: { replace?: boolean },
+    options?: { replace?: boolean; by?: string },
   ): Promise<import("./meetings.js").RecapOutcome>;
   close(): Promise<void>;
 }
@@ -459,6 +464,8 @@ const ROUTE_SEGMENTS = new Set([
   "projects",
   "intelligence",
   "rebuild",
+  "review",
+  "ai-runs",
 ]);
 
 /**
@@ -580,6 +587,57 @@ export function createApp(deps: AppDeps): App {
     },
   );
   const boardStore = intelligence.observe(rawBoardStore);
+
+  // docs/26 J6 (ADR 0047): a record of every AI run. Writing one never fails
+  // the request it describes — governance is kept, not enforced, here.
+  const aiRuns = deps.aiRuns ?? new InMemoryAiRunStore();
+  const recordRun = async (run: NewAiRun): Promise<string | null> => {
+    try {
+      return (await aiRuns.record(run)).id;
+    } catch (err) {
+      logger.warn("ai_run_record_failed", { surface: run.surface, error: (err as Error).message });
+      return null;
+    }
+  };
+  /**
+   * The run behind a canvas, meeting or spoken request. Its board is the one
+   * the request names in `run` — kept only when the caller can read it and it
+   * belongs to the billed org, so a run can never be pinned to a stranger's
+   * board (and a later commit can't borrow it there).
+   */
+  const recordGenerateRun = async (
+    rawBody: unknown,
+    userId: string,
+    orgId: string,
+    provider: string,
+    model: string | null,
+    operations: readonly unknown[],
+  ): Promise<string | null> => {
+    const context = (rawBody as { run?: { boardId?: unknown; surface?: unknown } } | null)?.run;
+    const surface =
+      context?.surface === "meeting" || context?.surface === "voice" ? context.surface : "canvas";
+    let boardId: string | null = null;
+    if (typeof context?.boardId === "string" && context.boardId.length <= 120) {
+      const board = await boardStore.get(context.boardId);
+      const role = board
+        ? await boardStore.memberRole(board.id, userId, (uid) => orgRoleFor(uid, board.orgId))
+        : undefined;
+      if (board && role && board.orgId === orgId) boardId = board.id;
+    }
+    return recordRun({
+      orgId,
+      boardId,
+      initiatedBy: userId,
+      surface,
+      provider,
+      model,
+      contextScope: surface === "meeting" ? "meeting" : "board",
+      tools: [TOOL_NAME],
+      outputHash: outputHash(operations),
+      opCount: operations.length,
+      createdAt: Date.now(),
+    });
+  };
 
   /**
    * docs/25 V1: the server STT service + its session table. Omitted deps
@@ -1307,6 +1365,100 @@ export function createApp(deps: AppDeps): App {
     });
   }
 
+  // ADR 0047: news from the index — work that now names an owner, work that
+  // is newly blocked, AI suggestions newly waiting. The assignee field is
+  // text (typed, or synced from a tracker), so it notifies only a person it
+  // names exactly: their name, email, or the part before the @ — and only
+  // when exactly one member of the board's workspace matches.
+  const reviewNudgedAt = new Map<string, number>();
+  const REVIEW_NUDGE_MS = 60 * 60_000;
+  intelligence.onChange = (board, before, after) => {
+    if (!notifyDeps) return;
+    void (async () => {
+      const prev = new Map(before.map((r) => [r.id, r] as const));
+      const assigned = after.filter(
+        (r) =>
+          r.kind === "action" &&
+          r.status === "open" &&
+          r.assignee &&
+          r.assignee !== prev.get(r.id)?.assignee,
+      );
+      const blocked = after.filter(
+        (r) =>
+          r.kind === "action" &&
+          r.status === "open" &&
+          r.blocked &&
+          r.assignee &&
+          !prev.get(r.id)?.blocked,
+      );
+      const suggested = after.filter(
+        (r) => r.trust === "ai-suggested" && prev.get(r.id)?.trust !== "ai-suggested",
+      ).length;
+
+      if (assigned.length > 0 || blocked.length > 0) {
+        const people = new Map<string, { id: string; email: string; name: string }>();
+        const owner = await userStore.findById(board.ownerId);
+        if (owner) people.set(owner.id, { id: owner.id, email: owner.email, name: owner.name });
+        for (const m of (await orgStore?.membersOf(board.orgId)) ?? []) {
+          if (m.email) people.set(m.userId, { id: m.userId, email: m.email, name: m.name });
+        }
+        const personNamed = (assignee: string) => {
+          const want = assignee.trim().toLowerCase();
+          const hits = [...people.values()].filter((p) =>
+            [p.name, p.email, p.email.split("@")[0]].some((v) => v && v.toLowerCase() === want),
+          );
+          return hits.length === 1 ? hits[0] : undefined;
+        };
+        for (const row of assigned) {
+          const person = personNamed(row.assignee!);
+          if (!person) continue;
+          notifyUser({
+            kind: "work.assigned",
+            to: { userId: person.id, email: person.email },
+            orgId: board.orgId,
+            payload: {
+              boardId: board.id,
+              boardName: board.name,
+              nodeId: row.id,
+              label: row.label,
+              dueDate: row.dueDate ?? null,
+            },
+          });
+        }
+        for (const row of blocked) {
+          const person = personNamed(row.assignee!);
+          if (!person) continue;
+          notifyUser({
+            kind: "work.blocked",
+            to: { userId: person.id, email: person.email },
+            orgId: board.orgId,
+            payload: { boardId: board.id, boardName: board.name, nodeId: row.id, label: row.label },
+          });
+        }
+      }
+
+      const last = reviewNudgedAt.get(board.id) ?? 0;
+      if (suggested > 0 && Date.now() - last >= REVIEW_NUDGE_MS) {
+        const owner = await userStore.findById(board.ownerId);
+        if (owner) {
+          reviewNudgedAt.set(board.id, Date.now());
+          const waiting = after.filter((r) => r.trust === "ai-suggested").length;
+          notifyUser({
+            kind: "review.pending",
+            to: { userId: owner.id, email: owner.email },
+            orgId: board.orgId,
+            payload: { boardId: board.id, boardName: board.name, count: waiting },
+          });
+        }
+      }
+    })().catch((err: unknown) =>
+      logger.warn("index_notify_failed", {
+        boardId: board.id,
+        message: err instanceof Error ? err.message : String(err),
+      }),
+    );
+  };
+
   // --- Monetization: the entitlement gate (M4) ------------------------------
   //
   // entitlements.ts resolves what an org may do (`subscriptions` -> `plans` ->
@@ -1950,7 +2102,7 @@ export function createApp(deps: AppDeps): App {
   async function writeMeetingRecap(
     boardId: string,
     meetingId: string,
-    options: { replace?: boolean } = {},
+    options: { replace?: boolean; by?: string } = {},
   ): Promise<import("./meetings.js").RecapOutcome> {
     if (!meetings) return { outcome: "unavailable" };
     const board = await boardStore.get(boardId);
@@ -2007,12 +2159,48 @@ export function createApp(deps: AppDeps): App {
             mode: "meeting-summary",
             ...(draft.model ? { model: draft.model } : {}),
           });
+          // ADR 0047: the summary job's run — the system's own unless a person
+          // asked for it (Write it now / Rewrite).
+          void recordRun({
+            orgId: board.orgId,
+            boardId,
+            initiatedBy: options.by ?? null,
+            surface: "recap",
+            provider: provider.name,
+            model: draft.model ?? null,
+            contextScope: "meeting",
+            tools: [],
+            outputHash: outputHash(draft),
+            opCount: 0,
+            createdAt: now,
+          });
         } catch {
           recap = offline("model-failed");
         }
       }
     }
     const saved = await meetings.setRecap(boardId, meetingId, recap);
+    // ADR 0047: tell whoever recorded it — unless they just asked for it and
+    // are looking at it.
+    if (saved && meeting.createdBy && meeting.createdBy !== options.by) {
+      const holder = await userStore.findById(meeting.createdBy);
+      if (holder) {
+        notifyUser({
+          kind: "meeting.summarized",
+          to: { userId: holder.id, email: holder.email },
+          orgId: board.orgId,
+          payload: {
+            boardId,
+            boardName: board.name,
+            meetingId,
+            title:
+              meeting.title ??
+              `Meeting on ${new Date(meeting.startedAt).toISOString().slice(0, 10)}`,
+          },
+          id: `ntf_summary_${meetingId}_${saved.recap?.generatedAt ?? now}`,
+        });
+      }
+    }
     return saved ? { outcome: "written", meeting: saved } : { outcome: "not-found" };
   }
 
@@ -2058,6 +2246,8 @@ export function createApp(deps: AppDeps): App {
     meetingNotes: deps.meetingNotes ?? (meetings ? new InMemoryMeetingNotesStore() : undefined),
     projects: deps.projects ?? new InMemoryProjectStore(),
     intelligence,
+    aiRuns,
+    recordRun,
     readableBoards: async (userId, orgId) => {
       // The two scopes of GET /api/boards (ADR 0045, 0046): an org member
       // reads every board in the org; an outside collaborator only the
@@ -2154,6 +2344,7 @@ export function createApp(deps: AppDeps): App {
   registerMeetingNotesRoutes(router, services);
   registerProjectRoutes(router, services);
   registerIntelligenceRoutes(router, services);
+  registerReviewRoutes(router, services);
   registerThemesRoutes(router, services);
   registerProposalRoutes(router, services);
   registerSsoRoutes(router, services);
@@ -4398,6 +4589,18 @@ export function createApp(deps: AppDeps): App {
           // against a failed generation, so a figure attached to one would not
           // reconcile with what the customer is shown next.
           body = withAllowance(body, allowance);
+          // ADR 0047: the run, and its id for the client to commit it under.
+          if (aiCtx.orgId && auth.userId) {
+            const runId = await recordGenerateRun(
+              parsed,
+              auth.userId,
+              aiCtx.orgId,
+              provider.name,
+              result.completion?.model ?? null,
+              (result.body as { operations?: unknown[] }).operations ?? [],
+            );
+            if (runId) body = { ...(body as Record<string, unknown>), runId };
+          }
         }
         send(res, result.status, body);
       } catch (err) {
@@ -4534,6 +4737,19 @@ export function createApp(deps: AppDeps): App {
           auth.userId,
           authoritative,
           (event, data) => sendFrame(event, data),
+          // ADR 0047: the run, recorded before the done frame so its id rides it.
+          async (done) => {
+            if (!aiCtx.orgId || !auth.userId) return {};
+            const runId = await recordGenerateRun(
+              parsed,
+              auth.userId,
+              aiCtx.orgId,
+              done.provider,
+              done.model ?? null,
+              done.operations,
+            );
+            return runId ? { runId } : {};
+          },
         );
         closed = true;
         res.end();
@@ -4808,6 +5024,7 @@ export function createApp(deps: AppDeps): App {
   const realtime = new RealtimeServer({
     userStore,
     boardStore,
+    aiRuns,
     secret,
     tickets,
     orgRoleFor,
