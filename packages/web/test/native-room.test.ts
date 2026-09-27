@@ -59,6 +59,7 @@ describe("meeting capabilities", () => {
       video: true,
       screenShare: true,
       speakerIdentity: true,
+      chat: true,
     });
     expect(EXTERNAL_MEETING_CAPABILITIES).toMatchObject({
       audio: false,

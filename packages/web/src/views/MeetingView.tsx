@@ -29,7 +29,7 @@ import {
   openBoardQuestions,
   type VoiceAnswer,
 } from "../meeting-voice.js";
-import { useMeetingSession } from "../meeting-room/MeetingSessionContext.js";
+import { inCall, useMeetingSession } from "../meeting-room/MeetingSessionContext.js";
 import { speakAnswer, isTtsSpeaking } from "../tts.js";
 import type { VoiceHandlers } from "../stt/index.js";
 import {
@@ -389,7 +389,15 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
       delete (window as unknown as { __lucentVoiceDebug?: typeof hook }).__lucentVoiceDebug;
     };
   }, [voiceHud]);
-  const [callOpen, setCallOpen] = useState(false);
+  // A joining link (?call=1, copied from the call) opens the lobby — never
+  // joins by itself: the person picks their devices first (docs/28 S4). The
+  // parameter stays until they join or put the call away, because the app
+  // remounts this view once while it checks the session.
+  const [callOpen, setCallOpen] = useState(
+    () =>
+      typeof window !== "undefined" &&
+      new URLSearchParams(window.location.search).get("call") === "1",
+  );
   const [query, setQuery] = useState("");
   const [turnFilter, setTurnFilter] = useState<TurnFilter>("all");
   const turnsListRef = useRef<HTMLDivElement | null>(null);
@@ -1789,9 +1797,16 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
     </>
   );
 
-  // The call drawer stays open while a call is joining or live; an idle or
-  // failed room can be put away.
-  const roomActive = roomStatus === "live" || roomStatus === "joining";
+  // The call drawer stays open while a call is joining, live, or showing why
+  // it ended; an idle or failed lobby can be put away.
+  const roomActive = roomStatus !== "idle" && roomStatus !== "error";
+  useEffect(() => {
+    if (callOpen && !inCall(roomStatus)) return;
+    const params = new URLSearchParams(window.location.search);
+    if (!params.has("call")) return;
+    params.delete("call");
+    window.history.replaceState(null, "", `?${params.toString()}`);
+  }, [callOpen, roomStatus]);
   const showCall = callOpen || roomActive;
 
   return (
@@ -2005,7 +2020,7 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
                       : "Video call with the people on this board"
                   }
                 >
-                  <Ico.Video /> {roomStatus === "live" ? "In call" : "Video call"}
+                  <Ico.Video /> {inCall(roomStatus) ? "In call" : "Video call"}
                 </Button>
                 {!panelOpen && (
                   <Button variant="quiet" size="sm" onClick={() => setPanelOpen(true)}>
@@ -2075,7 +2090,7 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
                 activePanel={activePanel}
                 onToggleNotes={() => onRoomPanel("notes")}
                 notesOpen={panelOpen && activePanel === "notes"}
-                turnsCount={displayTurns.length}
+                title={projectName || "Board call"}
               />
             </div>
           )}

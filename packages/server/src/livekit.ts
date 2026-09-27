@@ -93,6 +93,11 @@ export function mintLiveKitToken(input: MintLiveKitTokenInput): MintedLiveKitTok
       roomJoin: true,
       canPublish: true,
       canSubscribe: true,
+      // Chat and reactions ride the data channel (docs/28 S5).
+      canPublishData: true,
+      // Never granted: it would let a participant rename itself. A raised
+      // hand is set by the server on the caller's behalf (calls.ts).
+      canUpdateOwnMetadata: false,
     },
     ...(input.name ? { name: input.name } : {}),
   };

@@ -3,6 +3,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type ReactNode,
@@ -11,6 +12,33 @@ import { describeMediaError, enableLocalMedia } from "./mediaErrors.js";
 import { apiFetch } from "../http.js";
 import { roomPeers, type RoomPeer } from "./roomPeers.js";
 import type { ConversationalLease } from "../meeting-voice.js";
+import {
+  appendChat,
+  captureFrom,
+  CHAT_TOPIC,
+  decodeChat,
+  decodeReaction,
+  describeDisconnect,
+  describeJoinFailure,
+  encodeChat,
+  encodeReaction,
+  handFrom,
+  readCallMeta,
+  REACTION_TOPIC,
+  rejoinMarker,
+  rejoinOffer,
+  REJOIN_KEY,
+  type CallEnd,
+  type CallMeta,
+  type ChatMessage,
+  type Reaction,
+} from "./callProtocol.js";
+import {
+  loadDeviceChoice,
+  saveDeviceChoice,
+  type DeviceChoice,
+  type DeviceKind,
+} from "./devices.js";
 
 export interface MediaTile {
   key: string;
@@ -25,7 +53,8 @@ export interface LiveKitTrack {
   kind: string;
   source: string;
   attach(): HTMLElement;
-  detach(): void;
+  /** Without an element, detaches from every element — the dock's and the room's alike. */
+  detach(element?: HTMLElement): void;
   isMuted?: boolean;
   stop?(): void;
   mediaStreamTrack?: MediaStreamTrack;
@@ -42,6 +71,7 @@ export interface LiveKitParticipant {
   identity: string;
   name?: string;
   isLocal?: boolean;
+  attributes?: Record<string, string>;
   audioTrackPublications: Map<string, LiveKitPublication>;
   videoTrackPublications: Map<string, LiveKitPublication>;
 }
@@ -51,15 +81,30 @@ export interface LiveKitRoom {
   disconnect(stopTracks?: boolean): Promise<void>;
   on(event: string, cb: (...args: never[]) => void): void;
   off(event: string, cb: (...args: never[]) => void): void;
+  metadata?: string;
+  canPlaybackAudio?: boolean;
+  startAudio(): Promise<void>;
+  switchActiveDevice(kind: MediaDeviceKind, deviceId: string): Promise<boolean>;
   localParticipant: LiveKitParticipant & {
-    setMicrophoneEnabled(on: boolean): Promise<unknown>;
-    setCameraEnabled(on: boolean): Promise<unknown>;
+    setMicrophoneEnabled(on: boolean, options?: { deviceId?: string }): Promise<unknown>;
+    setCameraEnabled(on: boolean, options?: { deviceId?: string }): Promise<unknown>;
     setScreenShareEnabled(on: boolean): Promise<unknown>;
+    publishData(data: Uint8Array, options?: { reliable?: boolean; topic?: string }): Promise<void>;
   };
   remoteParticipants: Map<string, LiveKitParticipant>;
 }
 
-export type RoomStatus = "idle" | "joining" | "live" | "error";
+/**
+ * The call's connection (docs/28 §4.2): `idle` and `error` show the lobby
+ * (with the join failure in `error`), `ended` shows why the call ended
+ * (`ended`) with Rejoin; `live` and `reconnecting` are in the call.
+ */
+export type RoomStatus = "idle" | "joining" | "live" | "reconnecting" | "error" | "ended";
+
+/** In the call, including while the connection recovers. */
+export function inCall(status: RoomStatus): boolean {
+  return status === "live" || status === "reconnecting";
+}
 
 /**
  * A running meeting capture, published by the meeting view (docs/28 F14).
@@ -77,70 +122,191 @@ export interface LiveCapture {
   stop: () => void;
 }
 
+/** A reaction floating over someone's tile for a few seconds. */
+export interface LiveReaction {
+  id: number;
+  identity: string;
+  name: string;
+  emoji: Reaction;
+}
+
+export type HostAction =
+  | { kind: "mute"; identity: string }
+  | { kind: "mute-everyone" }
+  | { kind: "remove"; identity: string }
+  | { kind: "make-host"; identity: string }
+  | { kind: "lower-hand"; identity: string }
+  | { kind: "end" };
+
 interface MeetingSessionValue {
   status: RoomStatus;
+  /** Why the last join failed, in words (S4). */
   error: string | null;
+  /** Why the call ended, when it didn't end by leaving (S5). */
+  ended: Exclude<CallEnd, { kind: "left" }> | null;
   /**
-   * A non-fatal media problem in a live call — a blocked mic, a busy camera
-   * (docs/28 F18). `error` is the fatal kind the lobby shows; this one the
-   * room and the dock show, and the call carries on.
+   * A non-fatal problem in a live call — a blocked mic, a busy camera
+   * (docs/28 F18), "The host muted you". The call carries on.
    */
   notice: string | null;
   dismissNotice: () => void;
+  /** A passing event ("Alice raised a hand"), cleared after a few seconds. */
+  toast: string | null;
   activeBoardId: string | null;
   peers: Map<string, RoomPeer>;
   tiles: MediaTile[];
   micOn: boolean;
   camOn: boolean;
   screenOn: boolean;
+  /** The call's host list and start, from the room (server-written). */
+  meta: CallMeta | null;
+  /** You host this call (docs/28 §6). */
+  isHost: boolean;
+  /** Your LiveKit identity (your user id) while in a call. */
+  selfIdentity: string | null;
+  /** Your name as the call shows it to others. */
+  selfName: string | null;
+  /** The browser blocked call audio until the person clicks (autoplay policy). */
+  audioBlocked: boolean;
+  startAudio: () => void;
   activeLease: ConversationalLease | null;
   setActiveLease: React.Dispatch<React.SetStateAction<ConversationalLease | null>>;
   setMicOn: React.Dispatch<React.SetStateAction<boolean>>;
   setCamOn: React.Dispatch<React.SetStateAction<boolean>>;
-  join: (targetBoardId: string | null) => Promise<void>;
+  devices: DeviceChoice;
+  /** Choose a device — in the lobby it's remembered; in a call it switches now. */
+  chooseDevice: (kind: DeviceKind, deviceId: string) => Promise<void>;
+  /** Join the board's call; `options` overrides the lobby's mic and camera choice. */
+  join: (targetBoardId: string | null, options?: { mic?: boolean; cam?: boolean }) => Promise<void>;
+  cancelJoin: () => void;
   leave: (keepError?: boolean) => void;
+  /** Close the "call ended" screen, back to the lobby. */
+  dismissEnded: () => void;
   toggleMic: () => Promise<void>;
   toggleCam: () => Promise<void>;
   toggleScreen: () => Promise<void>;
+  chat: ChatMessage[];
+  chatUnread: number;
+  chatOpen: boolean;
+  setChatOpen: (open: boolean) => void;
+  sendChat: (text: string) => Promise<boolean>;
+  reactions: LiveReaction[];
+  sendReaction: (emoji: Reaction) => void;
+  handUp: boolean;
+  setHand: (up: boolean) => Promise<void>;
+  hostAction: (action: HostAction) => Promise<boolean>;
+  /** The call this tab was in when the page reloaded (S6), offered back. */
+  rejoin: { boardId: string } | null;
+  dismissRejoin: () => void;
   capture: LiveCapture | null;
   setCapture: React.Dispatch<React.SetStateAction<LiveCapture | null>>;
 }
 
 const MeetingSessionContext = createContext<MeetingSessionValue | null>(null);
 
+const LOCAL = "local";
+const REACTION_MS = 4000;
+const TOAST_MS = 4000;
+
+function readSession(key: string): string | null {
+  try {
+    return sessionStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+function writeSession(key: string, value: string | null): void {
+  try {
+    if (value === null) sessionStorage.removeItem(key);
+    else sessionStorage.setItem(key, value);
+  } catch {
+    /* the rejoin offer is a convenience */
+  }
+}
+
+/** POST to one of the board call's routes; the server's words on failure. */
+async function callRoute(
+  boardId: string,
+  action: string,
+  body: unknown,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  try {
+    const res = await apiFetch(`/api/boards/${encodeURIComponent(boardId)}/call/${action}`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+    if (res.ok) return { ok: true };
+    const json = (await res.json().catch(() => ({}))) as { error?: string };
+    return { ok: false, error: json.error ?? `That didn't work (error ${res.status}).` };
+  } catch {
+    return { ok: false, error: "Couldn't reach the server. Try again." };
+  }
+}
+
 export function MeetingSessionProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<RoomStatus>("idle");
   const [error, setError] = useState<string | null>(null);
+  const [ended, setEnded] = useState<Exclude<CallEnd, { kind: "left" }> | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
   const [activeBoardId, setActiveBoardId] = useState<string | null>(null);
   const [peers, setPeers] = useState<Map<string, RoomPeer>>(new Map());
   const [tiles, setTiles] = useState<MediaTile[]>([]);
   const [micOn, setMicOn] = useState(true);
   const [camOn, setCamOn] = useState(true);
   const [screenOn, setScreenOn] = useState(false);
+  const [meta, setMeta] = useState<CallMeta | null>(null);
+  const [selfIdentity, setSelfIdentity] = useState<string | null>(null);
+  const [selfName, setSelfName] = useState<string | null>(null);
+  const [audioBlocked, setAudioBlocked] = useState(false);
+  const [devices, setDevices] = useState<DeviceChoice>(() => loadDeviceChoice());
+  const [chat, setChat] = useState<ChatMessage[]>([]);
+  const [chatUnread, setChatUnread] = useState(0);
+  const [chatOpen, setChatOpenState] = useState(false);
+  const [reactions, setReactions] = useState<LiveReaction[]>([]);
+  const [rejoin, setRejoin] = useState<{ boardId: string } | null>(() =>
+    rejoinOffer(readSession(REJOIN_KEY), Date.now()),
+  );
   const [activeLease, setActiveLease] = useState<ConversationalLease | null>(null);
   const [capture, setCapture] = useState<LiveCapture | null>(null);
 
   const roomRef = useRef<LiveKitRoom | null>(null);
   const deadRef = useRef(false);
+  const joinSeq = useRef(0);
+  const chatOpenRef = useRef(false);
+  const captureRef = useRef<LiveCapture | null>(null);
+  captureRef.current = capture;
+  const boardRef = useRef<string | null>(null);
+  const reactionSeq = useRef(0);
+  const captureSent = useRef(false);
+  const micOnRef = useRef(micOn);
+  micOnRef.current = micOn;
+  const micBusy = useRef(false);
+  /** This person just ended the call for everyone: their own end reads "You ended…". */
+  const endingRef = useRef(false);
 
   const act = useCallback(
     (action: Parameters<typeof roomPeers>[1]) => setPeers((prev) => roomPeers(prev, action)),
     [],
   );
 
-  const leave = useCallback((keepError = false) => {
+  const showToast = useCallback((text: string) => {
+    setToast(text);
+    window.setTimeout(() => setToast((t) => (t === text ? null : t)), TOAST_MS);
+  }, []);
+
+  /** Tear the room down; `status` is the caller's to set. */
+  const teardown = useCallback(() => {
     deadRef.current = true;
     const room = roomRef.current;
     roomRef.current = null;
     if (room) {
       try {
         const lp = room.localParticipant;
-        for (const pub of lp.audioTrackPublications.values()) {
-          pub.track?.stop?.();
-          pub.track?.mediaStreamTrack?.stop();
-        }
-        for (const pub of lp.videoTrackPublications.values()) {
+        for (const pub of [
+          ...lp.audioTrackPublications.values(),
+          ...lp.videoTrackPublications.values(),
+        ]) {
           pub.track?.stop?.();
           pub.track?.mediaStreamTrack?.stop();
         }
@@ -155,208 +321,429 @@ export function MeetingSessionProvider({ children }: { children: ReactNode }) {
     setPeers(new Map());
     setScreenOn(false);
     setActiveLease(null);
-    setActiveBoardId(null);
-    setStatus(keepError ? "error" : "idle");
-    if (!keepError) setError(null);
+    setMeta(null);
+    setSelfIdentity(null);
+    setSelfName(null);
+    setAudioBlocked(false);
+    setReactions([]);
     setNotice(null);
+    captureSent.current = false;
   }, []);
 
+  const leave = useCallback(
+    (keepError = false) => {
+      joinSeq.current++;
+      teardown();
+      writeSession(REJOIN_KEY, null);
+      setActiveBoardId(null);
+      boardRef.current = null;
+      setChat([]);
+      setChatUnread(0);
+      setEnded(null);
+      setStatus(keepError ? "error" : "idle");
+      if (!keepError) setError(null);
+    },
+    [teardown],
+  );
+
   const publishLocal = useCallback(
-    (room: LiveKitRoom, identity: string, name: string) => {
+    (room: LiveKitRoom) => {
       const lp = room.localParticipant;
-      act({ type: "peer-joined", identity, name });
-      for (const pub of lp.audioTrackPublications.values()) {
-        if (pub.track) {
-          const track = pub.track;
-          setTiles((prev) => [
-            ...prev.filter((t) => !(t.identity === identity && t.kind === "audio")),
-            { key: `${identity}-audio`, identity, name, kind: "audio", screen: false, track },
-          ]);
-        }
-      }
+      act({ type: "peer-joined", identity: LOCAL, name: "You" });
       for (const pub of lp.videoTrackPublications.values()) {
-        if (pub.track) {
-          const track = pub.track;
-          const screen = pub.source === "screen_share";
-          const key = `${identity}-${screen ? "screen" : "video"}`;
-          setTiles((prev) => [
-            ...prev.filter((t) => t.key !== key),
-            { key, identity, name, kind: "video", screen, track },
-          ]);
-        }
+        if (!pub.track) continue;
+        const track = pub.track;
+        const screen = pub.source === "screen_share";
+        const key = `${LOCAL}-${screen ? "screen" : "video"}`;
+        setTiles((prev) => [
+          ...prev.filter((t) => t.key !== key),
+          { key, identity: LOCAL, name: "You", kind: "video", screen, track },
+        ]);
       }
     },
     [act],
   );
 
   const join = useCallback(
-    async (targetBoardId: string | null) => {
+    async (targetBoardId: string | null, options?: { mic?: boolean; cam?: boolean }) => {
+      const seq = ++joinSeq.current;
+      const wantMic = options?.mic ?? micOn;
+      const wantCam = options?.cam ?? camOn;
+      const current = () => seq === joinSeq.current;
       setError(null);
+      setEnded(null);
+      setNotice(null);
       setStatus("joining");
       setActiveBoardId(targetBoardId);
+      boardRef.current = targetBoardId;
+      setChat([]);
+      setChatUnread(0);
+      setRejoin(null);
       deadRef.current = false;
+      endingRef.current = false;
+      let data: { token: string; url: string };
       try {
-        const roomName = targetBoardId ? `board-${targetBoardId}` : "lucent-voice";
-        const resp = await apiFetch("/api/livekit/token", {
-          method: "POST",
-          body: JSON.stringify({ boardId: targetBoardId, room: roomName }),
-        });
-        if (!resp.ok) {
-          if (resp.status === 503) {
-            throw new Error("LiveKit is not configured on this Lucent server.");
-          }
-          const text = await resp.text();
-          throw new Error(`Token request failed (${resp.status}): ${text}`);
+        let resp: Response;
+        try {
+          resp = await apiFetch("/api/livekit/token", {
+            method: "POST",
+            body: JSON.stringify(
+              targetBoardId
+                ? { boardId: targetBoardId, room: `board-${targetBoardId}` }
+                : { room: "lucent-voice" },
+            ),
+          });
+        } catch {
+          throw new Error(describeJoinFailure(null));
         }
-        const data = (await resp.json()) as { token: string; url: string };
+        if (!resp.ok) {
+          const body = (await resp.json().catch(() => ({}))) as {
+            error?: string;
+            removed?: boolean;
+          };
+          throw new Error(describeJoinFailure(resp.status, body));
+        }
+        data = (await resp.json()) as { token: string; url: string };
+        if (!current()) return;
 
-        // Dynamic import of LiveKit client SDK
         const sdk = (await import("livekit-client")) as unknown as {
-          Room: new () => LiveKitRoom;
+          Room: new (options?: Record<string, unknown>) => LiveKitRoom;
           RoomEvent: Record<string, string>;
+          DisconnectReason: Record<number, string>;
         };
-        const room = new sdk.Room();
+        const room = new sdk.Room({
+          adaptiveStream: true,
+          dynacast: true,
+          audioCaptureDefaults: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+          },
+          ...(devices.audiooutput ? { audioOutput: { deviceId: devices.audiooutput } } : {}),
+        });
         roomRef.current = room;
+        // Development only: scripts/meeting-call-check.mjs drives LiveKit's own
+        // reconnect scenarios through this handle. Production builds drop it.
+        if (import.meta.env.DEV)
+          (window as unknown as { __lucentCall?: unknown }).__lucentCall = room;
+        const E = sdk.RoomEvent;
+        const on = (event: string | undefined, fallback: string, cb: (...args: never[]) => void) =>
+          room.on(event ?? fallback, cb);
+        const idOf = (p: LiveKitParticipant) =>
+          p.isLocal || p.identity === room.localParticipant.identity ? LOCAL : p.identity;
+        const nameOf = (p: LiveKitParticipant) =>
+          idOf(p) === LOCAL ? "You" : p.name || p.identity;
+        const seedPeer = (p: LiveKitParticipant) => {
+          const identity = idOf(p);
+          act({ type: "peer-joined", identity, name: nameOf(p) });
+          act({
+            type: "attributes",
+            identity,
+            handAt: handFrom(p.attributes),
+            capture: captureFrom(p.attributes),
+          });
+          for (const pub of p.audioTrackPublications.values()) {
+            if (pub.source === "microphone") {
+              act({ type: "track", identity, kind: "audio", on: !pub.isMuted });
+            }
+          }
+          for (const pub of p.videoTrackPublications.values()) {
+            act({
+              type: "track",
+              identity,
+              kind: pub.source === "screen_share" ? "screen" : "video",
+              on: !pub.isMuted,
+            });
+          }
+        };
 
-        room.on(sdk.RoomEvent.ParticipantConnected ?? "participantConnected", ((
-          p: LiveKitParticipant,
-        ) => {
-          act({ type: "peer-joined", identity: p.identity, name: p.name ?? p.identity });
+        on(E.ParticipantConnected, "participantConnected", ((p: LiveKitParticipant) => {
+          seedPeer(p);
         }) as (...args: never[]) => void);
 
-        room.on(sdk.RoomEvent.ParticipantDisconnected ?? "participantDisconnected", ((
-          p: LiveKitParticipant,
-        ) => {
+        on(E.ParticipantDisconnected, "participantDisconnected", ((p: LiveKitParticipant) => {
           act({ type: "peer-left", identity: p.identity });
           setTiles((prev) => prev.filter((t) => t.identity !== p.identity));
         }) as (...args: never[]) => void);
 
-        room.on(sdk.RoomEvent.TrackSubscribed ?? "trackSubscribed", ((
+        on(E.TrackSubscribed, "trackSubscribed", ((
           track: LiveKitTrack,
           pub: LiveKitPublication,
           p: LiveKitParticipant,
         ) => {
           const identity = p.identity;
-          const name = p.name ?? p.identity;
           const kind = track.kind === "video" ? "video" : "audio";
-          const screen = pub.source === "screen_share";
-          const key = `${identity}-${screen ? "screen" : kind}`;
-          act({ type: "track", identity, kind, on: true });
+          const screen = pub.source === "screen_share" || pub.source === "screen_share_audio";
+          const key = `${identity}-${screen ? `screen-${kind}` : kind}`;
+          if (pub.source !== "screen_share_audio") {
+            act({
+              type: "track",
+              identity,
+              kind: screen ? "screen" : kind,
+              on: !pub.isMuted,
+            });
+          }
           setTiles((prev) => [
             ...prev.filter((t) => t.key !== key),
-            { key, identity, name, kind, screen, track },
+            { key, identity, name: p.name || identity, kind, screen, track },
           ]);
         }) as (...args: never[]) => void);
 
-        room.on(sdk.RoomEvent.TrackUnsubscribed ?? "trackUnsubscribed", ((
+        on(E.TrackUnsubscribed, "trackUnsubscribed", ((
           track: LiveKitTrack,
           pub: LiveKitPublication,
           p: LiveKitParticipant,
         ) => {
-          const identity = p.identity;
           const kind = track.kind === "video" ? "video" : "audio";
-          const screen = pub.source === "screen_share";
-          const key = `${identity}-${screen ? "screen" : kind}`;
-          act({ type: "track", identity, kind, on: false });
+          const screen = pub.source === "screen_share" || pub.source === "screen_share_audio";
+          const key = `${p.identity}-${screen ? `screen-${kind}` : kind}`;
+          if (pub.source !== "screen_share_audio") {
+            act({ type: "track", identity: p.identity, kind: screen ? "screen" : kind, on: false });
+          }
           setTiles((prev) => prev.filter((t) => t.key !== key));
         }) as (...args: never[]) => void);
 
-        room.on(sdk.RoomEvent.TrackMuted ?? "trackMuted", ((
-          pub: LiveKitPublication,
-          p: LiveKitParticipant,
-        ) => {
-          const identity = p.identity;
-          const kind = pub.kind === "video" ? "video" : "audio";
-          act({ type: "track", identity, kind, on: false });
-        }) as (...args: never[]) => void);
+        const muteChange = (muted: boolean) =>
+          ((pub: LiveKitPublication, p: LiveKitParticipant) => {
+            const identity = idOf(p);
+            if (pub.source === "screen_share_audio") return;
+            const kind =
+              pub.source === "screen_share" ? "screen" : pub.kind === "video" ? "video" : "audio";
+            act({ type: "track", identity, kind, on: !muted });
+            // The host muted this device's mic: the control follows, and says why.
+            if (identity === LOCAL && pub.source === "microphone") {
+              if (muted && micOnRef.current && !micBusy.current) {
+                setNotice("The host muted you. Unmute when you're ready to speak.");
+              }
+              if (!micBusy.current) setMicOn(!muted);
+            }
+          }) as (...args: never[]) => void;
+        on(E.TrackMuted, "trackMuted", muteChange(true));
+        on(E.TrackUnmuted, "trackUnmuted", muteChange(false));
 
-        room.on(sdk.RoomEvent.TrackUnmuted ?? "trackUnmuted", ((
-          pub: LiveKitPublication,
-          p: LiveKitParticipant,
-        ) => {
-          const identity = p.identity;
-          const kind = pub.kind === "video" ? "video" : "audio";
-          act({ type: "track", identity, kind, on: true });
-        }) as (...args: never[]) => void);
-
-        room.on(sdk.RoomEvent.ActiveSpeakersChanged ?? "activeSpeakersChanged", ((
-          speakers: LiveKitParticipant[],
-        ) => {
+        on(E.ActiveSpeakersChanged, "activeSpeakersChanged", ((speakers: LiveKitParticipant[]) => {
           // Speakers arrive by real identity; the local participant is stored
-          // under "local" (its publish + tiles use that), so translate it or
-          // the local speaking ring never lights (F6).
-          const localId = room.localParticipant?.identity;
-          act({
-            type: "speakers",
-            identities: speakers.map((s) =>
-              s.isLocal || (localId !== undefined && s.identity === localId) ? "local" : s.identity,
-            ),
-          });
+          // under "local", so translate it or the local ring never lights (F6).
+          act({ type: "speakers", identities: speakers.map(idOf) });
         }) as (...args: never[]) => void);
 
         // The browser's own "Stop sharing" ends the track without our button
         // (docs/28 F24): follow it, or the control keeps saying "sharing".
-        room.on(sdk.RoomEvent.LocalTrackUnpublished ?? "localTrackUnpublished", ((
-          pub: LiveKitPublication,
-        ) => {
+        on(E.LocalTrackUnpublished, "localTrackUnpublished", ((pub: LiveKitPublication) => {
           if (pub.source !== "screen_share") return;
           setScreenOn(false);
-          setTiles((prev) => prev.filter((t) => !(t.identity === "local" && t.screen)));
+          setTiles((prev) => prev.filter((t) => !(t.identity === LOCAL && t.screen)));
         }) as (...args: never[]) => void);
 
-        room.on(sdk.RoomEvent.Disconnected ?? "disconnected", (() => {
-          if (!deadRef.current) leave();
+        on(E.RoomMetadataChanged, "roomMetadataChanged", ((raw: string) => {
+          setMeta((prev) => {
+            const next = readCallMeta(raw);
+            const self = room.localParticipant.identity;
+            if (next && prev && !prev.hosts.includes(self) && next.hosts.includes(self)) {
+              showToast("You're now a host of this call.");
+            }
+            return next;
+          });
+        }) as (...args: never[]) => void);
+
+        on(E.ParticipantAttributesChanged, "participantAttributesChanged", ((
+          _changed: Record<string, string>,
+          p: LiveKitParticipant,
+        ) => {
+          const identity = idOf(p);
+          const handAt = handFrom(p.attributes);
+          setPeers((prev) => {
+            const before = prev.get(identity);
+            if (identity !== LOCAL && handAt !== null && before && before.handAt === null) {
+              showToast(`${nameOf(p)} raised a hand`);
+            }
+            return roomPeers(prev, {
+              type: "attributes",
+              identity,
+              handAt,
+              capture: captureFrom(p.attributes),
+            });
+          });
+        }) as (...args: never[]) => void);
+
+        on(E.ConnectionQualityChanged, "connectionQualityChanged", ((
+          quality: string,
+          p: LiveKitParticipant,
+        ) => {
+          const q = ["excellent", "good", "poor", "lost"].includes(quality)
+            ? (quality as RoomPeer["quality"])
+            : "unknown";
+          act({ type: "quality", identity: idOf(p), quality: q });
+        }) as (...args: never[]) => void);
+
+        on(E.DataReceived, "dataReceived", ((
+          payload: Uint8Array,
+          p: LiveKitParticipant | undefined,
+          _kind: unknown,
+          topic: string | undefined,
+        ) => {
+          // Only people in the room send data; a server-sent packet has no participant.
+          if (!p) return;
+          if (topic === CHAT_TOPIC) {
+            const message = decodeChat(payload);
+            if (!message) return;
+            setChat((prev) =>
+              appendChat(prev, {
+                id: message.id,
+                from: p.identity,
+                name: p.name || p.identity,
+                text: message.text,
+                at: Date.now(),
+              }),
+            );
+            if (!chatOpenRef.current) setChatUnread((n) => n + 1);
+          } else if (topic === REACTION_TOPIC) {
+            const emoji = decodeReaction(payload);
+            if (!emoji) return;
+            const id = ++reactionSeq.current;
+            setReactions((prev) => [
+              ...prev.slice(-20),
+              { id, identity: p.identity, name: p.name || p.identity, emoji },
+            ]);
+            window.setTimeout(
+              () => setReactions((prev) => prev.filter((r) => r.id !== id)),
+              REACTION_MS,
+            );
+          }
+        }) as (...args: never[]) => void);
+
+        on(E.AudioPlaybackStatusChanged, "audioPlaybackChanged", (() => {
+          setAudioBlocked(room.canPlaybackAudio === false);
+        }) as (...args: never[]) => void);
+
+        on(E.Reconnecting, "reconnecting", (() => {
+          if (!deadRef.current) setStatus("reconnecting");
+        }) as (...args: never[]) => void);
+        on(E.Reconnected, "reconnected", (() => {
+          if (!deadRef.current) setStatus("live");
+        }) as (...args: never[]) => void);
+
+        on(E.Disconnected, "disconnected", ((reason?: number | string) => {
+          if (deadRef.current) return;
+          const name =
+            typeof reason === "number" ? sdk.DisconnectReason?.[reason] : (reason ?? undefined);
+          const described = describeDisconnect(name);
+          const end =
+            endingRef.current && described.kind === "ended"
+              ? { kind: "ended" as const, text: "You ended the call for everyone." }
+              : described;
+          const board = boardRef.current;
+          teardown();
+          if (end.kind === "left") {
+            leave();
+            return;
+          }
+          // "End for everyone" ends the meeting, so a capture of it here ends
+          // too — and its summary starts (docs/28 §9.1).
+          if (end.kind === "ended" && captureRef.current && captureRef.current.boardId === board) {
+            captureRef.current.stop();
+          }
+          // Removed or ended: no rejoin offer after a reload. Lost: offer it.
+          writeSession(
+            REJOIN_KEY,
+            end.kind === "lost" && board ? rejoinMarker(board, Date.now()) : null,
+          );
+          setEnded(end);
+          setStatus("ended");
         }) as (...args: never[]) => void);
 
         await room.connect(data.url, data.token);
+        if (!current()) {
+          void room.disconnect(true).catch(() => {});
+          return;
+        }
+        setSelfIdentity(room.localParticipant.identity);
+        setSelfName(room.localParticipant.name || null);
+        setMeta(readCallMeta(room.metadata));
+        setAudioBlocked(room.canPlaybackAudio === false);
+        // People already here: ParticipantConnected fires only for later arrivals.
+        for (const p of room.remoteParticipants.values()) seedPeer(p);
 
         // Mic and camera independently (docs/28 F18): each control shows what
         // really came on, and the reason for anything that didn't is on screen.
-        const media = await enableLocalMedia(room.localParticipant, { mic: micOn, cam: camOn });
+        micBusy.current = true;
+        const media = await enableLocalMedia(
+          room.localParticipant,
+          { mic: wantMic, cam: wantCam },
+          devices,
+        );
+        micBusy.current = false;
+        if (!current()) return;
         setMicOn(media.mic);
         setCamOn(media.cam);
         setNotice(media.notice);
-
-        publishLocal(room, "local", "You");
+        act({ type: "track", identity: LOCAL, kind: "audio", on: media.mic });
+        act({ type: "track", identity: LOCAL, kind: "video", on: media.cam });
+        publishLocal(room);
+        if (targetBoardId) writeSession(REJOIN_KEY, rejoinMarker(targetBoardId, Date.now()));
         setStatus("live");
       } catch (err) {
+        if (!current()) return;
+        teardown();
         setError((err as Error).message);
-        leave(true);
+        setStatus("error");
       }
     },
-    [act, camOn, leave, micOn, publishLocal],
+    [act, camOn, devices, leave, micOn, publishLocal, showToast, teardown],
   );
+
+  const cancelJoin = useCallback(() => {
+    leave();
+  }, [leave]);
+
+  const dismissEnded = useCallback(() => {
+    setEnded(null);
+    setActiveBoardId(null);
+    setChat([]);
+    setStatus("idle");
+  }, []);
 
   const toggleMic = useCallback(async () => {
     const room = roomRef.current;
     if (!room) return;
     const next = !micOn;
+    micBusy.current = true;
     try {
-      await room.localParticipant.setMicrophoneEnabled(next);
+      await room.localParticipant.setMicrophoneEnabled(
+        next,
+        next && devices.audioinput ? { deviceId: devices.audioinput } : undefined,
+      );
       setMicOn(next);
-      act({ type: "track", identity: "local", kind: "audio", on: next });
+      act({ type: "track", identity: LOCAL, kind: "audio", on: next });
+      if (next) setNotice((n) => (n?.startsWith("The host muted you") ? null : n));
     } catch (err) {
       setNotice(describeMediaError("microphone", err));
+    } finally {
+      // The muted event can trail the call that caused it.
+      window.setTimeout(() => (micBusy.current = false), 300);
     }
-  }, [act, micOn]);
+  }, [act, devices.audioinput, micOn]);
 
   const toggleCam = useCallback(async () => {
     const room = roomRef.current;
     if (!room) return;
     const next = !camOn;
     try {
-      await room.localParticipant.setCameraEnabled(next);
+      await room.localParticipant.setCameraEnabled(
+        next,
+        next && devices.videoinput ? { deviceId: devices.videoinput } : undefined,
+      );
       setCamOn(next);
-      act({ type: "track", identity: "local", kind: "video", on: next });
+      act({ type: "track", identity: LOCAL, kind: "video", on: next });
       if (!next) {
-        setTiles((prev) => prev.filter((t) => !(t.identity === "local" && !t.screen)));
+        setTiles((prev) => prev.filter((t) => !(t.identity === LOCAL && !t.screen)));
       } else {
-        publishLocal(room, "local", "You");
+        publishLocal(room);
       }
     } catch (err) {
       setNotice(describeMediaError("camera", err));
     }
-  }, [act, camOn, publishLocal]);
+  }, [act, camOn, devices.videoinput, publishLocal]);
 
   const toggleScreen = useCallback(async () => {
     const room = roomRef.current;
@@ -365,52 +752,280 @@ export function MeetingSessionProvider({ children }: { children: ReactNode }) {
     try {
       await room.localParticipant.setScreenShareEnabled(next);
       setScreenOn(next);
+      act({ type: "track", identity: LOCAL, kind: "screen", on: next });
       // The local screen tile used to be published only at join and on a
       // camera toggle, so your own share never showed (docs/28 F24).
-      if (next) publishLocal(room, "local", "You");
-      else setTiles((prev) => prev.filter((t) => !(t.identity === "local" && t.screen)));
+      if (next) publishLocal(room);
+      else setTiles((prev) => prev.filter((t) => !(t.identity === LOCAL && t.screen)));
     } catch (err) {
       // Cancelling the browser's picker is a choice, not a failure: null.
       setNotice(describeMediaError("screen", err));
     }
-  }, [publishLocal, screenOn]);
+  }, [act, publishLocal, screenOn]);
 
-  // Clean up on app unmount
+  const chooseDevice = useCallback(async (kind: DeviceKind, deviceId: string) => {
+    setDevices((prev) => {
+      const next = { ...prev, [kind]: deviceId };
+      saveDeviceChoice(next);
+      return next;
+    });
+    const room = roomRef.current;
+    if (!room) return;
+    try {
+      await room.switchActiveDevice(kind, deviceId);
+    } catch (err) {
+      setNotice(
+        describeMediaError(kind === "videoinput" ? "camera" : "microphone", err) ??
+          "Couldn't switch to that device.",
+      );
+    }
+  }, []);
+
+  const startAudio = useCallback(() => {
+    const room = roomRef.current;
+    if (!room) return;
+    void room
+      .startAudio()
+      .then(() => setAudioBlocked(room.canPlaybackAudio === false))
+      .catch(() => {});
+  }, []);
+
+  const setChatOpen = useCallback((open: boolean) => {
+    chatOpenRef.current = open;
+    setChatOpenState(open);
+    if (open) setChatUnread(0);
+  }, []);
+
+  const sendChat = useCallback(async (text: string): Promise<boolean> => {
+    const room = roomRef.current;
+    if (!room) return false;
+    const id = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
+    const at = Date.now();
+    const payload = encodeChat(text, id, at);
+    if (!payload) return false;
+    try {
+      await room.localParticipant.publishData(payload, { reliable: true, topic: CHAT_TOPIC });
+    } catch {
+      setNotice("Your message didn't send. Try again.");
+      return false;
+    }
+    setChat((prev) => appendChat(prev, { id, from: LOCAL, name: "You", text: text.trim(), at }));
+    return true;
+  }, []);
+
+  const sendReaction = useCallback((emoji: Reaction) => {
+    const room = roomRef.current;
+    if (!room) return;
+    void room.localParticipant
+      .publishData(encodeReaction(emoji), { reliable: true, topic: REACTION_TOPIC })
+      .catch(() => {});
+    const id = ++reactionSeq.current;
+    setReactions((prev) => [...prev.slice(-20), { id, identity: LOCAL, name: "You", emoji }]);
+    window.setTimeout(() => setReactions((prev) => prev.filter((r) => r.id !== id)), REACTION_MS);
+  }, []);
+
+  const handUp = (peers.get(LOCAL)?.handAt ?? null) !== null;
+
+  const setHand = useCallback(
+    async (up: boolean) => {
+      const board = boardRef.current;
+      if (!board) return;
+      const before = peers.get(LOCAL);
+      act({
+        type: "attributes",
+        identity: LOCAL,
+        handAt: up ? Date.now() : null,
+        capture: before?.capture ?? false,
+      });
+      const result = await callRoute(board, "state", { hand: up });
+      if (!result.ok) {
+        act({
+          type: "attributes",
+          identity: LOCAL,
+          handAt: before?.handAt ?? null,
+          capture: before?.capture ?? false,
+        });
+        setNotice(result.error);
+      }
+    },
+    [act, peers],
+  );
+
+  const hostAction = useCallback(async (action: HostAction): Promise<boolean> => {
+    const board = boardRef.current;
+    if (!board) return false;
+    const [route, body]: [string, unknown] =
+      action.kind === "mute"
+        ? ["mute", { identity: action.identity }]
+        : action.kind === "mute-everyone"
+          ? ["mute", { everyone: true }]
+          : action.kind === "remove"
+            ? ["remove", { identity: action.identity }]
+            : action.kind === "make-host"
+              ? ["hosts", { identity: action.identity }]
+              : action.kind === "lower-hand"
+                ? ["state", { identity: action.identity, hand: false }]
+                : ["end", {}];
+    if (action.kind === "end") endingRef.current = true;
+    const result = await callRoute(board, route, body);
+    if (!result.ok) {
+      endingRef.current = false;
+      setNotice(result.error);
+    }
+    return result.ok;
+  }, []);
+
+  // Rule 4: while this tab transcribes the call's board, everyone in the call
+  // sees it on this person's tile. The server sets the mark (calls.ts).
   useEffect(() => {
-    return () => {
-      leave();
-    };
-  }, [leave]);
+    if (status !== "live" || !activeBoardId) return;
+    const on = capture !== null && capture.boardId === activeBoardId;
+    if (on === captureSent.current) return;
+    captureSent.current = on;
+    void callRoute(activeBoardId, "state", { capture: on });
+  }, [status, activeBoardId, capture]);
+
+  // Clean up on app unmount (the marker stays: a reload offers the call back).
+  useEffect(() => () => teardown(), [teardown]);
+
+  const isHost = selfIdentity !== null && meta !== null && meta.hosts.includes(selfIdentity);
+
+  const value = useMemo<MeetingSessionValue>(
+    () => ({
+      status,
+      error,
+      ended,
+      notice,
+      dismissNotice: () => setNotice(null),
+      toast,
+      activeBoardId,
+      peers,
+      tiles,
+      micOn,
+      camOn,
+      screenOn,
+      meta,
+      isHost,
+      selfIdentity,
+      selfName,
+      audioBlocked,
+      startAudio,
+      activeLease,
+      setActiveLease,
+      setMicOn,
+      setCamOn,
+      devices,
+      chooseDevice,
+      join,
+      cancelJoin,
+      leave,
+      dismissEnded,
+      toggleMic,
+      toggleCam,
+      toggleScreen,
+      chat,
+      chatUnread,
+      chatOpen,
+      setChatOpen,
+      sendChat,
+      reactions,
+      sendReaction,
+      handUp,
+      setHand,
+      hostAction,
+      rejoin,
+      dismissRejoin: () => {
+        writeSession(REJOIN_KEY, null);
+        setRejoin(null);
+      },
+      capture,
+      setCapture,
+    }),
+    [
+      status,
+      error,
+      ended,
+      notice,
+      toast,
+      activeBoardId,
+      peers,
+      tiles,
+      micOn,
+      camOn,
+      screenOn,
+      meta,
+      isHost,
+      selfIdentity,
+      selfName,
+      audioBlocked,
+      startAudio,
+      activeLease,
+      devices,
+      chooseDevice,
+      join,
+      cancelJoin,
+      leave,
+      dismissEnded,
+      toggleMic,
+      toggleCam,
+      toggleScreen,
+      chat,
+      chatUnread,
+      chatOpen,
+      setChatOpen,
+      sendChat,
+      reactions,
+      sendReaction,
+      handUp,
+      setHand,
+      hostAction,
+      rejoin,
+      capture,
+    ],
+  );
 
   return (
-    <MeetingSessionContext.Provider
-      value={{
-        status,
-        error,
-        notice,
-        dismissNotice: () => setNotice(null),
-        activeBoardId,
-        peers,
-        tiles,
-        micOn,
-        camOn,
-        screenOn,
-        activeLease,
-        setActiveLease,
-        setMicOn,
-        setCamOn,
-        join,
-        leave,
-        toggleMic,
-        toggleCam,
-        toggleScreen,
-        capture,
-        setCapture,
-      }}
-    >
+    <MeetingSessionContext.Provider value={value}>
       {children}
+      <CallAudio tiles={tiles} />
     </MeetingSessionContext.Provider>
   );
+}
+
+/**
+ * Every remote voice, attached once, wherever the person is in the app. The
+ * room and the dock draw video only; audio used to be attached by neither,
+ * so a call could be silent.
+ */
+function CallAudio({ tiles }: { tiles: MediaTile[] }) {
+  const audio = tiles.filter((t) => t.kind === "audio" && t.identity !== LOCAL);
+  return (
+    <div hidden aria-hidden>
+      {audio.map((t) => (
+        <AudioSink key={t.key} tile={t} />
+      ))}
+    </div>
+  );
+}
+
+function AudioSink({ tile }: { tile: MediaTile }) {
+  const ref = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const host = ref.current;
+    if (!host) return;
+    const el = tile.track.attach() as HTMLAudioElement;
+    el.autoplay = true;
+    host.appendChild(el);
+    return () => {
+      try {
+        tile.track.detach(el);
+      } catch {
+        /* teardown race */
+      }
+      el.remove();
+    };
+  }, [tile]);
+  return <div ref={ref} />;
 }
 
 export function useMeetingSession(): MeetingSessionValue {

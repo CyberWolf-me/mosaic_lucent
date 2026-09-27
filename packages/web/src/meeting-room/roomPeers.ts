@@ -18,6 +18,12 @@ export interface RoomPeer {
   camOn: boolean;
   screenOn: boolean;
   speaking: boolean;
+  /** When their hand went up (docs/28 S5); null when it's down. */
+  handAt: number | null;
+  /** Their device is transcribing the meeting (rule 4: capture is never invisible). */
+  capture: boolean;
+  /** LiveKit's view of their link; "poor" and "lost" show on the tile. */
+  quality: "excellent" | "good" | "poor" | "lost" | "unknown";
 }
 
 export type RoomPeerAction =
@@ -25,7 +31,9 @@ export type RoomPeerAction =
   | { type: "peer-left"; identity: string }
   | { type: "reset" }
   | { type: "track"; identity: string; kind: "audio" | "video" | "screen"; on: boolean }
-  | { type: "speakers"; identities: string[] };
+  | { type: "speakers"; identities: string[] }
+  | { type: "attributes"; identity: string; handAt: number | null; capture: boolean }
+  | { type: "quality"; identity: string; quality: RoomPeer["quality"] };
 
 const blank = (identity: string, name: string): RoomPeer => ({
   identity,
@@ -34,6 +42,9 @@ const blank = (identity: string, name: string): RoomPeer => ({
   camOn: false,
   screenOn: false,
   speaking: false,
+  handAt: null,
+  capture: false,
+  quality: "unknown",
 });
 
 /**
@@ -85,6 +96,18 @@ export function roomPeers(
       const field =
         action.kind === "audio" ? "micOn" : action.kind === "video" ? "camOn" : "screenOn";
       next.set(action.identity, { ...existing, [field]: action.on });
+      return next;
+    }
+    case "attributes": {
+      const existing = next.get(action.identity) ?? blank(action.identity, action.identity);
+      next.set(action.identity, { ...existing, handAt: action.handAt, capture: action.capture });
+      return next;
+    }
+    case "quality": {
+      const existing = next.get(action.identity);
+      if (existing && existing.quality !== action.quality) {
+        next.set(action.identity, { ...existing, quality: action.quality });
+      }
       return next;
     }
     case "speakers": {

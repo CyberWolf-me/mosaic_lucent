@@ -1,5 +1,10 @@
 import { useRef, useEffect, useState } from "react";
-import { useMeetingSession, type LiveCapture, type MediaTile } from "./MeetingSessionContext.js";
+import {
+  inCall,
+  useMeetingSession,
+  type LiveCapture,
+  type MediaTile,
+} from "./MeetingSessionContext.js";
 import { useWorkspace } from "../workspace.js";
 import { Ico } from "../ui/icons.js";
 import { MediaNotice } from "./MediaNotice.js";
@@ -32,7 +37,8 @@ function MiniTrackPreview({ tile }: { tile: MediaTile }) {
     host.appendChild(el);
     return () => {
       try {
-        tile.track.detach();
+        // Only this element: the room may show the same track at the same time.
+        tile.track.detach(el);
         el.remove();
       } catch {
         /* ignore cleanup errors */
@@ -154,6 +160,12 @@ export function MeetingHuddleDock() {
     notice,
     dismissNotice,
     status,
+    ended,
+    dismissEnded,
+    join,
+    rejoin,
+    dismissRejoin,
+    chatUnread,
     peers,
     tiles,
     micOn,
@@ -186,10 +198,56 @@ export function MeetingHuddleDock() {
     return () => clearInterval(interval);
   }, [activeLease, setActiveLease]);
 
+  // S6: the page reloaded mid-call — offer the call back, wherever the person is.
+  if (rejoin && status === "idle") {
+    return (
+      <aside className="meeting-huddle-dock" aria-label="Rejoin the call" style={DOCK_STYLE}>
+        <p style={{ margin: 0, fontSize: 12.5, color: "var(--ink-0)" }}>
+          You left the call when the page reloaded.
+        </p>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button
+            type="button"
+            className="btn primary"
+            onClick={() => {
+              const board = rejoin.boardId;
+              openMeetingOf(board);
+              void join(board);
+            }}
+          >
+            Rejoin
+          </button>
+          <button type="button" className="btn" onClick={dismissRejoin}>
+            Not now
+          </button>
+        </div>
+      </aside>
+    );
+  }
+
   // The dock shows away from the full meeting screen, for a live call, a
   // running capture (docs/28 F14), or both.
   if (view === "meeting") return null;
-  if (status !== "live") {
+  if (status === "ended" && ended) {
+    return (
+      <aside className="meeting-huddle-dock" aria-label="The call ended" style={DOCK_STYLE}>
+        <p role="status" style={{ margin: 0, fontSize: 12.5, color: "var(--ink-0)" }}>
+          {ended.text}
+        </p>
+        <div style={{ display: "flex", gap: 8 }}>
+          {ended.kind === "lost" && (
+            <button type="button" className="btn primary" onClick={() => void join(activeBoardId)}>
+              Rejoin
+            </button>
+          )}
+          <button type="button" className="btn" onClick={dismissEnded}>
+            Close
+          </button>
+        </div>
+      </aside>
+    );
+  }
+  if (!inCall(status)) {
     return capture ? (
       <aside className="meeting-huddle-dock" aria-label="Meeting recording" style={DOCK_STYLE}>
         <CaptureRow capture={capture} onOpen={() => openMeetingOf(capture.boardId)} />
@@ -198,6 +256,7 @@ export function MeetingHuddleDock() {
   }
 
   const peerList = [...peers.values()];
+  const handsUp = peerList.filter((p) => p.handAt !== null).length;
   const screenTile = tiles.find((t) => t.screen);
   const videoTiles = tiles.filter((t) => t.kind === "video" && !t.screen);
 
@@ -224,16 +283,18 @@ export function MeetingHuddleDock() {
               boxShadow: "0 0 8px #22c55e",
             }}
           />
-          <span>Lucent Huddle</span>
+          <span>{status === "reconnecting" ? "Reconnecting…" : "In call"}</span>
           <span style={{ fontSize: 11, color: "var(--ink-2)", fontWeight: 400 }}>
-            ({peerList.length} peer{peerList.length === 1 ? "" : "s"})
+            · {peerList.length} {peerList.length === 1 ? "person" : "people"}
+            {handsUp > 0 ? ` · ${handsUp} hand${handsUp === 1 ? "" : "s"} up` : ""}
+            {chatUnread > 0 ? ` · ${chatUnread} new message${chatUnread === 1 ? "" : "s"}` : ""}
           </span>
         </div>
 
         <button
           className="btn"
           onClick={() => openMeetingOf(activeBoardId)}
-          title="Expand to Full Meeting Stage"
+          title="Open the call"
           style={{
             padding: "2px 8px",
             fontSize: 11,
@@ -244,7 +305,7 @@ export function MeetingHuddleDock() {
             cursor: "pointer",
           }}
         >
-          ⛶ Expand
+          Open
         </button>
       </div>
 
@@ -378,7 +439,7 @@ export function MeetingHuddleDock() {
                 color: "#fff",
               }}
             >
-              🔇
+              <Ico.MicOff width={9} height={9} />
             </span>
           )}
         </div>
@@ -431,7 +492,7 @@ export function MeetingHuddleDock() {
                       color: "#fff",
                     }}
                   >
-                    🔇
+                    <Ico.MicOff width={9} height={9} />
                   </span>
                 )}
               </div>

@@ -30,7 +30,8 @@ export const NATIVE_MEETING_CAPABILITIES: MeetingCapabilities = {
   participants: true,
   transcript: true,
   speakerIdentity: true,
-  chat: false,
+  // In-call messages over the data channel (docs/28 S5); never stored.
+  chat: true,
   recording: "policy",
 };
 

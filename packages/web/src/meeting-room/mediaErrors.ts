@@ -34,8 +34,8 @@ export function describeMediaError(device: MediaDevice, err: unknown): string | 
 
 /** The two switches `enableLocalMedia` needs from LiveKit's local participant. */
 export interface LocalMediaSwitches {
-  setMicrophoneEnabled(on: boolean): Promise<unknown>;
-  setCameraEnabled(on: boolean): Promise<unknown>;
+  setMicrophoneEnabled(on: boolean, options?: { deviceId?: string }): Promise<unknown>;
+  setCameraEnabled(on: boolean, options?: { deviceId?: string }): Promise<unknown>;
 }
 
 /**
@@ -47,13 +47,17 @@ export interface LocalMediaSwitches {
 export async function enableLocalMedia(
   local: LocalMediaSwitches,
   want: { mic: boolean; cam: boolean },
+  devices: { audioinput?: string; videoinput?: string } = {},
 ): Promise<{ mic: boolean; cam: boolean; notice: string | null }> {
   const problems: string[] = [];
   let mic = false;
   let cam = false;
   if (want.mic) {
     try {
-      await local.setMicrophoneEnabled(true);
+      await local.setMicrophoneEnabled(
+        true,
+        devices.audioinput ? { deviceId: devices.audioinput } : undefined,
+      );
       mic = true;
     } catch (err) {
       const why = describeMediaError("microphone", err);
@@ -62,7 +66,10 @@ export async function enableLocalMedia(
   }
   if (want.cam) {
     try {
-      await local.setCameraEnabled(true);
+      await local.setCameraEnabled(
+        true,
+        devices.videoinput ? { deviceId: devices.videoinput } : undefined,
+      );
       cam = true;
     } catch (err) {
       const why = describeMediaError("camera", err);

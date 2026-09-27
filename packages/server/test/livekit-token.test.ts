@@ -66,6 +66,8 @@ describe("mintLiveKitToken (wire format)", () => {
       roomJoin: true,
       canPublish: true,
       canSubscribe: true,
+      canPublishData: true,
+      canUpdateOwnMetadata: false,
     });
 
     // The signature is a real HMAC over header.payload with the api secret.

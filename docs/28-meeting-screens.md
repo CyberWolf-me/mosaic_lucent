@@ -98,20 +98,20 @@ against every file their row cites.
  S12 Import transcript ──► S8
 ```
 
-| Screen                             | Spec        |             Today             |
-| ---------------------------------- | ----------- | :---------------------------: |
-| S1 Meetings (workspace list)       | §65, §121   |   ✅ A3.1 (Live now · Past)   |
-| S2 Schedule                        | §16         |              ❌               |
-| S3 Meeting page (upcoming)         | §16, §122   |              ❌               |
-| S4 Lobby                           | §17         |        🟡 two toggles         |
-| S5 Room                            | §18–21      |              🟡               |
-| S6 Dock (call outside the meeting) | —           |          ✅ with F25          |
-| S7 Capture panel                   | §22–25      |   🟡 today's `MeetingView`    |
-| S8 Ending                          | §120        |     ✅ A3.3 (server job)      |
-| S9 Review                          | §26–27, §57 | 🟡 A3.3 summary; review is A2 |
-| S10 Past meeting                   | §121        |      ✅ A3.1 (+ rename)       |
-| S11 Follow-up                      | §57         |      🟡 pieces elsewhere      |
-| S12 Import transcript              | §64         |  🟡 route, mock only, no UI   |
+| Screen                             | Spec        |             Today              |
+| ---------------------------------- | ----------- | :----------------------------: |
+| S1 Meetings (workspace list)       | §65, §121   |   ✅ A3.1 (Live now · Past)    |
+| S2 Schedule                        | §16         |               ❌               |
+| S3 Meeting page (upcoming)         | §16, §122   |               ❌               |
+| S4 Lobby                           | §17         |            ✅ A3.2             |
+| S5 Room                            | §18–21      | ✅ A3.2 (captions wait for V8) |
+| S6 Dock (call outside the meeting) | —           |      ✅ with F25, rejoin       |
+| S7 Capture panel                   | §22–25      |    🟡 today's `MeetingView`    |
+| S8 Ending                          | §120        |      ✅ A3.3 (server job)      |
+| S9 Review                          | §26–27, §57 | 🟡 A3.3 summary; review is A2  |
+| S10 Past meeting                   | §121        |       ✅ A3.1 (+ rename)       |
+| S11 Follow-up                      | §57         |      🟡 pieces elsewhere       |
+| S12 Import transcript              | §64         |   🟡 route, mock only, no UI   |
 
 ## 4. State machines every screen shares
 
@@ -139,18 +139,20 @@ vocabulary but no code emits it, and the dispatcher has no consumers
 
 `idle → prejoin → joining → connected ⇄ reconnecting → left | failed | removed`
 
-| State          | The user sees                                                                       |                                        Today                                        |
-| -------------- | ----------------------------------------------------------------------------------- | :---------------------------------------------------------------------------------: |
-| `joining`      | "Connecting…" with Cancel                                                           |                         ✅ "Connecting to room…", no Cancel                         |
-| `connected`    | the room                                                                            |                                      ✅ `live`                                      |
-| `reconnecting` | a banner, "Reconnecting — your transcript is safe"; media frozen, capture continues | ❌ a disconnect silently returns to the lobby (`MeetingSessionContext.tsx:268–270`) |
-| `failed`       | "Lost the connection" with Rejoin (→ S4)                                            |                               ❌ folded into `error`                                |
-| `removed`      | "The host removed you from this meeting"                                            |                                  ❌ no host powers                                  |
-| `left`         | the dock disappears; the meeting goes on without you                                |                                         ✅                                          |
+| State          | The user sees                                                                       |                                    Today                                    |
+| -------------- | ----------------------------------------------------------------------------------- | :-------------------------------------------------------------------------: |
+| `joining`      | "Connecting…" with Cancel                                                           |                                     ✅                                      |
+| `connected`    | the room                                                                            |                                  ✅ `live`                                  |
+| `reconnecting` | a banner, "Reconnecting — your transcript is safe"; media frozen, capture continues | ✅ on a media reconnect; a signal-only resume keeps media and shows nothing |
+| `failed`       | "Lost the connection" with Rejoin (→ S4)                                            |                                     ✅                                      |
+| `removed`      | "The host removed you from this meeting"                                            |              ✅ and the token route refuses them for this call              |
+| `left`         | the dock disappears; the meeting goes on without you                                |                                     ✅                                      |
 
-The call token lasts 600 s (`server/src/livekit.ts:61`) and is minted only at
-join. A reconnect after expiry needs a fresh token, so `reconnecting` refreshes
-it.
+The call token lasts 600 s (`server/src/livekit.ts`) and is minted at join.
+LiveKit sends a connected client refreshed tokens over the signal connection
+(`refreshToken`), and the client reconnects with the newest one; a Rejoin after
+the call ended mints a new token through the token route, which also re-checks
+the board role and the host's removals.
 
 ### 4.3 Capture (transcription), per participant
 
@@ -268,9 +270,9 @@ Actions: **Join** → S4. **Edit** and **Cancel** (host) → S2 / confirm →
 
 ### S4 Lobby
 
-**Today 🟡:** "Lucent Video Meeting" with Mic On/Off and Camera On/Off toggles
-that set the starting state only (`NativeRoom.tsx:236–328`). There is no
-preview, level meter, device picker, or permission handling (F18).
+**Today ✅ (A3.2):** `CallLobby.tsx` — every state below; the speaker picker
+shows where the browser can route audio (`setSinkId`). The capture line and
+the host's mode choice are not in the lobby yet.
 
 Shows: camera preview, mic level meter, device pickers (mic, camera, speaker
 with a test sound), the capture line ("Lucent is transcribing · Assistant
@@ -292,38 +294,37 @@ mode"; the host can change the mode here), and Join.
 
 ### S5 Room
 
-**Today 🟡:** `NativeRoom.tsx:455–674` — the stage, "N participants", speaking
-rings, mic, camera, screen share, Leave.
+**Today ✅ (A3.2):** `CallStage.tsx` — auto grid, spotlight when someone presents
+or is pinned, speaker view, People and Chat panels, reactions, the host's
+menus. Live captions, "stop transcribing me" and the board beside the call
+are still to come.
 
-| Control                                                       | Who                          |                            Today                             |
-| ------------------------------------------------------------- | ---------------------------- | :----------------------------------------------------------: |
-| Mic, camera                                                   | everyone                     |                              ✅                              |
-| Switch device in the call                                     | everyone                     |                              ❌                              |
-| Share screen, stop sharing                                    | everyone (host may restrict) |                            🟡 F24                            |
-| Roster with speaking, muted, sharing, hand                    | everyone                     |                        ❌ count only                         |
-| Raise hand, reactions                                         | everyone                     |                              ❌                              |
-| Chat                                                          | everyone                     |      ❌ absent (`meeting-capabilities.ts` `chat:false`)      |
-| Live captions (interim, never stored)                         | everyone                     |                   ❌ interim is discarded                    |
-| Capture indicator (rule 4)                                    | everyone sees it             |                              ❌                              |
-| Stop transcribing me                                          | everyone                     |                              ❌                              |
-| Board beside the call; follow, spotlight, bring everyone here | everyone / presenter         |                ❌ (`focusOn` exists, unused)                 |
-| Leave                                                         | everyone                     |                        ✅ no confirm                         |
-| End for everyone                                              | host                         |                              ❌                              |
-| Mute, remove, allow sharing, make co-host                     | host                         | ❌ needs a LiveKit admin grant and RoomService on the server |
+| Control                                                       | Who                          |                                      Today                                      |
+| ------------------------------------------------------------- | ---------------------------- | :-----------------------------------------------------------------------------: |
+| Mic, camera                                                   | everyone                     |                                ✅ Ctrl+D, Ctrl+E                                |
+| Switch device in the call                                     | everyone                     |                           ✅ Audio and video settings                           |
+| Share screen, stop sharing                                    | everyone (host may restrict) |                       ✅ F24 (host restriction not built)                       |
+| Roster with speaking, muted, sharing, hand                    | everyone                     |                                 ✅ People panel                                 |
+| Raise hand, reactions                                         | everyone                     |                                       ✅                                        |
+| Chat                                                          | everyone                     |                   ✅ in-call only, never stored (as in Meet)                    |
+| Live captions (interim, never stored)                         | everyone                     |                             ❌ interim is discarded                             |
+| Capture indicator (rule 4)                                    | everyone sees it             |                      ✅ "Lucent is transcribing · <name>"                       |
+| Stop transcribing me                                          | everyone                     |                                       ❌                                        |
+| Board beside the call; follow, spotlight, bring everyone here | everyone / presenter         |                          ❌ (`focusOn` exists, unused)                          |
+| Leave                                                         | everyone                     |                                  ✅ no confirm                                  |
+| End for everyone                                              | host                         |                       ✅ also ends a capture of the call                        |
+| Mute, remove, allow sharing, make co-host                     | host                         | ✅ mute, mute everyone, remove, co-host, lower a hand; sharing rights not built |
 
 States follow §4.2. Two more: **ended by host** ("Alice ended the meeting" →
 S8 for the host, S10 for others) and **removed** (→ S1).
 
 ### S6 Dock — the call while you work elsewhere
 
-**Today ✅:** shows while the call is live and the meeting view isn't open
-(`MeetingHuddleDock.tsx:82`): peers, presenter, the lease chip, mic, camera,
-screen, Leave, Expand.
-
-Add: the `reconnecting` banner (§4.2), the capture state (§4.3), Expand to
-the call's board (F25). A reload ends the call today; the target keeps a
-per-tab marker and offers "You left the meeting when the page reloaded —
-Rejoin?".
+**Today ✅:** shows while the call is live and the meeting view isn't open:
+people, hands and unread messages, presenter, the lease chip, mic, camera,
+screen, Leave, Open (to the call's board, F25), "Reconnecting…", and why a call
+ended. A reload offers the call back ("You left the call when the page
+reloaded" — Rejoin), from a per-tab marker.
 
 ### S7 Capture panel — transcript, notes, Lucent, brief
 
@@ -468,17 +469,17 @@ When it does: choose source → pick meeting → preview turns → import → S8
 Board role governs what lands on the board. Meeting role (new) governs the
 call. Org policy caps both.
 
-| Action                         |   Board viewer   | Board editor |  Meeting host  | Today                                           |
-| ------------------------------ | :--------------: | :----------: | :------------: | ----------------------------------------------- |
-| See the meeting and transcript |        ✅        |      ✅      |       ✅       | viewer floor ✅                                 |
-| Join the call, speak, share    |    ✅ (§9.3)     |      ✅      |       ✅       | ✅ every token can publish (`livekit.ts:87–96`) |
-| Be transcribed                 | ✅ unless muted  |      ✅      |       ✅       | only the recorder's mic                         |
-| Start or stop capture          |        ❌        |      ✅      |       ✅       | editor floor; the UI doesn't check (F19)        |
-| Private notes, enhance, Ask    |        ✅        |      ✅      |       ✅       | ✅ viewer floor                                 |
-| Correct a turn                 | own turns (§9.4) |      ✅      |       ✅       | ❌                                              |
-| Approve candidates             |        ❌        |      ✅      | only as editor | editor ✅                                       |
-| End for everyone, host powers  |        ❌        |      ❌      |       ✅       | ❌                                              |
-| Import                         |        ❌        |      ✅      |       —        | editor ✅                                       |
+| Action                         |   Board viewer   | Board editor |  Meeting host  | Today                                                    |
+| ------------------------------ | :--------------: | :----------: | :------------: | -------------------------------------------------------- |
+| See the meeting and transcript |        ✅        |      ✅      |       ✅       | viewer floor ✅                                          |
+| Join the call, speak, share    |    ✅ (§9.3)     |      ✅      |       ✅       | ✅ every board member's token can publish                |
+| Be transcribed                 | ✅ unless muted  |      ✅      |       ✅       | only the recorder's mic                                  |
+| Start or stop capture          |        ❌        |      ✅      |       ✅       | editor floor; the UI doesn't check (F19)                 |
+| Private notes, enhance, Ask    |        ✅        |      ✅      |       ✅       | ✅ viewer floor                                          |
+| Correct a turn                 | own turns (§9.4) |      ✅      |       ✅       | ❌                                                       |
+| Approve candidates             |        ❌        |      ✅      | only as editor | editor ✅                                                |
+| End for everyone, host powers  |        ❌        |      ❌      |       ✅       | ✅ the call's host list (first person in, plus co-hosts) |
+| Import                         |        ❌        |      ✅      |       —        | editor ✅                                                |
 
 Org `recordingDisabled` blocks save, append and import, but never end or reads
 (`server/src/routes/meetings.ts`) ✅. The UI must say so (§4.3 `refused`).
@@ -542,6 +543,28 @@ V8 transport (F4).
   above the Brief with turn chips, says "Writing the summary" while the job runs,
   and lets an editor Write it now / Rewrite (`POST …/summary`). Per-item review
   of candidates with trust stays A2 (J5). `scripts/meeting-capture-check.mjs` 29/29.
+- **A3.2 — done (2026-09-27): the call works like Zoom or Meet.** The lobby
+  (S4): camera preview, a live mic meter, microphone / camera / speaker pickers
+  with a test sound, per-device permission states (a blocked or missing mic
+  still joins as a listener), "who's here", Cancel while connecting, and a
+  failed join in words. The room (S5): auto grid, spotlight for a presenter or
+  a pin, speaker view, People (raised hands first) and Chat panels, reactions,
+  raise hand, device switching, Ctrl+D / Ctrl+E / Ctrl+Alt+H, the
+  "transcribing" mark on the person who records (rule 4), and every connection
+  state of §4.2. Host powers: the first person into a board's call hosts it
+  (created with LiveKit's RoomService, so two people starting at once still
+  get one host); a host mutes one person or everyone, lowers a hand, makes a
+  co-host, removes someone — who can't rejoin that call — and ends it for
+  everyone, which also ends a capture of it. When every host has left, the
+  next person in hosts. The host list lives in the LiveKit room's metadata,
+  which only the server writes; hands and the transcribing mark are
+  participant attributes the server sets for the caller, so no participant
+  token can rename itself. The dock (S6) offers the call back after a reload.
+  Fixed on the way: remote audio was attached nowhere, so a call could be
+  silent. `scripts/meeting-call-check.mjs` drives three accounts through a real
+  LiveKit project (37/37, four runs in a row). Not yet: live captions (V8),
+  "stop transcribing me", the board beside the call, host-restricted sharing,
+  a waiting room for guests (A6), background blur, and video recording.
 - **A3.5, corrections part — done (2026-09-27).** An editor corrects a
   transcript line in place on a saved meeting (`POST …/turns/:n/correction`).
   The correction is an overlay (`corrections`, migration 0034, appended
@@ -553,6 +576,11 @@ V8 transport (F4).
   the rest of A3.5 (it needs a multi-person LiveKit room to build and verify).
 
 ## 9. Decisions needed
+
+Taken with the recommendation on 2026-09-27, when the owner asked for meetings
+that work like Zoom and Meet: **1** (the host ends for everyone; LiveKit closes
+an empty room after two minutes; the idle sweep ends orphaned captures), **3**
+(viewers speak) and **6** (early join). 2, 4 and 5 are still open.
 
 | #   | Question                                                                                | Recommendation                                                                                                                         |
 | --- | --------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |

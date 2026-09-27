@@ -115,6 +115,8 @@ export interface RouteServices {
    * register against the same interface with per-request credentials.
    */
   readonly meetingConnectors: import("../meetingConnectors.js").MeetingConnectorRegistry;
+  /** docs/28 A3.2: the board call's host powers; undefined → the call routes answer 503. */
+  readonly calls: import("../calls.js").CallControl | undefined;
   /** Stage B3: review-gate proposals; undefined → the proposal routes answer 503. */
   readonly proposals: import("../proposals.js").ProposalStore | undefined;
   /** F1: SSO connections + domain claims; undefined → the SSO routes answer 503. */

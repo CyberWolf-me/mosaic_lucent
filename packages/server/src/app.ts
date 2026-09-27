@@ -130,8 +130,10 @@ import { registerAskRoutes } from "./routes/ask.js";
 import { registerSearchRoutes } from "./routes/search.js";
 import { registerIntegrationRoutes } from "./routes/integrations.js";
 import { registerSttRoutes } from "./routes/stt.js";
+import { registerCallRoutes } from "./routes/calls.js";
 import { registerTtsRoutes } from "./routes/tts.js";
 import { mintLiveKitToken } from "./livekit.js";
+import { admitToCall, callRoomName, newCallMeta } from "./calls.js";
 import {
   agentGrantFromHeader,
   issueAgentGrant,
@@ -292,6 +294,12 @@ export interface AppDeps {
    * working and tests inject scripted sources. main.ts takes the default.
    */
   meetingConnectors?: import("./meetingConnectors.js").MeetingConnectorRegistry;
+  /**
+   * docs/28 A3.2: the board call's host powers, over LiveKit's RoomService.
+   * main.ts builds it from the LiveKit config; tests inject the in-memory
+   * one. Absent means calls still work, without hosts (the call routes 503).
+   */
+  callControl?: import("./calls.js").CallControl;
   /**
    * Stage B3: review-gate proposals. When present, proposal create/list/
    * decide are real; without it they answer 503 (fail-closed, like the other
@@ -2002,6 +2010,7 @@ export function createApp(deps: AppDeps): App {
     sttSessions,
     tts: ttsService,
     meetingConnectors,
+    calls: deps.callControl,
     authCtx,
     userStore,
     boardStore,
@@ -2106,6 +2115,7 @@ export function createApp(deps: AppDeps): App {
   registerIntegrationRoutes(router, services);
   registerOrgSettingsRoutes(router, services);
   registerSttRoutes(router, services);
+  registerCallRoutes(router, services);
   registerTtsRoutes(router, services);
   /**
    * Asset gateway (M7 / M4 storage): `/api/assets/*`. The handler is built
@@ -3341,6 +3351,33 @@ export function createApp(deps: AppDeps): App {
         if (!guard.ok) return;
       }
       const room = access.room;
+      // docs/28 A3.2: a board's call has hosts. The first person in starts the
+      // room and hosts it; someone the host removed stays out of this call.
+      // RoomService trouble never blocks a join — the call then has no host
+      // powers, which is what it had before hosts existed.
+      let host = false;
+      const calls = deps.callControl;
+      if (calls && access.kind === "board" && room === callRoomName(access.boardId)) {
+        try {
+          const now = Date.now();
+          const opened = await calls.open(room, newCallMeta(user.id, now));
+          const state = await calls.read(room);
+          const admission = admitToCall(
+            state ? state.meta : opened,
+            (state?.participants ?? []).map((p) => p.identity),
+            user.id,
+            now,
+          );
+          if (admission.kind === "removed") {
+            send(res, 403, { error: "The host removed you from this call.", removed: true });
+            return;
+          }
+          if (admission.changed) await calls.setMeta(room, admission.meta);
+          host = admission.host;
+        } catch (err) {
+          logger.warn("call.admit_failed", { room, error: (err as Error).message });
+        }
+      }
       const minted = mintLiveKitToken({
         config: { apiKey, apiSecret, url },
         room,
@@ -3352,6 +3389,7 @@ export function createApp(deps: AppDeps): App {
         url: minted.url,
         expiresAt: minted.expiresAt,
         room,
+        host,
       });
       return;
     }

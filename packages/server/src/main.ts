@@ -613,6 +613,16 @@ const { server, realtime, writeMeetingRecap } = createApp({
   meetingNotes: stores.meetingNotes,
   // docs/28 A3.3: ending a meeting announces MeetingEnded here.
   outbox,
+  // docs/28 A3.2: host powers in the board call, over the same LiveKit project.
+  ...(config.livekit.apiKey && config.livekit.apiSecret && config.livekit.url
+    ? {
+        callControl: (await import("./calls.js")).createLiveKitCallControl({
+          apiKey: config.livekit.apiKey,
+          apiSecret: config.livekit.apiSecret,
+          url: config.livekit.url,
+        }),
+      }
+    : {}),
   // Stage B3: review-gate proposals, same rule — the server is now the
   // record for what Lucent wants to change on a shared board.
   proposals: stores.proposals,
