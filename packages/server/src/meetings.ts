@@ -388,6 +388,8 @@ export interface MeetingStore {
    * Returns the deleted count.
    */
   deleteExpired(orgId: string, endedBefore: number, limit: number): Promise<number>;
+  /** docs/26 A6: delete one meeting for good (the trash's purge). */
+  delete(boardId: string, id: string): Promise<boolean>;
   /**
    * Append turns to a running meeting (M2): a live capture checkpoints as it
    * goes instead of holding the whole transcript in a tab. The transcript
@@ -689,6 +691,12 @@ export class InMemoryMeetingStore implements MeetingStore {
     if (row.turns.length + turns.length > MAX_TURNS_PER_TRANSCRIPT) return undefined;
     row.turns = [...row.turns, ...turns.map((t) => ({ ...t }))];
     return { ...row, turns: [...row.turns] };
+  }
+
+  async delete(boardId: string, id: string): Promise<boolean> {
+    const row = this.rows.get(id);
+    if (!row || row.boardId !== boardId) return false;
+    return this.rows.delete(id);
   }
 
   async deleteExpired(orgId: string, endedBefore: number, limit: number): Promise<number> {

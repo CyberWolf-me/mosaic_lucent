@@ -35,6 +35,7 @@ import { useToast } from "../ui/Toast.js";
 import { hasSession } from "../session.js";
 import { loadOrgs, setCurrentOrgId, type OrgSummary } from "../orgs.js";
 import { listBoards, listSharedWithMe, type BoardSummary } from "../boards.js";
+import { trashBoard } from "../trash.js";
 import { KIND_TINT, statementIsHistory } from "../statementUi.js";
 import { TEMPLATES, type Template } from "../templates.js";
 
@@ -415,11 +416,23 @@ export function DashboardView({ onOpenSettings }: { onOpenSettings: (section?: s
     notify(`Renamed to “${next}”.`);
   };
 
-  const commitDelete = () => {
+  const commitDelete = async () => {
     if (!deleting) return;
-    deleteProject(deleting.id);
-    notify(`Deleted “${deleting.name}”.`);
+    const target = deleting;
     setDeleting(null);
+    if (target.scope === "team") {
+      // docs/26 A6: a team board goes to the trash for 30 days.
+      const result = await trashBoard(target.id);
+      if (!result.ok) {
+        notify(result.error);
+        return;
+      }
+      setCloudBoards((rows) => rows.filter((b) => b.id !== target.id));
+      notify(`Moved “${target.name}” to the trash — restore it from Admin → Trash for 30 days.`);
+      return;
+    }
+    deleteProject(target.id);
+    notify(`Deleted “${target.name}”.`);
     setLocalRev((r) => r + 1);
   };
 
@@ -650,7 +663,10 @@ export function DashboardView({ onOpenSettings }: { onOpenSettings: (section?: s
                   // The open board can't be deleted from here: its next
                   // autosave would write it straight back.
                   onDelete={
-                    b.scope === "local" && b.id !== projectId ? () => setDeleting(b) : undefined
+                    (b.scope === "local" && b.id !== projectId) ||
+                    (b.scope === "team" && b.id !== openBoardId)
+                      ? () => setDeleting(b)
+                      : undefined
                   }
                 />
               ))}
@@ -692,14 +708,16 @@ export function DashboardView({ onOpenSettings }: { onOpenSettings: (section?: s
       {deleting && (
         <Dialog onClose={() => setDeleting(null)} title={`Delete “${deleting.name}”?`}>
           <div className="confirm-body">
-            This removes the board and its conversation from this browser. It can&apos;t be undone.
+            {deleting.scope === "team"
+              ? "It moves to the trash for 30 days: gone for everyone, and restorable from Admin → Trash until then."
+              : "This removes the board and its conversation from this browser. It can't be undone."}
           </div>
           <div className="confirm-actions">
             <Button variant="ghost" onClick={() => setDeleting(null)}>
               Keep it
             </Button>
-            <Button variant="danger" onClick={commitDelete}>
-              Delete board
+            <Button variant="danger" onClick={() => void commitDelete()}>
+              {deleting.scope === "team" ? "Move to trash" : "Delete board"}
             </Button>
           </div>
         </Dialog>

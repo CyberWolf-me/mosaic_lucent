@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useId, useMemo, useState } from "react";
+import { trashProject } from "../trash.js";
 import type { StatementKind } from "@lucent/core";
 import { useWorkspace } from "../workspace.js";
 import { useToast } from "../ui/Toast.js";
@@ -597,6 +598,17 @@ function ProjectDetail({
             }
           }}
           archived={project.archivedAt !== null}
+          onDelete={async () => {
+            const result = await trashProject(org.id, project.id);
+            if (!result.ok) {
+              notify(result.error);
+              return;
+            }
+            notify(
+              `Moved “${project.name}” to the trash — restore it from Admin → Trash for 30 days.`,
+            );
+            onBack();
+          }}
         />
       )}
 
@@ -799,14 +811,18 @@ function EditProjectForm({
   onCancel,
   onSave,
   onArchive,
+  onDelete,
 }: {
   project: OrgProject;
   archived: boolean;
   onCancel: () => void;
   onSave: (patch: { name: string; objective: string }) => Promise<void>;
   onArchive: () => Promise<void>;
+  /** docs/26 A6: to the trash, for 30 days. */
+  onDelete: () => Promise<void>;
 }) {
   const ids = { name: useId(), objective: useId() };
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const [name, setName] = useState(project.name);
   const [objective, setObjective] = useState(project.objective);
   return (
@@ -847,6 +863,15 @@ function EditProjectForm({
         <Button variant="quiet" onClick={() => void onArchive()}>
           {archived ? "Restore project" : "Archive project"}
         </Button>
+        {confirmDelete ? (
+          <Button variant="danger" onClick={() => void onDelete()}>
+            Move to trash
+          </Button>
+        ) : (
+          <Button variant="quiet" onClick={() => setConfirmDelete(true)}>
+            Delete project
+          </Button>
+        )}
         <Button variant="quiet" onClick={onCancel}>
           Cancel
         </Button>

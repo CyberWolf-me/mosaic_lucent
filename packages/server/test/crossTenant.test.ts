@@ -675,10 +675,11 @@ describe("M2.3 DELETE /api/boards/:id", () => {
     expect(deleted.status).toBe(204);
     expect((await api(h, `/api/boards/${boardId}`, { token: alice.token })).status).toBe(404);
 
-    // Audited the way the org routes are, on the board's own org.
+    // Audited the way the org routes are, on the board's own org. Since
+    // docs/26 A6 a deleted board goes to the trash first.
     const audit = await api(h, `/api/orgs/${orgId}/audit`, { token: alice.token });
     expect(audit.status).toBe(200);
-    const entry = audit.body.entries.find((e: { action: string }) => e.action === "board.delete");
+    const entry = audit.body.entries.find((e: { action: string }) => e.action === "board.trashed");
     expect(entry).toBeDefined();
     expect(entry.subject).toBe(boardId);
     expect(entry.actorId).toBe(alice.id);

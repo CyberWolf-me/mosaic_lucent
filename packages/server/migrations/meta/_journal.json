@@ -302,6 +302,13 @@
       "when": 1790530964314,
       "tag": "0042_milky_betty_brant",
       "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1790532220859,
+      "tag": "0043_sour_bushwacker",
+      "breakpoints": true
     }
   ]
 }

@@ -1175,3 +1175,39 @@ html[data-theme="dark"] .boards-notif-row.static:hover {
   color: var(--ink-3);
   padding: 2px;
 }
+
+/* ------------------------------------ trash (docs/26 A6) */
+
+.trash-list {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.trash-row {
+  display: grid;
+  grid-template-columns: 70px 1fr auto auto;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 4px;
+}
+.trash-row + .trash-row {
+  border-top: 1px solid oklch(from var(--paper-4) l c h / 0.5);
+}
+.trash-kind {
+  font-size: 10px;
+  color: var(--ink-3);
+}
+.trash-name {
+  font-size: 13px;
+  color: var(--ink-0);
+}
+.trash-where,
+.trash-when {
+  font-size: 12px;
+  color: var(--ink-3);
+}
+.trash-actions {
+  display: flex;
+  gap: 6px;
+}

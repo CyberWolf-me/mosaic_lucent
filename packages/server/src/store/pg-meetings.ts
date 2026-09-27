@@ -275,6 +275,14 @@ export class PostgresMeetingStore implements MeetingStore {
    * becomes now, which is past any cutoff) — never strand a running
    * capture, which the WHERE excludes by construction.
    */
+  async delete(boardId: string, id: string): Promise<boolean> {
+    const gone = await this.target.db
+      .delete(meetingTranscripts)
+      .where(and(eq(meetingTranscripts.boardId, boardId), eq(meetingTranscripts.id, id)))
+      .returning({ id: meetingTranscripts.id });
+    return gone.length > 0;
+  }
+
   async deleteExpired(orgId: string, endedBefore: number, limit: number): Promise<number> {
     if (limit <= 0) return 0;
     const stale = await this.target.db

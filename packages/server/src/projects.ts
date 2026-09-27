@@ -55,6 +55,8 @@ export interface ProjectStore {
   unlinkBoard(projectId: string, boardId: string, at: number): Promise<boolean>;
   /** The projects a board is linked to, archived ones excluded. */
   forBoard(boardId: string): Promise<StoredProject[]>;
+  /** docs/26 A6: delete one project for good (the trash's purge); links go with it. */
+  delete(id: string): Promise<boolean>;
 }
 
 export function newProjectId(): string {
@@ -167,6 +169,10 @@ export function applyProjectPatch(
 
 export class InMemoryProjectStore implements ProjectStore {
   private readonly rows = new Map<string, StoredProject>();
+
+  async delete(id: string): Promise<boolean> {
+    return this.rows.delete(id);
+  }
 
   async listForOrg(orgId: string, options: { includeArchived?: boolean } = {}) {
     return [...this.rows.values()]

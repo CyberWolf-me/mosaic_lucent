@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { trashMeeting } from "../trash.js";
 import type { FormEvent, ReactNode } from "react";
 import { Ico } from "../ui/icons.js";
 import {
@@ -1187,6 +1188,7 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
   // Naming a past meeting (ADR 0045, docs/28 S10).
   const [renaming, setRenaming] = useState(false);
   const [titleDraft, setTitleDraft] = useState("");
+  const [confirmTrash, setConfirmTrash] = useState(false);
   const saveTitle = async (): Promise<void> => {
     if (!shown || !boardId) return;
     const updated = await renameMeeting(boardId, shown.id, titleDraft);
@@ -2085,16 +2087,46 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
             actions={
               // docs/28 S10: an editor names a past meeting (ADR 0045).
               phase === "saved" && shown && boardId && !readOnly && !renaming ? (
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => {
-                    setTitleDraft(shown.title ?? "");
-                    setRenaming(true);
-                  }}
-                >
-                  Rename
-                </Button>
+                <>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => {
+                      setTitleDraft(shown.title ?? "");
+                      setRenaming(true);
+                    }}
+                  >
+                    Rename
+                  </Button>
+                  {/* docs/26 A6: to the trash, restorable for 30 days. */}
+                  {confirmTrash ? (
+                    <Button
+                      size="sm"
+                      variant="danger"
+                      onClick={async () => {
+                        const result = await trashMeeting(boardId, shown.id);
+                        setConfirmTrash(false);
+                        if (!result.ok) {
+                          notify(result.error);
+                          return;
+                        }
+                        notify(
+                          "Moved the meeting to the trash — restore it from Admin → Trash for 30 days.",
+                        );
+                        const params = new URLSearchParams(window.location.search);
+                        params.delete("meeting");
+                        window.history.replaceState(null, "", `?${params.toString()}`);
+                        setView("canvas");
+                      }}
+                    >
+                      Move to trash
+                    </Button>
+                  ) : (
+                    <Button size="sm" variant="ghost" onClick={() => setConfirmTrash(true)}>
+                      Delete
+                    </Button>
+                  )}
+                </>
               ) : undefined
             }
             lede={

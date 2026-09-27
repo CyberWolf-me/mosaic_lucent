@@ -131,6 +131,8 @@ import { registerIntegrationOAuthRoutes } from "./routes/integrationOAuth.js";
 import { registerOrgMemberRoutes } from "./routes/orgMembers.js";
 import { registerGuestRoutes } from "./routes/guests.js";
 import { registerTeamRoutes } from "./routes/teams.js";
+import { registerTrashRoutes } from "./routes/trash.js";
+import { InMemoryTrashStore, withMeetingTrash, withProjectTrash } from "./trash.js";
 import { InMemoryTeamStore, withTeamGrants } from "./teams.js";
 import { registerSsoRoutes } from "./routes/sso.js";
 import { registerHistoryRoutes } from "./routes/history.js";
@@ -316,6 +318,8 @@ export interface AppDeps {
   threads?: import("./threads.js").ThreadStore;
   /** docs/26 A6: teams and their board grants (in-memory when absent). */
   teams?: import("./teams.js").TeamStore;
+  /** docs/26 A6: trashed meetings and projects (in-memory when absent). */
+  trash?: import("./trash.js").TrashStore;
   /**
    * P2's outbox. When present, ending a meeting announces `MeetingEnded`
    * (docs/28 A3.3) and main.ts's consumer queues its summary. Absent in most
@@ -590,13 +594,17 @@ export function createApp(deps: AppDeps): App {
     usageStore,
     teamTemplates,
     billing,
-    meetings,
+    meetings: rawMeetings,
     ssoStore,
     integrations,
     proposals: proposalStore,
   } = deps;
 
   const logger = deps.logger ?? silentLogger;
+  // docs/26 A6: trashed meetings and projects are hidden by wrapping their
+  // stores, so nothing that lists or opens one needs to know the trash.
+  const trashStore = deps.trash ?? new InMemoryTrashStore();
+  const meetings = rawMeetings ? withMeetingTrash(rawMeetings, trashStore) : undefined;
   const metrics = deps.metrics ?? new MetricsRegistry();
 
   // docs/26 J3 (ADR 0046): the workspace intelligence index follows every
@@ -2359,7 +2367,8 @@ export function createApp(deps: AppDeps): App {
     // Notes live beside transcripts: with a meeting store and no notes store
     // (tests, in-memory dev), keep notes in memory rather than refusing them.
     meetingNotes: deps.meetingNotes ?? (meetings ? new InMemoryMeetingNotesStore() : undefined),
-    projects: deps.projects ?? new InMemoryProjectStore(),
+    projects: withProjectTrash(deps.projects ?? new InMemoryProjectStore(), trashStore),
+    trash: trashStore,
     intelligence,
     aiRuns,
     recordRun,
@@ -2594,6 +2603,7 @@ export function createApp(deps: AppDeps): App {
   registerOrgMemberRoutes(router, services);
   registerGuestRoutes(router, services);
   registerTeamRoutes(router, services);
+  registerTrashRoutes(router, services);
   registerOrgSettingsRoutes(router, services);
   registerSttRoutes(router, services);
   registerCallRoutes(router, services);
@@ -4713,7 +4723,9 @@ export function createApp(deps: AppDeps): App {
       // accepting ops for a board that no longer exists and try to append them
       // to a deleted op log.
       realtime.evictBoard(id);
-      await boardStore.delete(id);
+      // docs/26 A6: to the trash, not gone — restorable for 30 days, its log,
+      // grants and links kept; the sweep purges it after that.
+      await boardStore.trash(id, guard.user.id, Date.now());
       // Audit like the org routes do (org.create / org.rename / org.delete).
       // Optional-chained rather than 503-guarded as those routes are: the audit
       // sink is not configured in every deployment, and refusing to delete a
@@ -4721,7 +4733,7 @@ export function createApp(deps: AppDeps): App {
       await orgStore?.audit({
         orgId: guard.board.orgId,
         actorId: guard.user.id,
-        action: "board.delete",
+        action: "board.trashed",
         subject: id,
         ...requestOrigin(req),
         metadata: { name: guard.board.name, ownerId: guard.board.ownerId },

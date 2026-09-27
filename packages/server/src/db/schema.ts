@@ -1417,6 +1417,48 @@ export const integrationWebhookEvents = pgTable(
 );
 
 /**
+ * docs/26 A6: the board trash. A row here hides its board from every read
+ * until it's restored or purged (after 30 days).
+ */
+export const boardTrash = pgTable(
+  "board_trash",
+  {
+    boardId: text("board_id")
+      .primaryKey()
+      .references(() => boards.id, { onDelete: "cascade" }),
+    orgId: text("org_id").notNull(),
+    deletedBy: text("deleted_by").notNull(),
+    deletedAt: bigint("deleted_at", { mode: "number" }).notNull(),
+  },
+  (t) => ({
+    orgIdx: index("board_trash_org_idx").on(t.orgId, t.deletedAt),
+  }),
+);
+
+/**
+ * docs/26 A6: trashed meetings and projects (trash.ts) — hidden from every
+ * read until restored, purged after 30 days.
+ */
+export const trashItems = pgTable(
+  "trash_items",
+  {
+    kind: text("kind").notNull(),
+    itemId: text("item_id").notNull(),
+    orgId: text("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    boardId: text("board_id"),
+    name: text("name").notNull(),
+    deletedBy: text("deleted_by").notNull(),
+    deletedAt: bigint("deleted_at", { mode: "number" }).notNull(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.kind, t.itemId] }),
+    orgIdx: index("trash_items_org_idx").on(t.orgId, t.deletedAt),
+  }),
+);
+
+/**
  * docs/26 A6: teams inside an org (teams.ts) — groups of members a board can
  * be shared with; SCIM Groups sync into them (`external_id`).
  */

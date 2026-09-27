@@ -42,6 +42,7 @@ import {
   removeTeamMember,
   type TeamView,
 } from "../teams.js";
+import { deleteForGood, loadTrash, restoreFromTrash, type TrashEntry } from "../trash.js";
 import {
   getCurrentOrgId,
   listOrgGuests,
@@ -432,6 +433,9 @@ export function AdminView({ onBack }: { onBack: () => void }) {
       <SectionLabel>Guests</SectionLabel>
       <GuestsSection org={org} />
 
+      <SectionLabel>Trash</SectionLabel>
+      <TrashSection org={org} />
+
       <SectionLabel count={auditState === "ready" ? audit.length : undefined}>
         Recent activity
       </SectionLabel>
@@ -760,6 +764,103 @@ function TeamsSection({ org }: { org: OrgSummary | null }) {
       {error && (
         <p className="boards-admin-error" role="alert">
           {error}
+        </p>
+      )}
+    </Card>
+  );
+}
+
+/**
+ * The trash (docs/26 A6): what was deleted here in the last 30 days that you
+ * can bring back — boards you own (every board, for an owner), meetings on
+ * boards you edit, projects. An owner can also delete for good.
+ */
+function TrashSection({ org }: { org: OrgSummary | null }) {
+  const [items, setItems] = useState<TrashEntry[] | null | "failed">(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [note, setNote] = useState<{ text: string; tone: "ok" | "error" } | null>(null);
+  const reload = async (orgId: string) => setItems((await loadTrash(orgId)) ?? "failed");
+  useEffect(() => {
+    if (org) void reload(org.id);
+  }, [org]);
+  if (!org) return null;
+  if (items === null) {
+    return (
+      <p className="boards-admin-muted" role="status">
+        Loading the trash…
+      </p>
+    );
+  }
+  if (items === "failed") {
+    return (
+      <p className="boards-admin-muted" role="alert">
+        Couldn&apos;t load the trash.
+      </p>
+    );
+  }
+  if (items.length === 0) {
+    return (
+      <EmptyState
+        compact
+        title="The trash is empty"
+        body="A deleted board, meeting or project waits here for 30 days before it's gone for good."
+      />
+    );
+  }
+  const act = async (item: TrashEntry, restore: boolean) => {
+    setBusy(item.id);
+    const result = restore
+      ? await restoreFromTrash(org.id, item.kind, item.id)
+      : await deleteForGood(org.id, item.kind, item.id);
+    setBusy(null);
+    setNote(
+      result.ok
+        ? {
+            text: restore ? `Restored “${item.name}”.` : `Deleted “${item.name}” for good.`,
+            tone: "ok",
+          }
+        : { text: result.error, tone: "error" },
+    );
+    await reload(org.id);
+  };
+  const days = (at: number) => Math.max(0, Math.ceil((at - Date.now()) / 86_400_000));
+  return (
+    <Card className="boards-admin-card">
+      <ul className="trash-list" aria-label="Trash">
+        {items.map((item) => (
+          <li key={`${item.kind}:${item.id}`} className="trash-row">
+            <span className="trash-kind mono-caps">{item.kind}</span>
+            <span className="trash-name">
+              {item.name}
+              {item.boardName && <span className="trash-where"> · on {item.boardName}</span>}
+            </span>
+            <span className="trash-when">
+              deleted by {item.deletedBy} · gone in {days(item.purgeAt)} days
+            </span>
+            <span className="trash-actions">
+              <Button size="sm" disabled={busy !== null} onClick={() => void act(item, true)}>
+                Restore
+              </Button>
+              {org.role === "owner" && (
+                <Button
+                  size="sm"
+                  variant="danger"
+                  disabled={busy !== null}
+                  onClick={() => void act(item, false)}
+                >
+                  Delete for good
+                </Button>
+              )}
+            </span>
+          </li>
+        ))}
+      </ul>
+      {note && (
+        <p
+          className={`integ-notice ${note.tone}`}
+          role={note.tone === "error" ? "alert" : "status"}
+        >
+          {note.text}
         </p>
       )}
     </Card>

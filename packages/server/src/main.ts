@@ -37,6 +37,8 @@ import { InMemoryIntegrationCredentialStore } from "./integrations/credentials.j
 import { PostgresIntegrationCredentialStore } from "./store/pg-integration-credentials.js";
 import { InMemoryTeamStore } from "./teams.js";
 import { PostgresTeamStore } from "./store/pg-teams.js";
+import { InMemoryTrashStore, purgeExpiredTrash } from "./trash.js";
+import { PostgresTrashStore } from "./store/pg-trash.js";
 
 /**
  * docs/26 A5: OAuth connect for Linear/Jira — only with a token key
@@ -227,6 +229,7 @@ function makeStores(databaseUrl: string | undefined): {
   aiRuns: import("./aiRuns.js").AiRunStore;
   threads: import("./threads.js").ThreadStore;
   teams: import("./teams.js").TeamStore;
+  trash: import("./trash.js").TrashStore;
   /** F1: SSO connections + domain claims, on the same store-per-database rule. */
   ssoStore: import("./ssoStore.js").SsoStore;
   /** Stage B3: review-gate proposals — in-memory for dev, Postgres when set. */
@@ -273,6 +276,7 @@ function makeStores(databaseUrl: string | undefined): {
       aiRuns: new InMemoryAiRunStore(),
       threads: new InMemoryThreadStore(),
       teams: new InMemoryTeamStore(),
+      trash: new InMemoryTrashStore(),
       ssoStore: new InMemorySsoStore(),
       integrations: {
         store: new InMemoryIntegrationStore(),
@@ -327,6 +331,7 @@ function makeStores(databaseUrl: string | undefined): {
     aiRuns: new PostgresAiRunStore(target),
     threads: new PostgresThreadStore(target),
     teams: new PostgresTeamStore(target.db),
+    trash: new PostgresTrashStore(target.db),
     ssoStore: new PostgresSsoStore(target),
     proposals: new PostgresProposalStore(target),
     assetStore: new PostgresAssetStore(target),
@@ -725,6 +730,7 @@ const { server, realtime, writeMeetingRecap, automations } = createApp({
   aiRuns: stores.aiRuns,
   threads: stores.threads,
   teams: stores.teams,
+  trash: stores.trash,
   // docs/28 A3.3: ending a meeting announces MeetingEnded here.
   outbox,
   // docs/28 A3.2: host powers in the board call, over the same LiveKit project.
@@ -1206,6 +1212,18 @@ const jobRunner = runsJobs(role)
           }
           const result = await automations.planDecisions(boardId, nodeIds as string[], by);
           logger.info("automation.decision-plan", { boardId, outcome: result.outcome });
+        },
+        // docs/26 A6: what has been in the trash past its 30 days goes for good.
+        "sweep-trash": async () => {
+          const purged = await purgeExpiredTrash({
+            boards: stores.boardStore,
+            ...(stores.meetings ? { meetings: stores.meetings } : {}),
+            projects: stores.projects,
+            trash: stores.trash,
+          });
+          if (purged.boards + purged.meetings + purged.projects > 0) {
+            logger.info("trash.purged", purged);
+          }
         },
         "sweep-overdue": async () => {
           const { told } = await automations.sweepOverdue();

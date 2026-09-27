@@ -139,6 +139,15 @@ export class PostgresProjectStore implements ProjectStore {
     return true;
   }
 
+  async delete(id: string): Promise<boolean> {
+    // project_boards cascades on the FK.
+    const gone = await this.target.db
+      .delete(projects)
+      .where(eq(projects.id, id))
+      .returning({ id: projects.id });
+    return gone.length > 0;
+  }
+
   async forBoard(boardId: string) {
     const links = await this.target.db
       .select({ projectId: projectBoards.projectId })

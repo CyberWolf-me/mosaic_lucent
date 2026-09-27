@@ -1,10 +1,11 @@
-import { and, asc, desc, eq, exists, gt, isNull, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, exists, gt, isNull, lt, notExists, or, sql } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { parseWorkspaceOrDefault, type Workspace, type Operation } from "@lucent/core";
 import type { Db } from "../db/client.js";
 import {
   boardMembers,
   boards,
+  boardTrash,
   boardShareLinks,
   boardSnapshots,
   opLog,
@@ -19,6 +20,7 @@ import type {
   OpAppend,
   ShareLink,
   StoredBoard,
+  TrashedBoard,
 } from "../boards.js";
 import { effectiveBoardRole, type Role } from "../identity.js";
 import { newOperationId } from "../boards.js";
@@ -37,9 +39,69 @@ import { newOperationId } from "../boards.js";
 export class PostgresBoardStore implements BoardStore {
   constructor(private readonly target: Db) {}
 
+  /** docs/26 A6: not in the trash. */
+  private notTrashed() {
+    return notExists(
+      this.target.db
+        .select({ one: sql`1` })
+        .from(boardTrash)
+        .where(eq(boardTrash.boardId, boards.id)),
+    );
+  }
+
   async get(id: string): Promise<StoredBoard | undefined> {
-    const rows = await this.target.db.select().from(boards).where(eq(boards.id, id)).limit(1);
+    const rows = await this.target.db
+      .select()
+      .from(boards)
+      .where(and(eq(boards.id, id), this.notTrashed()))
+      .limit(1);
     return rows[0] ? rowToStoredBoard(rows[0]) : undefined;
+  }
+
+  async trash(id: string, by: string, at: number): Promise<boolean> {
+    const [board] = await this.target.db
+      .select({ orgId: boards.orgId })
+      .from(boards)
+      .where(eq(boards.id, id));
+    if (!board) return false;
+    const inserted = await this.target.db
+      .insert(boardTrash)
+      .values({ boardId: id, orgId: board.orgId, deletedBy: by, deletedAt: at })
+      .onConflictDoNothing()
+      .returning();
+    return inserted.length > 0;
+  }
+
+  async restore(id: string): Promise<boolean> {
+    const gone = await this.target.db
+      .delete(boardTrash)
+      .where(eq(boardTrash.boardId, id))
+      .returning();
+    return gone.length > 0;
+  }
+
+  async trashed(orgId: string): Promise<TrashedBoard[]> {
+    const rows = await this.target.db
+      .select({ board: boards, trash: boardTrash })
+      .from(boardTrash)
+      .innerJoin(boards, eq(boards.id, boardTrash.boardId))
+      .where(eq(boardTrash.orgId, orgId))
+      .orderBy(desc(boardTrash.deletedAt));
+    return rows.map((r) => ({
+      board: rowToStoredBoard(r.board),
+      deletedBy: r.trash.deletedBy,
+      deletedAt: r.trash.deletedAt,
+    }));
+  }
+
+  async purgeTrashed(before: number, limit: number): Promise<string[]> {
+    const rows = await this.target.db
+      .select({ id: boardTrash.boardId })
+      .from(boardTrash)
+      .where(lt(boardTrash.deletedAt, before))
+      .limit(limit);
+    for (const { id } of rows) await this.delete(id);
+    return rows.map((r) => r.id);
   }
 
   async listForOrg(orgId: string): Promise<StoredBoard[]> {
@@ -48,7 +110,7 @@ export class PostgresBoardStore implements BoardStore {
     const rows = await this.target.db
       .select()
       .from(boards)
-      .where(eq(boards.orgId, orgId))
+      .where(and(eq(boards.orgId, orgId), this.notTrashed()))
       .orderBy(desc(boards.updatedAt));
     return rows.map(rowToStoredBoard);
   }
@@ -66,7 +128,7 @@ export class PostgresBoardStore implements BoardStore {
     const rows = await this.target.db
       .select({ count: sql<string>`count(*)` })
       .from(boards)
-      .where(eq(boards.orgId, orgId));
+      .where(and(eq(boards.orgId, orgId), this.notTrashed()));
     return toNumber(rows[0]?.count);
   }
 
@@ -82,6 +144,7 @@ export class PostgresBoardStore implements BoardStore {
       .where(
         and(
           eq(boards.orgId, orgId),
+          this.notTrashed(),
           or(
             eq(boards.ownerId, userId),
             exists(
@@ -105,7 +168,7 @@ export class PostgresBoardStore implements BoardStore {
       .select({ board: boards, role: boardMembers.role })
       .from(boardMembers)
       .innerJoin(boards, eq(boards.id, boardMembers.boardId))
-      .where(eq(boardMembers.userId, userId))
+      .where(and(eq(boardMembers.userId, userId), this.notTrashed()))
       .orderBy(desc(boards.updatedAt))
       .limit(limit);
     return rows.map((r) => ({ board: rowToStoredBoard(r.board), role: r.role as Role }));

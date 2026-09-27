@@ -195,6 +195,13 @@ export interface BoardSnapshot {
   createdAt: number;
 }
 
+/** A board in the trash (docs/26 A6). */
+export interface TrashedBoard {
+  board: StoredBoard;
+  deletedBy: string;
+  deletedAt: number;
+}
+
 export interface BoardStore {
   get(id: string): Promise<StoredBoard | undefined>;
   /**
@@ -230,6 +237,17 @@ export interface BoardStore {
    * would read every diagram in the tenant to answer "how many are there".
    */
   countForOrg(orgId: string): Promise<number>;
+  /**
+   * docs/26 A6: the trash. A trashed board is gone to every read above — get,
+   * the lists, the count, effective roles — until it's restored or, after the
+   * window, purged for good. Its log, grants and links are kept meanwhile,
+   * so a restore brings everything back as it was.
+   */
+  trash(id: string, by: string, at: number): Promise<boolean>;
+  restore(id: string): Promise<boolean>;
+  trashed(orgId: string): Promise<TrashedBoard[]>;
+  /** Delete for good every board trashed before `before`; the ids purged. */
+  purgeTrashed(before: number, limit: number): Promise<string[]>;
   put(board: StoredBoard): Promise<void>;
   delete(id: string): Promise<void>;
 
@@ -344,21 +362,57 @@ export class InMemoryBoardStore implements BoardStore {
   /** Keyed by board id and user id joined by a space. */
   private readonly memberRows = new Map<string, BoardMember>();
   private readonly links = new Map<string, ShareLink>();
+  /** docs/26 A6: trashed boards, by id. */
+  private readonly trashRows = new Map<string, { deletedBy: string; deletedAt: number }>();
+
+  /** Every board not in the trash. */
+  private live(): StoredBoard[] {
+    return [...this.boards.values()].filter((b) => !this.trashRows.has(b.id));
+  }
 
   async get(id: string): Promise<StoredBoard | undefined> {
-    return this.boards.get(id);
+    return this.trashRows.has(id) ? undefined : this.boards.get(id);
   }
 
   async listForOrg(orgId: string): Promise<StoredBoard[]> {
-    return [...this.boards.values()]
+    return this.live()
       .filter((b) => b.orgId === orgId)
       .sort((a, b) => b.updatedAt - a.updatedAt);
   }
 
   async countForOrg(orgId: string): Promise<number> {
-    let n = 0;
-    for (const b of this.boards.values()) if (b.orgId === orgId) n += 1;
-    return n;
+    return this.live().filter((b) => b.orgId === orgId).length;
+  }
+
+  async trash(id: string, by: string, at: number): Promise<boolean> {
+    if (!this.boards.has(id) || this.trashRows.has(id)) return false;
+    this.trashRows.set(id, { deletedBy: by, deletedAt: at });
+    return true;
+  }
+
+  async restore(id: string): Promise<boolean> {
+    return this.trashRows.delete(id);
+  }
+
+  async trashed(orgId: string): Promise<TrashedBoard[]> {
+    const out: TrashedBoard[] = [];
+    for (const [id, row] of this.trashRows) {
+      const board = this.boards.get(id);
+      if (board && board.orgId === orgId) out.push({ board, ...row });
+    }
+    return out.sort((a, b) => b.deletedAt - a.deletedAt);
+  }
+
+  async purgeTrashed(before: number, limit: number): Promise<string[]> {
+    const doomed = [...this.trashRows]
+      .filter(([, row]) => row.deletedAt < before)
+      .slice(0, limit)
+      .map(([id]) => id);
+    for (const id of doomed) {
+      await this.delete(id);
+      this.trashRows.delete(id);
+    }
+    return doomed;
   }
 
   /**
@@ -367,7 +421,7 @@ export class InMemoryBoardStore implements BoardStore {
    * test and the row lookup are load-bearing.
    */
   async listForUser(orgId: string, userId: string): Promise<StoredBoard[]> {
-    return [...this.boards.values()]
+    return this.live()
       .filter(
         (b) =>
           b.orgId === orgId &&
@@ -383,7 +437,7 @@ export class InMemoryBoardStore implements BoardStore {
     const out: Array<{ board: StoredBoard; role: Role }> = [];
     for (const member of this.memberRows.values()) {
       if (member.userId !== userId) continue;
-      const board = this.boards.get(member.boardId);
+      const board = await this.get(member.boardId);
       if (board) out.push({ board, role: member.role });
     }
     return out.sort((a, b) => b.board.updatedAt - a.board.updatedAt).slice(0, limit);
@@ -395,6 +449,7 @@ export class InMemoryBoardStore implements BoardStore {
 
   async delete(id: string): Promise<void> {
     this.boards.delete(id);
+    this.trashRows.delete(id);
     this.logs.delete(id);
     this.snapshots.delete(id);
     for (const [key, member] of this.memberRows) {
@@ -410,7 +465,7 @@ export class InMemoryBoardStore implements BoardStore {
     userId: string,
     lookupOrgRole?: (userId: string) => Promise<Role | undefined>,
   ): Promise<Role | undefined> {
-    const board = this.boards.get(boardId);
+    const board = await this.get(boardId);
     if (!board) return undefined;
     const orgRole = lookupOrgRole ? await lookupOrgRole(userId) : undefined;
     if (board.ownerId === userId || orgRole === "owner") return "owner";

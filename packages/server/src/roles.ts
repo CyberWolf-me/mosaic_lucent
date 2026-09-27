@@ -140,6 +140,13 @@ export const RECURRING_JOBS: RecurringJob[] = [
     type: "integration.poll",
     everyMs: 10 * 60_000,
   },
+  // docs/26 A6: the trash window is 30 days; an hourly purge is plenty.
+  {
+    key: "sweep-trash",
+    family: "maintenance",
+    type: "sweep-trash",
+    everyMs: 60 * 60_000,
+  },
   // docs/26 A5: due dates are calendar days, so an hourly look is prompt
   // enough; each reminder is sent once per due date.
   {

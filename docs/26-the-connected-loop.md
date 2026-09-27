@@ -819,7 +819,24 @@ a much better product — not rewriting the layout engine.
     decides its board grants. Migration 0042 (teams, team_members,
     board_team_grants; RLS on).
 
+  - _Trash._ Deleting a board, a meeting or a project moves it to the
+    trash for 30 days. It's gone for everyone, and restorable, exactly as it
+    was, by whoever could delete it: a board's owner or the org's owner, a
+    meeting's board editors, the org's editors for a project. Admin → Trash
+    lists what you can bring back and when it goes. An owner can delete for
+    good sooner; the hourly `sweep-trash` job purges the rest.
+
+    Boards keep their trash state in `board_trash`, filtered in every board
+    read in SQL, so a trashed board isn't counted, listed, opened or given a
+    role. Meetings and projects are registered in `trash_items` and hidden by
+    wrapping their stores (migration 0043, RLS on). Trashing keeps a board's
+    log, grants and links, so a restore brings them back. The dashboard can
+    now move a team board to the trash; before, only boards on this device
+    had a Delete. A meeting has Delete beside Rename, and a project has it
+    in its edit form.
+
   - Evidence: server `org-members.test.ts` (3), `guests.test.ts` (4),
+    `trash.test.ts` (3), `pg-trash.test.ts`; `scripts/trash-check.mjs` (6/6);
     `teams.test.ts` (3, with SCIM Groups), `pg-teams.test.ts`;
     `scripts/teams-check.mjs` (6/6);
     `scripts/guests-check.mjs` (6/6); `scripts/org-members-check.mjs`
