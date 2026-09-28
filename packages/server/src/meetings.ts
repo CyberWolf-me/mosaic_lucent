@@ -43,6 +43,8 @@ export interface TurnCorrection {
   text: string;
   /** Who corrected it. */
   by: string;
+  /** Their name when they did, so the line can say who (docs/28 §9.4). */
+  byName?: string;
   at: number;
 }
 

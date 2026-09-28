@@ -40,6 +40,10 @@ import {
   LINE_TOPIC,
   readCallMeta,
   REACTION_TOPIC,
+  MODE_TOPIC,
+  encodeModeChange,
+  decodeModeChange,
+  captureSince,
   rejoinMarker,
   rejoinOffer,
   REJOIN_KEY,
@@ -49,6 +53,7 @@ import {
   type ChatMessage,
   type Reaction,
 } from "./callProtocol.js";
+import { MODE_LABELS } from "../meeting-modes.js";
 import {
   loadDeviceChoice,
   saveDeviceChoice,
@@ -257,6 +262,8 @@ interface MeetingSessionValue {
   }) => Promise<boolean>;
   /** You asked to join as a guest, and wait for a host (docs/28 S5, A6). */
   waitingToJoin: boolean;
+  /** Tell the call Lucent's mode changed on this (the recording) device (docs/28 §9.5). */
+  announceMode: (mode: string) => void;
   /** A host lets a waiting guest in, or keeps them out of this call. */
   answerGuest: (userId: string, allow: boolean) => Promise<boolean>;
 }
@@ -745,6 +752,11 @@ export function MeetingSessionProvider({ children }: { children: ReactNode }) {
               }),
             );
             if (!chatOpenRef.current) setChatUnread((n) => n + 1);
+          } else if (topic === MODE_TOPIC) {
+            // Only the device that records runs Lucent, so only its word counts.
+            const mode = decodeModeChange(payload);
+            if (!mode || !captureSince(p.attributes)) return;
+            showToast(`${p.name || p.identity} switched Lucent to ${MODE_LABELS[mode]} mode`);
           } else if (topic === REACTION_TOPIC) {
             const emoji = decodeReaction(payload);
             if (!emoji) return;
@@ -1164,6 +1176,14 @@ export function MeetingSessionProvider({ children }: { children: ReactNode }) {
     [],
   );
 
+  const announceMode = useCallback((mode: string) => {
+    const room = roomRef.current;
+    if (!room) return;
+    void room.localParticipant
+      .publishData(encodeModeChange(mode), { reliable: true, topic: MODE_TOPIC })
+      .catch(() => {});
+  }, []);
+
   const answerGuest = useCallback(async (userId: string, allow: boolean) => {
     const board = boardRef.current;
     if (!board) return false;
@@ -1285,10 +1305,12 @@ export function MeetingSessionProvider({ children }: { children: ReactNode }) {
       setCallSettings,
       waitingToJoin,
       answerGuest,
+      announceMode,
     }),
     [
       waitingToJoin,
       answerGuest,
+      announceMode,
       captionsOn,
       setCaptionsOn,
       captions,

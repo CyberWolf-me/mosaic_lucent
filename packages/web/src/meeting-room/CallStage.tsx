@@ -19,6 +19,8 @@ import { MediaNotice } from "./MediaNotice.js";
 import { DevicePicker, useDeviceLists } from "./CallLobby.js";
 import { canChooseSpeaker } from "./devices.js";
 import { Ico, ToolIco } from "../ui/icons.js";
+import { useSettings } from "../settings.js";
+import { MEETING_MODES, MODE_LABELS, isMeetingMode } from "../meeting-modes.js";
 
 /**
  * S5 — the room (docs/28): the people, the controls, and every state the
@@ -520,7 +522,12 @@ export function CallStage({
     captionsRequested,
     setCallSettings,
     answerGuest,
+    announceMode,
   } = s;
+  // docs/28 §9.5: Lucent's mode lives on the device that records; a host who
+  // records can switch it here mid-meeting, and the call is told.
+  const [settings, setSettings] = useSettings();
+  const lucentMode = isMeetingMode(settings.meetingMode) ? settings.meetingMode : "assistant";
 
   const [panel, setPanel] = useState<Panel>(null);
   const [layout, setLayout] = useState<Layout>("auto");
@@ -1095,6 +1102,25 @@ export function CallStage({
                   >
                     {copied ? "Link copied" : "Copy joining link"}
                   </MenuItem>
+                )}
+                {isHost && transcriber?.isLocal && (
+                  <>
+                    <hr className="call-menu-rule" />
+                    <p className="call-menu-heading">Lucent&apos;s mode</p>
+                    {MEETING_MODES.map((mode) => (
+                      <MenuItem
+                        key={mode}
+                        onClick={() => {
+                          close();
+                          if (mode === lucentMode) return;
+                          setSettings({ meetingMode: mode });
+                          announceMode(mode);
+                        }}
+                      >
+                        {mode === lucentMode ? `✓ ${MODE_LABELS[mode]}` : MODE_LABELS[mode]}
+                      </MenuItem>
+                    ))}
+                  </>
                 )}
                 {isHost && (
                   <>

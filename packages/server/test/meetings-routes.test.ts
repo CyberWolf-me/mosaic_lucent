@@ -946,6 +946,7 @@ describe("transcript corrections (docs/28 S7)", () => {
       invitedBy: null,
       createdAt: 1,
     });
+    // A viewer can't correct what someone else said (docs/28 §9.4)...
     expect(
       (
         await h.api(path(0), {
@@ -954,7 +955,25 @@ describe("transcript corrections (docs/28 S7)", () => {
           body: JSON.stringify({ text: "x" }),
         })
       ).status,
-    ).toBe(404);
+    ).toBe(403);
+    // ...but may correct their own line, and the correction says who.
+    const theirs = await h.api(`/api/boards/${boardId}/meetings`, {
+      method: "POST",
+      token: owner.token,
+      body: JSON.stringify({
+        turns: [{ speaker: "Vi", speakerId: viewer.id, at: 2_000, text: "We ship on Fridey." }],
+        startedAt: 1_000,
+        endedAt: 3_000,
+      }),
+    });
+    const own = await h.api(
+      `/api/boards/${boardId}/meetings/${theirs.body.id}/turns/0/correction`,
+      { method: "POST", token: viewer.token, body: JSON.stringify({ text: "We ship on Friday." }) },
+    );
+    expect(own.status).toBe(200);
+    expect(own.body.corrections).toEqual([
+      expect.objectContaining({ turn: 0, by: viewer.id, byName: "fix.viewer" }),
+    ]);
 
     // The summary reads the corrected words: the fixed line now carries a
     // decision cue the offline draft (the mock) can cite.

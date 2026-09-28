@@ -776,13 +776,40 @@ V8 transport (F4).
   workspace members. `call-routes.test.ts` (the rule; let in, deny, open to
   guests), `call-protocol.test.ts`.
 
+- **Decisions 4 and 5 — done (2026-09-28).**
+
+  - **Correcting your own words (§9.4).** A transcript line can be corrected
+    by the person who said it (the turn's `speakerId`, set by per-person
+    capture in a call) as well as by the board's editors. A viewer sees Edit
+    on their own lines only; anyone else's answers 403.
+  - **Every correction shows who made it.** It stores the corrector's name,
+    and the line reads "· edited by Vi Viewer", with the original in its
+    tooltip.
+  - **Changing Lucent's mode mid-meeting (§9.5).** The mode picker stays
+    usable while recording. In a call, only a host can switch, and a host
+    who records can do it from the call's own menu ("Lucent's mode").
+  - **How a switch takes effect.** The capture reads the mode as each line
+    arrives, not as it was at Start, so the next line follows the new mode.
+  - **Who is told.** Everyone in the call sees "Hana Host switched Lucent to
+    Record mode", sent over the call's data channel. A receiver shows it only
+    when the sender is the one recording, since the mode lives on that
+    device.
+  - Not changed: the meeting's stored mode is the one it started in, so a
+    meeting that began in Record mode still gets no written summary.
+
+  `meetings-routes.test.ts`, `call-protocol.test.ts`;
+  `scripts/meeting-correct-check.mjs` 3/3 (a viewer corrects their own line,
+  the owner sees who); `scripts/meeting-call-check.mjs` 52/52 (the switch,
+  told to the guest, on the real LiveKit project).
+
 ## 9. Decisions needed
 
 Taken with the recommendation on 2026-09-27, when the owner asked for meetings
 that work like Zoom and Meet: **1** (the host ends for everyone; LiveKit closes
 an empty room after two minutes; the idle sweep ends orphaned captures), **3**
 (viewers speak) and **6** (early join); and **2** (per participant in a call,
-one-device capture for a room with no call), with A3.5. 4 and 5 are still open.
+one-device capture for a room with no call), with A3.5. **4** and **5** were
+taken with the recommendation on 2026-09-28 (below, under Status).
 
 | #   | Question                                                                                | Recommendation                                                                                                                         |
 | --- | --------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |

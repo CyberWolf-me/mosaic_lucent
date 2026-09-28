@@ -255,8 +255,11 @@ export const registerMeetingRoutes: RegisterRoutes = (router, s) => {
     const route = "/api/boards/:id/meetings/:mid/turns/:n/correction";
     if (!requireCsrf(req, res, route)) return;
     const boardId = ctx.param("id");
-    const guard = await requireBoardRole(req, res, boardId, "editor", route);
+    // docs/28 §9.4: the person who said it may correct their own line, as
+    // well as the board's editors; every correction names who made it.
+    const guard = await requireBoardRole(req, res, boardId, "viewer", route);
     if (!guard.ok) return;
+    const editor = guard.role === "editor" || guard.role === "owner";
     if (!meetings) return send(res, 503, { error: "meeting transcripts are not configured" });
     let body: { text?: unknown };
     try {
@@ -280,10 +283,15 @@ export const registerMeetingRoutes: RegisterRoutes = (router, s) => {
       send(res, 400, { error: "no such turn in this meeting" });
       return;
     }
+    if (!editor && meeting.turns[turn]!.speakerId !== guard.user.id) {
+      send(res, 403, { error: "Only the person who said it, or an editor, can correct a line." });
+      return;
+    }
     const updated = await meetings.addCorrection(boardId, mid, {
       turn,
       text,
       by: guard.user.id,
+      ...(guard.user.name ? { byName: guard.user.name } : {}),
       at: Date.now(),
     });
     if (!updated) return send(res, 404, { error: "meeting not found" });

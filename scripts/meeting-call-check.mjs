@@ -471,6 +471,22 @@ const recChip = await waitFor(async () =>
 );
 check("everyone sees that the meeting is being transcribed", recChip);
 
+// docs/28 §9.5: the host, who records, switches Lucent's mode mid-meeting,
+// and everyone in the call is told.
+await host.page.getByRole("button", { name: "More options" }).click();
+await host.page.getByRole("menuitem", { name: /^Record$/ }).click();
+const switched = await waitFor(async () =>
+  (
+    await guest.page
+      .locator(".call-toast")
+      .textContent()
+      .catch(() => "")
+  )?.includes("Hana Host switched Lucent to Record mode"),
+);
+check("the host switches Lucent's mode mid-meeting, and the call is told", switched);
+await host.page.getByRole("button", { name: "More options" }).click();
+await host.page.getByRole("menuitem", { name: /^Assistant$/ }).click();
+
 // --- the host locks the call, and lets only hosts present ---------------------------
 
 const hostMenu = async (item) => {

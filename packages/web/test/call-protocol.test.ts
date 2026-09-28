@@ -22,6 +22,8 @@ import {
   decodeReaction,
   describeDisconnect,
   describeJoinFailure,
+  decodeModeChange,
+  encodeModeChange,
   encodeChat,
   encodeReaction,
   formatElapsed,
@@ -235,6 +237,13 @@ describe("live captions (docs/28 S5)", () => {
     expect(describeJoinFailure(403, { locked: true })).toBe(
       "The host locked this call, so no one new can join. Ask them to unlock it.",
     );
+  });
+
+  // docs/28 §9.5: the recording device tells the call Lucent's mode changed.
+  it("carries a mode switch, and nothing that isn't one", () => {
+    expect(decodeModeChange(encodeModeChange("record"))).toBe("record");
+    expect(decodeModeChange(encodeModeChange("autopilot"))).toBeNull();
+    expect(decodeModeChange(new TextEncoder().encode("not json"))).toBeNull();
   });
 
   // docs/28 S5 (A6): guests ask to join; a host answers.

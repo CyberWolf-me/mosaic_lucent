@@ -38,7 +38,7 @@ export interface MeetingTranscript {
   /** The end-of-meeting summary (docs/28 A3.3); absent until written. */
   recap?: MeetingRecap;
   /** People's corrections to turns (docs/28 S7): an overlay, originals kept. */
-  corrections?: Array<{ turn: number; text: string; by: string; at: number }>;
+  corrections?: Array<{ turn: number; text: string; by: string; byName?: string; at: number }>;
   /** The plan, for a scheduled meeting (docs/28 A3.4). */
   schedule?: MeetingSchedule;
   /** When the host called it off. */
@@ -203,7 +203,7 @@ export function startsIn(scheduledFor: number, now: number): string {
 }
 
 /** A turn as a reader sees it: corrected, with the original words kept aside. */
-export type ReadTurn = MeetingTurn & { original?: string };
+export type ReadTurn = MeetingTurn & { original?: string; correctedBy?: string };
 
 /**
  * The turns with each one's latest correction applied (docs/28 S7) — the
@@ -215,14 +215,16 @@ export function correctedTurns(
 ): ReadTurn[] {
   const corrections = meeting.corrections ?? [];
   if (corrections.length === 0) return meeting.turns;
-  const latest = new Map<number, { text: string; at: number }>();
+  const latest = new Map<number, { text: string; at: number; byName?: string }>();
   for (const c of corrections) {
     const prior = latest.get(c.turn);
     if (!prior || c.at >= prior.at) latest.set(c.turn, c);
   }
   return meeting.turns.map((t, i) => {
     const c = latest.get(i);
-    return c && c.text !== t.text ? { ...t, text: c.text, original: t.text } : t;
+    return c && c.text !== t.text
+      ? { ...t, text: c.text, original: t.text, ...(c.byName ? { correctedBy: c.byName } : {}) }
+      : t;
   });
 }
 

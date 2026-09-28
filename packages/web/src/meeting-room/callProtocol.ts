@@ -128,6 +128,24 @@ export function transcriberOf(
 
 export const CHAT_TOPIC = "lucent.chat";
 export const REACTION_TOPIC = "lucent.reaction";
+/** docs/28 §9.5: the recording device switched Lucent's mode mid-meeting. */
+export const MODE_TOPIC = "lucent.mode";
+const MODES = ["record", "intelligence", "assistant", "participant"] as const;
+
+export function encodeModeChange(mode: string): Uint8Array {
+  return new TextEncoder().encode(JSON.stringify({ v: 1, mode }));
+}
+
+/** The mode a switch announced, or null for anything else. */
+export function decodeModeChange(payload: Uint8Array): (typeof MODES)[number] | null {
+  try {
+    const value = JSON.parse(new TextDecoder().decode(payload)) as Record<string, unknown>;
+    const mode = value?.v === 1 ? value.mode : null;
+    return (MODES as readonly unknown[]).includes(mode) ? (mode as (typeof MODES)[number]) : null;
+  } catch {
+    return null;
+  }
+}
 export const MAX_CHAT_CHARS = 1000;
 /** The reactions on offer — Meet's set, short enough to learn. */
 export const REACTIONS = ["👍", "👏", "😂", "❤️", "🎉", "😮"] as const;

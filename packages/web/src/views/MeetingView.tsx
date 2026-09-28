@@ -15,6 +15,7 @@ import {
 import { StatementGlyph } from "../ui/StatementGlyph.js";
 import { KIND_LABEL } from "../statementUi.js";
 import { useWorkspace } from "../workspace.js";
+import { getSessionUser } from "../session.js";
 import { useToast } from "../ui/Toast.js";
 import { useSettings } from "../settings.js";
 import {
@@ -276,6 +277,8 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
   const proposalPendingRef = useRef(false);
   proposalPendingRef.current = proposal !== null;
   const { notify } = useToast();
+  /** You, for the lines you said (docs/28 §9.4: you may correct your own). */
+  const meId = getSessionUser()?.id ?? null;
   const [settings, setSettings] = useSettings();
   const [recording, setRecording] = useState(false);
   const [startedAt, setStartedAt] = useState<number | null>(null);
@@ -472,6 +475,8 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
     transcriber: callTranscriber,
     subscribeLines,
     broadcastCaption,
+    isHost: callHost,
+    announceMode,
   } = useMeetingSession();
   // docs/28 A3.5: while this board's call runs, the capture names its own
   // speaker and hears everyone else's lines (refs: the capture's callbacks
@@ -550,6 +555,10 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
   // reads only the effective behavior, the UI shows the selected mode.
   const selectedMode = isMeetingMode(settings.meetingMode) ? settings.meetingMode : "assistant";
   const extracts = modeAllowsExtraction(selectedMode);
+  // The capture's callbacks are armed once; they read the mode now, so a
+  // switch mid-meeting (docs/28 §9.5) takes effect on the next line.
+  const modeRef = useRef(selectedMode);
+  modeRef.current = selectedMode;
 
   const voiceSupported = isAnyVoiceSupported();
   const livekitConfigured = settings.livekitTokenUrl.trim().length > 0;
@@ -802,13 +811,13 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
         });
 
         // Queue the turn for the live extraction loop
-        if (extracts) setExtractQueued((q) => q + 1);
+        if (modeAllowsExtraction(modeRef.current)) setExtractQueued((q) => q + 1);
 
         // Persist the captured turn immediately
         void captureRef.current?.persist(turnsRef.current);
 
         // Conversational Lease Engine in Assistant / Participant modes
-        if (selectedMode === "assistant" || selectedMode === "participant") {
+        if (modeRef.current === "assistant" || modeRef.current === "participant") {
           // 1. Barge-in check if AI is currently playing speech
           if (playbackRef.current) {
             const barge = leaseManagerRef.current.onBargeIn(speaker, t);
@@ -2262,9 +2271,19 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
       );
     });
 
+  // docs/28 §9.5: Lucent's mode can change mid-meeting — by whoever records,
+  // and in a call only by a host — and everyone in the call is told.
+  const canSwitchMode = !recording || !inThisCall || callHost;
+  const switchMode = (mode: typeof selectedMode) => {
+    if (mode === selectedMode) return;
+    setSettings({ meetingMode: mode });
+    if (!recording) return;
+    notify(`Lucent is in ${MODE_LABELS[mode]} mode now`);
+    if (inThisCall) announceMode(mode);
+  };
   const modeControl = (
     <div className="meet-mode">
-      {!recording ? (
+      {canSwitchMode ? (
         <div className="meet-seg" role="radiogroup" aria-label="Meeting mode">
           {MEETING_MODES.map((mode) => (
             <button
@@ -2273,14 +2292,16 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
               className={selectedMode === mode ? "on" : ""}
               aria-pressed={selectedMode === mode}
               title={MODE_NOTES[mode]}
-              onClick={() => setSettings({ meetingMode: mode })}
+              onClick={() => switchMode(mode)}
             >
               {MODE_LABELS[mode]}
             </button>
           ))}
         </div>
       ) : (
-        <span className="meet-chip">{MODE_LABELS[selectedMode]} mode</span>
+        <span className="meet-chip" title="Only a host can change Lucent's mode during the call">
+          {MODE_LABELS[selectedMode]} mode
+        </span>
       )}
     </div>
   );
@@ -3071,22 +3092,26 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
                                 {t.original !== undefined && (
                                   <span
                                     className="mono meet-turn-edited"
-                                    title={`Corrected. Originally: “${t.original}”`}
+                                    title={`Corrected${t.correctedBy ? ` by ${t.correctedBy}` : ""}. Originally: “${t.original}”`}
                                   >
                                     {" "}
-                                    · edited
+                                    · edited{t.correctedBy ? ` by ${t.correctedBy}` : ""}
                                   </span>
                                 )}
-                                {shown && boardId && !readOnly && (
-                                  <button
-                                    type="button"
-                                    className="meet-link meet-turn-fix"
-                                    aria-label={`Correct turn ${i + 1}`}
-                                    onClick={() => setEditingTurn({ turn: i, text: t.text })}
-                                  >
-                                    Edit
-                                  </button>
-                                )}
+                                {/* docs/28 §9.4: editors, and whoever said the line. */}
+                                {shown &&
+                                  boardId &&
+                                  (!readOnly ||
+                                    (t.speakerId !== undefined && t.speakerId === meId)) && (
+                                    <button
+                                      type="button"
+                                      className="meet-link meet-turn-fix"
+                                      aria-label={`Correct turn ${i + 1}`}
+                                      onClick={() => setEditingTurn({ turn: i, text: t.text })}
+                                    >
+                                      Edit
+                                    </button>
+                                  )}
                               </p>
                             )}
                             <div className="meet-turn-foot">
