@@ -149,6 +149,7 @@ import {
   runAsApiToken,
   tokenIsLive,
 } from "./apiTokens.js";
+import { API_VERSION_HEADER, API_VERSIONS, apiIndex, apiVersionOf } from "./apiVersion.js";
 import { registerApiTokenRoutes } from "./routes/apiTokens.js";
 import { registerSsoRoutes } from "./routes/sso.js";
 import { registerHistoryRoutes } from "./routes/history.js";
@@ -462,6 +463,7 @@ const MAX_BODY_BYTES = 25_000_000;
  */
 const ROUTE_SEGMENTS = new Set([
   "api",
+  "v1",
   "auth",
   "orgs",
   "boards",
@@ -578,7 +580,8 @@ export function routeLabel(url: string): string {
   const segments = path.split("/").filter((s) => s.length > 0);
   // Deeper than any route this server defines: a prober's invented path must not
   // mint a series per variation.
-  if (segments.length > 5) return "/api/other";
+  // (One level deeper under /api/v1, which names the same routes.)
+  if (segments.length > (segments[1] === "v1" ? 6 : 5)) return "/api/other";
   const labelled = segments.map((segment, i) => {
     if (i === 0) return segment;
     if (ID_SEGMENT.test(segment)) return ":id";
@@ -5586,8 +5589,37 @@ export function createApp(deps: AppDeps): App {
     );
   }
 
+  /**
+   * The versioned API (ADR 0052): `/api/v1/…` is rewritten to its canonical
+   * `/api/…` path here — after the access log has its label, before the
+   * API-token rules and every guard — so one policy covers both names.
+   */
+  async function admitApiVersion(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const version = apiVersionOf(req.url ?? "/");
+    if (!version) return admitApiToken(req, res);
+    if (version.kind === "unknown") {
+      send(res, 404, {
+        error: `Lucent has no API ${version.version} — use /api/v1`,
+        versions: [...API_VERSIONS],
+      });
+      return;
+    }
+    res.setHeader(API_VERSION_HEADER, "1");
+    if (version.kind === "index") {
+      const method = (req.method ?? "GET").toUpperCase();
+      if (method !== "GET" && method !== "HEAD") {
+        send(res, 405, { error: "method not allowed" });
+        return;
+      }
+      send(res, 200, apiIndex());
+      return;
+    }
+    req.url = version.url;
+    return admitApiToken(req, res);
+  }
+
   const server = createServer((req, res) => {
-    void observe(req, res, admitApiToken);
+    void observe(req, res, admitApiVersion);
   });
 
   // Realtime collaboration shares the HTTP server, upgrading /ws connections.

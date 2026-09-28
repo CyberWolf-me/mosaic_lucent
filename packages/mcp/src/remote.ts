@@ -12,7 +12,8 @@ import { mermaidImportOps, summarizeBoard, type ToolResult } from "./tools.js";
 /**
  * RemoteBoardSession (E3 / R1): the same three-tool MCP surface as
  * `BoardSession`, backed by a real Lucent server over HTTP instead of a
- * process-local workspace.
+ * process-local workspace. It speaks the versioned API (`/api/v1`, ADR
+ * 0052), the name a server keeps stable for callers outside the web app.
  *
  * Why this exists: the in-memory session means an agent using MCP edits a
  * sandbox that shares nothing with your boards. This session makes
@@ -115,7 +116,7 @@ export class RemoteBoardSession {
   }
 
   private async getBoard(): Promise<ToolResult> {
-    const res = await this.request("GET", `/api/boards/${this.opts.boardId}`);
+    const res = await this.request("GET", `/api/v1/boards/${this.opts.boardId}`);
     if (res.status === 401 || res.status === 403) {
       // A 403 here can be a governance refusal (the board is `restricted` and
       // forbids agent reads), not a bad token. Surface the server's reason so
@@ -152,7 +153,10 @@ export class RemoteBoardSession {
    * exist for it).
    */
   private async listExternalLinks(): Promise<ToolResult> {
-    const links = await this.request("GET", `/api/boards/${this.opts.boardId}/integrations/links`);
+    const links = await this.request(
+      "GET",
+      `/api/v1/boards/${this.opts.boardId}/integrations/links`,
+    );
     if (!links.ok) {
       return this.failure(`External links fetch failed (${links.status}).`);
     }
@@ -161,7 +165,7 @@ export class RemoteBoardSession {
     };
     const inbound = await this.request(
       "GET",
-      `/api/boards/${this.opts.boardId}/integrations/inbound`,
+      `/api/v1/boards/${this.opts.boardId}/integrations/inbound`,
     );
     if (!inbound.ok) {
       return this.failure(`Inbound queue fetch failed (${inbound.status}).`);
@@ -243,7 +247,7 @@ export class RemoteBoardSession {
       }
     }
 
-    const res = await this.request("POST", `/api/boards/${this.opts.boardId}/ops`, {
+    const res = await this.request("POST", `/api/v1/boards/${this.opts.boardId}/ops`, {
       ops: filtered,
       label: "mcp agent",
     });
@@ -317,7 +321,7 @@ export class RemoteBoardSession {
   private orgId: string | null = null;
   private async org(): Promise<string | ToolResult> {
     if (this.orgId) return this.orgId;
-    const res = await this.request("GET", `/api/boards/${this.opts.boardId}`);
+    const res = await this.request("GET", `/api/v1/boards/${this.opts.boardId}`);
     if (!res.ok) return this.failure(`Couldn't read board ${this.opts.boardId} (${res.status}).`);
     const board = (await res.json()) as { orgId?: string };
     if (!board.orgId) return this.failure("The board didn't say which workspace it belongs to.");
@@ -354,7 +358,7 @@ export class RemoteBoardSession {
       const v = this.str(args, key);
       if (v) params.set(key, v);
     }
-    return this.read(`/api/orgs/${encodeURIComponent(org)}/search?${params}`, "Search");
+    return this.read(`/api/v1/orgs/${encodeURIComponent(org)}/search?${params}`, "Search");
   }
 
   private async listDecisions(args: Record<string, unknown>): Promise<ToolResult> {
@@ -365,7 +369,7 @@ export class RemoteBoardSession {
     const project = this.str(args, "project");
     if (status) params.set("status", status);
     if (project) params.set("project", project);
-    return this.read(`/api/orgs/${encodeURIComponent(org)}/intelligence?${params}`, "Decisions");
+    return this.read(`/api/v1/orgs/${encodeURIComponent(org)}/intelligence?${params}`, "Decisions");
   }
 
   private async getMeeting(args: Record<string, unknown>): Promise<ToolResult> {
@@ -373,7 +377,7 @@ export class RemoteBoardSession {
     if (!meetingId) return this.failure("get_meeting needs a meetingId.");
     const boardId = this.str(args, "boardId") ?? this.opts.boardId;
     return this.read(
-      `/api/boards/${encodeURIComponent(boardId)}/meetings/${encodeURIComponent(meetingId)}`,
+      `/api/v1/boards/${encodeURIComponent(boardId)}/meetings/${encodeURIComponent(meetingId)}`,
       "Meeting",
     );
   }
@@ -384,7 +388,7 @@ export class RemoteBoardSession {
     const org = await this.org();
     if (typeof org !== "string") return org;
     return this.read(
-      `/api/orgs/${encodeURIComponent(org)}/projects/${encodeURIComponent(projectId)}`,
+      `/api/v1/orgs/${encodeURIComponent(org)}/projects/${encodeURIComponent(projectId)}`,
       "Project",
     );
   }

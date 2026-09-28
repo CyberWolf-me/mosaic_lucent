@@ -58,3 +58,4 @@ back to it.
 | [0049](0049-automation-proposes-or-is-reversible.md)              | Automation proposes; the one rule that applies is opt-in and reversible (docs/26 A5)                                               | Accepted |
 | [0050](0050-oauth-tokens-are-sealed-at-rest.md)                   | OAuth tokens are sealed at rest; every other credential stays a reference (docs/26 A5)                                             | Accepted |
 | [0051](0051-access-is-decided-in-two-places.md)                   | Access is decided in two places; the two-step requirement and API tokens' limits live there (docs/26 A6)                           | Accepted |
+| [0052](0052-the-api-is-versioned-by-alias.md)                     | The API is versioned by alias: `/api/v1` resolves to the canonical path before any policy (docs/26 A6)                             | Accepted |

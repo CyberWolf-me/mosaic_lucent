@@ -865,8 +865,16 @@ a much better product — not rewriting the layout engine.
     disconnect.
 
 - **A6 — built (2026-09-28).** Enterprise and sharing. Where the limits
-  live is ADR 0051. Not done: a versioned `/api/v1` alias. A token uses
-  today's routes as they are.
+  live is ADR 0051.
+
+  - _Versioned API (2026-09-28, ADR 0052)._ `/api/v1/…` is an alias of
+    `/api/…`, resolved before the token rules and every guard, so one policy
+    covers both names and `/api/v1/auth/…` can't slip past a rule for
+    `/api/auth/…`. Versioned responses carry `Lucent-Api-Version: 1`.
+    `GET /api/v1` describes how to authenticate and the stable resources.
+    An unknown version is a 404 naming the ones there are. Metrics label the
+    name the caller used. The MCP server speaks `/api/v1`; the web app keeps
+    the unversioned paths.
 
   - _Members._ An owner changes a member's role and removes members from
     Admin; anyone can leave. An org always keeps an owner: the last one
