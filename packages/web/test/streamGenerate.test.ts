@@ -129,4 +129,79 @@ describe("streamGenerate", () => {
     expect(phases).toEqual(["understanding", "constructing", "validating", "applying"]);
     expect(result.explanation).toBe("done");
   });
+
+  it("has no time limit: a model silent for five minutes still lands, and pings are ignored", async () => {
+    vi.useFakeTimers();
+    try {
+      const enc = new TextEncoder();
+      const frame = (e: string, d: unknown) =>
+        enc.encode(`event: ${e}
+data: ${JSON.stringify(d)}
+
+`);
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(
+          async () =>
+            new Response(
+              new ReadableStream<Uint8Array>({
+                start(c) {
+                  c.enqueue(frame("start", { provider: "slow" }));
+                  c.enqueue(frame("ping", {}));
+                  setTimeout(() => {
+                    c.enqueue(
+                      frame("done", {
+                        operations: [{ op: "CREATE_NODE", id: "a", nodeType: "step", label: "A" }],
+                        explanation: "at last",
+                        provider: "slow",
+                      }),
+                    );
+                    c.close();
+                  }, 300_000);
+                },
+              }),
+              { status: 200 },
+            ),
+        ),
+      );
+      const pending = streamGenerate("x", emptyWorkspace, () => {});
+      await vi.advanceTimersByTimeAsync(300_000);
+      const result = await pending;
+      expect(result.operations).toHaveLength(1);
+      expect(result.explanation).toBe("at last");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("Cancel still stops it, and says so", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async (_url: string, init?: RequestInit) =>
+          new Response(
+            new ReadableStream<Uint8Array>({
+              start(c) {
+                init?.signal?.addEventListener("abort", () =>
+                  c.error(Object.assign(new Error("aborted"), { name: "AbortError" })),
+                );
+              },
+            }),
+            { status: 200 },
+          ),
+      ),
+    );
+    const cancel = new AbortController();
+    const pending = streamGenerate(
+      "x",
+      emptyWorkspace,
+      () => {},
+      undefined,
+      undefined,
+      undefined,
+      cancel.signal,
+    );
+    setTimeout(() => cancel.abort(), 10);
+    await expect(pending).rejects.toThrow(/Cancelled/);
+  });
 });

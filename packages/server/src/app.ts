@@ -5258,6 +5258,10 @@ export function createApp(deps: AppDeps): App {
           "access-control-allow-credentials": "true",
         });
 
+        // A heartbeat while the model is silent: with no time limit on a
+        // generation, a proxy in front of the app would otherwise close a
+        // stream that says nothing for a minute. The client ignores it.
+        const heartbeat = setInterval(() => sendFrame("ping", {}), 15_000);
         const outcome = await handleGenerateStream(
           requestProvider,
           parsed,
@@ -5277,7 +5281,7 @@ export function createApp(deps: AppDeps): App {
             );
             return runId ? { runId } : {};
           },
-        );
+        ).finally(() => clearInterval(heartbeat));
         closed = true;
         res.end();
 

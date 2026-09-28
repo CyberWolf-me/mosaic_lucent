@@ -46,12 +46,6 @@ export interface RunContext {
 }
 
 /**
- * Diagram generation can legitimately take ~30s on a large board, so allow a
- * generous ceiling but still fail with a clear message instead of hanging.
- */
-const GENERATE_TIMEOUT_MS = 120_000;
-
-/**
  * The machine-readable half of a 402 refusal, mirroring `RefusalBody` in
  * `packages/server/src/entitlements.ts`. Declared here rather than imported: the
  * browser bundle does not depend on the server package, so the wire contract is
@@ -397,9 +391,6 @@ export async function generate(
   attachments?: { images?: ImageAttachment[]; documents?: DocumentAttachment[] },
   run?: RunContext,
 ): Promise<GenerateResponse> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), GENERATE_TIMEOUT_MS);
-
   const turns = history ? recentHistory(history) : [];
 
   let res: Response;
@@ -415,7 +406,6 @@ export async function generate(
         ...(attachments?.documents?.length ? { documents: attachments.documents } : {}),
         ...(run ? { run } : {}),
       }),
-      signal: controller.signal,
     });
   } catch (err) {
     // fetch only rejects on abort or a transport-level failure — i.e. the Lucent
@@ -427,8 +417,6 @@ export async function generate(
     throw new Error(
       "Can't reach the Lucent server. Start it with: npm run start -w @lucent/server",
     );
-  } finally {
-    clearTimeout(timer);
   }
 
   if (!res.ok) {
@@ -447,8 +435,10 @@ export async function generate(
  * Deltas are the model's payload text as it arrives and go to `onDelta` —
  * display material only. The resolved value is the `done` frame, whose
  * operations passed the server's full validation pipeline; an `error` frame
- * throws with the server's message. The timeout is activity-based: any frame
- * resets it, so a long stream that keeps producing is never cut off.
+ * throws with the server's message. There is no time limit: a slow model's
+ * generation runs until it answers, and the person can Cancel (the server
+ * sends a heartbeat while the model is silent, so nothing between here and it
+ * closes a quiet stream either).
  */
 export async function streamGenerate(
   message: string,
@@ -465,9 +455,8 @@ export async function streamGenerate(
   run?: RunContext,
 ): Promise<GenerateResponse> {
   const controller = new AbortController();
-  // UX-2: user cancellation shares the abort path with the activity timeout.
-  // A flag keeps the two distinguishable so Cancel reports "cancelled",
-  // not "timed out".
+  // UX-2: Cancel aborts the request. The flag tells a cancel apart from
+  // anything else that aborts it (the page going away).
   let userCancelled = false;
   const onExternalAbort = (): void => {
     userCancelled = true;
@@ -479,12 +468,6 @@ export async function streamGenerate(
     }
     externalSignal.addEventListener("abort", onExternalAbort, { once: true });
   }
-  let timer = setTimeout(() => controller.abort(), GENERATE_TIMEOUT_MS);
-  const touch = (): void => {
-    clearTimeout(timer);
-    timer = setTimeout(() => controller.abort(), GENERATE_TIMEOUT_MS);
-  };
-
   const turns = history ? recentHistory(history) : [];
   let res: Response;
   try {
@@ -502,11 +485,10 @@ export async function streamGenerate(
       signal: controller.signal,
     });
   } catch (err) {
-    clearTimeout(timer);
     externalSignal?.removeEventListener("abort", onExternalAbort);
     if ((err as Error).name === "AbortError") {
       if (userCancelled) throw new Error("Cancelled — nothing was applied.");
-      throw new Error("Generation timed out before the server responded — please try again.");
+      throw new Error("The request was stopped before the server responded — please try again.");
     }
     throw new Error(
       "Can't reach the Lucent server. Start it with: npm run start -w @lucent/server",
@@ -514,7 +496,7 @@ export async function streamGenerate(
   }
 
   if (!res.ok || !res.body) {
-    clearTimeout(timer);
+    externalSignal?.removeEventListener("abort", onExternalAbort);
     throw await describeFailure(res);
   }
 
@@ -527,7 +509,6 @@ export async function streamGenerate(
   let failure: string | null = null;
 
   const handleFrame = (event: string, data: unknown): void => {
-    touch();
     if (event === "phase") {
       const body = data as { phase?: unknown; message?: unknown };
       if (typeof body.phase === "string") {
@@ -603,15 +584,12 @@ export async function streamGenerate(
   try {
     await readEvents();
   } catch (err) {
-    clearTimeout(timer);
     externalSignal?.removeEventListener("abort", onExternalAbort);
-    if ((err as Error).name === "AbortError") {
-      if (userCancelled) throw new Error("Cancelled — nothing was applied.");
-      throw new Error("Generation timed out mid-stream — please try again.");
+    if ((err as Error).name === "AbortError" && userCancelled) {
+      throw new Error("Cancelled — nothing was applied.");
     }
     throw new Error("The stream was interrupted before it finished — please try again.");
   }
-  clearTimeout(timer);
   externalSignal?.removeEventListener("abort", onExternalAbort);
 
   if (failure) throw new Error(failure);

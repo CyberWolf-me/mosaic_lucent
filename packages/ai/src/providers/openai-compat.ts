@@ -193,6 +193,10 @@ export class OpenAICompatibleProvider implements LLMProvider {
   private readonly fetchImpl: typeof fetch;
   private readonly maxRetries: number;
   private readonly timeoutMs: number;
+  /** The request's deadline: none when the timeout is 0 (LUCENT_AI_TIMEOUT_MS=0). */
+  private deadline(): AbortSignal | null {
+    return this.timeoutMs > 0 ? AbortSignal.timeout(this.timeoutMs) : null;
+  }
   /** Flips after the first "only auto is supported" 400 — see the helper. */
   private forceAutoToolChoice = false;
   /** Flips after the first "recursive schemas not supported" 400. */
@@ -291,7 +295,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
           body,
           // Per-attempt timeout so retries don't compound and a stuck socket
           // can't keep the user waiting indefinitely.
-          signal: AbortSignal.timeout(this.timeoutMs),
+          signal: this.deadline(),
         });
       } catch (err) {
         // Network-level failure (DNS, reset, timeout) — retry.
@@ -428,7 +432,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
             authorization: `Bearer ${this.apiKey}`,
           },
           body,
-          signal: AbortSignal.timeout(this.timeoutMs),
+          signal: this.deadline(),
         });
       } catch (err) {
         lastDetail = (err as Error).message;
@@ -571,7 +575,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
           method: "POST",
           headers: { "content-type": "application/json", authorization: `Bearer ${this.apiKey}` },
           body,
-          signal: AbortSignal.timeout(this.timeoutMs),
+          signal: this.deadline(),
         });
       } catch (err) {
         lastDetail = (err as Error).message;
@@ -655,7 +659,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
             authorization: `Bearer ${this.apiKey}`,
           },
           body,
-          signal: AbortSignal.timeout(this.timeoutMs),
+          signal: this.deadline(),
         });
       } catch (err) {
         lastDetail = (err as Error).message;
@@ -791,7 +795,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
           accept: "text/event-stream",
         },
         body: makeStreamBody(),
-        signal: AbortSignal.timeout(this.timeoutMs),
+        signal: this.deadline(),
       });
 
     // A pre-stream failure carries no streamed data, so a transient gateway

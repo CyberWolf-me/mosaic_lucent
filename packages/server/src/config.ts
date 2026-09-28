@@ -223,6 +223,17 @@ const num = (value: string | undefined, fallback: number) => {
   return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : fallback;
 };
 
+/**
+ * How long one model call may take. `0` (or `off`/`none`) means no limit: a
+ * slow gateway's generation runs until it answers or the person cancels.
+ * Unset or unreadable keeps the 180 s default.
+ */
+export function aiTimeout(value: string | undefined): number {
+  const v = value?.trim().toLowerCase();
+  if (v === "0" || v === "off" || v === "none") return 0;
+  return num(value, 180_000);
+}
+
 /** True for any environment where accidentally weak defaults would be a security incident. */
 export function isProduction(env: ConfigEnv): boolean {
   return env.NODE_ENV === "production";
@@ -264,7 +275,7 @@ export function readConfig(env: ConfigEnv = process.env): Config {
     // 90s default aborted exactly the large generations the raised output
     // budget was for (M1). The client's per-frame-resetting stream timeout
     // (120s) is the user-side guard, so this only needs to sit above it.
-    aiTimeoutMs: num(env.LUCENT_AI_TIMEOUT_MS, 180_000),
+    aiTimeoutMs: aiTimeout(env.LUCENT_AI_TIMEOUT_MS),
     realtimeTicketTtlMs: num(env.LUCENT_REALTIME_TICKET_TTL_MS, 60_000),
     mail: {
       transport: mailTransport(env.LUCENT_MAIL_TRANSPORT),

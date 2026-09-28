@@ -177,6 +177,20 @@ describe("OpenAICompatibleProvider retries", () => {
     expect(signal.aborted).toBe(false);
     expect(typeof signal.addEventListener).toBe("function");
   });
+
+  it("a 0 timeout sends no deadline at all (LUCENT_AI_TIMEOUT_MS=0)", async () => {
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse(200, OK_BODY));
+    const provider = new OpenAICompatibleProvider({
+      apiKey: "k",
+      baseUrl: "https://gw/v1/chat/completions",
+      model: "m",
+      fetchImpl,
+      timeoutMs: 0,
+    });
+    await provider.generateOperations(request);
+    const init = fetchImpl.mock.calls[0]?.[1] as RequestInit | undefined;
+    expect(init?.signal).toBeNull();
+  });
 });
 
 describe("OpenAICompatibleProvider tool_choice downgrade", () => {

@@ -123,6 +123,10 @@ export class AnthropicProvider implements LLMProvider {
   private readonly baseUrl: string;
   private readonly fetchImpl: typeof fetch;
   private readonly timeoutMs: number;
+  /** The request's deadline: none when the timeout is 0 (LUCENT_AI_TIMEOUT_MS=0). */
+  private deadline(): AbortSignal | null {
+    return this.timeoutMs > 0 ? AbortSignal.timeout(this.timeoutMs) : null;
+  }
   private readonly maxRetries: number;
 
   constructor(options: AnthropicProviderOptions) {
@@ -177,7 +181,7 @@ export class AnthropicProvider implements LLMProvider {
             tools: [anthropicToolDefinition()],
             tool_choice: { type: "tool", name: TOOL_NAME },
           }),
-          signal: AbortSignal.timeout(this.timeoutMs),
+          signal: this.deadline(),
         });
       } catch (err) {
         // Network-level failure (DNS, reset, timeout) — one more try.
@@ -258,7 +262,7 @@ export class AnthropicProvider implements LLMProvider {
             tools: [anthropicAnswerToolDefinition()],
             tool_choice: { type: "tool", name: ANSWER_TOOL_NAME },
           }),
-          signal: AbortSignal.timeout(this.timeoutMs),
+          signal: this.deadline(),
         });
       } catch (err) {
         lastDetail = (err as Error).message;
@@ -325,7 +329,7 @@ export class AnthropicProvider implements LLMProvider {
             tools: [anthropicExternalPlanToolDefinition()],
             tool_choice: { type: "tool", name: EXTERNAL_PLAN_TOOL_NAME },
           }),
-          signal: AbortSignal.timeout(this.timeoutMs),
+          signal: this.deadline(),
         });
       } catch (err) {
         lastDetail = (err as Error).message;
@@ -429,7 +433,7 @@ export class AnthropicProvider implements LLMProvider {
             tools: [tool],
             tool_choice: { type: "tool", name: tool.name },
           }),
-          signal: AbortSignal.timeout(this.timeoutMs),
+          signal: this.deadline(),
         });
       } catch (err) {
         lastDetail = (err as Error).message;
@@ -516,7 +520,7 @@ export class AnthropicProvider implements LLMProvider {
           tool_choice: { type: "tool", name: TOOL_NAME },
           stream: true,
         }),
-        signal: AbortSignal.timeout(this.timeoutMs),
+        signal: this.deadline(),
       });
       if (!response.ok || !response.body) {
         const detail = await response.text().catch(() => "");
