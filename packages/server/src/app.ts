@@ -126,6 +126,7 @@ import { registerMeetingFollowUpRoutes } from "./routes/meetingFollowUp.js";
 import { registerMeetingScheduleRoutes } from "./routes/meetingSchedule.js";
 import { registerMeetingNotesRoutes } from "./routes/meetingNotes.js";
 import { registerThemesRoutes } from "./routes/themes.js";
+import { registerVectorEditRoutes } from "./routes/vectorEdit.js";
 import { InMemoryMeetingNotesStore } from "./meetingNotes.js";
 import { registerOrgSettingsRoutes } from "./routes/settings.js";
 import { registerProposalRoutes } from "./routes/proposals.js";
@@ -2680,6 +2681,7 @@ export function createApp(deps: AppDeps): App {
   registerScopedAskRoutes(router, services);
   registerThreadRoutes(router, services);
   registerThemesRoutes(router, services);
+  registerVectorEditRoutes(router, services);
   registerProposalRoutes(router, services);
   registerSsoRoutes(router, services);
   registerHistoryRoutes(router, services);

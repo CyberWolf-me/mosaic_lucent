@@ -1,5 +1,6 @@
 import { NOTE_TEMPLATES, type NotesRequest } from "./notes.js";
 import { THEME_LIMITS, themeCap, type ThemesRequest } from "./themes.js";
+import { VECTOR_EDIT_LIMITS, type VectorEditRequest } from "./vectorEdit.js";
 import { getPrompt } from "./registry.js";
 import { capChartSummary, capTableSummary, REQUEST_LIMITS } from "./provider.js";
 import type { ChartSummary, GenerateRequest, TableSummary } from "./provider.js";
@@ -1031,4 +1032,28 @@ export function buildThemesUserPrompt(request: ThemesRequest): string {
   });
   sections.push(`<sticky-notes count="${request.items.length}">\n${notes.join("\n")}\n</sticky-notes>`);
   return sections.join("\n\n");
+}
+
+const VECTOR_EDITOR = getPrompt("vector-editor");
+export const VECTOR_EDIT_SYSTEM_PROMPT: string = VECTOR_EDITOR.systemPrompt;
+export const VECTOR_EDIT_SYSTEM_PROMPT_ID: string = VECTOR_EDITOR.id;
+export const VECTOR_EDIT_SYSTEM_PROMPT_VERSION: number = VECTOR_EDITOR.version;
+
+/**
+ * The vector editor's user turn: the person's instruction (their own words,
+ * escaped but kept) and the drawing as structured JSON — viewBox, paths,
+ * gradients. The vector's provenance (a vendor prompt, a file name) is left
+ * out: the model needs the drawing, not where it came from.
+ */
+export function buildVectorEditUserPrompt(request: VectorEditRequest): string {
+  const v = request.vector;
+  const drawing = JSON.stringify({
+    viewBox: v.viewBox,
+    paths: v.paths,
+    ...(v.gradients?.length ? { gradients: v.gradients } : {}),
+  });
+  return [
+    `The person's instruction: ${escapeHarnessTags(clamp(request.instruction.trim(), VECTOR_EDIT_LIMITS.instruction).text)}`,
+    `<untrusted-vector paths="${v.paths.length}">\n${escapeHarnessTags(drawing)}\n</untrusted-vector>`,
+  ].join("\n\n");
 }

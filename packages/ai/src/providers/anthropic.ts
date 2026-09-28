@@ -17,10 +17,18 @@ import {
   type ThemesResult,
 } from "../themes.js";
 import {
+  anthropicVectorEditToolDefinition,
+  parseVectorEditDraft,
+  type VectorEditRequest,
+  type VectorEditResult,
+} from "../vectorEdit.js";
+import {
   NOTES_SYSTEM_PROMPT,
   THEMES_SYSTEM_PROMPT,
+  VECTOR_EDIT_SYSTEM_PROMPT,
   buildNotesUserPrompt,
   buildThemesUserPrompt,
+  buildVectorEditUserPrompt,
 } from "../prompt.js";
 import {
   ANSWER_SYSTEM_PROMPT,
@@ -375,6 +383,17 @@ export class AnthropicProvider implements LLMProvider {
       anthropicThemesToolDefinition(),
       parseThemesDraft,
       2048,
+    );
+  }
+
+  /** docs/26 §6.3: rewrite one vector's structured paths to an instruction. */
+  async editVector(request: VectorEditRequest): Promise<VectorEditResult> {
+    return this.forcedTool(
+      VECTOR_EDIT_SYSTEM_PROMPT,
+      buildVectorEditUserPrompt(request),
+      anthropicVectorEditToolDefinition(),
+      parseVectorEditDraft,
+      8192,
     );
   }
 

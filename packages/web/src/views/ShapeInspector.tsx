@@ -330,6 +330,7 @@ export function ShapeInspector({
   onSelect,
   onStructure,
   structuring = false,
+  boardId,
 }: {
   shapes: Record<string, Shape>;
   selectedIds: Set<string>;
@@ -340,6 +341,8 @@ export function ShapeInspector({
   onStructure?: (action: StructureAction) => void;
   /** A structure request is in flight. */
   structuring?: boolean;
+  /** The shared board, if any: an AI edit of a vector answers to its policy. */
+  boardId?: string | null;
 }) {
   const ids = [...selectedIds].filter((id) => shapes[id]);
   if (ids.length === 0) return null;
@@ -499,6 +502,7 @@ export function ShapeInspector({
       <VectorSection
         shapes={selectedShapes}
         allShapes={Object.values(shapes)}
+        boardId={boardId ?? null}
         onApply={onApply}
         onSelect={onSelect}
       />

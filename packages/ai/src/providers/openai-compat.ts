@@ -17,10 +17,18 @@ import {
   type ThemesResult,
 } from "../themes.js";
 import {
+  openAiVectorEditToolDefinition,
+  parseVectorEditDraft,
+  type VectorEditRequest,
+  type VectorEditResult,
+} from "../vectorEdit.js";
+import {
   NOTES_SYSTEM_PROMPT,
   THEMES_SYSTEM_PROMPT,
+  VECTOR_EDIT_SYSTEM_PROMPT,
   buildNotesUserPrompt,
   buildThemesUserPrompt,
+  buildVectorEditUserPrompt,
 } from "../prompt.js";
 import { sseEvents } from "./sse.js";
 import {
@@ -496,6 +504,17 @@ export class OpenAICompatibleProvider implements LLMProvider {
       openAiThemesToolDefinition(),
       parseThemesDraft,
       2048,
+    );
+  }
+
+  /** docs/26 §6.3: rewrite one vector's structured paths to an instruction. */
+  async editVector(request: VectorEditRequest): Promise<VectorEditResult> {
+    return this.forcedTool(
+      VECTOR_EDIT_SYSTEM_PROMPT,
+      buildVectorEditUserPrompt(request),
+      openAiVectorEditToolDefinition(),
+      parseVectorEditDraft,
+      8192,
     );
   }
 

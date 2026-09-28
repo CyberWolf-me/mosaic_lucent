@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { IconIndex } from "../src/icons/registry.js";
-import { brandInPrompt, generateVectors } from "../src/vector/generate.js";
+import { brandInPrompt, editVectorWithAi, generateVectors } from "../src/vector/generate.js";
 
 /**
  * docs/26 §6.3 V3, client half: what the Generate tab sends and how it reads
@@ -98,6 +98,56 @@ describe("generateVectors", () => {
     ).toMatchObject({
       ok: false,
       error: expect.stringMatching(/Couldn't reach Lucent/),
+    });
+  });
+});
+
+describe("editVectorWithAi", () => {
+  const vector = { viewBox: [0, 0, 24, 24], paths: [{ d: "M0 0L24 24" }] } as const;
+  const req = { vector: vector as never, instruction: "make it blue", boardId: "brd_1" };
+
+  it("posts the drawing, the words and the board, and returns the edit to preview", async () => {
+    const edited = { viewBox: [0, 0, 24, 24], paths: [{ d: "M0 0L24 24", fill: "#0000ff" }] };
+    const fetchSpy = vi.fn(async (url: string) =>
+      url === "/api/auth/csrf"
+        ? Response.json({ token: "t" })
+        : Response.json({ vector: edited, summary: "Made it blue." }),
+    );
+    vi.stubGlobal("fetch", fetchSpy);
+    expect(await editVectorWithAi(req)).toEqual({
+      ok: true,
+      vector: edited,
+      summary: "Made it blue.",
+    });
+    const call = fetchSpy.mock.calls.find((c) => c[0] === "/api/vector/edit") as unknown as [
+      string,
+      RequestInit,
+    ];
+    expect(JSON.parse(String(call[1].body))).toEqual({
+      vector,
+      instruction: "make it blue",
+      boardId: "brd_1",
+    });
+  });
+
+  it("says what to do about each refusal", async () => {
+    const answer = (status: number, body: unknown) =>
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => Response.json(body, { status })),
+      );
+    answer(413, { error: "This vector is too detailed to edit with AI — simplify it first." });
+    expect(await editVectorWithAi(req)).toEqual({
+      ok: false,
+      error: "This vector is too detailed to edit with AI — simplify it first.",
+    });
+    answer(503, { error: "x" });
+    expect(await editVectorWithAi(req)).toMatchObject({
+      error: expect.stringMatching(/isn't set up/),
+    });
+    answer(502, { error: "The edit came back with nothing drawable." });
+    expect(await editVectorWithAi(req)).toMatchObject({
+      error: expect.stringMatching(/try saying it another way/),
     });
   });
 });

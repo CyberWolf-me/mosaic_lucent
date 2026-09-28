@@ -12,6 +12,7 @@ export * from "./vector.js";
 export * from "./notes.js";
 export * from "./meetingPrompt.js";
 export * from "./themes.js";
+export * from "./vectorEdit.js";
 export * from "./cache.js";
 export * from "./evals.js";
 export { GOLDEN_SET } from "./golden.js";

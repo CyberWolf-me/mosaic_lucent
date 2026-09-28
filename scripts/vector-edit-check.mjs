@@ -179,6 +179,35 @@ check(
     flat.vector.paths[2].fillGradient === undefined,
 );
 
+// --- edit with AI (the offline editor behind the mock provider) ----------------------------------
+await page.getByRole("button", { name: "Edit with AI" }).click();
+await page.getByLabel("Describe the change").fill("outline only");
+await page.getByRole("button", { name: "Preview", exact: true }).click();
+const preview = page.getByRole("group", { name: "AI edit preview" });
+await preview.waitFor({ timeout: 15000 });
+const previewed = {
+  figures: await preview.locator("figure svg").count(),
+  summary: await preview.locator(".vector-ai-summary").textContent(),
+  // Nothing is written until Apply.
+  untouched: (await shapesNow())[0].vector.paths[0].fill === "#e4572e",
+};
+if (shots) await page.screenshot({ path: `${shots}/vector-ai-preview.png` });
+check(
+  "Edit with AI previews before and after, and changes nothing yet",
+  previewed.figures === 2 && /outlines/.test(previewed.summary ?? "") && previewed.untouched,
+  JSON.stringify(previewed),
+);
+await preview.getByRole("button", { name: "Apply" }).click();
+const outlined = await waitFor(async () => {
+  const [v] = await shapesNow();
+  return v && v.vector.paths.every((p) => p.fill === "none") ? v : null;
+});
+check(
+  "Apply writes the edit to the board, with its provenance",
+  outlined && outlined.vector.source?.prompt === "outline only",
+  JSON.stringify(outlined?.vector.source),
+);
+
 // --- split ---------------------------------------------------------------------------------------
 await page.getByRole("button", { name: "Split", exact: true }).click();
 const parts = await waitFor(async () => {

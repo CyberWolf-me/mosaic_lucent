@@ -377,8 +377,21 @@ paths; the Generate tab (style, three variations, click to place, "More" from
 the inspector); a brand guard that offers the real mark from the library instead
 of generating another company's logo (Recraft's terms forbid it); prompt v14
 lets the visual agent draw a small pictogram itself as the free fallback.
-Verified against the live API (one call, 80 units). Not yet: AI edit of an
-existing vector (image-to-image), QuiverAI.
+Verified against the live API (one call, 80 units). Not yet: QuiverAI.
+
+**Status (2026-09-28, AI edit):** built through the model-independent path,
+not a vendor's image-to-image — "Edit with AI" in the inspector sends one
+vector as structured paths (never SVG text, never its vendor prompt) and the
+person's words to the configured LLM (`editVector`, prompt `vector-editor`
+v1, one forced `edit_vector` tool). `POST /api/vector/edit` holds the
+generation gates (editor floor, AI boundary → 403, provider policy,
+allowance), refuses vectors over 80 paths / 16k characters with "simplify it
+first" (413), and runs the answer through `assembleVectorEdit`: path data
+normalized by core, paint kept only where the schema takes it, gradients
+kept whole or not at all, an empty drawing refused. Nothing touches the board
+until the person has seen before and after and pressed Apply — one
+UPDATE_SHAPE, one undo. The mock provider edits offline by keyword (outline,
+one colour, two colours, a named colour, bolder/finer) and says so.
 
 **Image-generation fixes (2026-09-25):** two defects noticed during testing,
 now closed. (1) A generated raster image is no longer inlined into the op log

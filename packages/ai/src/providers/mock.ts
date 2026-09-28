@@ -16,6 +16,7 @@ import type {
 import type { AnswerCitation, AnswerRequest, AnswerResult } from "../answer.js";
 import { fallbackNotesDraft, type NotesRequest, type NotesResult } from "../notes.js";
 import { fallbackThemes, type ThemesRequest, type ThemesResult } from "../themes.js";
+import { mockVectorEdit, type VectorEditRequest, type VectorEditResult } from "../vectorEdit.js";
 import {
   MAX_AI_SELECTED_ACTIONS,
   type ExternalPlanRequest,
@@ -1324,6 +1325,11 @@ export class MockProvider implements LLMProvider {
   /** docs/27 D2: offline — the keyword sorter, so the flow works with no key. */
   async generateThemes(request: ThemesRequest): Promise<ThemesResult> {
     return { ...fallbackThemes(request), model: "mock" };
+  }
+
+  /** docs/26 §6.3: offline — a few keyword edits, so "edit with AI" works with no key. */
+  async editVector(request: VectorEditRequest): Promise<VectorEditResult> {
+    return { ...mockVectorEdit(request), model: "mock" };
   }
 
   /**

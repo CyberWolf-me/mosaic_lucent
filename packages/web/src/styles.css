@@ -3013,6 +3013,78 @@ html[data-theme="light"] .segmented button.active {
   opacity: 0.5;
   cursor: default;
 }
+/* "Edit with AI" on a vector (docs/26 §6.3): ask, then before/after, then apply. */
+.vector-ai {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.vector-ai input {
+  height: 30px;
+  padding: 0 9px;
+  border-radius: 8px;
+  border: 1px solid var(--stroke-2);
+  background: var(--canvas-3);
+  font: inherit;
+  font-size: 12px;
+  color: var(--ink-0);
+  outline: none;
+}
+.vector-ai input:focus {
+  border-color: var(--bloom-2);
+  box-shadow: 0 0 0 2px var(--bloom-wash);
+}
+.vector-ai-row {
+  display: flex;
+  gap: 6px;
+}
+.vector-ai-row > button {
+  flex: 1;
+  height: 30px;
+  border-radius: 8px;
+  font-size: 12px;
+  border: 1px solid var(--stroke-1);
+}
+.vector-ai-row > button:not(.insp-structure) {
+  background: var(--canvas-3);
+  color: var(--ink-1);
+}
+.vector-ai-compare {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+.vector-ai-compare figure {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.vector-ai-compare svg {
+  height: 72px !important;
+  padding: 6px;
+  border-radius: 8px;
+  background: var(--canvas-3);
+  border: 1px solid var(--stroke-1);
+}
+.vector-ai-compare figcaption {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  text-align: center;
+}
+.vector-ai-summary,
+.vector-ai-error {
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--ink-2);
+}
+.vector-ai-error {
+  color: var(--sig-red);
+}
+
 /* Numeric geometry (docs/26 §6.4): two columns of compact label+value cells. */
 .insp-fields {
   display: grid;

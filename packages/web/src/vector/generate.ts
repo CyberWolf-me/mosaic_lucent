@@ -65,6 +65,56 @@ export async function generateVectors(req: {
   }
 }
 
+export type VectorEditOutcome =
+  | { ok: true; vector: VectorData; summary: string }
+  | { ok: false; error: string };
+
+/**
+ * "Edit with AI" (docs/26 §6.3): the drawing goes to the server as structured
+ * paths, and a checked vector comes back for the person to preview. Nothing
+ * is written to the board until they apply it.
+ */
+export async function editVectorWithAi(req: {
+  vector: VectorData;
+  instruction: string;
+  boardId: string | null;
+}): Promise<VectorEditOutcome> {
+  try {
+    const res = await apiFetch("/api/vector/edit", {
+      method: "POST",
+      body: JSON.stringify({
+        vector: req.vector,
+        instruction: req.instruction,
+        ...(req.boardId ? { boardId: req.boardId } : {}),
+      }),
+    });
+    const body = (await res.json().catch(() => ({}))) as {
+      vector?: VectorData;
+      summary?: string;
+      error?: string;
+      detail?: string;
+    };
+    if (!res.ok || !body.vector) {
+      const why =
+        res.status === 413
+          ? (body.error ?? "This vector is too detailed to edit with AI — simplify it first.")
+          : res.status === 503
+            ? "Editing with AI isn't set up on this workspace."
+            : res.status === 402 || /allowance|quota/i.test(body.detail ?? body.error ?? "")
+              ? "The AI allowance is used up."
+              : res.status === 403
+                ? (body.error ?? "This board's AI policy doesn't allow sending it to a model.")
+                : res.status === 502
+                  ? "The model couldn't make that change — try saying it another way."
+                  : (body.error ?? `Editing failed (${res.status}).`);
+      return { ok: false, error: why };
+    }
+    return { ok: true, vector: body.vector, summary: body.summary ?? "Edited the vector." };
+  } catch {
+    return { ok: false, error: "Couldn't reach Lucent. Check the connection and try again." };
+  }
+}
+
 const LOGO_WORDS = new Set([
   "logo",
   "logos",

@@ -1,5 +1,6 @@
 import type { NotesRequest, NotesResult } from "./notes.js";
 import type { ThemesRequest, ThemesResult } from "./themes.js";
+import type { VectorEditRequest, VectorEditResult } from "./vectorEdit.js";
 import type { DiagramKind, Operation, Workspace } from "@lucent/core";
 import { commentThreads, compositionLine, reactionTally, voteRanking } from "@lucent/core";
 import type { AnswerRequest, AnswerResult } from "./answer.js";
@@ -276,6 +277,12 @@ export interface LLMProvider {
    * offline keyword sorter answers.
    */
   generateThemes?(request: ThemesRequest): Promise<ThemesResult>;
+  /**
+   * "Edit with AI" for a vector (docs/26 §6.3): rewrite one drawing's
+   * structured paths to an instruction. Optional — without it the route
+   * answers that editing needs a model.
+   */
+  editVector?(request: VectorEditRequest): Promise<VectorEditResult>;
   /**
    * Streaming variant. Optional: the single-shot contract stays the default,
    * and `streamViaGenerate` adapts any non-streaming provider so callers can

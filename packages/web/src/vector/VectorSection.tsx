@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type FormEvent } from "react";
 import {
   flattenGradients,
   recolorVector,
@@ -11,7 +11,9 @@ import {
   type VectorData,
 } from "@lucent/core";
 import { nextZ } from "../shapes.js";
+import { editVectorWithAi } from "./generate.js";
 import { combineVectorOps, splitVectorOps, SPLIT_MAX } from "./ops.js";
+import { VectorSvg } from "./VectorSvg.js";
 import { openVectorsPanel } from "./VectorsPanel.js";
 
 /**
@@ -26,7 +28,16 @@ import { openVectorsPanel } from "./VectorsPanel.js";
  * drawing), flatten gradients to their solid colours, split one vector into
  * a vector per part, and combine several back into one — each one batch,
  * one undo.
+ *
+ * "Edit with AI" sends one vector and the person's words to the model and
+ * shows before and after; nothing changes until they apply it (the approval
+ * gate), and then it is one UPDATE_SHAPE like any edit.
  */
+
+type AiEdit =
+  | { id: string; phase: "ask"; text: string; error?: string }
+  | { id: string; phase: "working"; text: string }
+  | { id: string; phase: "preview"; text: string; vector: VectorData; summary: string };
 
 /** Replacement colours: the board palette as literals, plus the theme's ink. */
 const REPLACEMENTS = [
@@ -65,18 +76,22 @@ function swatchStyle(c: string, ink: string): React.CSSProperties {
 export function VectorSection({
   shapes,
   allShapes,
+  boardId = null,
   onApply,
   onSelect,
 }: {
   shapes: Shape[];
   /** Every shape on the board, for stacking split parts on top. */
   allShapes?: Shape[];
+  /** The shared board, whose AI policy an edit with AI answers to. */
+  boardId?: string | null;
   onApply: (ops: Operation[], label: string) => boolean | void;
   onSelect?: (ids: Set<string>) => void;
 }) {
   const vectors = shapes.filter((s): s is Shape & { vector: VectorData } => Boolean(s.vector));
   const [from, setFrom] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
+  const [aiEdit, setAiEdit] = useState<AiEdit | null>(null);
   if (vectors.length === 0) return null;
   const locked = vectors.some((s) => s.locked);
 
@@ -127,6 +142,32 @@ export function VectorSection({
       setNote(null);
       onSelect?.(new Set(r.ids));
     }
+  };
+
+  // An edit with AI belongs to the vector it was started on.
+  const ai = one && aiEdit?.id === one.id ? aiEdit : null;
+
+  const askAi = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!one || !ai || ai.phase !== "ask" || ai.text.trim().length < 2) return;
+    const text = ai.text.trim();
+    setAiEdit({ id: one.id, phase: "working", text });
+    const r = await editVectorWithAi({ vector: one.vector, instruction: text, boardId });
+    setAiEdit((cur) => {
+      if (cur?.id !== one.id || cur.phase !== "working") return cur;
+      return r.ok
+        ? { id: one.id, phase: "preview", text, vector: r.vector, summary: r.summary }
+        : { id: one.id, phase: "ask", text, error: r.error };
+    });
+  };
+
+  const applyAi = () => {
+    if (!one || !ai || ai.phase !== "preview") return;
+    if (
+      onApply([{ op: "UPDATE_SHAPE", id: one.id, vector: ai.vector }], "Edit vector with AI") !==
+      false
+    )
+      setAiEdit(null);
   };
 
   const combine = () => {
@@ -281,6 +322,76 @@ export function VectorSection({
           </button>
         )}
       </div>
+      {one && !ai && (
+        <button
+          className="insp-structure"
+          onClick={() => setAiEdit({ id: one.id, phase: "ask", text: "" })}
+          disabled={locked}
+          title="Describe a change and preview it before it's applied"
+        >
+          Edit with AI
+        </button>
+      )}
+      {one && ai && ai.phase !== "preview" && (
+        <form className="vector-ai" onSubmit={(e) => void askAi(e)}>
+          <input
+            aria-label="Describe the change"
+            placeholder="“Flat, two colours”"
+            value={ai.text}
+            disabled={ai.phase === "working"}
+            autoFocus
+            maxLength={500}
+            onChange={(e) => setAiEdit({ id: one.id, phase: "ask", text: e.target.value })}
+            onKeyDown={(e) => {
+              e.stopPropagation();
+              if (e.key === "Escape") setAiEdit(null);
+            }}
+          />
+          <div className="vector-ai-row">
+            <button
+              type="submit"
+              className="insp-structure"
+              disabled={ai.phase === "working" || ai.text.trim().length < 2}
+            >
+              {ai.phase === "working" ? "Working…" : "Preview"}
+            </button>
+            <button type="button" onClick={() => setAiEdit(null)}>
+              Cancel
+            </button>
+          </div>
+          {ai.phase === "ask" && ai.error && (
+            <span role="alert" className="vector-ai-error">
+              {ai.error}
+            </span>
+          )}
+        </form>
+      )}
+      {one && ai?.phase === "preview" && (
+        <div className="vector-ai" role="group" aria-label="AI edit preview">
+          <div className="vector-ai-compare" style={{ color: ink }}>
+            <figure>
+              <VectorSvg vector={one.vector} title="Before" />
+              <figcaption>Before</figcaption>
+            </figure>
+            <figure>
+              <VectorSvg vector={ai.vector} title="After" />
+              <figcaption>After</figcaption>
+            </figure>
+          </div>
+          <span role="status" className="vector-ai-summary">
+            {ai.summary}
+          </span>
+          <div className="vector-ai-row">
+            <button className="insp-structure" onClick={applyAi}>
+              Apply
+            </button>
+            <button onClick={() => setAiEdit({ id: one.id, phase: "ask", text: ai.text })}>
+              Change
+            </button>
+            <button onClick={() => setAiEdit(null)}>Discard</button>
+          </div>
+        </div>
+      )}
       {note && (
         <span role="status" style={{ fontSize: 11, lineHeight: 1.35, color: "var(--ink-3)" }}>
           {note}

@@ -3608,6 +3608,7 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
               onSelect={setSelectedShapes}
               onStructure={(a) => void structureStickies(a)}
               structuring={structuring}
+              boardId={boardId}
             />
           )}
 
