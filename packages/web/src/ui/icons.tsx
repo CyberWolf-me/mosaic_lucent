@@ -733,6 +733,17 @@ export const Ico = {
 };
 
 export const ToolIco = {
+  /** Six dots: the handle that moves the tool palette. */
+  Grip: (p: P) => (
+    <svg width="10" height="16" viewBox="0 0 10 16" fill="currentColor" {...p}>
+      <circle cx="3" cy="3" r="1.3" />
+      <circle cx="7" cy="3" r="1.3" />
+      <circle cx="3" cy="8" r="1.3" />
+      <circle cx="7" cy="8" r="1.3" />
+      <circle cx="3" cy="13" r="1.3" />
+      <circle cx="7" cy="13" r="1.3" />
+    </svg>
+  ),
   Select: (p: P) => (
     <svg
       width="16"

@@ -18,6 +18,7 @@ import { RichText } from "./RichText.js";
 import { VectorSvg } from "../vector/VectorSvg.js";
 import { TableView } from "./TableView.js";
 import { ChartView } from "./ChartView.js";
+import { useFloatingPanel } from "./floatingPanel.js";
 
 export type { DropKind };
 
@@ -97,6 +98,12 @@ export function ShapeToolbar({
   const [tool, setTool] = useState<Tool>(activeTool);
 
   useEffect(() => setTool(activeTool), [activeTool]);
+  // The palette can be moved anywhere on the board by its grip, and stays
+  // where it was put (in this browser).
+  const barRef = useRef<HTMLDivElement>(null);
+  const floating = useFloatingPanel(barRef, "lucent.toolbarPosition");
+  // Low on the screen, tooltips open above the tools instead of off the edge.
+  const tipsAbove = floating.pos !== null && floating.pos.y > window.innerHeight / 2;
 
   // Selecting a shape tool only *arms* it; the user then draws it on the canvas
   // by click-dragging (docs/14). No more auto-dropping at a random spot.
@@ -119,7 +126,20 @@ export function ShapeToolbar({
   );
 
   return (
-    <div className={`shape-toolbar ${orientation}`}>
+    <div
+      ref={barRef}
+      className={`shape-toolbar ${orientation}${floating.pos ? " is-floating" : ""}${floating.dragging ? " is-dragging" : ""}${tipsAbove ? " tips-above" : ""}`}
+      style={floating.style}
+    >
+      <button
+        type="button"
+        className="tool toolbar-grip"
+        data-tip="Drag to move · double-click to put back"
+        aria-label="Move the toolbar — drag it, or use the arrow keys; Home puts it back"
+        {...floating.gripProps}
+      >
+        <ToolIco.Grip />
+      </button>
       <T id="select" tip="Select · V">
         <ToolIco.Select />
       </T>

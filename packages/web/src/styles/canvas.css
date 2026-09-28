@@ -48,6 +48,34 @@
   transform: translateX(-50%);
 }
 
+/* The palette moves by its grip (ui/floatingPanel.ts). Moved, it may use the
+   window's width rather than leaving room for the top-right controls. */
+.shape-toolbar .tool.toolbar-grip,
+.shape-toolbar.top .tool.toolbar-grip {
+  width: 16px;
+  cursor: grab;
+  color: var(--ink-3);
+  touch-action: none;
+}
+.shape-toolbar .tool.toolbar-grip:hover {
+  color: var(--ink-1);
+}
+.shape-toolbar.is-dragging,
+.shape-toolbar.is-dragging .tool.toolbar-grip {
+  cursor: grabbing;
+}
+.shape-toolbar.is-dragging {
+  box-shadow: var(--elev-3);
+  user-select: none;
+}
+.shape-toolbar.top.is-floating {
+  max-width: calc(100vw - 16px);
+}
+.shape-toolbar.top.tips-above .tool[data-tip]::after {
+  top: auto;
+  bottom: calc(100% + 10px);
+}
+
 /* One row at top right: the Edit / Focus / Present switch (always there, so
    Focus and Present can always be left) and the board utilities. */
 .canvas-top-right {
