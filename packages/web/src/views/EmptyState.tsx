@@ -67,9 +67,10 @@ export function EmptyState({
   onGenImage?: () => void;
   /**
    * The last attempt from this screen, when it left the board empty: a
-   * failure (with the prompt to try again), or the model's question.
+   * failure (with the prompt to try again), or the model's reply in words — an
+   * answer, an opinion, or a question back.
    */
-  failedAttempt?: { text: string; retryPrompt?: string; kind?: "failed" | "question" } | null;
+  failedAttempt?: { text: string; retryPrompt?: string; kind?: "failed" | "reply" } | null;
 }) {
   const { notify } = useToast();
   const fileRef = useRef<HTMLInputElement>(null);
@@ -146,18 +147,18 @@ export function EmptyState({
         listen. Every object it draws remembers the words that made it.
       </p>
 
-      {failedAttempt?.kind === "question" && (
-        <div className="hero-failure is-question" role="status">
+      {failedAttempt?.kind === "reply" && (
+        <div className="hero-failure is-reply" role="status">
           <span className="hero-failure-mark" aria-hidden>
-            ?
+            <Ico.Sparkle />
           </span>
           <div className="hero-failure-text">
-            <div>Lucent needs a little more before it draws — answer below:</div>
+            <div>Lucent replied — write back below to keep going, or ask it to draw:</div>
             <div className="hero-failure-detail">{failedAttempt.text}</div>
           </div>
         </div>
       )}
-      {failedAttempt && failedAttempt.kind !== "question" && (
+      {failedAttempt && failedAttempt.kind !== "reply" && (
         <div className="hero-failure" role="alert">
           <span className="hero-failure-mark" aria-hidden>
             !

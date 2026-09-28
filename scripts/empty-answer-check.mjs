@@ -97,8 +97,8 @@ async function attempt(label, done) {
   });
   const text = (await notice.textContent().catch(() => "")) ?? "";
   check(
-    "a question instead of a diagram is shown, to answer",
-    /needs a little more/.test(text) && text.includes(question),
+    "a reply in words instead of a diagram is shown, to write back to",
+    /Lucent replied/.test(text) && text.includes(question),
     text.replace(/\s+/g, " ").trim().slice(0, 140),
   );
   if (shots) await page.screenshot({ path: `${shots}/empty-answer-question.png` });

@@ -1217,19 +1217,22 @@ body:has(.node-inspector) .minimap {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* The model asked a question instead of drawing: not an error, and the whole
-   question has to be readable to answer it. */
-.hero-failure.is-question {
+/* The model replied in words instead of drawing: not an error, and the whole
+   reply has to be readable to write back to it. */
+.hero-failure.is-reply {
+  align-items: flex-start;
   border-color: oklch(from var(--bloom-2) l c h / 0.45);
   background: oklch(from var(--bloom-2) l c h / 0.06);
 }
-.hero-failure.is-question .hero-failure-mark {
+.hero-failure.is-reply .hero-failure-mark {
   background: var(--bloom-2);
 }
-.hero-failure.is-question .hero-failure-detail {
+.hero-failure.is-reply .hero-failure-detail {
+  margin-top: 4px;
   font-size: 13px;
+  line-height: 1.5;
   color: var(--ink-1);
-  white-space: normal;
+  white-space: pre-wrap;
 }
 
 /* ---------------------------------------------------- voice conversation */

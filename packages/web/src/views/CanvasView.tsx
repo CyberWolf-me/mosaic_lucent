@@ -2971,15 +2971,16 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
   // entry is that failure, surface it here; Try again puts the prompt back
   // in the box (retrying is one deliberate send, not an auto-fire, so the
   // user can fix the request first).
-  // The same goes for a model that asked a question instead of drawing: on
-  // an empty board its question is the only answer there is, so the hero
-  // shows it, and the person answers in the box (the conversation carries).
+  // The same goes for a model that replied in words instead of drawing (an
+  // opinion, an answer, a question back): on an empty board that reply is
+  // the only result there is, so the hero shows it, and the person writes
+  // back in the box (the conversation carries).
   const heroFailure =
     canvasPhase === "empty" && chat.length > 0
       ? (() => {
           const last = chat[chat.length - 1]!;
           if (last.role === "ai" && last.drewNothing) {
-            return { text: last.reply || last.text, kind: "question" as const };
+            return { text: last.reply || last.text, kind: "reply" as const };
           }
           if (last.role !== "error") return null;
           // Only the immediately-preceding failed attempt: the user entry for
