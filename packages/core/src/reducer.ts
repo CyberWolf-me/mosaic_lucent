@@ -130,6 +130,10 @@ export function applyOperation(workspace: Workspace, op: Operation): Workspace {
       for (const [id, edge] of Object.entries(next.edges)) {
         if (edge.source === op.id || edge.target === op.id) delete next.edges[id];
       }
+      // And manual connectors from shapes to it (docs/26 §6.4).
+      for (const [id, link] of Object.entries(next.shapeLinks)) {
+        if (link.source === op.id || link.target === op.id) delete next.shapeLinks[id];
+      }
       // Remove from any group membership.
       for (const [gid, group] of Object.entries(next.groups)) {
         if (group.children.includes(op.id)) {

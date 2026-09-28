@@ -884,6 +884,24 @@ export const ToolIco = {
       <path d="M13 6l5 5" />
     </svg>
   ),
+  /** A chisel marker over a broad translucent swash (docs/26 §6.4). */
+  Highlighter: (p: P) => (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      {...p}
+    >
+      <path d="M4 20h9" strokeWidth="3.5" opacity="0.4" />
+      <path d="M14.5 3.5l5 5-7 7H8v-4.5z" />
+      <path d="M8 15.5l-2 2.5" />
+    </svg>
+  ),
   Frame: (p: P) => (
     <svg
       width="16"

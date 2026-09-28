@@ -125,6 +125,20 @@ export function inverseOperations(ops: readonly Operation[], before: Workspace):
               relationship: e.relationship,
             }),
           ),
+          // Manual connectors between the node and shapes (docs/26 §6.4).
+          ...Object.values(walking.shapeLinks)
+            .filter((l) => l.source === op.id || l.target === op.id)
+            .map(
+              (l): Operation => ({
+                op: "CONNECT_SHAPES",
+                id: l.id,
+                source: l.source,
+                target: l.target,
+                ...(l.label !== undefined ? { label: l.label } : {}),
+                ...(l.variant !== undefined ? { variant: l.variant } : {}),
+                ...(l.doubleArrow !== undefined ? { doubleArrow: l.doubleArrow } : {}),
+              }),
+            ),
         ];
         inverses.unshift(...restore);
         break;

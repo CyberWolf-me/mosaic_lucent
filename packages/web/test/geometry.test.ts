@@ -92,6 +92,23 @@ describe("board geometry", () => {
     expect(svg).toContain("A &amp; &lt;b&gt;");
   });
 
+  it("exports a highlighter stroke see-through, as the canvas draws it", () => {
+    const ws = applyOperations(createWorkspace(), [
+      {
+        op: "CREATE_SHAPE",
+        id: "hl",
+        kind: "draw",
+        position: { x: 10, y: 10 },
+        size: { width: 100, height: 20 },
+        path: "M 0 10 L 100 10",
+        style: { stroke: "oklch(0.88 0.17 95)", strokeWidth: 16, opacity: 0.38 },
+      },
+    ]);
+    const svg = buildBoardSvg(ws);
+    expect(svg).toContain('<g opacity="0.38"><path');
+    expect(svg).toContain('stroke-width="16"');
+  });
+
   it("exports connectors between nodes (the export used to drop every edge)", () => {
     const ws = applyOperations(createWorkspace({ diagramKind: "flowchart" }), [
       { op: "CREATE_NODE", id: "a", nodeType: "service", label: "A" },

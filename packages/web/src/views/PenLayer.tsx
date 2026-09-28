@@ -26,6 +26,24 @@ const PEN_WIDTHS = [
 ];
 
 /**
+ * The highlighter (docs/26 §6.4): the pen with a broad, see-through stroke —
+ * marks over things rather than lines between them. Stored as an ordinary
+ * `draw` shape with an opacity, so it moves, undoes and exports like ink.
+ */
+const HIGHLIGHT_COLORS = [
+  { label: "Yellow", value: "oklch(0.88 0.17 95)" },
+  { label: "Green", value: "oklch(0.85 0.17 145)" },
+  { label: "Pink", value: "oklch(0.8 0.15 350)" },
+  { label: "Blue", value: "oklch(0.8 0.12 230)" },
+];
+const HIGHLIGHT_WIDTHS = [
+  { label: "Thin", value: 10 },
+  { label: "Medium", value: 16 },
+  { label: "Wide", value: 26 },
+];
+const HIGHLIGHT_OPACITY = 0.38;
+
+/**
  * Freehand pen. Captures pointer strokes in content coordinates and, on release,
  * emits a CREATE_SHAPE {kind:"draw"} with an SVG path so the drawing becomes a
  * real model shape (persists + undo/redo, docs/13).
@@ -35,17 +53,25 @@ const PEN_WIDTHS = [
 export function PenLayer({
   scale,
   stroke = INK,
+  highlighter = false,
   onCommit,
   onDone,
 }: {
   scale: number;
   stroke?: string;
+  /** A broad, see-through stroke instead of ink. */
+  highlighter?: boolean;
   onCommit: (op: Operation) => void;
   onDone?: () => void;
 }) {
+  const colors = highlighter ? HIGHLIGHT_COLORS : PEN_COLORS;
+  const widths = highlighter ? HIGHLIGHT_WIDTHS : PEN_WIDTHS;
   const [points, setPoints] = useState<{ x: number; y: number }[]>([]);
-  const [penColor, setPenColor] = useState(stroke);
-  const [penWidth, setPenWidth] = useState(2.5);
+  // The stroke itself: commits read it here, never inside a state updater
+  // (React may run an updater twice, which saved every stroke twice).
+  const pointsRef = useRef<{ x: number; y: number }[]>([]);
+  const [penColor, setPenColor] = useState(highlighter ? HIGHLIGHT_COLORS[0]!.value : stroke);
+  const [penWidth, setPenWidth] = useState(highlighter ? 16 : 2.5);
   const drawing = useRef(false);
   const svgRef = useRef<SVGSVGElement>(null);
 
@@ -78,6 +104,7 @@ export function PenLayer({
       /* ignore capture error */
     }
     const pt = toContent(e);
+    pointsRef.current = [pt];
     setPoints([pt]);
   };
 
@@ -86,7 +113,8 @@ export function PenLayer({
     e.stopPropagation();
     e.preventDefault();
     const pt = toContent(e);
-    setPoints((p) => [...p, pt]);
+    pointsRef.current = [...pointsRef.current, pt];
+    setPoints(pointsRef.current);
   };
 
   const onPointerUp = (e: React.PointerEvent) => {
@@ -98,10 +126,10 @@ export function PenLayer({
     } catch {
       /* ignore release error */
     }
-    setPoints((pts) => {
-      commit(pts);
-      return [];
-    });
+    const pts = pointsRef.current;
+    pointsRef.current = [];
+    setPoints([]);
+    commit(pts);
   };
 
   const commit = (pts: { x: number; y: number }[]) => {
@@ -134,7 +162,11 @@ export function PenLayer({
       position: { x: minX, y: minY },
       size: { width: Math.max(3, maxX - minX), height: Math.max(3, maxY - minY) },
       path: d,
-      style: penColor === INK ? { strokeWidth: penWidth } : { stroke: penColor, strokeWidth: penWidth },
+      style: highlighter
+        ? { stroke: penColor, strokeWidth: penWidth, opacity: HIGHLIGHT_OPACITY }
+        : penColor === INK
+          ? { strokeWidth: penWidth }
+          : { stroke: penColor, strokeWidth: penWidth },
       z: 1,
     };
     onCommit(op);
@@ -179,6 +211,7 @@ export function PenLayer({
             strokeWidth={penWidth}
             strokeLinecap="round"
             strokeLinejoin="round"
+            opacity={highlighter ? HIGHLIGHT_OPACITY : undefined}
             pointerEvents="none"
           />
         )}
@@ -206,14 +239,14 @@ export function PenLayer({
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
-          <span style={{ fontSize: 13 }}>✏️</span>
+          <span style={{ fontSize: 13 }}>{highlighter ? "🖍️" : "✏️"}</span>
           <span className="mono small" style={{ color: "var(--ink-1)", fontWeight: 600 }}>
-            Pen
+            {highlighter ? "Highlighter" : "Pen"}
           </span>
         </div>
         <div style={{ width: 1, height: 16, background: "var(--stroke-2)" }} />
         <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-          {PEN_COLORS.map((c) => (
+          {colors.map((c) => (
             <button
               key={c.label}
               title={c.label}
@@ -238,7 +271,7 @@ export function PenLayer({
         </div>
         <div style={{ width: 1, height: 16, background: "var(--stroke-2)" }} />
         <div style={{ display: "flex", alignItems: "center", gap: 3 }}>
-          {PEN_WIDTHS.map((w) => (
+          {widths.map((w) => (
             <button
               key={w.label}
               title={w.label}

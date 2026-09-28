@@ -2025,7 +2025,7 @@ html[data-theme="light"] .shape.diamond {
 
 /* When any drawing, shape, or placement tool is active (Figma/Miro/Eraser standard):
    All underlying objects ignore pointer events so drawing/placement is completely uninterrupted across the board. */
-.drawing-active .node,
+.drawing-active:not(.connecting) .node,
 .drawing-active .shape-element,
 .drawing-active .group-region,
 .drawing-active .connectors,
@@ -7292,4 +7292,68 @@ textarea:focus-visible {
 /* Watches the board for "you moved it yourself" without taking a box (docs/28 S5). */
 .canvas-follow-watch {
   display: contents;
+}
+
+/* Minimal rich text in shapes (docs/26 §6.4, richText.ts). */
+.rich-text {
+  display: block;
+  white-space: normal;
+  text-align: inherit;
+}
+.rich-text > div {
+  min-height: 1.35em;
+}
+.rich-text .rt-blank {
+  min-height: 0.6em;
+}
+.rich-text .rt-h {
+  font-weight: 650;
+  line-height: 1.25;
+  margin: 0.1em 0 0.25em;
+}
+.rich-text .rt-h1 {
+  font-size: 1.35em;
+}
+.rich-text .rt-h2 {
+  font-size: 1.18em;
+}
+.rich-text .rt-h3 {
+  font-size: 1.05em;
+}
+.rich-text .rt-li {
+  display: flex;
+  gap: 0.45em;
+  text-align: left;
+}
+.rich-text .rt-mark {
+  flex-shrink: 0;
+  min-width: 0.9em;
+  opacity: 0.7;
+}
+.rich-text .rt-code,
+.rich-text .rt-pre {
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+  background: color-mix(in oklch, currentColor 9%, transparent);
+  border-radius: 4px;
+}
+.rich-text .rt-code {
+  padding: 0.05em 0.3em;
+}
+.rich-text .rt-pre {
+  margin: 0.3em 0;
+  padding: 0.5em 0.65em;
+  white-space: pre;
+  overflow-x: auto;
+  text-align: left;
+  line-height: 1.45;
+}
+.rich-text .rt-pre code {
+  font: inherit;
+}
+.rich-text .rt-link {
+  color: var(--bloom-2);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
 }

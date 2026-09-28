@@ -80,6 +80,6 @@ describe("shape operations", () => {
     expect(
       validateOperations(ws, [{ op: "CONNECT_SHAPES", id: "l1", source: "s1", target: "ghost" }])[0]
         ?.message,
-    ).toMatch(/target "ghost" does not exist/);
+    ).toMatch(/target "ghost" is not a shape or node/);
   });
 });

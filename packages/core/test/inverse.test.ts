@@ -3,6 +3,7 @@ import {
   applyOperations,
   createWorkspace,
   inverseOperations,
+  validateOperations,
   OperationHistory,
   type Operation,
   type Workspace,
@@ -191,6 +192,27 @@ describe("shape inverses", () => {
   it("undoes connector create, edit, and delete", () => {
     expectRoundTrip(board(), [{ op: "CONNECT_SHAPES", id: "l2", source: "note2", target: "note" }]);
     expectRoundTrip(board(), [{ op: "DISCONNECT_SHAPES", id: "link" }]);
+  });
+
+  // docs/26 §6.4: a connector may join a shape and a diagram node.
+  it("links a shape to a node, and a node's delete takes the link and undo brings it back", () => {
+    const linked = applyOperations(board(), [
+      { op: "CONNECT_SHAPES", id: "to-pay", source: "note", target: "pay" },
+    ]);
+    expect(
+      validateOperations(board(), [
+        { op: "CONNECT_SHAPES", id: "to-pay", source: "note", target: "pay" },
+      ]),
+    ).toEqual([]);
+    expect(
+      validateOperations(board(), [
+        { op: "CONNECT_SHAPES", id: "x", source: "note", target: "nowhere" },
+      ]).length,
+    ).toBe(1);
+    const deleted = applyOperations(linked, [{ op: "DELETE_NODE", id: "pay" }]);
+    expect(deleted.shapeLinks["to-pay"]).toBeUndefined();
+    const { undone } = expectRoundTrip(linked, [{ op: "DELETE_NODE", id: "pay" }]);
+    expect(undone.shapeLinks["to-pay"]).toMatchObject({ source: "note", target: "pay" });
   });
 });
 

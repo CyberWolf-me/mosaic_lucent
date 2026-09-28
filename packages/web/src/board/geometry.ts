@@ -1,3 +1,4 @@
+import { plainText } from "../richText.js";
 import type { Node, Shape, ShapeLink, Workspace } from "@lucent/core";
 import {
   chartGeometry,
@@ -339,7 +340,18 @@ export function shapeLinkEnds(
 ): { a: { x: number; y: number }; b: { x: number; y: number } } | null {
   const boxOf = (id: string): Box | null => {
     const s = workspace.shapes[id];
-    if (!s || s.hidden) return null;
+    if (!s) {
+      // Either end may be a diagram node (docs/26 §6.4), drawn where it sits.
+      const n = workspace.nodes[id];
+      if (!n?.position) return null;
+      return {
+        x: n.position.x,
+        y: n.position.y,
+        width: n.size?.width ?? 160,
+        height: n.size?.height ?? 64,
+      };
+    }
+    if (s.hidden) return null;
     const pos = override?.id === id ? { x: override.x, y: override.y } : s.position;
     return { x: pos.x, y: pos.y, width: s.size.width, height: s.size.height };
   };
@@ -602,7 +614,8 @@ export function buildBoardSvg(workspace: Workspace, pad = 40): string {
       parts.push(
         `<rect x="${s.position.x}" y="${s.position.y}" width="${s.size.width}" height="${s.size.height}" rx="${s.kind === "ellipse" ? s.size.height / 2 : 6}" fill="${escapeAttr(fill)}" stroke="${escapeAttr(s.style?.stroke ?? "#0000")}"/>` +
           (s.text
-            ? wrappedSvgText(s.text, s.position.x + 10, s.position.y + 22, s.size.width - 20)
+            ? // The words, without the rich-text markup the canvas draws (richText.ts).
+              wrappedSvgText(plainText(s.text), s.position.x + 10, s.position.y + 22, s.size.width - 20)
             : ""),
       );
     }
@@ -610,6 +623,12 @@ export function buildBoardSvg(workspace: Workspace, pad = 40): string {
       const cx = s.position.x + s.size.width / 2;
       const cy = s.position.y + s.size.height / 2;
       parts[parts.length - 1] = `<g transform="rotate(${s.rotation} ${cx} ${cy})">${parts[parts.length - 1]}</g>`;
+    }
+    // Opacity, as the canvas draws it (a highlighter's stroke, the
+    // inspector's opacity) — exports used to leave it out.
+    const opacity = s.style?.opacity;
+    if (opacity !== undefined && opacity < 1 && parts.length > before) {
+      parts[parts.length - 1] = `<g opacity="${opacity}">${parts[parts.length - 1]}</g>`;
     }
   }
 

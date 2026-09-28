@@ -385,9 +385,13 @@ export function validateOperations(workspace: Workspace, ops: Operation[]): Vali
         break;
       }
       case "CONNECT_SHAPES":
+        // docs/26 §6.4: a manual connector joins shapes — or a shape and a
+        // diagram node (a sticky pointing at the step it's about).
         if (shapeLinks.has(op.id)) err(`shape link "${op.id}" already exists`);
-        if (!shapes.has(op.source)) err(`shape link source "${op.source}" does not exist`);
-        if (!shapes.has(op.target)) err(`shape link target "${op.target}" does not exist`);
+        if (!shapes.has(op.source) && !nodes.has(op.source))
+          err(`shape link source "${op.source}" is not a shape or node`);
+        if (!shapes.has(op.target) && !nodes.has(op.target))
+          err(`shape link target "${op.target}" is not a shape or node`);
         shapeLinks.add(op.id);
         break;
       case "UPDATE_LINK":

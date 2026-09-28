@@ -772,6 +772,7 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
         s: "sticky",
         a: "arrow",
         p: "pen",
+        i: "highlighter",
         e: "eraser",
         f: "frame",
         // The toolbar has always advertised "Comment · C" but the key was unbound.
@@ -1468,6 +1469,35 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
 
   // Arrow tool: click a first shape, then a second, to bind a connector.
   const [linkSource, setLinkSource] = useState<string | null>(null);
+  /**
+   * The Connect tool: the first click picks one end, the second binds the
+   * connector. Either end may be a shape or a diagram node (docs/26 §6.4) —
+   * a sticky pointing at the step it's about.
+   */
+  const bindLink = useCallback(
+    (id: string) => {
+      if (!linkSource) {
+        setLinkSource(id);
+        return;
+      }
+      if (linkSource === id) return;
+      applyManual(
+        [
+          {
+            op: "CONNECT_SHAPES",
+            id: `slink_${Date.now().toString(36)}`,
+            source: linkSource,
+            target: id,
+            variant: "curved",
+          },
+        ],
+        "Connect",
+      );
+      setLinkSource(null);
+      setTool("select");
+    },
+    [linkSource, applyManual],
+  );
   const [selectedLink, setSelectedLink] = useState<string | null>(null);
 
   const groupSelection = useCallback(() => {
@@ -1779,30 +1809,13 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
         return;
       }
       if (tool === "arrow") {
-        if (!linkSource) {
-          setLinkSource(id);
-        } else if (linkSource !== id) {
-          applyManual(
-            [
-              {
-                op: "CONNECT_SHAPES",
-                id: `slink_${Date.now().toString(36)}`,
-                source: linkSource,
-                target: id,
-                variant: "curved",
-              },
-            ],
-            "Connect shapes",
-          );
-          setLinkSource(null);
-          setTool("select");
-        }
+        bindLink(id);
         return;
       }
       setSelectedLink(null);
       selectShape(id, additive);
     },
-    [voting, tool, linkSource, applyManual, selectShape, workspace],
+    [voting, tool, bindLink, applyManual, selectShape, workspace],
   );
 
   /** Node click: vote during a round, otherwise select (shift = add to selection). */
@@ -1883,16 +1896,24 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
         applyManual(toggleVoteOps(workspace, id), "Vote");
         return;
       }
+      if (tool === "arrow") {
+        bindLink(id);
+        return;
+      }
       selectNode(id, additive);
     },
-    [voting, applyManual, workspace, selectNode],
+    [voting, applyManual, workspace, selectNode, tool, bindLink],
   );
 
   const addDrawing = useCallback(
     (op: import("@lucent/core").Operation) => {
-      applyManual([op], "Draw");
+      // A stroke goes on top of what it's drawn over — a highlight used to
+      // land under the note it marked.
+      const placed =
+        op.op === "CREATE_SHAPE" ? { ...op, z: nextZ(Object.values(workspace.shapes)) } : op;
+      applyManual([placed], "Draw");
     },
-    [applyManual],
+    [applyManual, workspace.shapes],
   );
 
   // The system clipboard (docs/26 §6.4). Copy and cut write a Lucent
@@ -3027,7 +3048,11 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
             <CanvasViewport
               initialZoom={85}
               tool={tool === "hand" ? "hand" : "select"}
-              className={drawingArmed ? "drawing-active" : undefined}
+              // Connect (docs/26 §6.4) binds to nodes as well as shapes, so
+              // nodes stay clickable while it's armed.
+              className={
+                drawingArmed ? `drawing-active${tool === "arrow" ? " connecting" : ""}` : undefined
+              }
               onZoom={setZoom}
               setControls={(c) => (controls.current = c)}
               onViewport={setViewportBox}
@@ -3145,10 +3170,13 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
                   </div>
                 );
               })}
-              {tool === "pen" && canEdit && (
+              {(tool === "pen" || tool === "highlighter") && canEdit && (
                 <PenLayer
+                  // A fresh layer per tool, so each starts with its own colours.
+                  key={tool}
                   scale={zoom / 100}
                   stroke="var(--ink-0)"
+                  highlighter={tool === "highlighter"}
                   onCommit={addDrawing}
                   onDone={() => setTool("select")}
                 />

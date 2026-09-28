@@ -13,6 +13,8 @@ import {
   type ResizeHandle,
 } from "../board/geometry.js";
 import { embedModeOf } from "../embed.js";
+import { hasRichText } from "../richText.js";
+import { RichText } from "./RichText.js";
 import { VectorSvg } from "../vector/VectorSvg.js";
 import { TableView } from "./TableView.js";
 import { ChartView } from "./ChartView.js";
@@ -55,6 +57,7 @@ export type Tool =
   | "text"
   | "arrow"
   | "pen"
+  | "highlighter"
   | "eraser"
   | "frame"
   | "table"
@@ -151,6 +154,9 @@ export function ShapeToolbar({
       </T>
       <T id="pen" tip="Pen · P">
         <ToolIco.Pen />
+      </T>
+      <T id="highlighter" tip="Highlighter · I">
+        <ToolIco.Highlighter />
       </T>
       <T id="eraser" tip="Eraser · E">
         <ToolIco.Eraser />
@@ -489,6 +495,8 @@ export function ShapeElement({
           strokeWidth={sty?.strokeWidth ?? 2}
           strokeLinecap="round"
           strokeLinejoin="round"
+          // A highlighter's see-through stroke (docs/26 §6.4).
+          opacity={sty?.opacity}
         />
       </svg>
     );
@@ -802,7 +810,12 @@ export function ShapeElement({
     )
   ) : (
     // Preserve newlines when displaying multi-line text.
-    <span style={{ whiteSpace: "pre-wrap" }}>{defaultText}</span>
+    // docs/26 §6.4: minimal rich text — headings, lists, code, marks, links.
+    text && hasRichText(text) ? (
+      <RichText text={text} />
+    ) : (
+      <span style={{ whiteSpace: "pre-wrap" }}>{defaultText}</span>
+    )
   );
 
   const commonProps = {

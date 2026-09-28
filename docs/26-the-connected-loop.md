@@ -447,7 +447,35 @@ Found on the way:
 `geometry.test.ts` (the resize and lasso math); `scripts/editor-check.mjs`
 5/5.
 
-Still open: highlighter, code blocks, rich text, and node ↔ shape links.
+**Status (2026-09-28, later):** the rest of the list is built.
+
+- **The highlighter (I).** The pen with a broad, see-through stroke, in its
+  own colours. It's an ordinary `draw` shape with an opacity, so it moves,
+  undoes and exports like ink. Exports now keep any shape's opacity; they
+  used to drop it.
+- **Minimal rich text.** A shape's own text reads a small, safe markdown
+  subset: headings, bullets, numbered lines, bold, italic, struck, inline
+  code, and links (http, https and mailto only).
+- **Code blocks.** A fenced ` ``` ` block draws as monospace, keeping
+  its whitespace.
+- **What stays the same.** Nothing in the schema changes, and an old board
+  reads as it did. Editing is still typing, and exports get the plain words
+  (`richText.ts`).
+- **Links between nodes and shapes.** A connector joins a shape and a
+  diagram node, such as a sticky pointing at the step it's about.
+  `CONNECT_SHAPES` accepts a node at either end. Connect binds to nodes, which
+  stay clickable while it's armed. Deleting the node takes its links, and
+  undo brings them back.
+
+Found on the way:
+
+- The pen saved every stroke twice in development: it committed inside a
+  React state updater, which strict mode runs twice.
+- Strokes were always placed at the bottom of the stack, so a highlight
+  landed under the note it marked. They now go on top.
+
+`rich-text.test.ts` (7), core `inverse.test.ts` (links to nodes),
+`geometry.test.ts` (export opacity); `scripts/editor-more-check.mjs` 3/3.
 
 ### 6.5 Semantic zoom ladder
 
