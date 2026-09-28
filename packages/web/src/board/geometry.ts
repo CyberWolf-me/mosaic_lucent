@@ -480,7 +480,7 @@ export function buildBoardSvg(workspace: Workspace, pad = 40): string {
       // mapping its own viewBox onto the shape's box, as the canvas does.
       // Unfilled parts take the shape's ink (light, on the dark export).
       parts.push(
-        `<svg x="${s.position.x}" y="${s.position.y}" width="${s.size.width}" height="${s.size.height}" viewBox="${s.vector.viewBox.join(" ")}" preserveAspectRatio="xMidYMid meet" overflow="visible" color="${escapeAttr(s.style?.color ?? "#eeeeee")}">${vectorPathsMarkup(s.vector)}</svg>`,
+        `<svg x="${s.position.x}" y="${s.position.y}" width="${s.size.width}" height="${s.size.height}" viewBox="${s.vector.viewBox.join(" ")}" preserveAspectRatio="xMidYMid meet" overflow="visible" color="${escapeAttr(s.style?.color ?? "#eeeeee")}">${vectorPathsMarkup(s.vector, s.id)}</svg>`,
       );
     } else if (s.kind === "table" && s.table) {
       // A data table exports as a drawn grid: a header band, row/column rules,

@@ -1,13 +1,17 @@
 import { useState } from "react";
 import {
+  flattenGradients,
   recolorVector,
   scaleVectorStrokes,
+  simplifyVector,
   vectorPalette,
   vectorToSvg,
   type Operation,
   type Shape,
   type VectorData,
 } from "@lucent/core";
+import { nextZ } from "../shapes.js";
+import { combineVectorOps, splitVectorOps, SPLIT_MAX } from "./ops.js";
 import { openVectorsPanel } from "./VectorsPanel.js";
 
 /**
@@ -17,6 +21,11 @@ import { openVectorsPanel } from "./VectorsPanel.js";
  * download of the vector as a standalone SVG. Every change is one
  * UPDATE_SHAPE carrying the new paths, so it is validated, shared and
  * undoable like any edit.
+ *
+ * And the structural edits (docs/26 §6.3): simplify (fewer points, same
+ * drawing), flatten gradients to their solid colours, split one vector into
+ * a vector per part, and combine several back into one — each one batch,
+ * one undo.
  */
 
 /** Replacement colours: the board palette as literals, plus the theme's ink. */
@@ -55,14 +64,21 @@ function swatchStyle(c: string, ink: string): React.CSSProperties {
 
 export function VectorSection({
   shapes,
+  allShapes,
   onApply,
+  onSelect,
 }: {
   shapes: Shape[];
-  onApply: (ops: Operation[], label: string) => void;
+  /** Every shape on the board, for stacking split parts on top. */
+  allShapes?: Shape[];
+  onApply: (ops: Operation[], label: string) => boolean | void;
+  onSelect?: (ids: Set<string>) => void;
 }) {
   const vectors = shapes.filter((s): s is Shape & { vector: VectorData } => Boolean(s.vector));
   const [from, setFrom] = useState<string | null>(null);
+  const [note, setNote] = useState<string | null>(null);
   if (vectors.length === 0) return null;
+  const locked = vectors.some((s) => s.locked);
 
   const palette = [...new Set(vectors.flatMap((s) => vectorPalette(s.vector)))].slice(0, 12);
   const hasStrokes = vectors.some((s) =>
@@ -75,6 +91,56 @@ export function VectorSection({
       vectors.map((s) => ({ op: "UPDATE_SHAPE" as const, id: s.id, vector: fn(s.vector) })),
       label,
     );
+
+  const hasGradients = vectors.some((s) => (s.vector.gradients?.length ?? 0) > 0);
+  const one = vectors.length === 1 ? vectors[0]! : null;
+  const canSplit = one !== null && one.vector.paths.length > 1;
+
+  const simplify = () => {
+    let before = 0;
+    let after = 0;
+    const ops: Operation[] = [];
+    for (const s of vectors) {
+      const r = simplifyVector(s.vector);
+      before += r.before;
+      after += r.after;
+      if (r.vector !== s.vector && r.after < r.before)
+        ops.push({ op: "UPDATE_SHAPE", id: s.id, vector: r.vector });
+    }
+    if (ops.length === 0) {
+      setNote("Already as simple as it gets.");
+      return;
+    }
+    if (onApply(ops, "Simplify vector") !== false)
+      setNote(`Simplified: ${before.toLocaleString()} → ${after.toLocaleString()} points.`);
+  };
+
+  const split = () => {
+    if (!one) return;
+    if (one.vector.paths.length > SPLIT_MAX) {
+      setNote(`${one.vector.paths.length} parts is too many to split — simplify it first.`);
+      return;
+    }
+    const r = splitVectorOps(one, nextZ(allShapes ?? shapes));
+    if (!r) return;
+    if (onApply(r.ops, "Split into parts") !== false) {
+      setNote(null);
+      onSelect?.(new Set(r.ids));
+    }
+  };
+
+  const combine = () => {
+    const r = combineVectorOps(vectors);
+    if (!r) return;
+    if ("error" in r) {
+      setNote(r.error);
+      return;
+    }
+    if (onApply(r.ops, "Combine vectors") !== false) {
+      setNote(null);
+      onSelect?.(new Set([r.id]));
+    }
+  };
 
   const download = () => {
     const s = vectors[0]!;
@@ -150,37 +216,76 @@ export function VectorSection({
           />
         ))}
       </div>
-      <div className="segmented">
-        {hasStrokes && (
-          <>
+      {(hasStrokes || one) && (
+        <div className="segmented">
+          {hasStrokes && (
+            <>
+              <button
+                onClick={() => edit((v) => scaleVectorStrokes(v, 0.8), "Thinner strokes")}
+                title="Thinner strokes"
+              >
+                Thinner
+              </button>
+              <button
+                onClick={() => edit((v) => scaleVectorStrokes(v, 1.25), "Thicker strokes")}
+                title="Thicker strokes"
+              >
+                Thicker
+              </button>
+            </>
+          )}
+          {vectors.length === 1 && vectors[0]!.vector.source?.prompt && (
             <button
-              onClick={() => edit((v) => scaleVectorStrokes(v, 0.8), "Thinner strokes")}
-              title="Thinner strokes"
+              onClick={() => openVectorsPanel(vectors[0]!.vector.source!.prompt)}
+              title="Generate variations from the same prompt"
             >
-              Thinner
+              More
             </button>
-            <button
-              onClick={() => edit((v) => scaleVectorStrokes(v, 1.25), "Thicker strokes")}
-              title="Thicker strokes"
-            >
-              Thicker
+          )}
+          {vectors.length === 1 && (
+            <button onClick={download} title="Download this vector as an SVG file">
+              SVG
             </button>
-          </>
-        )}
-        {vectors.length === 1 && vectors[0]!.vector.source?.prompt && (
+          )}
+        </div>
+      )}
+      <div className="segmented" role="group" aria-label="Vector structure">
+        <button
+          onClick={simplify}
+          disabled={locked}
+          title="Fewer points, the same drawing — and tiny specks removed"
+        >
+          Simplify
+        </button>
+        {hasGradients && (
           <button
-            onClick={() => openVectorsPanel(vectors[0]!.vector.source!.prompt)}
-            title="Generate variations from the same prompt"
+            onClick={() => edit(flattenGradients, "Flatten gradients")}
+            disabled={locked}
+            title="Replace each gradient with its solid colour"
           >
-            More
+            Flat
           </button>
         )}
-        {vectors.length === 1 && (
-          <button onClick={download} title="Download this vector as an SVG file">
-            SVG
+        {canSplit && (
+          <button
+            onClick={split}
+            disabled={locked}
+            title={`Make each of the ${one.vector.paths.length} parts its own shape`}
+          >
+            Split
+          </button>
+        )}
+        {vectors.length > 1 && (
+          <button onClick={combine} disabled={locked} title="Join these vectors into one">
+            Combine
           </button>
         )}
       </div>
+      {note && (
+        <span role="status" style={{ fontSize: 11, lineHeight: 1.35, color: "var(--ink-3)" }}>
+          {note}
+        </span>
+      )}
     </div>
   );
 }

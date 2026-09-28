@@ -1,14 +1,16 @@
 import {
+  combineVectors,
   importSvg,
   normalizePathData,
   sketchToVector,
+  splitVector,
   vectorDataSchema,
   type Operation,
   type Shape,
   type VectorData,
 } from "@lucent/core";
 import type { IconGlyph } from "../icons/registry.js";
-import { normalizeZ, shapeId } from "../shapes.js";
+import { normalizeZ, shapeId, Z_MAX } from "../shapes.js";
 
 /**
  * The ways a vector gets onto the board (docs/26 §6.3, V2), as operations:
@@ -146,4 +148,105 @@ export function replaceWithVectorOps(image: Shape, vector: VectorData): Operatio
       z: normalizeZ(image.z),
     },
   ];
+}
+
+/** Past this many parts a split would bury the board; simplify first. */
+export const SPLIT_MAX = 200;
+
+const r2 = (n: number) => Math.round(n * 100) / 100;
+
+/**
+ * One vector → a vector per path, each where it was drawn (docs/26 §6.3
+ * "split into parts, each selectable"), as one undoable batch. The parts
+ * keep the shape's rotation (each turned about the whole's centre), ink and
+ * group, and stack in paint order above `topZ`.
+ */
+export function splitVectorOps(
+  shape: Shape,
+  topZ: number,
+): { ops: Operation[]; ids: string[] } | null {
+  const v = shape.vector;
+  if (!v || v.paths.length < 2 || v.paths.length > SPLIT_MAX) return null;
+  const parts = splitVector(v);
+  if (parts.length < 2) return null;
+  const [vx, vy, vw, vh] = v.viewBox;
+  const { width: W, height: H } = shape.size;
+  const k = Math.min(W / vw, H / vh);
+  const ox = (W - vw * k) / 2;
+  const oy = (H - vh * k) / 2;
+  const turn = ((shape.rotation ?? 0) * Math.PI) / 180;
+  const cos = Math.cos(turn);
+  const sin = Math.sin(turn);
+  const ids: string[] = [];
+  const ops: Operation[] = [{ op: "DELETE_SHAPE", id: shape.id }];
+  parts.forEach((part, i) => {
+    const w = Math.max(0.5, r2(part.box.width * k));
+    const h = Math.max(0.5, r2(part.box.height * k));
+    // The part's centre, relative to the whole's centre, turned with it.
+    const dx = ox + (part.box.x - vx) * k + w / 2 - W / 2;
+    const dy = oy + (part.box.y - vy) * k + h / 2 - H / 2;
+    const cx = shape.position.x + W / 2 + dx * cos - dy * sin;
+    const cy = shape.position.y + H / 2 + dx * sin + dy * cos;
+    const id = `${shapeId()}_${i}`;
+    ids.push(id);
+    ops.push({
+      op: "CREATE_SHAPE",
+      id,
+      kind: "vector",
+      position: { x: r2(cx - w / 2), y: r2(cy - h / 2) },
+      size: { width: w, height: h },
+      ...(shape.rotation ? { rotation: shape.rotation } : {}),
+      vector: part.vector,
+      ...(shape.style ? { style: shape.style } : {}),
+      ...(shape.groupId ? { groupId: shape.groupId } : {}),
+      z: Math.min(normalizeZ(topZ) + i, Z_MAX),
+    });
+  });
+  return { ops, ids };
+}
+
+/**
+ * Several vectors → one (split's inverse), in paint order, at the top one's
+ * z. Rotated vectors are refused: their boxes don't map onto one upright
+ * viewBox without redrawing every path.
+ */
+export function combineVectorOps(
+  shapes: Shape[],
+): { ops: Operation[]; id: string } | { error: string } | null {
+  const vs = shapes
+    .filter((s): s is Shape & { vector: VectorData } => Boolean(s.vector))
+    .sort((a, b) => normalizeZ(a.z) - normalizeZ(b.z));
+  if (vs.length < 2) return null;
+  if (vs.some((s) => s.rotation))
+    return { error: "Straighten the turned parts before combining them." };
+  const first = vs[0]!;
+  const r = combineVectors(
+    vs.map((s) => ({
+      vector: s.vector,
+      x: s.position.x,
+      y: s.position.y,
+      width: s.size.width,
+      height: s.size.height,
+      ...(s.style?.color ? { ink: s.style.color } : {}),
+    })),
+    first.style?.color,
+  );
+  if (!r) return { error: "Together they're too detailed for one vector." };
+  const id = shapeId();
+  return {
+    id,
+    ops: [
+      ...vs.map((s) => ({ op: "DELETE_SHAPE" as const, id: s.id })),
+      {
+        op: "CREATE_SHAPE",
+        id,
+        kind: "vector",
+        position: { x: r2(r.x), y: r2(r.y) },
+        size: { width: r2(r.width), height: r2(r.height) },
+        vector: r.vector,
+        ...(first.style ? { style: first.style } : {}),
+        z: normalizeZ(vs[vs.length - 1]!.z),
+      },
+    ],
+  };
 }

@@ -353,7 +353,20 @@ are dropped. It replaces today's regex `svgToOps`.
 core importer, paste/drop/board-import of SVG, icon → vector, local tracing
 in a worker (flat-art and detailed presets), pen strokes → smooth vector, the
 inspector's palette recolour, ink, stroke weight and SVG download, and
-vectors in exports. Not yet: split into parts, simplify, gradients.
+vectors in exports.
+
+**Status (2026-09-28, editing):** built — gradients kept whole (linear and
+radial, both units, flattened through every transform, `href` chains followed;
+each path keeps its solid fallback in `fill`, so the palette, recolour and any
+older reader still work), drawn in the canvas, the download and the board
+export with per-shape ids; recolour reaches gradient stops, and **Flat**
+swaps each gradient for its colour. **Simplify** samples each subpath, thins it
+with Ramer–Douglas–Peucker, redraws curves as cubics that keep their real
+corners, drops filled specks, and only ever makes a path shorter. **Split**
+makes each path its own vector shape where it was drawn (rotation, ink and
+group kept, capped at 200 parts); **Combine** is its inverse for upright
+vectors. Each is one batch and one undo (`core/src/vector.ts`,
+`web/src/vector/ops.ts`; `scripts/vector-edit-check.mjs`).
 
 **Status (2026-09-24, V3):** built — the `VectorProvider` seam in `@lucent/ai`
 (Recraft `recraftv4_1_vector` via `b64_json`, and an offline mock); `POST

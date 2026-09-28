@@ -496,7 +496,12 @@ export function ShapeInspector({
   return (
     <div className="shape-inspector">
       <div className="insp-label">{ids.length > 1 ? `${ids.length} selected` : "Shape"}</div>
-      <VectorSection shapes={selectedShapes} onApply={onApply} />
+      <VectorSection
+        shapes={selectedShapes}
+        allShapes={Object.values(shapes)}
+        onApply={onApply}
+        onSelect={onSelect}
+      />
       {one?.kind === "table" && one.table && (
         <TableSection shape={one} shapes={shapes} onApply={onApply} onSelect={onSelect} />
       )}

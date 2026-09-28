@@ -36,7 +36,47 @@ export interface VectorPath {
   opacity?: number;
   cap?: "butt" | "round" | "square";
   join?: "miter" | "round" | "bevel";
+  /**
+   * Index into the vector's `gradients`: the fill (or stroke) is painted with
+   * that gradient. `fill`/`stroke` stay a solid fallback colour — what the
+   * palette, a flatten and any older reader use.
+   */
+  fillGradient?: number;
+  strokeGradient?: number;
 }
+
+export interface VectorGradientStop {
+  /** 0–1 along the gradient. */
+  offset: number;
+  color: string;
+  opacity?: number;
+}
+
+/**
+ * A gradient paint (docs/26 §6.3). Coordinates are in the vector's own space
+ * ("user") or the painted part's bounding box, 0–1 ("box") — SVG's two
+ * gradient units, already flattened through every transform the importer saw.
+ */
+export type VectorGradient =
+  | {
+      kind: "linear";
+      units: "user" | "box";
+      x1: number;
+      y1: number;
+      x2: number;
+      y2: number;
+      stops: VectorGradientStop[];
+    }
+  | {
+      kind: "radial";
+      units: "user" | "box";
+      cx: number;
+      cy: number;
+      r: number;
+      fx?: number;
+      fy?: number;
+      stops: VectorGradientStop[];
+    };
 
 export type VectorGenerator = "import" | "icon" | "trace" | "sketch" | "recraft" | "llm" | "mock";
 
@@ -44,6 +84,8 @@ export interface VectorData {
   /** [minX, minY, width, height] of the paths' own coordinate space. */
   viewBox: [number, number, number, number];
   paths: VectorPath[];
+  /** Gradient paints the paths refer to by index. */
+  gradients?: VectorGradient[];
   /** Where it came from — provenance, never used to render. */
   source?: { generator: VectorGenerator; ref?: string; prompt?: string; model?: string };
 }
@@ -54,6 +96,8 @@ export const VECTOR_LIMITS = {
   paths: 2_000,
   pathChars: 60_000,
   totalChars: 400_000,
+  gradients: 256,
+  stops: 16,
 } as const;
 
 const paint = z.union([cssColor, z.literal("none"), z.literal("currentColor")]);
@@ -71,14 +115,61 @@ export const vectorPathSchema = z.object({
   opacity: z.number().min(0).max(1).optional(),
   cap: z.enum(["butt", "round", "square"]).optional(),
   join: z.enum(["miter", "round", "bevel"]).optional(),
+  fillGradient: z
+    .number()
+    .int()
+    .min(0)
+    .max(VECTOR_LIMITS.gradients - 1)
+    .optional(),
+  strokeGradient: z
+    .number()
+    .int()
+    .min(0)
+    .max(VECTOR_LIMITS.gradients - 1)
+    .optional(),
 });
 
 const finite = z.number().refine(Number.isFinite, "not a finite number");
+
+const gradientStops = z
+  .array(
+    z.object({
+      offset: z.number().min(0).max(1),
+      color: z.union([cssColor, z.literal("currentColor")]),
+      opacity: z.number().min(0).max(1).optional(),
+    }),
+  )
+  .min(2)
+  .max(VECTOR_LIMITS.stops);
+const gradientUnits = z.enum(["user", "box"]);
+
+export const vectorGradientSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("linear"),
+    units: gradientUnits,
+    x1: finite,
+    y1: finite,
+    x2: finite,
+    y2: finite,
+    stops: gradientStops,
+  }),
+  z.object({
+    kind: z.literal("radial"),
+    units: gradientUnits,
+    cx: finite,
+    cy: finite,
+    r: finite.refine((n) => n > 0),
+    fx: finite.optional(),
+    fy: finite.optional(),
+    stops: gradientStops,
+  }),
+]);
 
 export const vectorDataSchema = z
   .object({
     viewBox: z.tuple([finite, finite, finite.refine((n) => n > 0), finite.refine((n) => n > 0)]),
     paths: z.array(vectorPathSchema).min(1).max(VECTOR_LIMITS.paths),
+    gradients: z.array(vectorGradientSchema).max(VECTOR_LIMITS.gradients).optional(),
     source: z
       .object({
         generator: z.enum(["import", "icon", "trace", "sketch", "recraft", "llm", "mock"]),
@@ -91,7 +182,11 @@ export const vectorDataSchema = z
   .refine(
     (v) => v.paths.reduce((n, p) => n + p.d.length, 0) <= VECTOR_LIMITS.totalChars,
     "vector is too detailed (total path data over the limit)",
-  );
+  )
+  .refine((v) => {
+    const n = v.gradients?.length ?? 0;
+    return v.paths.every((p) => (p.fillGradient ?? -1) < n && (p.strokeGradient ?? -1) < n);
+  }, "vector path refers to a gradient it doesn't have");
 
 // ---------------------------------------------------------------------------
 // Path data: parse → absolute segments → (transform) → normalized string
@@ -767,7 +862,10 @@ const NAMED: Record<string, string> = {
 };
 
 interface Gradient {
-  stops: Array<{ color: string; opacity: number }>;
+  kind: "linear" | "radial";
+  /** Its own attributes (lowercased names), merged down the href chain on resolve. */
+  attrs: Record<string, string>;
+  stops: Array<{ offset: number; color: string; opacity: number }>;
   href?: string;
 }
 
@@ -794,6 +892,10 @@ function resolvePaint(
   return parsed.success ? parsed.data : undefined;
 }
 
+/**
+ * A gradient with its href chain applied: attributes it doesn't set come from
+ * the one it references, and so do the stops when it has none.
+ */
 function resolveGradient(
   id: string,
   gradients: Map<string, Gradient>,
@@ -801,8 +903,101 @@ function resolveGradient(
 ): Gradient | undefined {
   const g = gradients.get(id);
   if (!g || depth > 4) return undefined;
-  if (g.stops.length === 0 && g.href) return resolveGradient(g.href, gradients, depth + 1);
-  return g;
+  if (!g.href) return g;
+  const parent = resolveGradient(g.href, gradients, depth + 1);
+  if (!parent) return g;
+  return {
+    kind: g.kind,
+    attrs: { ...parent.attrs, ...g.attrs },
+    stops: g.stops.length ? g.stops : parent.stops,
+  };
+}
+
+/** "50%" → 0.5, "0.5" → 0.5, clamped to 0–1. */
+function fraction(v: string | undefined, fallback: number): number {
+  if (v === undefined) return fallback;
+  const n = Number.parseFloat(v);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(1, Math.max(0, v.trim().endsWith("%") ? n / 100 : n));
+}
+
+const round = (n: number, decimals: number) => {
+  const k = 10 ** decimals;
+  const r = Math.round(n * k) / k;
+  return Object.is(r, -0) ? 0 : r;
+};
+
+/**
+ * An SVG gradient as a stored one, in the flattened space: user-space
+ * coordinates go through the element's transform and the gradient's own;
+ * bounding-box coordinates only through the gradient's (the box is the
+ * flattened part's, which is exact without rotation or skew and close with).
+ * Fewer than two stops is a solid colour, not a gradient: null.
+ */
+function flattenGradient(
+  g: Gradient,
+  m: Matrix,
+  extent: { w: number; h: number },
+  decimals: number,
+): VectorGradient | null {
+  if (g.stops.length < 2) return null;
+  const a = g.attrs;
+  const box = a.gradientunits !== "userSpaceOnUse";
+  const gt = parseTransform(a.gradienttransform);
+  const t = box ? gt : multiply(m, gt);
+  const places = box ? 4 : decimals + 1;
+  const coord = (v: string | undefined, fallback: string, axis: "x" | "y" | "r"): number => {
+    const s = (v ?? fallback).trim();
+    const n = Number.parseFloat(s);
+    if (!Number.isFinite(n)) return 0;
+    if (!s.endsWith("%")) return n;
+    const f = n / 100;
+    if (box) return f;
+    return (
+      f *
+      (axis === "x"
+        ? extent.w
+        : axis === "y"
+          ? extent.h
+          : Math.hypot(extent.w, extent.h) / Math.SQRT2)
+    );
+  };
+  const at = (x: number, y: number): [number, number] => [
+    round(t[0] * x + t[2] * y + t[4], places),
+    round(t[1] * x + t[3] * y + t[5], places),
+  ];
+  const units = box ? ("box" as const) : ("user" as const);
+  const stops = g.stops.slice(0, VECTOR_LIMITS.stops).map((s) => ({
+    offset: round(s.offset, 4),
+    color: s.color,
+    ...(s.opacity < 1 ? { opacity: round(s.opacity, 3) } : {}),
+  }));
+  if (g.kind === "linear") {
+    const [x1, y1] = at(coord(a.x1, "0%", "x"), coord(a.y1, "0%", "y"));
+    const [x2, y2] = at(coord(a.x2, "100%", "x"), coord(a.y2, "0%", "y"));
+    return { kind: "linear", units, x1, y1, x2, y2, stops };
+  }
+  const cx0 = coord(a.cx, "50%", "x");
+  const cy0 = coord(a.cy, "50%", "y");
+  const [cx, cy] = at(cx0, cy0);
+  const [fx, fy] = at(
+    a.fx !== undefined ? coord(a.fx, "50%", "x") : cx0,
+    a.fy !== undefined ? coord(a.fy, "50%", "y") : cy0,
+  );
+  const r = round(
+    coord(a.r, "50%", "r") * (Math.sqrt(Math.abs(t[0] * t[3] - t[1] * t[2])) || 1),
+    places,
+  );
+  if (!(r > 0)) return null;
+  return {
+    kind: "radial",
+    units,
+    cx,
+    cy,
+    r,
+    ...(fx !== cx || fy !== cy ? { fx, fy } : {}),
+    stops,
+  };
 }
 
 const num = (v: string | undefined, fallback = 0): number => {
@@ -902,18 +1097,27 @@ export function importSvg(svgText: string, source?: VectorData["source"]): SvgIm
   const sheet = parseSheet(css);
   for (const [id, n] of byId) {
     if (n.tag !== "linearGradient" && n.tag !== "radialGradient") continue;
+    // A stop's offset never goes back past the one before it (SVG's rule).
+    let floor = 0;
     const stops = n.children
       .filter((c) => c.tag === "stop")
       .map((s) => {
         const st = ownStyle(s, sheet);
         const color = resolvePaint(st["stop-color"] ?? "#000000", new Map());
+        floor = Math.max(floor, fraction(s.attrs.offset, 0));
         return {
+          offset: floor,
           color: color && color !== "none" ? color : "#000000",
-          opacity: num(st["stop-opacity"], 1),
+          opacity: Math.min(1, Math.max(0, num(st["stop-opacity"], 1))),
         };
       });
     const href = n.attrs.href?.startsWith("#") ? n.attrs.href.slice(1) : undefined;
-    gradients.set(id, { stops, ...(href ? { href } : {}) });
+    gradients.set(id, {
+      kind: n.tag === "linearGradient" ? "linear" : "radial",
+      attrs: n.attrs,
+      stops,
+      ...(href ? { href } : {}),
+    });
   }
 
   // viewBox: the file's own, else its width/height, else the drawing's bounds.
@@ -934,8 +1138,29 @@ export function importSvg(svgText: string, source?: VectorData["source"]): SvgIm
         ? [0, 0, w0, h0]
         : null;
   const decimals = precisionFor(viewBox ? Math.max(viewBox[2], viewBox[3]) : 1_000);
+  // What a user-space percentage is a percentage of.
+  const extent = viewBox ? { w: viewBox[2], h: viewBox[3] } : { w: 100, h: 100 };
 
   const paths: VectorPath[] = [];
+  // Gradients as stored: one per distinct flattened result, referenced by index.
+  const kept: VectorGradient[] = [];
+  const keptIndex = new Map<string, number>();
+  const gradientFor = (value: string | undefined, m: Matrix): number | undefined => {
+    const url = value ? /^url\(\s*['"]?#([^'")\s]+)['"]?\s*\)/i.exec(value.trim()) : null;
+    if (!url) return undefined;
+    const g = resolveGradient(url[1]!, gradients, 0);
+    const flat = g ? flattenGradient(g, m, extent, decimals) : null;
+    if (!flat) return undefined;
+    const key = JSON.stringify(flat);
+    let i = keptIndex.get(key);
+    if (i === undefined) {
+      if (kept.length >= VECTOR_LIMITS.gradients) return undefined;
+      i = kept.length;
+      kept.push(flat);
+      keptIndex.set(key, i);
+    }
+    return i;
+  };
   type Ctx = { style: Style; opacity: number; m: Matrix; depth: number; via: Set<string> };
 
   const visit = (node: XmlNode, ctx: Ctx, inDefs: boolean) => {
@@ -1016,6 +1241,13 @@ export function importSvg(svgText: string, source?: VectorData["source"]): SvgIm
           : {}),
       };
       if (fill === undefined) delete path.fill;
+      // A gradient paint keeps its solid fallback above and points at the
+      // whole gradient too.
+      const fillGradient =
+        fill !== undefined && fill !== "none" ? gradientFor(style.fill, m) : undefined;
+      if (fillGradient !== undefined) path.fillGradient = fillGradient;
+      const strokeGradient = stroke !== "none" ? gradientFor(style.stroke, m) : undefined;
+      if (strokeGradient !== undefined) path.strokeGradient = strokeGradient;
       paths.push(path);
       return;
     }
@@ -1049,7 +1281,12 @@ export function importSvg(svgText: string, source?: VectorData["source"]): SvgIm
     viewBox = [minX, minY, Math.max(1, maxX - minX), Math.max(1, maxY - minY)];
   }
 
-  const vector: VectorData = { viewBox, paths, ...(source ? { source } : {}) };
+  const vector: VectorData = {
+    viewBox,
+    paths,
+    ...(kept.length ? { gradients: kept } : {}),
+    ...(source ? { source } : {}),
+  };
   const checked = vectorDataSchema.safeParse(vector);
   if (!checked.success) {
     const tooBig = checked.error.issues.some((i) => /too detailed|maximum length/.test(i.message));
@@ -1077,19 +1314,22 @@ export function importSvg(svgText: string, source?: VectorData["source"]): SvgIm
 // Editing helpers
 // ---------------------------------------------------------------------------
 
-/** The distinct paints a vector uses, most used first — the recolour palette. */
+/** The distinct paints a vector uses (gradient stops too), most used first — the recolour palette. */
 export function vectorPalette(v: VectorData): string[] {
   const count = new Map<string, number>();
+  const add = (c: string | undefined) => {
+    if (!c || c === "none") return;
+    count.set(c, (count.get(c) ?? 0) + 1);
+  };
   for (const p of v.paths) {
-    for (const c of [p.fill ?? "currentColor", p.stroke]) {
-      if (!c || c === "none") continue;
-      count.set(c, (count.get(c) ?? 0) + 1);
-    }
+    add(p.fill ?? "currentColor");
+    add(p.stroke);
   }
+  for (const g of v.gradients ?? []) for (const s of g.stops) add(s.color);
   return [...count.entries()].sort((a, b) => b[1] - a[1]).map(([c]) => c);
 }
 
-/** Replace one paint everywhere it's used (fill and stroke). */
+/** Replace one paint everywhere it's used (fill, stroke, and gradient stops). */
 export function recolorVector(v: VectorData, from: string, to: string): VectorData {
   return {
     ...v,
@@ -1102,7 +1342,35 @@ export function recolorVector(v: VectorData, from: string, to: string): VectorDa
       if (p.stroke === from) next.stroke = to;
       return next;
     }),
+    ...(v.gradients
+      ? {
+          gradients: v.gradients.map((g) => ({
+            ...g,
+            stops: g.stops.map((s) => (s.color === from ? { ...s, color: to } : s)),
+          })),
+        }
+      : {}),
   };
+}
+
+/** Every gradient replaced by its solid fallback colour (the inspector's "Flat"). */
+export function flattenGradients(v: VectorData): VectorData {
+  if (
+    !v.gradients?.length &&
+    !v.paths.some((p) => p.fillGradient !== undefined || p.strokeGradient !== undefined)
+  )
+    return v;
+  const next: VectorData = {
+    ...v,
+    paths: v.paths.map((p) => {
+      const q = { ...p };
+      delete q.fillGradient;
+      delete q.strokeGradient;
+      return q;
+    }),
+  };
+  delete next.gradients;
+  return next;
 }
 
 /**
@@ -1141,24 +1409,54 @@ export function scaleVectorStrokes(v: VectorData, factor: number): VectorData {
 const escAttr = (s: string) =>
   s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
-/** A vector's paths as SVG elements (escaped): shared by the download and the board export. */
-export function vectorPathsMarkup(v: VectorData): string {
-  return v.paths
-    .map((p) => {
-      const attrs = [
-        `d="${escAttr(p.d)}"`,
-        `fill="${escAttr(p.fill ?? "currentColor")}"`,
-        ...(p.stroke
-          ? [`stroke="${escAttr(p.stroke)}"`, `stroke-width="${p.strokeWidth ?? 1}"`]
-          : []),
-        ...(p.fillRule ? [`fill-rule="${p.fillRule}"`] : []),
-        ...(p.opacity !== undefined ? [`opacity="${p.opacity}"`] : []),
-        ...(p.cap ? [`stroke-linecap="${p.cap}"`] : []),
-        ...(p.join ? [`stroke-linejoin="${p.join}"`] : []),
-      ];
-      return `<path ${attrs.join(" ")}/>`;
-    })
+function gradientMarkup(g: VectorGradient, id: string): string {
+  const units = g.units === "user" ? "userSpaceOnUse" : "objectBoundingBox";
+  const stops = g.stops
+    .map(
+      (s) =>
+        `<stop offset="${s.offset}" stop-color="${escAttr(s.color)}"${s.opacity !== undefined ? ` stop-opacity="${s.opacity}"` : ""}/>`,
+    )
     .join("");
+  return g.kind === "linear"
+    ? `<linearGradient id="${id}" gradientUnits="${units}" x1="${g.x1}" y1="${g.y1}" x2="${g.x2}" y2="${g.y2}">${stops}</linearGradient>`
+    : `<radialGradient id="${id}" gradientUnits="${units}" cx="${g.cx}" cy="${g.cy}" r="${g.r}"${g.fx !== undefined ? ` fx="${g.fx}"` : ""}${g.fy !== undefined ? ` fy="${g.fy}"` : ""}>${stops}</radialGradient>`;
+}
+
+/**
+ * A vector's paths as SVG elements (escaped): shared by the download and the
+ * board export. `idPrefix` keeps gradient ids apart when several vectors share
+ * one document.
+ */
+export function vectorPathsMarkup(v: VectorData, idPrefix = "vg"): string {
+  const prefix = idPrefix.replace(/[^A-Za-z0-9_-]/g, "") || "vg";
+  const gradients = v.gradients ?? [];
+  const paint = (solid: string, index: number | undefined) =>
+    index !== undefined && gradients[index] ? `url(#${prefix}-${index})` : escAttr(solid);
+  const defs = gradients.length
+    ? `<defs>${gradients.map((g, i) => gradientMarkup(g, `${prefix}-${i}`)).join("")}</defs>`
+    : "";
+  return (
+    defs +
+    v.paths
+      .map((p) => {
+        const attrs = [
+          `d="${escAttr(p.d)}"`,
+          `fill="${paint(p.fill ?? "currentColor", p.fillGradient)}"`,
+          ...(p.stroke
+            ? [
+                `stroke="${paint(p.stroke, p.strokeGradient)}"`,
+                `stroke-width="${p.strokeWidth ?? 1}"`,
+              ]
+            : []),
+          ...(p.fillRule ? [`fill-rule="${p.fillRule}"`] : []),
+          ...(p.opacity !== undefined ? [`opacity="${p.opacity}"`] : []),
+          ...(p.cap ? [`stroke-linecap="${p.cap}"`] : []),
+          ...(p.join ? [`stroke-linejoin="${p.join}"`] : []),
+        ];
+        return `<path ${attrs.join(" ")}/>`;
+      })
+      .join("")
+  );
 }
 
 /** Standalone SVG text for one vector (download / export). Attribute values are escaped. */
@@ -1171,10 +1469,7 @@ export function vectorToSvg(v: VectorData, width: number, height: number, ink = 
 // ---------------------------------------------------------------------------
 
 /** Ramer–Douglas–Peucker: drop points within `eps` of the line through their neighbours. */
-export function simplifyPoints(
-  pts: Array<{ x: number; y: number }>,
-  eps: number,
-): Array<{ x: number; y: number }> {
+export function simplifyPoints<T extends { x: number; y: number }>(pts: T[], eps: number): T[] {
   if (pts.length < 3) return pts;
   const keep = new Uint8Array(pts.length);
   keep[0] = keep[pts.length - 1] = 1;
@@ -1280,4 +1575,439 @@ export function sketchToVector(
     width,
     height,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Split, combine, simplify (docs/26 §6.3 editing)
+// ---------------------------------------------------------------------------
+
+type Pt = { x: number; y: number };
+
+function cubicAt(t: number, a: number, b: number, c: number, d: number): number {
+  const u = 1 - t;
+  return u * u * u * a + 3 * u * u * t * b + 3 * u * t * t * c + t * t * t * d;
+}
+function quadAt(t: number, a: number, b: number, c: number): number {
+  const u = 1 - t;
+  return u * u * a + 2 * u * t * b + t * t * c;
+}
+
+/** A sampled subpath: its points, and which of them are real corners. */
+interface Subpath {
+  pts: Array<Pt & { corner: boolean }>;
+  closed: boolean;
+  curved: boolean;
+}
+
+/** Turns sharper than this are corners a smoothing pass must keep. */
+const CORNER_COS = Math.cos((25 * Math.PI) / 180);
+function sharpTurn(a: [number, number], b: [number, number]): boolean {
+  const la = Math.hypot(a[0], a[1]);
+  const lb = Math.hypot(b[0], b[1]);
+  if (!la || !lb) return true;
+  return (a[0] * b[0] + a[1] * b[1]) / (la * lb) < CORNER_COS;
+}
+function firstNonZero(...vs: Array<[number, number]>): [number, number] {
+  return vs.find((v) => v[0] !== 0 || v[1] !== 0) ?? [0, 0];
+}
+
+/**
+ * Path segments → subpaths of points, curves sampled finely enough for
+ * `tol`. Every segment end is a corner candidate; it stays a corner only
+ * where the tangent really breaks, so a smooth curve's joins stay smooth.
+ */
+function sampleSubpaths(segs: Seg[], tol: number): Subpath[] {
+  const subs: Subpath[] = [];
+  let cur: Subpath | null = null;
+  let x = 0;
+  let y = 0;
+  let sx = 0;
+  let sy = 0;
+  let arriving: [number, number] | null = null;
+  let leaving: [number, number] | null = null;
+  const begin = (bx: number, by: number): Subpath => {
+    const sub: Subpath = { pts: [{ x: bx, y: by, corner: true }], closed: false, curved: false };
+    subs.push(sub);
+    cur = sub;
+    sx = bx;
+    sy = by;
+    arriving = null;
+    leaving = null;
+    return sub;
+  };
+  const extend = (tStart: [number, number], tEnd: [number, number], samples: Pt[]) => {
+    const sub = cur ?? begin(x, y);
+    const anchor = sub.pts[sub.pts.length - 1]!;
+    if (arriving) anchor.corner = sharpTurn(arriving, tStart);
+    else leaving = tStart;
+    for (const p of samples) sub.pts.push({ x: p.x, y: p.y, corner: false });
+    sub.pts[sub.pts.length - 1]!.corner = true;
+    arriving = tEnd;
+    return sub;
+  };
+  const stepsFor = (len: number) =>
+    Math.min(24, Math.max(3, Math.ceil(len / Math.max(tol * 2, 1e-6))));
+  for (const g of segs) {
+    switch (g.t) {
+      case "M":
+        begin(g.x, g.y);
+        x = g.x;
+        y = g.y;
+        break;
+      case "L": {
+        const t: [number, number] = [g.x - x, g.y - y];
+        if (t[0] !== 0 || t[1] !== 0) extend(t, t, [{ x: g.x, y: g.y }]);
+        x = g.x;
+        y = g.y;
+        break;
+      }
+      case "C": {
+        const n = stepsFor(
+          Math.hypot(g.x1 - x, g.y1 - y) +
+            Math.hypot(g.x2 - g.x1, g.y2 - g.y1) +
+            Math.hypot(g.x - g.x2, g.y - g.y2),
+        );
+        const samples: Pt[] = [];
+        for (let i = 1; i <= n; i++) {
+          const t = i / n;
+          samples.push({ x: cubicAt(t, x, g.x1, g.x2, g.x), y: cubicAt(t, y, g.y1, g.y2, g.y) });
+        }
+        const sub = extend(
+          firstNonZero([g.x1 - x, g.y1 - y], [g.x2 - x, g.y2 - y], [g.x - x, g.y - y]),
+          firstNonZero([g.x - g.x2, g.y - g.y2], [g.x - g.x1, g.y - g.y1], [g.x - x, g.y - y]),
+          samples,
+        );
+        sub.curved = true;
+        x = g.x;
+        y = g.y;
+        break;
+      }
+      case "Q": {
+        const n = stepsFor(Math.hypot(g.x1 - x, g.y1 - y) + Math.hypot(g.x - g.x1, g.y - g.y1));
+        const samples: Pt[] = [];
+        for (let i = 1; i <= n; i++) {
+          const t = i / n;
+          samples.push({ x: quadAt(t, x, g.x1, g.x), y: quadAt(t, y, g.y1, g.y) });
+        }
+        const sub = extend(
+          firstNonZero([g.x1 - x, g.y1 - y], [g.x - x, g.y - y]),
+          firstNonZero([g.x - g.x1, g.y - g.y1], [g.x - x, g.y - y]),
+          samples,
+        );
+        sub.curved = true;
+        x = g.x;
+        y = g.y;
+        break;
+      }
+      case "Z": {
+        const sub = cur as Subpath | null;
+        if (!sub) break;
+        if (x !== sx || y !== sy) extend([sx - x, sy - y], [sx - x, sy - y], [{ x: sx, y: sy }]);
+        // The ring's last point is its first: fold them, and decide the
+        // start's corner from the turn between the last segment and the first.
+        if (sub.pts.length > 1) {
+          sub.pts.pop();
+          sub.pts[0]!.corner = arriving && leaving ? sharpTurn(arriving, leaving) : true;
+        }
+        sub.closed = true;
+        cur = null;
+        x = sx;
+        y = sy;
+        arriving = null;
+        break;
+      }
+    }
+  }
+  return subs;
+}
+
+function boundsOf(pts: Pt[]): { minX: number; minY: number; maxX: number; maxY: number } | null {
+  if (pts.length === 0) return null;
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const p of pts) {
+    minX = Math.min(minX, p.x);
+    minY = Math.min(minY, p.y);
+    maxX = Math.max(maxX, p.x);
+    maxY = Math.max(maxY, p.y);
+  }
+  return { minX, minY, maxX, maxY };
+}
+
+/** The drawn extent of path data: curves sampled, not their control points. */
+export function pathExtent(
+  d: string,
+): { minX: number; minY: number; maxX: number; maxY: number } | null {
+  const segs = parsePathData(d);
+  if (!segs) return null;
+  const b = pathBounds(d);
+  const tol = b ? Math.max(b.maxX - b.minX, b.maxY - b.minY) / 200 : 1;
+  return boundsOf(sampleSubpaths(segs, tol || 1).flatMap((s) => s.pts));
+}
+
+/** RDP on a closed ring: split at the point farthest from the start, simplify both halves. */
+function simplifyRing<T extends Pt>(pts: T[], eps: number): T[] {
+  if (pts.length < 4) return pts;
+  const a = pts[0]!;
+  let far = 1;
+  let farD = -1;
+  for (let i = 1; i < pts.length; i++) {
+    const dist = Math.hypot(pts[i]!.x - a.x, pts[i]!.y - a.y);
+    if (dist > farD) {
+      farD = dist;
+      far = i;
+    }
+  }
+  const first = simplifyPoints(pts.slice(0, far + 1), eps);
+  const second = simplifyPoints([...pts.slice(far), a], eps);
+  return [...first, ...second.slice(1, -1)];
+}
+
+/**
+ * Points → path data. Straight subpaths stay straight; curved ones become
+ * Catmull-Rom cubics through the points, with a straight run wherever both
+ * ends are corners, so a rounded corner stays round and a sharp one sharp.
+ */
+function fitSubpath(
+  pts: Array<Pt & { corner: boolean }>,
+  closed: boolean,
+  curved: boolean,
+  decimals: number,
+): string {
+  const k = 10 ** decimals;
+  const f = (n: number) => fmt(n, k);
+  const n = pts.length;
+  let d = `M${f(pts[0]!.x)} ${f(pts[0]!.y)}`;
+  const at = (i: number) => pts[closed ? ((i % n) + n) % n : Math.max(0, Math.min(n - 1, i))]!;
+  const isCorner = (i: number) => (!closed && (i <= 0 || i >= n - 1)) || at(i).corner;
+  const segments = closed ? n : n - 1;
+  for (let i = 0; i < segments; i++) {
+    const p0 = at(i - 1);
+    const p1 = at(i);
+    const p2 = at(i + 1);
+    const p3 = at(i + 2);
+    const c1 = isCorner(i);
+    const c2 = isCorner(i + 1);
+    if (!curved || (c1 && c2)) {
+      if (!(closed && i === segments - 1)) d += `L${f(p2.x)} ${f(p2.y)}`;
+      continue;
+    }
+    const a = c1
+      ? { x: p1.x + (p2.x - p1.x) / 3, y: p1.y + (p2.y - p1.y) / 3 }
+      : { x: p1.x + (p2.x - p0.x) / 6, y: p1.y + (p2.y - p0.y) / 6 };
+    const b = c2
+      ? { x: p2.x - (p2.x - p1.x) / 3, y: p2.y - (p2.y - p1.y) / 3 }
+      : { x: p2.x - (p3.x - p1.x) / 6, y: p2.y - (p3.y - p1.y) / 6 };
+    d += `C${f(a.x)} ${f(a.y)} ${f(b.x)} ${f(b.y)} ${f(p2.x)} ${f(p2.y)}`;
+  }
+  return closed ? `${d}Z` : d;
+}
+
+const anchorCount = (segs: Seg[]) => segs.reduce((n, g) => n + (g.t === "Z" ? 0 : 1), 0);
+
+/**
+ * Fewer points, same drawing (the inspector's "Simplify"): each subpath is
+ * sampled, thinned with Ramer–Douglas–Peucker at `tolerance` (default 1/400
+ * of the vector's larger side), and redrawn — curves as smooth cubics that
+ * keep their corners, straight runs as lines. Filled specks smaller than a
+ * few tolerances go (traced art is full of them). A path is only replaced
+ * when the result is shorter, and a vector always keeps one path.
+ */
+export function simplifyVector(
+  v: VectorData,
+  tolerance?: number,
+): { vector: VectorData; before: number; after: number } {
+  const [, , w, h] = v.viewBox;
+  const tol = tolerance ?? Math.max(w, h) / 400;
+  const decimals = precisionFor(Math.max(w, h));
+  let before = 0;
+  let after = 0;
+  const paths: VectorPath[] = [];
+  v.paths.forEach((p) => {
+    const segs = parsePathData(p.d);
+    if (!segs) {
+      paths.push(p);
+      return;
+    }
+    const own = anchorCount(segs);
+    before += own;
+    const stroked = Boolean(p.stroke && p.stroke !== "none");
+    const parts: string[] = [];
+    let points = 0;
+    for (const sub of sampleSubpaths(segs, tol)) {
+      const b = boundsOf(sub.pts)!;
+      const size = Math.max(b.maxX - b.minX, b.maxY - b.minY);
+      if (!stroked && size < tol * 3) continue; // a speck
+      let pts = sub.closed ? simplifyRing(sub.pts, tol) : simplifyPoints(sub.pts, tol);
+      if (sub.closed && pts.length < 3) {
+        if (!stroked) continue; // a sliver thinner than the tolerance
+        pts = sub.pts;
+      }
+      if (pts.length < 2) continue;
+      parts.push(fitSubpath(pts, sub.closed, sub.curved, decimals));
+      points += pts.length;
+    }
+    const d = parts.join("");
+    if (!d) {
+      // Nothing left worth drawing: the path was all specks.
+      return;
+    }
+    if (d.length < p.d.length && vectorPathSchema.shape.d.safeParse(d).success) {
+      paths.push({ ...p, d });
+      after += points;
+    } else {
+      paths.push(p);
+      after += own;
+    }
+  });
+  if (paths.length === 0) return { vector: v, before, after: before };
+  return { vector: { ...v, paths }, before, after };
+}
+
+export interface VectorPart {
+  vector: VectorData;
+  /** Where the part sits in the whole vector's viewBox space. */
+  box: { x: number; y: number; width: number; height: number };
+}
+
+/**
+ * One vector → one vector per path ("split into parts", each selectable).
+ * Path data doesn't change: each part's viewBox is its own drawn extent in
+ * the same space, so user-space gradients still line up; a part carries only
+ * the gradients it uses, re-indexed.
+ */
+export function splitVector(v: VectorData): VectorPart[] {
+  const minSide = Math.max(v.viewBox[2], v.viewBox[3]) / 1_000;
+  const out: VectorPart[] = [];
+  for (const p of v.paths) {
+    const b = pathExtent(p.d);
+    if (!b) continue;
+    const pad = p.stroke && p.stroke !== "none" ? (p.strokeWidth ?? 1) / 2 : 0;
+    const x = round(b.minX - pad, 3);
+    const y = round(b.minY - pad, 3);
+    const width = round(Math.max(minSide, b.maxX - b.minX + 2 * pad), 3);
+    const height = round(Math.max(minSide, b.maxY - b.minY + 2 * pad), 3);
+    const gradients: VectorGradient[] = [];
+    const path: VectorPath = { ...p };
+    const keep = (i: number | undefined): number | undefined => {
+      const g = i === undefined ? undefined : v.gradients?.[i];
+      if (!g) return undefined;
+      gradients.push(g);
+      return gradients.length - 1;
+    };
+    const fillGradient = keep(p.fillGradient);
+    const strokeGradient = keep(p.strokeGradient);
+    delete path.fillGradient;
+    delete path.strokeGradient;
+    if (fillGradient !== undefined) path.fillGradient = fillGradient;
+    if (strokeGradient !== undefined) path.strokeGradient = strokeGradient;
+    out.push({
+      vector: {
+        viewBox: [x, y, width, height],
+        paths: [path],
+        ...(gradients.length ? { gradients } : {}),
+        ...(v.source ? { source: v.source } : {}),
+      },
+      box: { x, y, width, height },
+    });
+  }
+  return out;
+}
+
+/** A vector as placed on the board: its box, and the ink its unpainted parts take. */
+export interface PlacedVector {
+  vector: VectorData;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  ink?: string;
+}
+
+/**
+ * Several placed vectors → one ("combine", split's inverse): every path is
+ * mapped from its vector's viewBox (fitted into its box the way it's drawn,
+ * centred and uniformly scaled) into one space at the boxes' union, in the
+ * order given — paint order. Stroke widths and user-space gradients scale
+ * with it. A part whose ink differs from `ink` has its ink written in, so its
+ * colour survives. Null when the result would be over the vector limits.
+ */
+export function combineVectors(
+  parts: PlacedVector[],
+  ink?: string,
+): { vector: VectorData; x: number; y: number; width: number; height: number } | null {
+  if (parts.length === 0) return null;
+  const minX = Math.min(...parts.map((p) => p.x));
+  const minY = Math.min(...parts.map((p) => p.y));
+  const maxX = Math.max(...parts.map((p) => p.x + p.width));
+  const maxY = Math.max(...parts.map((p) => p.y + p.height));
+  const width = Math.max(1, maxX - minX);
+  const height = Math.max(1, maxY - minY);
+  const decimals = precisionFor(Math.max(width, height));
+  const paths: VectorPath[] = [];
+  const gradients: VectorGradient[] = [];
+  for (const part of parts) {
+    const [vx, vy, vw, vh] = part.vector.viewBox;
+    const s = Math.min(part.width / vw, part.height / vh);
+    const ox = part.x - minX + (part.width - vw * s) / 2 - vx * s;
+    const oy = part.y - minY + (part.height - vh * s) / 2 - vy * s;
+    const m: Matrix = [s, 0, 0, s, ox, oy];
+    const literal = part.ink && part.ink !== ink ? part.ink : undefined;
+    const paint = (c: string | undefined) =>
+      literal && (c ?? "currentColor") === "currentColor" ? literal : c;
+    const base = gradients.length;
+    for (const g of part.vector.gradients ?? []) {
+      const stops = g.stops.map((st) => ({ ...st, color: paint(st.color)! }));
+      if (g.units === "box") {
+        gradients.push({ ...g, stops });
+      } else if (g.kind === "linear") {
+        gradients.push({
+          ...g,
+          x1: round(g.x1 * s + ox, decimals + 1),
+          y1: round(g.y1 * s + oy, decimals + 1),
+          x2: round(g.x2 * s + ox, decimals + 1),
+          y2: round(g.y2 * s + oy, decimals + 1),
+          stops,
+        });
+      } else {
+        gradients.push({
+          ...g,
+          cx: round(g.cx * s + ox, decimals + 1),
+          cy: round(g.cy * s + oy, decimals + 1),
+          r: round(g.r * s, decimals + 1) || 0.01,
+          ...(g.fx !== undefined ? { fx: round(g.fx * s + ox, decimals + 1) } : {}),
+          ...(g.fy !== undefined ? { fy: round(g.fy * s + oy, decimals + 1) } : {}),
+          stops,
+        });
+      }
+    }
+    for (const p of part.vector.paths) {
+      const d = normalizePathData(p.d, m, decimals);
+      if (!d) continue;
+      const next: VectorPath = { ...p, d };
+      const fill = paint(p.fill);
+      if (fill === undefined) delete next.fill;
+      else next.fill = fill;
+      if (p.stroke) next.stroke = paint(p.stroke)!;
+      if (p.strokeWidth !== undefined)
+        next.strokeWidth = Math.min(1_000, round(p.strokeWidth * s, 2));
+      if (p.fillGradient !== undefined) next.fillGradient = base + p.fillGradient;
+      if (p.strokeGradient !== undefined) next.strokeGradient = base + p.strokeGradient;
+      paths.push(next);
+    }
+  }
+  const vector: VectorData = {
+    viewBox: [0, 0, round(width, 3), round(height, 3)],
+    paths,
+    ...(gradients.length ? { gradients } : {}),
+    ...(parts.every((p) => p.vector.source?.generator === parts[0]!.vector.source?.generator) &&
+    parts[0]!.vector.source
+      ? { source: { generator: parts[0]!.vector.source.generator } }
+      : {}),
+  };
+  const checked = vectorDataSchema.safeParse(vector);
+  if (!checked.success) return null;
+  return { vector: checked.data as VectorData, x: minX, y: minY, width, height };
 }
