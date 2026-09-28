@@ -902,3 +902,122 @@ export function distributePositions(
   }
   return out;
 }
+
+/* ------------------------------------------------------------------------ */
+/* Resizing from any edge or corner (docs/26 §6.4)                          */
+/* ------------------------------------------------------------------------ */
+
+/** The eight handles: the compass point of the edge or corner that moves. */
+export const RESIZE_HANDLES = ["nw", "n", "ne", "e", "se", "s", "sw", "w"] as const;
+export type ResizeHandle = (typeof RESIZE_HANDLES)[number];
+
+export interface ShapeBox {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  /** Degrees, about the box's centre. */
+  rotation?: number;
+}
+
+/** Which way a handle moves each axis: -1 the left/top edge, +1 the right/bottom, 0 neither. */
+export function handleAxes(handle: ResizeHandle): { sx: -1 | 0 | 1; sy: -1 | 0 | 1 } {
+  return {
+    sx: handle.includes("w") ? -1 : handle.includes("e") ? 1 : 0,
+    sy: handle.includes("n") ? -1 : handle.includes("s") ? 1 : 0,
+  };
+}
+
+/**
+ * The box after dragging `handle` by (dx, dy) in board coordinates. The
+ * opposite edge or corner stays exactly where it was, turned or not: the drag
+ * is read in the box's own (rotated) frame, and the box's position is solved
+ * so that point doesn't move. `lockAspect` keeps the width-to-height ratio —
+ * from a corner by the larger change, from an edge by growing the other side
+ * about its centre.
+ */
+export function resizeFromHandle(
+  box: ShapeBox,
+  handle: ResizeHandle,
+  delta: { dx: number; dy: number },
+  options: { lockAspect?: boolean; min?: number } = {},
+): { x: number; y: number; width: number; height: number } {
+  const min = options.min ?? 24;
+  const { sx, sy } = handleAxes(handle);
+  const theta = ((box.rotation ?? 0) * Math.PI) / 180;
+  const cos = Math.cos(theta);
+  const sin = Math.sin(theta);
+  // The drag in the box's own frame.
+  const lx = delta.dx * cos + delta.dy * sin;
+  const ly = -delta.dx * sin + delta.dy * cos;
+  let width = sx === 0 ? box.width : Math.max(min, box.width + sx * lx);
+  let height = sy === 0 ? box.height : Math.max(min, box.height + sy * ly);
+  if (options.lockAspect && box.width > 0 && box.height > 0) {
+    const ratio = box.width / box.height;
+    if (sx !== 0 && sy !== 0) {
+      const k = Math.max(width / box.width, height / box.height);
+      width = box.width * k;
+      height = box.height * k;
+    } else if (sx !== 0) {
+      height = width / ratio;
+    } else {
+      width = height * ratio;
+    }
+    if (width < min || height < min) {
+      const k = Math.max(min / width, min / height);
+      width *= k;
+      height *= k;
+    }
+  }
+  // The point that stays put, from the old centre, in the box's frame…
+  const cx = box.x + box.width / 2;
+  const cy = box.y + box.height / 2;
+  const ax = (-sx * box.width) / 2;
+  const ay = (-sy * box.height) / 2;
+  const anchorX = cx + ax * cos - ay * sin;
+  const anchorY = cy + ax * sin + ay * cos;
+  // …and the new centre that keeps it there.
+  const bx = (-sx * width) / 2;
+  const by = (-sy * height) / 2;
+  const ncx = anchorX - (bx * cos - by * sin);
+  const ncy = anchorY - (bx * sin + by * cos);
+  return { x: ncx - width / 2, y: ncy - height / 2, width, height };
+}
+
+/* ------------------------------------------------------------------------ */
+/* Lasso (docs/26 §6.4)                                                     */
+/* ------------------------------------------------------------------------ */
+
+/** Is the point inside the closed path (even-odd, by ray casting)? */
+export function pointInPolygon(
+  point: { x: number; y: number },
+  polygon: ReadonlyArray<{ x: number; y: number }>,
+): boolean {
+  let inside = false;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const a = polygon[i]!;
+    const b = polygon[j]!;
+    const crosses =
+      a.y > point.y !== b.y > point.y &&
+      point.x < ((b.x - a.x) * (point.y - a.y)) / (b.y - a.y) + a.x;
+    if (crosses) inside = !inside;
+  }
+  return inside;
+}
+
+/**
+ * What a lasso takes: every box whose centre falls inside the drawn path —
+ * the rule Figma's and Miro's lassos follow, so grazing an edge doesn't pick
+ * something up.
+ */
+export function lassoHits(
+  path: ReadonlyArray<{ x: number; y: number }>,
+  boxes: ReadonlyArray<{ id: string; x: number; y: number; width: number; height: number }>,
+): Set<string> {
+  const hit = new Set<string>();
+  if (path.length < 3) return hit;
+  for (const b of boxes) {
+    if (pointInPolygon({ x: b.x + b.width / 2, y: b.y + b.height / 2 }, path)) hit.add(b.id);
+  }
+  return hit;
+}

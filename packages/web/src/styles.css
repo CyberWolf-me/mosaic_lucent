@@ -3088,16 +3088,22 @@ html[data-theme="light"] .segmented button.active {
 }
 .shape-resize {
   position: absolute;
-  right: -6px;
-  bottom: -6px;
-  width: 12px;
-  height: 12px;
+  width: 10px;
+  height: 10px;
   border-radius: 3px;
   background: var(--amber-2);
   border: 1px solid var(--canvas-0);
-  cursor: nwse-resize;
   z-index: 2;
 }
+/* Eight handles (docs/26 §6.4): corners, then edge midpoints. */
+.shape-resize.h-nw { left: -6px; top: -6px; cursor: nwse-resize; }
+.shape-resize.h-ne { right: -6px; top: -6px; cursor: nesw-resize; }
+.shape-resize.h-se { right: -6px; bottom: -6px; cursor: nwse-resize; }
+.shape-resize.h-sw { left: -6px; bottom: -6px; cursor: nesw-resize; }
+.shape-resize.h-n { left: calc(50% - 5px); top: -6px; cursor: ns-resize; }
+.shape-resize.h-s { left: calc(50% - 5px); bottom: -6px; cursor: ns-resize; }
+.shape-resize.h-e { right: -6px; top: calc(50% - 5px); cursor: ew-resize; }
+.shape-resize.h-w { left: -6px; top: calc(50% - 5px); cursor: ew-resize; }
 /* Rotate handle (docs/26 §6.4): a knob on a short stem above the top edge.
    It lives inside the shape, so it turns with it. */
 .shape-rotate {

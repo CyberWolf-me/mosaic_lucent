@@ -3,8 +3,15 @@ import { ToolIco } from "./icons.js";
 import { isAssetRef, isImageDataUrl } from "@lucent/core";
 import { assetUrl } from "../assets.js";
 import type { Shape } from "@lucent/core";
-import { inkOn, normalizeZ, type DropKind } from "../shapes.js";
-import { DRAG_HYSTERESIS_PX, shapeLinkEnds, shapeLinkPath } from "../board/geometry.js";
+import { inkOn, normalizeZ, Z_SHAPE_FLOOR, type DropKind } from "../shapes.js";
+import {
+  DRAG_HYSTERESIS_PX,
+  RESIZE_HANDLES,
+  resizeFromHandle,
+  shapeLinkEnds,
+  shapeLinkPath,
+  type ResizeHandle,
+} from "../board/geometry.js";
 import { embedModeOf } from "../embed.js";
 import { VectorSvg } from "../vector/VectorSvg.js";
 import { TableView } from "./TableView.js";
@@ -210,7 +217,17 @@ export function ShapeElement({
   scale?: number;
   onSelect?: (id: string, additive: boolean) => void;
   onMove?: (id: string, x: number, y: number, commit: boolean) => void;
-  onResize?: (id: string, width: number, height: number, commit: boolean) => void;
+  /**
+   * A new size — and, from a top or left handle, a new position, so the
+   * opposite side stays put (docs/26 §6.4).
+   */
+  onResize?: (
+    id: string,
+    width: number,
+    height: number,
+    commit: boolean,
+    position?: { x: number; y: number },
+  ) => void;
   /** Rotation in degrees from the rotate handle (docs/26 §6.4); commit on release. */
   onRotate?: (id: string, degrees: number, commit: boolean) => void;
   onChangeLabel?: (id: string, label: string) => void;
@@ -230,12 +247,19 @@ export function ShapeElement({
   // Legacy boards stored z as Date.now(), which overflows the CSS z-index range
   // and made every shape paint above the tool overlays. Clamp on render so old
   // saved boards behave too, not just newly created shapes.
-  const z = normalizeZ(shape.z);
-  const x = position.x;
-  const y = position.y;
+  const z = Z_SHAPE_FLOOR + normalizeZ(shape.z);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(text ?? "");
-  const [liveSize, setLiveSize] = useState<{ width: number; height: number } | null>(null);
+  // The box while a handle is dragged: a top or left handle moves it too.
+  const [liveBox, setLiveBox] = useState<{
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  } | null>(null);
+  const liveSize = liveBox ? { width: liveBox.width, height: liveBox.height } : null;
+  const x = liveBox?.x ?? position.x;
+  const y = liveBox?.y ?? position.y;
   const [liveRotation, setLiveRotation] = useState<number | null>(null);
   const rotateRef = useRef<{ cx: number; cy: number } | null>(null);
   const dragRef = useRef<{
@@ -276,9 +300,7 @@ export function ShapeElement({
   // Release is a hard stop: shape placement is precision work, so unlike
   // viewport pans there is no momentum projection here.
   const [dragging, setDragging] = useState(false);
-  const resizeRef = useRef<{ startX: number; startY: number; baseW: number; baseH: number } | null>(
-    null,
-  );
+  const resizeRef = useRef<{ handle: ResizeHandle; startX: number; startY: number } | null>(null);
 
   // Hidden shapes are not rendered on the canvas (still in the model). This
   // must come after every hook: returning before `dragging`/`resizeRef`
@@ -286,7 +308,20 @@ export function ShapeElement({
   // ("Rendered fewer hooks than expected").
   if (shape.hidden) return null;
 
-  const startResize = (e: React.PointerEvent) => {
+  // Eight handles (docs/26 §6.4): each moves its own edge or corner and the
+  // opposite one stays put, turned or not. Shift keeps the proportions;
+  // pictures and vectors keep them from a corner unless Shift is held.
+  const keepsRatio = kind === "image" || kind === "vector";
+  const resizedBox = (r: NonNullable<typeof resizeRef.current>, e: React.PointerEvent) => {
+    const corner = r.handle.length === 2;
+    return resizeFromHandle(
+      { x: position.x, y: position.y, width: size.width, height: size.height, rotation: rotation ?? 0 },
+      r.handle,
+      { dx: (e.clientX - r.startX) / scale, dy: (e.clientY - r.startY) / scale },
+      { lockAspect: keepsRatio && corner ? !e.shiftKey : e.shiftKey },
+    );
+  };
+  const startResize = (handle: ResizeHandle) => (e: React.PointerEvent) => {
     e.stopPropagation();
     e.preventDefault();
     try {
@@ -294,38 +329,37 @@ export function ShapeElement({
     } catch {
       // Best-effort; in-bounds movement still resizes.
     }
-    resizeRef.current = {
-      startX: e.clientX,
-      startY: e.clientY,
-      baseW: size.width,
-      baseH: size.height,
-    };
+    resizeRef.current = { handle, startX: e.clientX, startY: e.clientY };
   };
   const onResizeMove = (e: React.PointerEvent) => {
     const r = resizeRef.current;
     if (!r) return;
-    const w = Math.max(24, r.baseW + (e.clientX - r.startX) / scale);
-    const h = Math.max(24, r.baseH + (e.clientY - r.startY) / scale);
-    setLiveSize({ width: w, height: h });
+    setLiveBox(resizedBox(r, e));
   };
   const endResize = (e: React.PointerEvent, commit: boolean) => {
     const r = resizeRef.current;
     resizeRef.current = null;
     if (!r) return;
-    setLiveSize(null);
+    setLiveBox(null);
     if (commit) {
-      const w = Math.max(24, r.baseW + (e.clientX - r.startX) / scale);
-      const h = Math.max(24, r.baseH + (e.clientY - r.startY) / scale);
-      onResize?.(id, Math.round(w), Math.round(h), true);
+      const next = resizedBox(r, e);
+      const moved = Math.round(next.x) !== position.x || Math.round(next.y) !== position.y;
+      onResize?.(
+        id,
+        Math.round(next.width),
+        Math.round(next.height),
+        true,
+        moved ? { x: Math.round(next.x), y: Math.round(next.y) } : undefined,
+      );
     }
   };
-  const resizeProps = {
-    onPointerDown: startResize,
+  const resizeProps = (handle: ResizeHandle) => ({
+    onPointerDown: startResize(handle),
     onPointerMove: onResizeMove,
     onPointerUp: (e: React.PointerEvent) => endResize(e, true),
     // Takeover (scroll, alert): drop the live size, skip the commit.
     onPointerCancel: (e: React.PointerEvent) => endResize(e, false),
-  };
+  });
 
   // Rotate (docs/26 §6.4): the angle from the shape's centre to the pointer,
   // 0° with the handle straight up. The centre is read from the rendered box —
@@ -789,7 +823,15 @@ export function ShapeElement({
   const resizeHandle =
     selected && !shape.locked ? (
       <>
-        <span className="shape-resize" {...resizeProps} title="Resize" />
+        {RESIZE_HANDLES.map((handle) => (
+          <span
+            key={handle}
+            className={`shape-resize h-${handle}`}
+            data-handle={handle}
+            {...resizeProps(handle)}
+            title="Resize · Shift keeps the proportions"
+          />
+        ))}
         {onRotate && (
           <span
             className="shape-rotate"

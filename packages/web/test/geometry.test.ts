@@ -12,6 +12,9 @@ import {
   VelocityTracker,
   approach,
   softClampZoom,
+  resizeFromHandle,
+  pointInPolygon,
+  lassoHits,
 } from "../src/board/geometry.js";
 import type { Shape } from "@lucent/core";
 import { cloneShapeOp } from "../src/shapes.js";
@@ -356,5 +359,117 @@ describe("export fidelity (F10)", () => {
     });
     expect(op).not.toHaveProperty("locked");
     expect(op).not.toHaveProperty("hidden");
+  });
+});
+
+describe("resizeFromHandle (docs/26 §6.4)", () => {
+  const box = { x: 100, y: 100, width: 200, height: 100 };
+  const round = (b: { x: number; y: number; width: number; height: number }) => ({
+    x: Math.round(b.x * 100) / 100,
+    y: Math.round(b.y * 100) / 100,
+    width: Math.round(b.width * 100) / 100,
+    height: Math.round(b.height * 100) / 100,
+  });
+
+  it("moves only the dragged edge or corner", () => {
+    expect(round(resizeFromHandle(box, "se", { dx: 20, dy: 10 }))).toEqual({
+      x: 100,
+      y: 100,
+      width: 220,
+      height: 110,
+    });
+    expect(round(resizeFromHandle(box, "nw", { dx: 20, dy: 10 }))).toEqual({
+      x: 120,
+      y: 110,
+      width: 180,
+      height: 90,
+    });
+    expect(round(resizeFromHandle(box, "n", { dx: 50, dy: -30 }))).toEqual({
+      x: 100,
+      y: 70,
+      width: 200,
+      height: 130,
+    });
+    expect(round(resizeFromHandle(box, "w", { dx: -40, dy: 99 }))).toEqual({
+      x: 60,
+      y: 100,
+      width: 240,
+      height: 100,
+    });
+  });
+
+  it("never shrinks below the minimum, and keeps the far side put", () => {
+    expect(round(resizeFromHandle(box, "e", { dx: -500, dy: 0 }))).toEqual({
+      x: 100,
+      y: 100,
+      width: 24,
+      height: 100,
+    });
+    expect(round(resizeFromHandle(box, "w", { dx: 500, dy: 0 }))).toEqual({
+      x: 276,
+      y: 100,
+      width: 24,
+      height: 100,
+    });
+  });
+
+  it("keeps the ratio when asked, from a corner and from an edge", () => {
+    expect(round(resizeFromHandle(box, "se", { dx: 100, dy: 0 }, { lockAspect: true }))).toEqual({
+      x: 100,
+      y: 100,
+      width: 300,
+      height: 150,
+    });
+    // An edge grows the other side about its centre.
+    expect(round(resizeFromHandle(box, "e", { dx: 100, dy: 0 }, { lockAspect: true }))).toEqual({
+      x: 100,
+      y: 75,
+      width: 300,
+      height: 150,
+    });
+  });
+
+  it("reads the drag in a turned box's frame, and its far corner doesn't move", () => {
+    const turned = { ...box, rotation: 90 };
+    // Turned 90°, the box's own "right" points down the screen.
+    const out = resizeFromHandle(turned, "e", { dx: 0, dy: 40 });
+    expect(Math.round(out.width)).toBe(240);
+    expect(Math.round(out.height)).toBe(100);
+    // The left edge's middle, turned, stays where it was on the board.
+    const edge = (b: { x: number; y: number; width: number; height: number }) => {
+      const cx = b.x + b.width / 2;
+      const cy = b.y + b.height / 2;
+      // Local (-w/2, 0) turned by 90° is (0, -w/2).
+      return { x: Math.round(cx), y: Math.round(cy - b.width / 2) };
+    };
+    expect(edge(out)).toEqual(edge(turned));
+  });
+});
+
+describe("lasso (docs/26 §6.4)", () => {
+  // An L-shaped path: a box's centre in the notch is outside it.
+  const path = [
+    { x: 0, y: 0 },
+    { x: 200, y: 0 },
+    { x: 200, y: 100 },
+    { x: 100, y: 100 },
+    { x: 100, y: 200 },
+    { x: 0, y: 200 },
+  ];
+  it("tells inside from outside, notches included", () => {
+    expect(pointInPolygon({ x: 50, y: 50 }, path)).toBe(true);
+    expect(pointInPolygon({ x: 150, y: 150 }, path)).toBe(false);
+    expect(pointInPolygon({ x: 250, y: 50 }, path)).toBe(false);
+  });
+  it("takes what its centre is inside, and nothing it only grazes", () => {
+    const hits = lassoHits(path, [
+      { id: "in", x: 20, y: 20, width: 40, height: 40 },
+      { id: "notch", x: 120, y: 120, width: 40, height: 40 },
+      { id: "graze", x: 180, y: 60, width: 100, height: 20 },
+    ]);
+    expect([...hits]).toEqual(["in"]);
+    expect(lassoHits(path.slice(0, 2), [{ id: "x", x: 0, y: 0, width: 1, height: 1 }]).size).toBe(
+      0,
+    );
   });
 });

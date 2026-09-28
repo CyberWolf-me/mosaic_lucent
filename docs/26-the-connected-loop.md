@@ -420,9 +420,34 @@ clipboard (Lucent payload between boards and tabs; images, SVG, links and
 text from other apps; schema-gated), zoom to frame, camera back/forward,
 ⌘K canvas commands (fit, zoom to selection, camera, go to frame), and the
 asset upload client (shared boards store `asset:` references; exports inline
-the bytes). Fill-aware shape text fixes dark-mode legibility. Still open:
-8-handle resize with aspect lock, lasso, highlighter, tables, code blocks,
-rich text, node ↔ shape links, and align/group/convert in ⌘K.
+the bytes). Fill-aware shape text fixes dark-mode legibility.
+
+**Status (2026-09-28):** more editing moves are built.
+
+- **Resize from any edge or corner.** A selected shape has eight handles.
+  Each moves its own edge or corner while the opposite one stays put, even on
+  a turned shape: the drag is read in the shape's own frame, by the pure
+  `resizeFromHandle`.
+- **Keeping proportions.** Shift keeps the width-to-height ratio. Pictures
+  and vectors keep it from a corner by default, and Shift frees them.
+- **Lasso.** An Alt-drag draws a free path and takes everything whose centre
+  falls inside it (`lassoHits`).
+- **The selection in ⌘K.** Align (six ways), distribute, group and ungroup
+  act on the selection, and "Convert board to …" offers each family.
+
+Found on the way:
+
+- The marquee's capture surface was only the viewport-sized box the pan/zoom
+  layer starts as, so once the board was panned, no marquee could start
+  outside it. It now reaches far past the board's origin.
+- A shape with no stored z rendered under the marquee's backdrop and couldn't
+  be clicked; that included every shape an agent, the API or an import
+  created without one. Shapes now always render above the backdrop.
+
+`geometry.test.ts` (the resize and lasso math); `scripts/editor-check.mjs`
+5/5.
+
+Still open: highlighter, code blocks, rich text, and node ↔ shape links.
 
 ### 6.5 Semantic zoom ladder
 

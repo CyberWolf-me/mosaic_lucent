@@ -73,6 +73,13 @@ export const Z_MAX = 10_000;
  * whichever number each layer happened to pick.
  */
 export const Z_OVERLAY_PEN = Z_MAX + 10;
+/**
+ * The marquee's backdrop sits under every shape: a shape renders one above it
+ * whatever its stored z. A shape with none (an agent's, an import's) rendered
+ * at 0 — under the backdrop — and could not be clicked.
+ */
+export const Z_MARQUEE = 1;
+export const Z_SHAPE_FLOOR = Z_MARQUEE + 1;
 export const Z_OVERLAY_DRAW = Z_MAX + 20;
 
 /** Coerce any stored z (including legacy timestamps) into the legal band. */

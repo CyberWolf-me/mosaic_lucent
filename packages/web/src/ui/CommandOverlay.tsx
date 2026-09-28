@@ -2,7 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Ico } from "./icons.js";
 import { useWorkspace } from "../workspace.js";
 import type { WorkspaceState } from "../workspace.js";
-import type { Workspace } from "@lucent/core";
+import { convertibleKinds, type Workspace } from "@lucent/core";
+import { DIAGRAM_LABELS } from "../scene.js";
 import { searchBoard, type BoardSearchHit, type BoardSearchResponse } from "../boards.js";
 import { searchWorkspace, type WorkspaceHit } from "../workspaceAsk.js";
 import { getCurrentOrgId } from "../orgs.js";
@@ -134,6 +135,62 @@ export function CommandOverlay({
         group: "action",
         run: { kind: "canvas", cmd: { kind: "forward" } },
       },
+      // The selection, from ⌘K (docs/26 §6.4).
+      ...(
+        [
+          ["left", "Align left"],
+          ["hcenter", "Align centres"],
+          ["right", "Align right"],
+          ["top", "Align tops"],
+          ["vcenter", "Align middles"],
+          ["bottom", "Align bottoms"],
+        ] as const
+      ).map(
+        ([mode, label]): PaletteItem => ({
+          id: `c-align-${mode}`,
+          label,
+          hint: "Selected shapes · Canvas",
+          group: "action",
+          run: { kind: "canvas", cmd: { kind: "align", mode } },
+        }),
+      ),
+      {
+        id: "c-distribute-h",
+        label: "Distribute horizontally",
+        hint: "Equal gaps · Selected shapes",
+        group: "action",
+        run: { kind: "canvas", cmd: { kind: "distribute", axis: "h" } },
+      },
+      {
+        id: "c-distribute-v",
+        label: "Distribute vertically",
+        hint: "Equal gaps · Selected shapes",
+        group: "action",
+        run: { kind: "canvas", cmd: { kind: "distribute", axis: "v" } },
+      },
+      {
+        id: "c-group",
+        label: "Group selection",
+        hint: "⌘G · Canvas",
+        group: "action",
+        run: { kind: "canvas", cmd: { kind: "group" } },
+      },
+      {
+        id: "c-ungroup",
+        label: "Ungroup selection",
+        hint: "⌘⇧G · Canvas",
+        group: "action",
+        run: { kind: "canvas", cmd: { kind: "ungroup" } },
+      },
+      ...convertibleKinds().map(
+        (to): PaletteItem => ({
+          id: `c-convert-${to}`,
+          label: `Convert board to ${DIAGRAM_LABELS[to]}`,
+          hint: "Representation · Canvas",
+          group: "action",
+          run: { kind: "canvas", cmd: { kind: "convert", to } },
+        }),
+      ),
       ...frameEntries(workspace).map(
         (fr): PaletteItem => ({
           id: `frame-${fr.id}`,

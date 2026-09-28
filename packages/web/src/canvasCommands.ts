@@ -1,4 +1,5 @@
-import type { Workspace } from "@lucent/core";
+import type { DiagramKind, Workspace } from "@lucent/core";
+import type { AlignMode } from "./board/geometry.js";
 
 /**
  * Canvas commands from outside the canvas (docs/26 §6.4): the ⌘K palette
@@ -14,7 +15,14 @@ export type CanvasCommand =
   | { kind: "fitSelection" }
   | { kind: "frame"; id: string }
   | { kind: "back" }
-  | { kind: "forward" };
+  | { kind: "forward" }
+  // Editing the selection from ⌘K (docs/26 §6.4): the same moves as the
+  // inspector and the context menu.
+  | { kind: "align"; mode: AlignMode }
+  | { kind: "distribute"; axis: "h" | "v" }
+  | { kind: "group" }
+  | { kind: "ungroup" }
+  | { kind: "convert"; to: DiagramKind };
 
 export const CANVAS_COMMAND_EVENT = "lucent:canvas-command";
 

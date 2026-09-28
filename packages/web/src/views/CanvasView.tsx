@@ -98,6 +98,7 @@ import { cloneShapeOp, nextZ, normalizeZ, shapeId, zOrderOps, type ZMove } from 
 import { resolveEmbed } from "../embed.js";
 import { boardToMarkdown, boardToCsv } from "../board/serialize.js";
 import { boardToMermaid, detectMermaid } from "@lucent/core";
+import type { Shape } from "@lucent/core";
 import { planMermaidImport } from "../board/mermaidImport.js";
 import {
   classifyImport,
@@ -128,6 +129,8 @@ import {
   escapeAttr,
   shapesInFrame,
   nextSelectable,
+  alignPositions,
+  distributePositions,
   type AlignGuide,
 } from "../board/geometry.js";
 import { DIAGRAM_LABELS } from "../scene.js";
@@ -2295,9 +2298,18 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
   }, [applyManual, workspace.shapes, notify, boardId]);
 
   const resizeShape = useCallback(
-    (id: string, width: number, height: number, commit: boolean) => {
+    (
+      id: string,
+      width: number,
+      height: number,
+      commit: boolean,
+      position?: { x: number; y: number },
+    ) => {
       if (commit)
-        applyManual([{ op: "UPDATE_SHAPE", id, size: { width, height } }], "Resize shape");
+        applyManual(
+          [{ op: "UPDATE_SHAPE", id, size: { width, height }, ...(position ? { position } : {}) }],
+          "Resize shape",
+        );
     },
     [applyManual],
   );
@@ -2487,6 +2499,46 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
         break;
       case "forward":
         cameraForward();
+        break;
+      case "align":
+      case "distribute": {
+        const picked = [...selectedShapes]
+          .map((id) => workspace.shapes[id])
+          .filter((s): s is Shape => Boolean(s));
+        const need = cmd.kind === "align" ? 2 : 3;
+        if (picked.length < need) {
+          notify(
+            cmd.kind === "align"
+              ? "Select two or more shapes to align."
+              : "Select three or more shapes to distribute.",
+          );
+          break;
+        }
+        const pos =
+          cmd.kind === "align"
+            ? alignPositions(picked, cmd.mode)
+            : distributePositions(picked, cmd.axis);
+        const ops = Object.entries(pos).map(([id, p]) => ({
+          op: "UPDATE_SHAPE" as const,
+          id,
+          position: p,
+        }));
+        if (ops.length)
+          applyManual(ops, cmd.kind === "align" ? "Align shapes" : "Distribute shapes");
+        break;
+      }
+      case "group":
+        if ([...selectedShapes].filter((id) => workspace.shapes[id]).length < 2) {
+          notify("Select two or more shapes to group.");
+          break;
+        }
+        groupSelection();
+        break;
+      case "ungroup":
+        ungroupSelection();
+        break;
+      case "convert":
+        convertBoard(cmd.to);
         break;
     }
   };
