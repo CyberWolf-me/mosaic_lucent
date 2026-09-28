@@ -1594,7 +1594,17 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         // the topic looks unrelated, and the entry is marked so the chat can
         // offer the one-click "build it on a new board".
         if (result.operations.length === 0) {
-          const explanation = result.explanation ?? "(no answer)";
+          // Nothing to draw AND nothing said is a failed attempt, not an
+          // answer: it used to land as "(no answer)", and on an empty board
+          // the canvas went quietly back to the launch screen with the
+          // request apparently lost. The failure arm records it with the
+          // prompt, and the launch screen offers it back.
+          if (!result.explanation?.trim() && !result.reply?.trim()) {
+            throw new Error(
+              "The AI answered but drew nothing — try again, or describe it another way.",
+            );
+          }
+          const explanation = result.explanation?.trim() || result.reply!.trim();
           const reply = result.reply?.trim() || explanation;
           const suggestsBoard =
             Object.keys(workspace.nodes).length > 0 &&
@@ -1606,6 +1616,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
               text: explanation,
               reply,
               ...(suggestsBoard ? { suggestNewBoard: true, originPrompt: text } : {}),
+              drewNothing: true,
             },
           ];
           setChat(conversation);
@@ -1773,6 +1784,16 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
             reply: `${reply} It's waiting for your review.`,
           };
         } else if (foldedOps.length === 0) {
+          // Nothing to draw AND nothing said: that's a failed attempt, not an
+          // answer. It used to land as "Applied 0 operations." — and on an
+          // empty board the canvas went quietly back to the launch screen,
+          // the request apparently lost. The failure arm below records it
+          // with the prompt, and the launch screen offers it back.
+          if (!result.explanation?.trim() && !result.reply?.trim() && !skippedNote.skippedOps) {
+            throw new Error(
+              "The AI answered but drew nothing — try again, or describe it another way.",
+            );
+          }
           // A clarifying reply (docs/26 locked philosophy): faced with an
           // ambiguous request the model asked a question instead of guessing,
           // so it returned no operations. Surface its question as a
@@ -1780,7 +1801,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           // no room broadcast, no canvas change.
           const conversation: ChatEntry[] = [
             ...withUser,
-            { role: "ai", text: explanation, reply, ...skippedNote },
+            { role: "ai", text: explanation, reply, ...skippedNote, drewNothing: true },
           ];
           setChat(conversation);
           persist(workspace, conversation, projectName);

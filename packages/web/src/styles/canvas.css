@@ -1217,6 +1217,20 @@ body:has(.node-inspector) .minimap {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* The model asked a question instead of drawing: not an error, and the whole
+   question has to be readable to answer it. */
+.hero-failure.is-question {
+  border-color: oklch(from var(--bloom-2) l c h / 0.45);
+  background: oklch(from var(--bloom-2) l c h / 0.06);
+}
+.hero-failure.is-question .hero-failure-mark {
+  background: var(--bloom-2);
+}
+.hero-failure.is-question .hero-failure-detail {
+  font-size: 13px;
+  color: var(--ink-1);
+  white-space: normal;
+}
 
 /* ---------------------------------------------------- voice conversation */
 

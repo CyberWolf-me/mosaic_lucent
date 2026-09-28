@@ -195,6 +195,12 @@ export interface ChatEntry {
    * unchanged.
    */
   retryPrompt?: string;
+  /**
+   * On an AI entry: the model answered in words and drew nothing — a
+   * clarifying question. On an empty board the launch screen shows it, so the
+   * person can answer instead of watching their request vanish.
+   */
+  drewNothing?: boolean;
 }
 
 export interface ProjectMeta {
