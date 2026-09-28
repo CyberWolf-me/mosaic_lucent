@@ -31,6 +31,7 @@ import { buildAttention } from "../attention.js";
 import { VoiceOverlay } from "./VoiceOverlay.js";
 import { StatementGlyph } from "../ui/StatementGlyph.js";
 import { PresentMode } from "./PresentMode.js";
+import { buildSlidesDocument, slidesOf } from "../board/slides.js";
 import { PenLayer } from "./PenLayer.js";
 import { onCanvasCommand, sendCanvasCommand, type CanvasCommand } from "../canvasCommands.js";
 import { preloadExportData } from "../board/exportData.js";
@@ -524,26 +525,33 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
     }
   }, [chat, settings.aiSound, setListening]);
 
-  // Leaving a diagram or losing all nodes resets any active mode.
+  // The board's frames, in slide order (docs/26 §6.1): what Present steps
+  // through and what "Slides PDF" prints, when there are any.
+  const slides = useMemo(() => slidesOf(workspace), [workspace]);
+
+  // Leaving a diagram or losing all nodes resets any active mode — unless
+  // it's a presentation of frames, which needs no nodes.
   useEffect(() => {
-    if (nodeCount === 0 && mode !== "edit") setMode("edit");
-  }, [nodeCount, mode]);
+    if (nodeCount === 0 && mode !== "edit" && !(mode === "present" && slides.length > 0))
+      setMode("edit");
+  }, [nodeCount, mode, slides.length]);
 
   const enterPresent = useCallback(() => {
-    if (nodeCount === 0) {
-      notify("Generate a diagram first, then present it.");
+    if (nodeCount === 0 && slides.length === 0) {
+      notify("Generate a diagram or add frames first, then present.");
       return;
     }
     setSelected(null);
     setSelectedShapes(new Set());
     setPresentStep(0);
     setMode("present");
-  }, [nodeCount, notify]);
+  }, [nodeCount, slides.length, notify]);
 
-  // The node spotlighted by present mode (in layout order) or focus mode.
+  // The node spotlighted by present mode (in layout order) or focus mode. A
+  // presentation of frames spotlights no node: the slide is the focus.
   const orderedNodeIds = Object.keys(workspace.nodes);
   const presentSpotlightId =
-    mode === "present"
+    mode === "present" && slides.length === 0
       ? (orderedNodeIds[Math.min(presentStep, orderedNodeIds.length - 1)] ?? null)
       : null;
   const spotlightId = mode === "present" ? presentSpotlightId : mode === "focus" ? selected : null;
@@ -2773,7 +2781,9 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
     const frame = document.createElement("iframe");
     // sandbox without allow-same-origin: the iframe document is opaque to us,
     // so it can't reach our localStorage, cookies, or postMessage handlers.
-    frame.setAttribute("sandbox", "allow-scripts");
+    // allow-modals is what lets it open the print dialog: without it Chrome
+    // ignores print() in a sandboxed document, and the export did nothing.
+    frame.setAttribute("sandbox", "allow-scripts allow-modals");
     frame.setAttribute("title", "print");
     host.appendChild(frame);
     document.body.appendChild(host);
@@ -2796,6 +2806,39 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
     });
     notify("Opening print dialog — choose “Save as PDF”.");
   }, [workspace, projectName, notify]);
+
+  // Slides as PDF (docs/26 §6.1): the same sandboxed print route, one page per
+  // frame at the frame's own size, in slide order.
+  const exportSlidesPdf = useCallback(async () => {
+    if (slides.length === 0) {
+      notify("Add frames to the board — each frame is a slide.");
+      return;
+    }
+    await preloadExportData(workspace);
+    const host = document.createElement("div");
+    host.style.position = "fixed";
+    host.style.left = "-10000px";
+    host.style.top = "0";
+    host.setAttribute("aria-hidden", "true");
+    const frame = document.createElement("iframe");
+    frame.setAttribute("sandbox", "allow-scripts allow-modals");
+    frame.setAttribute("title", "print slides");
+    host.appendChild(frame);
+    document.body.appendChild(host);
+    frame.srcdoc = buildSlidesDocument(workspace, slides, projectName);
+    frame.addEventListener("load", () => {
+      try {
+        frame.contentWindow?.focus();
+        frame.contentWindow?.print();
+      } catch {
+        // No programmatic print: the browser's own print menu still works.
+      }
+      setTimeout(() => host.remove(), 30_000);
+    });
+    notify(
+      `Opening print dialog — ${slides.length} slide${slides.length === 1 ? "" : "s"}, choose “Save as PDF”.`,
+    );
+  }, [workspace, slides, projectName, notify]);
 
   // Exactly one selected object gets the vote/react bar; a multi-selection has
   // no single target to attach a count to.
@@ -3269,6 +3312,7 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
           {mode === "present" && canvasPhase === "main" && (
             <PresentMode
               workspace={workspace}
+              slides={slides}
               controls={controls}
               step={presentStep}
               setStep={setPresentStep}
@@ -3276,7 +3320,9 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
                 setMode("edit");
                 controls.current?.reset();
               }}
-              frameLabel={DIAGRAM_LABELS[workspace.diagramKind]}
+              frameLabel={
+                slides.length > 0 ? projectName || undefined : DIAGRAM_LABELS[workspace.diagramKind]
+              }
             />
           )}
 
@@ -3684,6 +3730,14 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
               <button onClick={exportSvg}>SVG</button>
               <button onClick={exportPng}>PNG</button>
               <button onClick={exportPdf}>PDF</button>
+              {slides.length > 0 && (
+                <button
+                  onClick={exportSlidesPdf}
+                  title={`One page per frame — ${slides.length} slide${slides.length === 1 ? "" : "s"}`}
+                >
+                  Slides PDF
+                </button>
+              )}
               <button onClick={exportJson}>JSON</button>
               <button onClick={exportMarkdown}>Markdown</button>
               <button onClick={exportCsv}>CSV</button>

@@ -308,8 +308,22 @@ level nesting) beyond the "create/convert works" bar.**
 | Table                           |  ✅   | New object kind (`table` shape, table.ts): CSV/TSV import, HTML + SVG render |
 | Charts (bar/line/pie from data) |  ✅   | New object kind (`chart` shape, chart.ts): table/CSV-bound bar/line/pie      |
 | Wireframe                       |  ✅   | + icons, vector assets in elements                                           |
-| Presentation layout             |  🟡   | Present mode exists → frame-ordered slides, export PDF                       |
+| Presentation layout             |  ✅   | Frames are slides: Present steps through them, "Slides PDF" prints them      |
 | Network / infrastructure        |  ✅   | Registered architecture variant (group nodes into zones)                     |
+
+**Presentation layout (2026-09-28):** the board's frames are its slides — no
+separate deck to keep in sync (`web/src/board/slides.ts`). Order is by the
+numbers in the frames' names when every one has one ("1. Problem"), else
+reading order (rows top to bottom, left to right). Present steps frame by frame,
+fitting each to the screen (a board without frames still walks its nodes).
+Export → **Slides PDF** prints one page per frame at the frame's own size
+(named `@page` per slide), each the board export cropped to its frame with
+that frame's border left off, through the same sandboxed print route as the
+board PDF. Two fixes on the way: that route's sandbox lacked `allow-modals`,
+so Chrome ignored `print()` and neither PDF export opened a dialog; and Esc
+never left Present mode, because the canvas's own Escape handler re-rendered
+and re-subscribed Present's listener mid-dispatch
+(`scripts/slides-check.mjs`).
 
 ### 6.2 Icons everywhere
 

@@ -362,16 +362,27 @@ export function shapeLinkEnds(
   return { a: shapeLinkAnchor(sa, center(sb)), b: shapeLinkAnchor(sb, center(sa)) };
 }
 
-/** Serialize the board (nodes + manual shapes) to a standalone SVG string. */
-export function buildBoardSvg(workspace: Workspace, pad = 40): string {
-  const bounds = contentBounds(workspace);
+/**
+ * Serialize the board (nodes + manual shapes) to a standalone SVG string.
+ *
+ * `slide` names a frame to print as a slide (docs/26 §6.1): the drawing is
+ * cropped to that frame's box, and the frame's own dashed border is left off
+ * — the page edge is the frame now. Its name stays, as the slide's heading.
+ */
+export function buildBoardSvg(workspace: Workspace, pad = 40, slide?: string): string {
+  const frame = slide ? workspace.shapes[slide] : undefined;
+  const crop = frame?.kind === "frame" ? frame : undefined;
+  const bounds = crop
+    ? { x: crop.position.x, y: crop.position.y, width: crop.size.width, height: crop.size.height }
+    : contentBounds(workspace);
   if (!bounds) {
     return `<svg xmlns="http://www.w3.org/2000/svg" width="400" height="200"><text x="20" y="40" font-family="sans-serif" font-size="14">Empty board</text></svg>`;
   }
-  const minX = bounds.x - pad;
-  const minY = bounds.y - pad;
-  const w = bounds.width + pad * 2;
-  const h = bounds.height + pad * 2;
+  const inset = crop ? 0 : pad;
+  const minX = bounds.x - inset;
+  const minY = bounds.y - inset;
+  const w = bounds.width + inset * 2;
+  const h = bounds.height + inset * 2;
   const parts: string[] = [];
 
   // Diagram regions first, so their boxes sit behind their member nodes. A
@@ -550,7 +561,9 @@ export function buildBoardSvg(workspace: Workspace, pad = 40): string {
       );
     } else if (s.kind === "frame") {
       parts.push(
-        `<rect x="${s.position.x}" y="${s.position.y}" width="${s.size.width}" height="${s.size.height}" rx="10" fill="none" stroke="#777" stroke-dasharray="6 4"/>` +
+        (s.id === crop?.id
+          ? ""
+          : `<rect x="${s.position.x}" y="${s.position.y}" width="${s.size.width}" height="${s.size.height}" rx="10" fill="none" stroke="#777" stroke-dasharray="6 4"/>`) +
           (s.text
             ? `<text x="${s.position.x + 10}" y="${s.position.y + 18}" fill="#aaa" font-family="monospace" font-size="11">${escapeXml(s.text)}</text>`
             : ""),
