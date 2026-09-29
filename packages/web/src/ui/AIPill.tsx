@@ -1,6 +1,7 @@
 import { voicePhaseLabel, type VoicePhase } from "../voiceConversation.js";
 import { useId, useRef, useState } from "react";
 import { Ico } from "./icons.js";
+import { GrowTextarea } from "./GrowTextarea.js";
 import { AllowanceNote } from "./Paywall.js";
 import type { ChatEntry } from "../persistence.js";
 import type { AskCitation } from "../boards.js";
@@ -101,6 +102,9 @@ export function AIPill({
   voicePhase?: VoicePhase;
 }) {
   const [expanded, setExpanded] = useState(false);
+  // The prompt field grows with its text; when it passes one line the pill
+  // relaxes its fully-round corners so a tall box doesn't look like a capsule.
+  const [multiline, setMultiline] = useState(false);
   const bars = useRef(Array.from({ length: 14 }, () => 20 + Math.random() * 60));
   const inputId = useId();
   const hasMode = mode !== undefined && onModeChange !== undefined;
@@ -195,7 +199,9 @@ export function AIPill({
           {voiceLine}
         </div>
       )}
-      <div className={`ai-pill ${listening ? "listening" : ""}${readOnly ? " read-only" : ""}`}>
+      <div
+        className={`ai-pill ${listening ? "listening" : ""}${readOnly ? " read-only" : ""}${multiline ? " multiline" : ""}`}
+      >
         <div className="pill-icon">
           {readOnly ? (
             <Ico.Eye />
@@ -246,13 +252,13 @@ export function AIPill({
             <label htmlFor={inputId} className="sr-only">
               Ask Lucent
             </label>
-            <input
+            <GrowTextarea
               id={inputId}
               value={value}
-              onChange={(e) => onChange?.(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") onSubmit?.();
-              }}
+              onChange={(v) => onChange?.(v)}
+              onSubmit={() => onSubmit?.()}
+              onMultilineChange={setMultiline}
+              maxHeight={168}
               placeholder={
                 listening
                   ? "Listening… speak your idea (tap mic or ↵ when done)"

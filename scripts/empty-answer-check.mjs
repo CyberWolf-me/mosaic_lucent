@@ -66,6 +66,55 @@ async function attempt(label, done) {
   return { page, box, notice };
 }
 
+// --- the prompt field grows with the text (no more one-line slot) -----------------------------
+{
+  const page = await (
+    await browser.newContext({ viewport: { width: 1440, height: 900 } })
+  ).newPage();
+  page.on("pageerror", (e) => console.log("[pageerror]", e.message));
+  await page.goto(base + "/signup", { waitUntil: "networkidle", timeout: 30000 });
+  await page.locator('input[type="text"]').first().fill("Gro Grow");
+  await page.locator('input[type="email"]').first().fill(`grow_${Date.now()}@example.com`);
+  await page.locator('input[type="password"]').first().fill("empty-answer-123");
+  await page.getByRole("button", { name: /create account/i }).click();
+  await page.waitForURL(/view=canvas/, { timeout: 15000 }).catch(() => {});
+  await page.waitForTimeout(800);
+  for (let i = 0; i < 5; i++) {
+    const s = page.getByRole("button", { name: /^Skip$/ });
+    if (!(await s.count())) break;
+    await s
+      .first()
+      .click({ force: true })
+      .catch(() => {});
+    await page.waitForTimeout(300);
+  }
+  const field = page.locator("#empty-state-prompt");
+  const heightOf = () => field.evaluate((el) => el.getBoundingClientRect().height);
+  await field.click();
+  const one = await heightOf();
+  await field.fill(
+    Array.from({ length: 8 }, (_, i) => `Line ${i + 1} of a long prompt`).join("\n"),
+  );
+  await page.waitForTimeout(150);
+  const many = await heightOf();
+  if (shots) await page.screenshot({ path: `${shots}/grow-hero.png` });
+  check(
+    "the launch prompt grows with the text (and caps, then scrolls)",
+    many > one + 40 && many <= 240,
+    `one line ${Math.round(one)}px → eight lines ${Math.round(many)}px`,
+  );
+  // Enter sends; Shift+Enter makes a newline (so a long prompt is typable).
+  await field.fill("first");
+  await field.press("Shift+Enter");
+  await field.type("second");
+  check(
+    "Shift+Enter adds a line instead of sending",
+    (await field.inputValue()) === "first\nsecond",
+    JSON.stringify(await field.inputValue()),
+  );
+  await page.context().close();
+}
+
 // --- the model returned nothing at all -------------------------------------------------------
 {
   const { page, box, notice } = await attempt("nothing", {

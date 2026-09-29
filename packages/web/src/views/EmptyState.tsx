@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import { Ico, ToolIco } from "../ui/icons.js";
+import { GrowTextarea } from "../ui/GrowTextarea.js";
 import { useToast } from "../ui/Toast.js";
 import { downscaleImage } from "../board/images.js";
 import type { VoicePhase } from "../voiceConversation.js";
@@ -206,15 +207,14 @@ export function EmptyState({
         <label className="sr-only" htmlFor="empty-state-prompt">
           Describe what you want to build
         </label>
-        <input
+        <GrowTextarea
           id="empty-state-prompt"
           className="empty-input"
           value={value}
-          onChange={(e) => onChange(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") begin();
-          }}
+          onChange={onChange}
+          onSubmit={begin}
           disabled={generating}
+          maxHeight={220}
           placeholder="e.g. Customers browse restaurants, pay with Stripe, and track the driver. We decided on…"
         />
         {picked.length > 0 && (

@@ -743,6 +743,33 @@ html[data-theme="light"] .rail-btn[data-tip]::after {
   color: var(--ink-0);
   padding: 5px 0;
 }
+/* The prompt field is a textarea now (ui/GrowTextarea.tsx): it grows with the
+   text instead of scrolling one line sideways. It carries the same look as the
+   old input, plus the resets a textarea needs to sit flush in the pill. */
+.ai-pill textarea {
+  flex: 1;
+  min-width: 0;
+  font-size: 15.5px;
+  color: var(--ink-0);
+  padding: 5px 0;
+  margin: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  font-family: inherit;
+  line-height: 1.5;
+  resize: none;
+  display: block;
+}
+.ai-pill textarea::placeholder {
+  color: var(--ink-3);
+}
+/* Past one line, drop the capsule corners and let the buttons ride the bottom
+   so a tall field reads as a rounded box, not a stretched pill. */
+.ai-pill.multiline {
+  align-items: flex-end;
+  border-radius: 20px;
+}
 .ai-pill.read-only {
   background: var(--canvas-2);
   border-style: dashed;
@@ -1396,6 +1423,10 @@ html[data-theme="light"] .node-statement-chip {
   background: transparent;
   border: none;
   outline: none;
+  /* A growing textarea now (ui/GrowTextarea.tsx), not a one-line input. */
+  resize: none;
+  display: block;
+  font-family: inherit;
 }
 .empty-input::placeholder {
   color: var(--ink-3);
