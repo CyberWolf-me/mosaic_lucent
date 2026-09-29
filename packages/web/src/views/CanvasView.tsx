@@ -3017,7 +3017,18 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
   // drawing tool is armed we must show the board instead, or picking a shape on a
   // fresh board silently does nothing — the drag lands on the hero.
   const drawingArmed = tool !== "select" && tool !== "hand";
-  const showHero = canvasPhase === "empty" && !drawingArmed && !blankBoardStarted;
+  // A generation started from the hero applies its operations only at the end,
+  // so the board is empty the whole time it runs. Staying on the hero (with a
+  // working status) instead of flipping to a blank board and back is what
+  // stops the "it showed the board, then glitched home" jump: the hero holds
+  // until there is something to show — the diagram, or a reply in words.
+  const boardEmpty =
+    Object.keys(workspace.nodes).length === 0 &&
+    Object.keys(workspace.shapes).length === 0 &&
+    Object.keys(workspace.wireframes).length === 0;
+  const heroGenerating = canvasPhase === "generating" && boardEmpty;
+  const showHero =
+    (canvasPhase === "empty" || heroGenerating) && !drawingArmed && !blankBoardStarted;
 
   // UX-1: lenses render here, inside the Canvas entry — one board URL
   // (?view=canvas&lens=kanban) covers them. Each lens view is a full
@@ -3075,6 +3086,11 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
             onGenImage={() => generateImageShape()}
             onBlankBoard={() => setBlankBoardStarted(true)}
             failedAttempt={heroFailure}
+            generating={heroGenerating}
+            genStatus={
+              status?.text ?? (genProgress ? `Working… · ${genProgress}` : "Reading your request…")
+            }
+            onCancel={busy ? () => cancelSend() : undefined}
           />
           {/* The tour overlays the hero: it is the first-minute surface, and
               it unmounts itself once seen (or dismissed) — no flag threading

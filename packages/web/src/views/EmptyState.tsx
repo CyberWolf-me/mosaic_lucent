@@ -50,6 +50,9 @@ export function EmptyState({
   listening,
   voicePhase = "idle",
   onGenImage,
+  generating,
+  genStatus,
+  onCancel,
 }: {
   value: string;
   onChange: (v: string) => void;
@@ -65,6 +68,16 @@ export function EmptyState({
   /** Where a voice conversation started from here is. */
   voicePhase?: VoicePhase;
   onGenImage?: () => void;
+  /**
+   * A generation started from this screen is running. The board stays empty
+   * until it finishes (operations apply at the end), so the hero holds and
+   * shows this working state rather than flipping to a blank board and back.
+   */
+  generating?: boolean;
+  /** The phase + characters-received line to show while generating. */
+  genStatus?: string;
+  /** Cancel the running generation. */
+  onCancel?: () => void;
   /**
    * The last attempt from this screen, when it left the board empty: a
    * failure (with the prompt to try again), or the model's reply in words — an
@@ -116,6 +129,7 @@ export function EmptyState({
   };
 
   const begin = () => {
+    if (generating) return;
     if (picked.length > 0 && onSubmitWithAttachments) {
       const images = picked.flatMap((p) => (p.image ? [p.image] : []));
       const documents = picked.flatMap((p) => (p.document ? [p.document] : []));
@@ -147,7 +161,14 @@ export function EmptyState({
         listen. Every object it draws remembers the words that made it.
       </p>
 
-      {failedAttempt?.kind === "reply" && (
+      {generating && (
+        <div className="hero-working" role="status" aria-live="polite">
+          <span className="hero-working-spinner" aria-hidden />
+          <span className="hero-working-text">{genStatus ?? "Working…"}</span>
+        </div>
+      )}
+
+      {!generating && failedAttempt?.kind === "reply" && (
         <div className="hero-failure is-reply" role="status">
           <span className="hero-failure-mark" aria-hidden>
             <Ico.Sparkle />
@@ -158,7 +179,7 @@ export function EmptyState({
           </div>
         </div>
       )}
-      {failedAttempt && failedAttempt.kind !== "reply" && (
+      {!generating && failedAttempt && failedAttempt.kind !== "reply" && (
         <div className="hero-failure" role="alert">
           <span className="hero-failure-mark" aria-hidden>
             !
@@ -193,6 +214,7 @@ export function EmptyState({
           onKeyDown={(e) => {
             if (e.key === "Enter") begin();
           }}
+          disabled={generating}
           placeholder="e.g. Customers browse restaurants, pay with Stripe, and track the driver. We decided on…"
         />
         {picked.length > 0 && (
@@ -266,14 +288,20 @@ export function EmptyState({
             </button>
           )}
           <div style={{ flex: 1 }} />
-          <span className="hero-hint">Enter to send</span>
-          <button
-            className="btn-atelier primary hero-begin"
-            onClick={begin}
-            disabled={!value.trim() && picked.length === 0}
-          >
-            Begin <Ico.Arrow />
-          </button>
+          <span className="hero-hint">{generating ? "Working…" : "Enter to send"}</span>
+          {generating && onCancel ? (
+            <button className="btn-atelier hero-begin" onClick={onCancel}>
+              Cancel
+            </button>
+          ) : (
+            <button
+              className="btn-atelier primary hero-begin"
+              onClick={begin}
+              disabled={!value.trim() && picked.length === 0}
+            >
+              Begin <Ico.Arrow />
+            </button>
+          )}
         </div>
       </div>
 

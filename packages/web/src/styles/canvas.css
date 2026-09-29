@@ -1192,6 +1192,41 @@ body:has(.node-inspector) .minimap {
   border: 1px solid oklch(from var(--madder) l c h / 0.45);
   background: oklch(from var(--madder) l c h / 0.06);
 }
+/* While a generation from the hero runs, the hero stays and shows this
+   instead of flipping to a blank board and back (the "it showed the board
+   then glitched home" jump). */
+.hero-working {
+  width: 680px;
+  max-width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: var(--r-md);
+  border: 1px solid oklch(from var(--bloom-2) l c h / 0.4);
+  background: oklch(from var(--bloom-2) l c h / 0.06);
+  font-size: 13px;
+  color: var(--ink-1);
+}
+.hero-working-spinner {
+  width: 15px;
+  height: 15px;
+  flex-shrink: 0;
+  border-radius: 999px;
+  border: 2px solid oklch(from var(--bloom-2) l c h / 0.3);
+  border-top-color: var(--bloom-2);
+  animation: hero-working-spin 0.7s linear infinite;
+}
+@keyframes hero-working-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .hero-working-spinner {
+    animation-duration: 2s;
+  }
+}
 .hero-failure-mark {
   width: 22px;
   height: 22px;

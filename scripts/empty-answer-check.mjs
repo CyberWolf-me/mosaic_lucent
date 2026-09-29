@@ -105,6 +105,86 @@ async function attempt(label, done) {
   await page.context().close();
 }
 
+// --- while generating, the hero stays: no flash to a blank board and back ---------------------
+{
+  const page = await (
+    await browser.newContext({ viewport: { width: 1440, height: 900 } })
+  ).newPage();
+  page.on("pageerror", (e) => console.log("[pageerror]", e.message));
+  let release;
+  const gate = new Promise((r) => (release = r));
+  await page.route("**/api/generate/stream", async (route) => {
+    const enc = (e, d) => `event: ${e}\ndata: ${JSON.stringify(d)}\n\n`;
+    await gate; // hold the stream open so we can look mid-generation
+    await route.fulfill({
+      status: 200,
+      headers: { "content-type": "text/event-stream" },
+      body:
+        enc("start", { provider: "gateway", streaming: true }) +
+        enc("phase", { phase: "understanding" }) +
+        enc("done", {
+          operations: [
+            { op: "CREATE_NODE", id: "a", nodeType: "start", label: "Signup" },
+            { op: "CREATE_NODE", id: "b", nodeType: "end", label: "Verified" },
+            { op: "CONNECT_NODES", source: "a", target: "b", relationship: "leads_to" },
+          ],
+          explanation: "Drew it.",
+          provider: "gateway",
+        }),
+    });
+  });
+  await page.goto(base + "/signup", { waitUntil: "networkidle", timeout: 30000 });
+  await page.locator('input[type="text"]').first().fill("Ann Await");
+  await page.locator('input[type="email"]').first().fill(`await_${Date.now()}@example.com`);
+  await page.locator('input[type="password"]').first().fill("empty-answer-123");
+  await page.getByRole("button", { name: /create account/i }).click();
+  await page.waitForURL(/view=canvas/, { timeout: 15000 }).catch(() => {});
+  await page.waitForTimeout(800);
+  for (let i = 0; i < 5; i++) {
+    const s = page.getByRole("button", { name: /^Skip$/ });
+    if (!(await s.count())) break;
+    await s
+      .first()
+      .click({ force: true })
+      .catch(() => {});
+    await page.waitForTimeout(300);
+  }
+  await page.locator("#empty-state-prompt").fill(PROMPT);
+  await page.keyboard.press("Enter");
+  // Mid-generation: the working line is up, the hero is still here, and the
+  // board has not appeared.
+  await page.locator(".hero-working").waitFor({ timeout: 10000 });
+  const mid = await page.evaluate(() => ({
+    hero: !!document.querySelector(".empty-hero"),
+    working: document.querySelector(".hero-working-text")?.textContent?.trim() ?? "",
+    nodes: document.querySelectorAll(".node").length,
+    canceler: !![...document.querySelectorAll("button")].find(
+      (b) => b.textContent?.trim() === "Cancel",
+    ),
+  }));
+  if (shots) await page.screenshot({ path: `${shots}/empty-generating.png` });
+  check(
+    "while generating, the hero holds with a working line — the board doesn't flash",
+    mid.hero &&
+      /request|Working|Reading|Building|Checking|Placing|Constructing/i.test(mid.working) &&
+      mid.nodes === 0 &&
+      mid.canceler,
+    JSON.stringify(mid),
+  );
+  release();
+  await page.locator(".node").first().waitFor({ timeout: 15000 });
+  const done = await page.evaluate(() => ({
+    hero: !!document.querySelector(".empty-hero"),
+    nodes: document.querySelectorAll(".node").length,
+  }));
+  check(
+    "when it draws, the hero gives way to the board — once, no bounce",
+    !done.hero && done.nodes >= 2,
+    JSON.stringify(done),
+  );
+  await page.context().close();
+}
+
 await browser.close();
 const failed = results.filter((r) => !r.pass);
 console.log(`\n${results.length - failed.length}/${results.length} checks passed`);
