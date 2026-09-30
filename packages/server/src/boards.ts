@@ -44,6 +44,14 @@ export interface StoredBoard {
   workspace: Workspace;
   createdAt: number;
   updatedAt: number;
+  /**
+   * docs/26: an opt-in, unguessable token that serves a READ-ONLY, sanitized
+   * public snapshot of this board (POST/DELETE /api/boards/:id/public →
+   * GET /api/public/boards/:token). Null/absent means the board is private —
+   * the default. It lives on the board RECORD, not in `workspace`: an
+   * operation must never be able to publish a board.
+   */
+  publicToken?: string | null;
 }
 
 /** An explicit grant of access to one board. */
@@ -204,6 +212,12 @@ export interface TrashedBoard {
 
 export interface BoardStore {
   get(id: string): Promise<StoredBoard | undefined>;
+  /**
+   * The board carrying this public token, or undefined. Backs the
+   * unauthenticated read-only public view; returns nothing for a trashed
+   * board or an empty/unknown token, so a revoked or deleted board goes dark.
+   */
+  findByPublicToken(token: string): Promise<StoredBoard | undefined>;
   /**
    * Every board in this org, ignoring board membership. Tenant-scoped: it
    * never returns a board from another org, which is the property M2's
@@ -372,6 +386,11 @@ export class InMemoryBoardStore implements BoardStore {
 
   async get(id: string): Promise<StoredBoard | undefined> {
     return this.trashRows.has(id) ? undefined : this.boards.get(id);
+  }
+
+  async findByPublicToken(token: string): Promise<StoredBoard | undefined> {
+    if (!token) return undefined;
+    return this.live().find((b) => b.publicToken === token);
   }
 
   async listForOrg(orgId: string): Promise<StoredBoard[]> {

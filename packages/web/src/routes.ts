@@ -25,6 +25,8 @@ export type Route =
   | { kind: "reset-confirm"; token: string }
   | { kind: "verify"; token: string | null }
   | { kind: "invite"; token: string | null }
+  /** `/p/:token`: an anonymous, read-only public board snapshot (no account). */
+  | { kind: "public"; token: string }
   | { kind: "privacy" }
   | { kind: "terms" };
 
@@ -71,6 +73,10 @@ export function tokenFromSearch(search: string, key = "token"): string | null {
 }
 
 export function parseRoute(pathname: string, search: string): Route {
+  // `/p/:token` is matched on the RAW path, before normalization — the token
+  // is a case-sensitive base64url string that lowercasing would corrupt.
+  const publicMatch = /^\/p\/([^/]+)\/?$/.exec(pathname);
+  if (publicMatch) return { kind: "public", token: decodeURIComponent(publicMatch[1]!) };
   switch (normalizePath(pathname)) {
     case "/login":
       return { kind: "login" };
@@ -104,6 +110,7 @@ export type Screen =
   | { kind: "reset-confirm"; token: string }
   | { kind: "verify"; token: string | null }
   | { kind: "invite"; token: string | null }
+  | { kind: "public"; token: string }
   | { kind: "privacy" }
   | { kind: "terms" }
   | { kind: "app" };
@@ -125,6 +132,10 @@ export type Screen =
  */
 export function decideScreen(route: Route, auth: AuthStatus): Screen {
   switch (route.kind) {
+    case "public":
+      // Anonymous, read-only — renders whatever the auth status, like a legal
+      // page: a public board link must work with no account.
+      return { kind: "public", token: route.token };
     case "privacy":
       return { kind: "privacy" };
     case "terms":

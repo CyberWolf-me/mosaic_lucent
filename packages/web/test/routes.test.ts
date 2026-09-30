@@ -82,6 +82,9 @@ describe("parseRoute", () => {
     // the workspace, not here.
     ["/", "?board=brd_1&invite=shr_1", { kind: "app" }],
     ["/anything/else", "", { kind: "app" }],
+    // A public board link, matched on the raw path so the case-sensitive token
+    // survives (lowercasing it would break the base64url).
+    ["/p/pub_AbC-9xYz", "", { kind: "public", token: "pub_AbC-9xYz" }],
   ];
 
   for (const [pathname, search, expected] of cases) {
@@ -110,6 +113,7 @@ describe("decideScreen", () => {
     { kind: "reset-confirm", token: "rst_1" },
     { kind: "verify", token: "vrf_1" },
     { kind: "invite", token: "inv_1" },
+    { kind: "public", token: "pub_1" },
     { kind: "privacy" },
     { kind: "terms" },
   ];
@@ -136,6 +140,10 @@ describe("decideScreen", () => {
     "verify/loading": { kind: "verify", token: "vrf_1" },
     "verify/authed": { kind: "verify", token: "vrf_1" },
     "verify/anon": { kind: "verify", token: "vrf_1" },
+    // A public board renders with no account, whatever the auth status.
+    "public/loading": { kind: "public", token: "pub_1" },
+    "public/authed": { kind: "public", token: "pub_1" },
+    "public/anon": { kind: "public", token: "pub_1" },
     "privacy/loading": { kind: "privacy" },
     "privacy/authed": { kind: "privacy" },
     "privacy/anon": { kind: "privacy" },

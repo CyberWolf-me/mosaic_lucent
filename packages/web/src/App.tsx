@@ -29,6 +29,7 @@ import { VALID_LENSES, VALID_VIEWS, landingView } from "./landing.js";
 import { MeetingSessionProvider, useMeetingSession } from "./meeting-room/MeetingSessionContext.js";
 import { MeetingHuddleDock } from "./meeting-room/MeetingHuddleDock.js";
 import { LegalView } from "./views/LegalView.js";
+import { PublicBoard } from "./views/PublicBoard.js";
 import {
   AuthView,
   InviteView,
@@ -313,6 +314,13 @@ export function App() {
         <>
           <ThemeRoot />
           <InviteView token={screen.token} />
+        </>
+      );
+    case "public":
+      return (
+        <>
+          <ThemeRoot />
+          <PublicBoard token={screen.token} />
         </>
       );
     case "privacy":

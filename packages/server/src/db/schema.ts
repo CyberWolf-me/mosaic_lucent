@@ -113,12 +113,20 @@ export const boards = pgTable(
     }),
     /** The full Workspace object, as emitted by `createWorkspace()` in core. */
     workspace: jsonb("workspace").notNull(),
+    /**
+     * docs/26: opt-in public read-only share. NULL (the default and every
+     * pre-existing board) means private, so the column needs no backfill. A
+     * non-null value is an unguessable token that serves a sanitized snapshot
+     * via the unauthenticated GET /api/public/boards/:token.
+     */
+    publicToken: text("public_token"),
     createdAt: bigint("created_at", { mode: "number" }).notNull(),
     updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
   },
   (t) => ({
     ownerIdx: index("boards_owner_idx").on(t.ownerId, t.updatedAt),
     orgIdx: index("boards_org_idx").on(t.orgId, t.updatedAt),
+    publicTokenIdx: uniqueIndex("boards_public_token_idx").on(t.publicToken),
   }),
 );
 
@@ -1795,7 +1803,9 @@ export const projects = pgTable(
     objective: text("objective").notNull().default(""),
     status: text("status").notNull().default("active"),
     leadId: text("lead_id").references(() => users.id, { onDelete: "set null" }),
-    members: jsonb("members").notNull().default(sql`'[]'::jsonb`),
+    members: jsonb("members")
+      .notNull()
+      .default(sql`'[]'::jsonb`),
     createdBy: text("created_by").references(() => users.id, { onDelete: "set null" }),
     createdAt: bigint("created_at", { mode: "number" }).notNull(),
     updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
@@ -1897,11 +1907,15 @@ export const aiRuns = pgTable(
     provider: text("provider").notNull(),
     model: text("model"),
     contextScope: text("context_scope").notNull(),
-    tools: jsonb("tools").notNull().default(sql`'[]'::jsonb`),
+    tools: jsonb("tools")
+      .notNull()
+      .default(sql`'[]'::jsonb`),
     outputHash: text("output_hash"),
     opCount: bigint("op_count", { mode: "number" }).notNull().default(0),
     proposalId: text("proposal_id"),
-    opSeqs: jsonb("op_seqs").notNull().default(sql`'[]'::jsonb`),
+    opSeqs: jsonb("op_seqs")
+      .notNull()
+      .default(sql`'[]'::jsonb`),
     approvedBy: text("approved_by").references(() => users.id, { onDelete: "set null" }),
     createdAt: bigint("created_at", { mode: "number" }).notNull(),
     decidedAt: bigint("decided_at", { mode: "number" }),

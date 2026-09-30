@@ -58,6 +58,16 @@ export class PostgresBoardStore implements BoardStore {
     return rows[0] ? rowToStoredBoard(rows[0]) : undefined;
   }
 
+  async findByPublicToken(token: string): Promise<StoredBoard | undefined> {
+    if (!token) return undefined;
+    const rows = await this.target.db
+      .select()
+      .from(boards)
+      .where(and(eq(boards.publicToken, token), this.notTrashed()))
+      .limit(1);
+    return rows[0] ? rowToStoredBoard(rows[0]) : undefined;
+  }
+
   async trash(id: string, by: string, at: number): Promise<boolean> {
     const [board] = await this.target.db
       .select({ orgId: boards.orgId })
@@ -184,6 +194,7 @@ export class PostgresBoardStore implements BoardStore {
         name: board.name,
         classification: board.classification ?? null,
         workspace: board.workspace,
+        publicToken: board.publicToken ?? null,
         createdAt: board.createdAt,
         updatedAt: board.updatedAt,
       })
@@ -195,6 +206,7 @@ export class PostgresBoardStore implements BoardStore {
           name: board.name,
           classification: board.classification ?? null,
           workspace: board.workspace,
+          publicToken: board.publicToken ?? null,
           updatedAt: board.updatedAt,
         },
       });
@@ -581,6 +593,7 @@ function rowToStoredBoard(row: typeof boards.$inferSelect): StoredBoard {
     // stays the single source of the answer.
     ...(row.classification ? { classification: row.classification } : {}),
     workspace: ws,
+    ...(row.publicToken ? { publicToken: row.publicToken } : {}),
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
