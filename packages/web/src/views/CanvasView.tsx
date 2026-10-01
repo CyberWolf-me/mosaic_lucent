@@ -1802,22 +1802,23 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
   );
 
   /**
-   * A tap on the empty board clears the selection, the way Figma and Miro do.
-   * Nodes, regions, shapes and controls carry their own target (and most stop
-   * their own events), so the `closest` check lets only true background
-   * through. A drag — panning, a marquee, or moving a node — fires no click, so
-   * moving a node leaves it selected; a separate tap on the board is what
-   * clears it. Only in the select tool: the draw / comment / eraser tools own
-   * their background clicks (placing a shape, opening a thread, erasing).
+   * A touch on the empty board clears the selection, the way Figma and Miro do.
+   * Nodes and shapes stop their own pointerdown (atoms NodeCard, ShapeElement),
+   * so this bubble-phase handler only ever sees true background — or a region,
+   * edge label or control, which the `closest` check also leaves alone. That
+   * stop is why selecting a node or a sticky note no longer clears it on the
+   * same gesture, and why moving one keeps it selected. We never preventDefault
+   * or stop the event, so a marquee or pan still begins normally. Select tool
+   * only: the draw / comment / eraser tools own their background taps.
    */
-  const onCanvasBackgroundClick = useCallback(
-    (e: React.MouseEvent) => {
+  const onCanvasBackgroundPointerDown = useCallback(
+    (e: React.PointerEvent) => {
       if (e.defaultPrevented || tool !== "select") return;
       const el = e.target instanceof Element ? e.target : null;
       if (!el || !el.closest(".canvas-viewport")) return;
       if (
         el.closest(
-          ".node, .group-region, .edge-label, .shape-element, button, input, textarea, select, [role='dialog'], [role='menu'], [contenteditable='true']",
+          ".node, .shape, .group-region, .edge-label, button, input, textarea, select, [role='dialog'], [role='menu'], [contenteditable='true']",
         )
       )
         return;
@@ -3154,7 +3155,7 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
             onPointerDownCapture={() => {
               if (followModes.following) followModes.takeOver();
             }}
-            onClick={onCanvasBackgroundClick}
+            onPointerDown={onCanvasBackgroundPointerDown}
             onPointerMove={publishCursor}
             onPointerLeave={() => setPresence({ cursor: null })}
           >
