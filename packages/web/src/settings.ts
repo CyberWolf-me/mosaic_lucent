@@ -66,7 +66,10 @@ export const DEFAULT_SETTINGS: Settings = {
   activityIndicators: true,
   sttProvider: "browser",
   meetingMode: "assistant",
-  livekitUrl: "wss://lucent-bjeymvze.livekit.cloud",
+  // Empty by default: the server's token endpoint returns the room URL
+  // (LUCENT_LIVEKIT_URL), so voice is zero-config. A value here is only for
+  // bringing your own LiveKit (Settings → Advanced).
+  livekitUrl: "",
   livekitTokenUrl: "/api/livekit/token",
   livekitRoom: "lucent-voice",
   boardStyle: "clean",
@@ -101,7 +104,9 @@ function createStore() {
       // consolidation would set data-accent to a value no CSS block matches,
       // leaving the app on cobalt with a dead swatch — coerce it back to bloom.
       if (!ACCENTS.includes(state.accent)) state.accent = "bloom";
-      if (!state.livekitUrl?.trim()) state.livekitUrl = DEFAULT_SETTINGS.livekitUrl;
+      // The token endpoint must stay set (it's how voice reaches the server);
+      // the room URL is intentionally allowed to be empty — the server supplies
+      // it, and only a bring-your-own-LiveKit user fills it in.
       if (!state.livekitTokenUrl?.trim()) state.livekitTokenUrl = DEFAULT_SETTINGS.livekitTokenUrl;
     } else if (!migrated) {
       localStorage.setItem(MIGRATION_KEY, "true");

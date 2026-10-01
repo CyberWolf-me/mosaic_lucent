@@ -67,7 +67,12 @@ export async function fetchLiveKitToken(room: string): Promise<{ token: string; 
 }
 
 function isConfigured(): boolean {
-  return config.url.trim().length > 0 && config.tokenUrl.trim().length > 0;
+  // The token endpoint is the only thing that must be reachable: it mints the
+  // access token AND returns the room URL (the server owns `LUCENT_LIVEKIT_URL`),
+  // so the browser needs no URL of its own. A deployment with no LiveKit
+  // configured answers the token call with 503, surfaced honestly at connect
+  // time rather than by asking the user to paste infrastructure here.
+  return config.tokenUrl.trim().length > 0;
 }
 
 export const livekitSttProvider: SttProvider = {
@@ -88,10 +93,11 @@ export const livekitSttProvider: SttProvider = {
     if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
       return "This browser can't access the microphone.";
     }
-    if (!config.url.trim()) return "Add your LiveKit server URL in Settings → AI & voice.";
     if (!config.tokenUrl.trim()) {
       return "Add a LiveKit token endpoint in Settings → AI & voice. The browser must never hold a LiveKit API secret.";
     }
+    // No check on config.url: the token endpoint returns the room URL, so an
+    // empty URL here is the normal zero-config case, not a misconfiguration.
     return null;
   },
 

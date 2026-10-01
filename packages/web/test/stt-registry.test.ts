@@ -76,7 +76,9 @@ describe("stt registry", () => {
     }
   });
 
-  it("reports a missing server URL before a missing token endpoint", () => {
+  it("is available with only a token endpoint — the server supplies the URL (zero-config)", () => {
+    // The web no longer asks for a LiveKit URL: the token endpoint returns it
+    // (the server owns LUCENT_LIVEKIT_URL), so an empty URL is the normal case.
     const original = globalThis.navigator;
     Object.defineProperty(globalThis, "navigator", {
       value: { mediaDevices: { getUserMedia: () => Promise.resolve({}) } },
@@ -85,7 +87,8 @@ describe("stt registry", () => {
     try {
       configureLiveKit({ url: "", tokenUrl: "/api/livekit/token", room: "r" });
       const status = sttProviderStatus().find((p) => p.id === "livekit")!;
-      expect(status.reason).toMatch(/server URL/i);
+      expect(status.supported).toBe(true);
+      expect(status.reason).toBeFalsy();
     } finally {
       Object.defineProperty(globalThis, "navigator", { value: original, configurable: true });
     }

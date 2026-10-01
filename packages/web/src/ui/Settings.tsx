@@ -731,44 +731,12 @@ export function SettingsModal({
               </div>
               {s.sttProvider === "livekit" && (
                 <div className="setting-row">
-                  <div className="label">LiveKit connection</div>
+                  <div className="label">LiveKit voice</div>
                   <div className="desc">
-                    Your server mints a short-lived access token; the browser never holds a LiveKit
-                    API secret. Transcription requires an agent publishing text into the room.
+                    Realtime transcription runs through this deployment's LiveKit — your server
+                    mints a short-lived access token and tells the browser where to connect, so the
+                    browser never holds a LiveKit API secret. Nothing to set up here.
                   </div>
-                  <label className="sr-only" htmlFor="livekit-url">
-                    LiveKit server URL
-                  </label>
-                  <input
-                    id="livekit-url"
-                    className="auth-input"
-                    style={{ maxWidth: 380, marginBottom: 8 }}
-                    placeholder="wss://your-project.livekit.cloud"
-                    value={s.livekitUrl}
-                    onChange={(e) => setS({ livekitUrl: e.target.value })}
-                  />
-                  <label className="sr-only" htmlFor="livekit-token-url">
-                    Token endpoint
-                  </label>
-                  <input
-                    id="livekit-token-url"
-                    className="auth-input"
-                    style={{ maxWidth: 380, marginBottom: 8 }}
-                    placeholder="/api/livekit/token"
-                    value={s.livekitTokenUrl}
-                    onChange={(e) => setS({ livekitTokenUrl: e.target.value })}
-                  />
-                  <label className="sr-only" htmlFor="livekit-room">
-                    Room name
-                  </label>
-                  <input
-                    id="livekit-room"
-                    className="auth-input"
-                    style={{ maxWidth: 380 }}
-                    placeholder="lucent-voice"
-                    value={s.livekitRoom}
-                    onChange={(e) => setS({ livekitRoom: e.target.value })}
-                  />
                   {livekitStatus?.reason && (
                     <div
                       className="desc"
@@ -777,6 +745,48 @@ export function SettingsModal({
                       {livekitStatus.reason}
                     </div>
                   )}
+                  <details style={{ marginTop: 10 }}>
+                    <summary style={{ cursor: "pointer", fontSize: 13 }}>
+                      Advanced — bring your own LiveKit
+                    </summary>
+                    <div className="desc" style={{ marginTop: 8 }}>
+                      Point at your own LiveKit server, token endpoint, or room (self-hosted or a
+                      third-party token server). Leave the URL blank to use this deployment's.
+                    </div>
+                    <label className="sr-only" htmlFor="livekit-url">
+                      LiveKit server URL
+                    </label>
+                    <input
+                      id="livekit-url"
+                      className="auth-input"
+                      style={{ maxWidth: 380, marginTop: 8, marginBottom: 8 }}
+                      placeholder="wss://your-project.livekit.cloud"
+                      value={s.livekitUrl}
+                      onChange={(e) => setS({ livekitUrl: e.target.value })}
+                    />
+                    <label className="sr-only" htmlFor="livekit-token-url">
+                      Token endpoint
+                    </label>
+                    <input
+                      id="livekit-token-url"
+                      className="auth-input"
+                      style={{ maxWidth: 380, marginBottom: 8 }}
+                      placeholder="/api/livekit/token"
+                      value={s.livekitTokenUrl}
+                      onChange={(e) => setS({ livekitTokenUrl: e.target.value })}
+                    />
+                    <label className="sr-only" htmlFor="livekit-room">
+                      Room name
+                    </label>
+                    <input
+                      id="livekit-room"
+                      className="auth-input"
+                      style={{ maxWidth: 380 }}
+                      placeholder="lucent-voice"
+                      value={s.livekitRoom}
+                      onChange={(e) => setS({ livekitRoom: e.target.value })}
+                    />
+                  </details>
                 </div>
               )}
               <div className="setting-row">
@@ -1085,8 +1095,8 @@ export function SettingsModal({
  * can require it; the server refuses turning it off while one does.
  */
 function SecurityPane() {
-  const [status, setStatus] = useState<TwoFactorStatus | "loading" | "signed-out" | "failed">(
-    () => (getSessionUser() ? "loading" : "signed-out"),
+  const [status, setStatus] = useState<TwoFactorStatus | "loading" | "signed-out" | "failed">(() =>
+    getSessionUser() ? "loading" : "signed-out",
   );
   const [setup, setSetup] = useState<{ secret: string; otpauthUri: string } | null>(null);
   const [recovery, setRecovery] = useState<string[] | null>(null);
@@ -1137,9 +1147,7 @@ function SecurityPane() {
     const r = await disableTwoFactor(code);
     setBusy(false);
     if (!r.ok) {
-      return setError(
-        r.error === "code did not match" ? "That code didn't match." : r.error,
-      );
+      return setError(r.error === "code did not match" ? "That code didn't match." : r.error);
     }
     setTurningOff(false);
     setCode("");
@@ -1224,7 +1232,12 @@ function SecurityPane() {
           )}
 
           {!status.enabled && !setup && (
-            <button className="btn primary" type="button" disabled={busy} onClick={() => void start()}>
+            <button
+              className="btn primary"
+              type="button"
+              disabled={busy}
+              onClick={() => void start()}
+            >
               Set up two-step verification
             </button>
           )}
@@ -1259,7 +1272,11 @@ function SecurityPane() {
                       placeholder="123 456"
                       aria-label="Code from your authenticator app"
                     />
-                    <button className="btn primary" type="submit" disabled={busy || code.trim().length < 6}>
+                    <button
+                      className="btn primary"
+                      type="submit"
+                      disabled={busy || code.trim().length < 6}
+                    >
                       {busy ? "Checking…" : "Turn on"}
                     </button>
                     <button
@@ -1636,12 +1653,19 @@ function TeamPane() {
                   <option value="editor">Editor</option>
                   <option value="viewer">Viewer</option>
                 </select>
-                <button className="btn primary" type="submit" disabled={sending || !email.includes("@")}>
+                <button
+                  className="btn primary"
+                  type="submit"
+                  disabled={sending || !email.includes("@")}
+                >
                   {sending ? "Sending…" : "Send invite"}
                 </button>
               </form>
               {note && (
-                <div className={`team-note ${note.tone}`} role={note.tone === "error" ? "alert" : "status"}>
+                <div
+                  className={`team-note ${note.tone}`}
+                  role={note.tone === "error" ? "alert" : "status"}
+                >
                   {note.text}
                 </div>
               )}
