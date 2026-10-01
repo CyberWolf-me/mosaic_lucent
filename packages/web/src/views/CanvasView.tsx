@@ -1801,6 +1801,36 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
     [canEdit, workspace],
   );
 
+  /**
+   * A tap on the empty board clears the selection, the way Figma and Miro do.
+   * Nodes, regions, shapes and controls carry their own target (and most stop
+   * their own events), so the `closest` check lets only true background
+   * through. A drag — panning, a marquee, or moving a node — fires no click, so
+   * moving a node leaves it selected; a separate tap on the board is what
+   * clears it. Only in the select tool: the draw / comment / eraser tools own
+   * their background clicks (placing a shape, opening a thread, erasing).
+   */
+  const onCanvasBackgroundClick = useCallback(
+    (e: React.MouseEvent) => {
+      if (e.defaultPrevented || tool !== "select") return;
+      const el = e.target instanceof Element ? e.target : null;
+      if (!el || !el.closest(".canvas-viewport")) return;
+      if (
+        el.closest(
+          ".node, .group-region, .edge-label, .shape-element, button, input, textarea, select, [role='dialog'], [role='menu'], [contenteditable='true']",
+        )
+      )
+        return;
+      if (!selected && !selectedLink && selectedNodes.size === 0 && selectedShapes.size === 0)
+        return;
+      setSelected(null);
+      setSelectedLink(null);
+      setSelectedNodes(new Set());
+      setSelectedShapes(new Set());
+    },
+    [tool, selected, selectedLink, selectedNodes, selectedShapes],
+  );
+
   const onShapePrimary = useCallback(
     (id: string, additive: boolean) => {
       // A live voting round turns a plain click into a vote, the way FigJam's
@@ -3124,6 +3154,7 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
             onPointerDownCapture={() => {
               if (followModes.following) followModes.takeOver();
             }}
+            onClick={onCanvasBackgroundClick}
             onPointerMove={publishCursor}
             onPointerLeave={() => setPresence({ cursor: null })}
           >
