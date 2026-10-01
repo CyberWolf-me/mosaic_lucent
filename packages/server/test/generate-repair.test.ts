@@ -89,4 +89,18 @@ describe("bounded repair round", () => {
     expect(result.status).toBe(200);
     expect(provider.calls).toHaveLength(1);
   });
+
+  it("meters a single clean call exactly once (no phantom repair-round double-count)", async () => {
+    // Regression guard: usageFor is handed the prior attempt ONLY when a repair
+    // actually replaced the result. When no repair runs, firstResult === result,
+    // so summing them would double a single call's tokens. "x" is not structural,
+    // so the degenerate guard does not fire either — exactly one billed call.
+    const provider = scriptedProvider([
+      { operations: GOOD_BATCH, usage: { inputTokens: 12, outputTokens: 9 } },
+    ]);
+    const result = await handleGenerate(provider, { message: "x", summary: emptySummary });
+    expect(result.status).toBe(200);
+    expect(provider.calls).toHaveLength(1);
+    expect(result.completion?.usage).toEqual({ inputTokens: 12, outputTokens: 9 });
+  });
 });

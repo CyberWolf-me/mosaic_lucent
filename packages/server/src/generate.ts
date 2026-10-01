@@ -569,10 +569,59 @@ async function requestConnect(
 }
 
 /**
- * Meter both attempts: a repair round is real spend, so its tokens join the
- * first call's rather than replacing them. Absent counts stay absent (M4
- * reconciles against what providers actually reported).
+ * Did the user plainly ask for a structured diagram? Used by the
+ * degenerate-result guard so an explicit "add a sticky note" (one shape IS the
+ * right answer) never triggers a re-ask, while "design the deploy flow" does.
+ * Deliberately conservative: it names structures, multi-step phrasing, or a
+ * long description, and an explicit note/annotation request suppresses it.
  */
+const STRUCTURAL_RE =
+  /\b(flow|flowchart|diagram|architecture|mind ?map|journey|pipeline|workflow|sequence|org ?chart|hierarchy|roadmap|state machine|swimlane|data model|er diagram|tree|process|system|steps?|stages?|phases?)\b/i;
+const NOTE_RE = /\b(sticky|note|annotation|annotate|label|caption|reminder|text ?box)\b/i;
+function looksStructural(message: string): boolean {
+  const m = message.trim();
+  // An explicit note/label/annotation request wants exactly one shape — leave it.
+  if (NOTE_RE.test(m)) return false;
+  if (STRUCTURAL_RE.test(m)) return true;
+  // A described sequence: arrows or "then/next/after that" joins imply steps.
+  const steps = (m.match(/->|→|\bthen\b|\bnext\b|\bafter that\b/gi) ?? []).length;
+  if (steps >= 2) return true;
+  // A long description is a structured ask even without the keywords above.
+  return m.length >= 160;
+}
+
+/**
+ * Degenerate-result re-ask: the free gateways intermittently collapse a
+ * structured request into a lone sticky note or a single node — the "it ignored
+ * my whole prompt" symptom. Ask the model once to rebuild it as a real diagram,
+ * from the ORIGINAL board (so the dud shape is not carried along), and the
+ * caller takes it only if it is materially richer. Never loops.
+ */
+async function requestRicher(
+  provider: LLMProvider,
+  today: string | undefined,
+  workspace: Workspace,
+  message: string,
+  memory?: string | null,
+): Promise<GenerateResult | null> {
+  const nudge = [
+    "Your previous attempt produced almost nothing — a single node or one sticky note — but the request below asks for a structured diagram.",
+    "Rebuild it properly: emit a CREATE_NODE for each distinct step or entity and CONNECT_NODES for the relationships between them. Do NOT answer with a single sticky note or a lone node.",
+    "",
+    "The request:",
+    message,
+  ].join("\n");
+  try {
+    return await provider.generateOperations({
+      message: nudge.slice(0, REQUEST_LIMITS.messageChars),
+      summary: summarizeWorkspace(workspace),
+      ...(today ? { today } : {}),
+      ...(memory ? { memory } : {}),
+    });
+  } catch {
+    return null;
+  }
+}
 function usageFor(last: GenerateResult, first: GenerateResult | undefined): TokenUsage | undefined {
   if (!first || !first.usage) return last.usage;
   if (!last.usage) return first.usage;
@@ -804,10 +853,14 @@ async function runGeneratePipeline(
 
   // Only the keys the provider actually reported: a model that omits usage must
   // not be metered as having used zero tokens. `let`, because a connectivity
-  // re-ask below is extra spend whose tokens must join these.
+  // re-ask below is extra spend whose tokens must join these. `firstResult` is
+  // metered as a separate attempt ONLY when a repair round actually replaced
+  // `result` — otherwise it IS `result`, and summing it would double-count a
+  // single call's tokens.
+  const priorAttempt = repaired ? firstResult : undefined;
   let completion: NonNullable<HandleResult["completion"]> = {
     ...(result.model ? { model: result.model } : {}),
-    ...(usageFor(result, firstResult) ? { usage: usageFor(result, firstResult)! } : {}),
+    ...(usageFor(result, priorAttempt) ? { usage: usageFor(result, priorAttempt)! } : {}),
   };
 
   // PARTIAL APPLICATION (M1): a batch that still fails validation after the
@@ -828,12 +881,90 @@ async function runGeneratePipeline(
       repaired,
     };
   }
-  const warnings = partial
+  let warnings = partial
     ? partial.skipped.map((s) => ({ op: s.op.op, reason: s.reason }))
     : undefined;
   // From here on, this is what actually applies.
-  const appliedBase = partial ? partial.applied : operations;
+  let appliedBase = partial ? partial.applied : operations;
   let mergedWorkspace = partial ? partial.workspace : applyOperations(workspace, appliedBase);
+
+  // DEGENERATE-RESULT GUARD: the free gateways intermittently collapse a
+  // structured request into a lone sticky note or a single node — the "it
+  // ignored my whole prompt" symptom. When a FROM-SCRATCH build was asked for a
+  // diagram (looksStructural) but this batch produced a thin result (<=1 node,
+  // no edges, yet something was emitted), re-ask ONCE for a real diagram and
+  // take it ONLY if it is materially richer (>=2 nodes). A second dud leaves the
+  // first result alone; it never loops. Scoped to an empty starting board on
+  // purpose: a thin ADDITION to an existing board ("add a login step") is
+  // normal and belongs to the connectivity guard below, not a full rebuild that
+  // could duplicate what is already there.
+  {
+    const nodeCount = appliedBase.filter((op) => op.op === "CREATE_NODE").length;
+    const edgeCount = appliedBase.filter((op) => op.op === "CONNECT_NODES").length;
+    const freshBuild = Object.keys(workspace.nodes).length === 0;
+    if (
+      freshBuild &&
+      appliedBase.length >= 1 &&
+      nodeCount <= 1 &&
+      edgeCount === 0 &&
+      looksStructural(parsed.data.message)
+    ) {
+      // Unlike the repair round (which omits memory — it only fixes validator
+      // complaints), this is a fresh rebuild of the user's intent on an empty
+      // board, so it carries the same workspace-memory digest the first call
+      // got: project context is exactly what helps it build the right diagram.
+      const richer = await requestRicher(
+        provider,
+        parsed.data.today,
+        workspace,
+        parsed.data.message,
+        memory,
+      );
+      if (richer) {
+        const richerOps = foldStatementTopics(
+          repairOperations(
+            stampAuthorship(
+              withoutTrust(richer.operations.filter((op) => !isHumanOnlyOperation(op.op))),
+              userId ?? ASSISTANT_AUTHOR,
+            ),
+          ),
+          topics,
+        );
+        const richerErrors = validateOperations(workspace, richerOps);
+        const richerPart =
+          richerErrors.length > 0
+            ? applyValidOperations(workspace, richerOps)
+            : { applied: richerOps, workspace: applyOperations(workspace, richerOps), skipped: [] };
+        const richerNodes = richerPart.applied.filter((op) => op.op === "CREATE_NODE").length;
+        if (richerNodes > nodeCount && richerNodes >= 2) {
+          appliedBase = richerPart.applied;
+          mergedWorkspace = richerPart.workspace;
+          warnings =
+            richerPart.skipped.length > 0
+              ? richerPart.skipped.map((s) => ({ op: s.op.op, reason: s.reason }))
+              : undefined;
+          // Its explanation/reply/model describe what the user now actually sees.
+          result = richer;
+          if (richer.model) completion = { ...completion, model: richer.model };
+        }
+        // The re-ask is real provider spend whether or not we kept it — mirror
+        // the connectivity guard, which meters a discarded connect re-ask too —
+        // so a rejected regen (the flaky-gateway dud-after-dud path) is still
+        // billed, never silently un-metered.
+        if (richer.usage) {
+          const sum = (a?: number, b?: number) =>
+            a === undefined ? b : b === undefined ? a : a + b;
+          completion = {
+            ...completion,
+            usage: {
+              inputTokens: sum(completion.usage?.inputTokens, richer.usage.inputTokens),
+              outputTokens: sum(completion.usage?.outputTokens, richer.usage.outputTokens),
+            },
+          };
+        }
+      }
+    }
+  }
 
   // CONNECTIVITY GUARD (the "a semantic node must never float" rule): a
   // generation on a connected-graph kind that left nodes with no connectors —
