@@ -14,6 +14,7 @@ import {
   listMembers,
   readShareLinkError,
   removeMember,
+  setBoardPublic,
   inviteToBoard,
   revokeShareLinks,
   setMemberRole,
@@ -337,6 +338,117 @@ function InviteByEmail({ boardId, onInvited }: { boardId: string; onInvited: () 
         </p>
       )}
     </form>
+  );
+}
+
+/**
+ * The opt-in public read-only link (docs/26). Editor+ only. Reads the board's
+ * current token on open, toggles it, and offers the /p/:token URL to copy.
+ */
+function PublicLink({ boardId }: { boardId: string }) {
+  const [token, setToken] = useState<string | null>(null);
+  const [loaded, setLoaded] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    let live = true;
+    void fetchBoard(boardId).then((b) => {
+      if (live) {
+        setToken(b?.publicToken ?? null);
+        setLoaded(true);
+      }
+    });
+    return () => {
+      live = false;
+    };
+  }, [boardId]);
+  const origin = typeof window !== "undefined" ? window.location.origin : "";
+  const url = token ? `${origin}/p/${token}` : "";
+  const toggle = async () => {
+    setBusy(true);
+    const next = await setBoardPublic(boardId, !token);
+    setToken(token ? null : next);
+    setBusy(false);
+  };
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      /* clipboard blocked: the URL is selectable above */
+    }
+  };
+  return (
+    <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid var(--stroke-1)" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 12, fontVariationSettings: "'wght' 550" }}>
+            Public read-only link
+          </div>
+          <div style={{ fontSize: 11, color: "var(--ink-3)", lineHeight: 1.4, marginTop: 2 }}>
+            Anyone with the link views a read-only copy — no account. Comments and votes stay
+            hidden.
+          </div>
+        </div>
+        <button
+          onClick={() => void toggle()}
+          disabled={busy || !loaded}
+          aria-label={token ? "Turn off public link" : "Create public link"}
+          style={{
+            fontSize: 11,
+            padding: "5px 11px",
+            borderRadius: 999,
+            border: "1px solid var(--stroke-2)",
+            background: token ? "var(--canvas-3)" : "var(--ink-0)",
+            color: token ? "var(--ink-1)" : "var(--canvas-0)",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {busy ? "…" : token ? "Turn off" : "Create link"}
+        </button>
+      </div>
+      {token && (
+        <div
+          style={{
+            display: "flex",
+            gap: 6,
+            alignItems: "center",
+            marginTop: 8,
+            padding: "7px 10px",
+            background: "var(--canvas-2)",
+            border: "1px solid var(--stroke-1)",
+            borderRadius: 6,
+          }}
+        >
+          <span
+            className="mono"
+            style={{
+              flex: 1,
+              fontSize: 11,
+              color: "var(--ink-2)",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {url}
+          </span>
+          <button
+            onClick={() => void copy()}
+            style={{
+              fontSize: 11,
+              padding: "3px 9px",
+              borderRadius: "var(--r-sm)",
+              background: "var(--ink-0)",
+              color: "var(--canvas-0)",
+            }}
+          >
+            {copied ? "Copied" : "Copy"}
+          </button>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -731,6 +843,9 @@ function ShareDialog({ onClose }: { onClose: () => void }) {
 
             {isOwner && boardId && (
               <InviteByEmail boardId={boardId} onInvited={() => void refreshMembers()} />
+            )}
+            {boardId && syncRole !== "viewer" && syncRole !== "commenter" && (
+              <PublicLink boardId={boardId} />
             )}
             {boardId && <TeamAccess boardId={boardId} canEdit={isOwner} />}
 

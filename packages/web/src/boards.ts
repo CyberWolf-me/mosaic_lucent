@@ -164,6 +164,7 @@ export async function fetchBoard(id: string): Promise<{
   workspace: Workspace;
   role: BoardRole;
   classification: BoardTier;
+  publicToken: string | null;
 } | null> {
   const res = await authed(`/api/boards/${encodeURIComponent(id)}`);
   if (!res || !res.ok) return null;
@@ -173,6 +174,7 @@ export async function fetchBoard(id: string): Promise<{
     workspace: Workspace;
     role: BoardRole;
     classification?: unknown;
+    publicToken?: string | null;
   };
   return {
     id: body.id,
@@ -180,7 +182,21 @@ export async function fetchBoard(id: string): Promise<{
     workspace: body.workspace,
     role: body.role,
     classification: isBoardTier(body.classification) ? body.classification : "internal",
+    publicToken: typeof body.publicToken === "string" ? body.publicToken : null,
   };
+}
+
+/**
+ * Turn the opt-in public read-only link on or off (docs/26). Returns the new
+ * token when turning it on, or null (off, or on failure — the caller treats a
+ * null-on as "couldn't publish"). Editor-gated on the server.
+ */
+export async function setBoardPublic(boardId: string, on: boolean): Promise<string | null> {
+  const res = await authed(`/api/boards/${encodeURIComponent(boardId)}/public`, {
+    method: on ? "POST" : "DELETE",
+  });
+  if (!res || !res.ok || !on) return null;
+  return ((await res.json()) as { token?: string }).token ?? null;
 }
 
 /**
