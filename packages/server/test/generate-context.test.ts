@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { applyOperations, createWorkspace } from "@lucent/core";
 import type { Operation } from "@lucent/core";
-import { buildMemoryDigest } from "../src/generateContext.js";
+import { buildCrossBoardMemory, buildMemoryDigest } from "../src/generateContext.js";
 
 /**
  * The generation-side memory projection (docs/23 doctrine): a derived,
@@ -100,5 +100,38 @@ describe("buildMemoryDigest", () => {
     expect(topics).toMatch(/oauth/);
     expect(topics).toContain("billing");
     expect(topics).toContain("pay-q");
+  });
+});
+
+describe("buildCrossBoardMemory", () => {
+  it("returns null when no sibling has statements", () => {
+    expect(buildCrossBoardMemory([])).toBeNull();
+    expect(buildCrossBoardMemory([{ boardName: "Billing", statements: [] }])).toBeNull();
+  });
+
+  it("groups surviving statements by board under a 'sibling boards' header", () => {
+    const text = buildCrossBoardMemory([
+      {
+        boardName: "Billing",
+        statements: [
+          { kind: "decision", label: "Use Stripe", status: "resolved", topic: "pay", id: "S:s1" },
+        ],
+      },
+    ])!;
+    expect(text).toContain("From sibling boards in this project");
+    expect(text).toContain("Billing:");
+    expect(text).toContain("[decision] Use Stripe · pay (S:s1)");
+  });
+
+  it("caps the total statements rendered across boards", () => {
+    const many = Array.from({ length: 40 }, (_, i) => ({
+      kind: "decision",
+      label: `D${i}`,
+      status: "resolved",
+      id: `S:${i}`,
+    }));
+    const text = buildCrossBoardMemory([{ boardName: "Big", statements: many }])!;
+    // CROSS_BOARD_LIMITS.perBoard caps a single board at 6 lines.
+    expect(text.match(/\[decision\]/g)?.length).toBeLessThanOrEqual(6);
   });
 });

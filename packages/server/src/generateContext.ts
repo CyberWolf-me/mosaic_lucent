@@ -147,3 +147,70 @@ function topicGlossary(statements: Node[]): string | null {
   });
   return `Topics (resolve a named part of the project — "the X" — to these ids):\n${lines.join("\n")}`;
 }
+
+/* -------------------------------------------------------------------------- */
+/* Cross-board memory (Phase 1): settled decisions from PROJECT SIBLINGS       */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Caps for the cross-board section. Kept strictly smaller than the own-board
+ * digest (MEMORY_LIMITS.perSection) so the board the user is actually on stays
+ * primary; the sibling context is a reminder, not the bulk of the prompt.
+ */
+const CROSS_BOARD_LIMITS = {
+  boards: 6,
+  perBoard: 6,
+  total: 24,
+  label: 80,
+  topic: 48,
+} as const;
+
+/** One sibling board's contribution: its name and the vetted statements to show.
+ * The caller passes already access-filtered, classification-cleared rows — this
+ * renderer does no authorization, only shaping. `id` is expected pre-qualified
+ * (e.g. `boardId:nodeId`) so the model never mistakes it for a node on THIS
+ * board (those ids are not local and can't be connected to). */
+export interface SiblingMemory {
+  boardName: string;
+  statements: ReadonlyArray<{
+    kind: string;
+    label: string;
+    status: string;
+    topic?: string;
+    id: string;
+  }>;
+}
+
+/**
+ * Render settled decisions/requirements carried on OTHER boards in the same
+ * project, grouped by board. Returns null when nothing survives, so an isolated
+ * board (no project, or no sibling statements) reads exactly as it does today.
+ *
+ * Pure and I/O-free: every access and classification gate (which siblings the
+ * caller may read, which the AI boundary allows) runs in the route BEFORE this
+ * is called — see app.ts. This only shapes the vetted result into prompt text,
+ * which the harness then escapes with the rest of the `memory` block.
+ */
+export function buildCrossBoardMemory(siblings: ReadonlyArray<SiblingMemory>): string | null {
+  const withContent = siblings
+    .filter((s) => s.statements.length > 0)
+    .slice(0, CROSS_BOARD_LIMITS.boards);
+  if (withContent.length === 0) return null;
+
+  let total = 0;
+  const blocks: string[] = [];
+  for (const sib of withContent) {
+    if (total >= CROSS_BOARD_LIMITS.total) break;
+    const lines: string[] = [];
+    for (const s of sib.statements.slice(0, CROSS_BOARD_LIMITS.perBoard)) {
+      if (total >= CROSS_BOARD_LIMITS.total) break;
+      const label = s.label.slice(0, CROSS_BOARD_LIMITS.label) || "(untitled)";
+      const topic = s.topic ? ` · ${s.topic.slice(0, CROSS_BOARD_LIMITS.topic)}` : "";
+      lines.push(`    - [${s.kind}] ${label}${topic} (${s.id})`);
+      total += 1;
+    }
+    if (lines.length) blocks.push(`  ${sib.boardName}:\n${lines.join("\n")}`);
+  }
+  if (blocks.length === 0) return null;
+  return `From sibling boards in this project (settled context — build on these, don't contradict them; their ids are on other boards):\n${blocks.join("\n")}`;
+}

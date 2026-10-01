@@ -17,7 +17,6 @@ import {
 } from "@lucent/core";
 import type { Operation, Shape, Workspace } from "@lucent/core";
 import type { BoardStore } from "./boards.js";
-import { buildMemoryDigest } from "./generateContext.js";
 
 /**
  * Request handling for POST /api/generate, framework-free so it can run under
@@ -542,8 +541,22 @@ export async function handleGenerate(
   userId?: string,
   /** Present when the request carries a boardId backed by server storage. */
   authoritative?: AuthoritativeContext,
+  /**
+   * The server-assembled workspace-memory digest (docs/23): the board's own
+   * settled statements plus vetted project siblings. Rides the first model call
+   * only; assembled by the route (app.ts) under its access + classification
+   * gates, never taken from the client body.
+   */
+  memory?: string | null,
 ): Promise<HandleResult> {
-  const outcome = await runGeneratePipeline(provider, rawBody, userId, authoritative);
+  const outcome = await runGeneratePipeline(
+    provider,
+    rawBody,
+    userId,
+    authoritative,
+    undefined,
+    memory,
+  );
   if (!outcome.ok) {
     return {
       status: outcome.status,
@@ -637,6 +650,7 @@ async function runGeneratePipeline(
   userId?: string,
   authoritative?: AuthoritativeContext,
   stream?: StreamCallbacks,
+  memory?: string | null,
 ): Promise<PipelineOutcome> {
   const parsed = generateRequestSchema.safeParse(rawBody);
   if (!parsed.success) {
@@ -649,28 +663,21 @@ async function runGeneratePipeline(
     };
   }
 
-  // Resolve the authoritative board up front — before the model call — so its
-  // durable state can seed the workspace-memory digest (docs/23). Authoritative
-  // only when a stored board backs this request AND belongs to the caller: the
-  // HTTP layer checks ownership too, but enforcing it here means the function
-  // that touches the data can never be talked past with a hand-built call. A
-  // board owned by someone else falls back to advisory validation and is never
-  // read from or written to.
+  // Resolve the authoritative board for VALIDATION and persistence: a stored
+  // board that belongs to the caller is validated against its real state
+  // instead of the request's summary, and the merged result is persisted back.
+  // Workspace memory is NOT tied to this gate — the caller assembles it (own
+  // board + vetted project siblings) and passes it in as `memory`, so it also
+  // reaches the advisory web path, which never sets `authoritative` (app.ts).
   const candidateBoard = authoritative
     ? await authoritative.store.get(authoritative.boardId)
     : undefined;
   const authoritativeBoard =
     candidateBoard && userId === candidateBoard.ownerId ? candidateBoard : undefined;
 
-  // Workspace memory (the "workspace remembers" north star) rides the FIRST
-  // model call only — not the bounded repair round below, which fixes validator
-  // complaints that memory can't help with and whose re-send would double the
-  // context cost of a failure. Derived from durable server state, never the
-  // client summary; null off the authoritative path, so advisory/anonymous
-  // generations are unchanged.
-  const memory = authoritativeBoard
-    ? buildMemoryDigest(authoritativeBoard.workspace, authoritativeBoard.name)
-    : null;
+  // Workspace memory (docs/23) rides the FIRST model call only — not the bounded
+  // repair round below, which fixes validator complaints that memory can't help
+  // with and whose re-send would double the context cost of a failure.
   const modelRequest = memory ? { ...parsed.data, memory } : parsed.data;
 
   let result;
@@ -838,6 +845,8 @@ export async function handleGenerateStream(
     provider: string;
     model: string | undefined;
   }) => Promise<Record<string, unknown>>,
+  /** The server-assembled workspace-memory digest (docs/23); see handleGenerate. */
+  memory?: string | null,
 ): Promise<{
   status: number;
   provider: string;
@@ -852,15 +861,22 @@ export async function handleGenerateStream(
   emit("phase", { phase: "understanding", message: "Parsing intent..." });
 
   let sawDelta = false;
-  const outcome = await runGeneratePipeline(provider, rawBody, userId, authoritative, {
-    onDelta: (delta) => {
-      if (!sawDelta) {
-        sawDelta = true;
-        emit("phase", { phase: "constructing", message: "Designing architecture..." });
-      }
-      emit("delta", { text: delta });
+  const outcome = await runGeneratePipeline(
+    provider,
+    rawBody,
+    userId,
+    authoritative,
+    {
+      onDelta: (delta) => {
+        if (!sawDelta) {
+          sawDelta = true;
+          emit("phase", { phase: "constructing", message: "Designing architecture..." });
+        }
+        emit("delta", { text: delta });
+      },
     },
-  });
+    memory,
+  );
   if (!outcome.ok) {
     emit("error", outcome.body);
     return {

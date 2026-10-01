@@ -2,6 +2,7 @@ import type { IncomingMessage, Server, ServerResponse } from "node:http";
 import { createServer } from "node:http";
 import type { LLMProvider, ImageProvider, VectorProvider } from "@lucent/ai";
 import { handleGenerate, handleGenerateStream } from "./generate.js";
+import { assembleGenerationMemory } from "./generateMemory.js";
 import { createAutomations } from "./automation.js";
 import { readByoHeaders, resolveProvider, providerFact } from "./modelRouter.js";
 import {
@@ -2555,6 +2556,37 @@ export function createApp(deps: AppDeps): App {
     broadcastProposal: (boardId, event) => realtime.broadcastProposal(boardId, event),
   };
 
+  // docs/23 — workspace memory for a generation. Keyed on the board the request
+  // is ABOUT (run.boardId on the web, or a top-level boardId), independent of
+  // the authoritative-validation gate, so it reaches the advisory web + meeting
+  // path (the primary surface) and not just stateless callers. Every access and
+  // classification gate lives inside assembleGenerationMemory. Best-effort: a
+  // failure degrades to no memory rather than failing the generation.
+  const generationMemory = async (
+    userId: string,
+    boardId: string,
+    activeProvider: { name: string },
+  ): Promise<string | undefined> => {
+    try {
+      return await assembleGenerationMemory(
+        {
+          boardStore,
+          intelligence,
+          projects: services.projects,
+          readableBoards: services.readableBoards,
+          outboundRefusal,
+          orgRoleFor,
+        },
+        userId,
+        boardId,
+        activeProvider,
+      );
+    } catch (err) {
+      logger.warn("workspace_memory_failed", { boardId, error: (err as Error).message });
+      return undefined;
+    }
+  };
+
   // docs/26 A5: automation v1 — the org's rules, run by jobs (main.ts) and
   // after an inbound change is queued (below). Built after the services: an
   // external close commits through the same seams a person's accept uses.
@@ -5067,7 +5099,21 @@ export function createApp(deps: AppDeps): App {
           ? await gateMonthly(req, res, aiCtx.orgId, "ai.generationsPerMonth", "/api/generate")
           : null;
         if (allowance === false) return;
-        const result = await handleGenerate(provider, parsed, auth.userId, authoritative);
+        // docs/23: the workspace-memory digest for the board this request is
+        // about — run.boardId on the web (which never sends a top-level boardId),
+        // or a top-level boardId from a stateless caller. Gated inside; absent
+        // for an anonymous caller with no user to scope reads to.
+        const memoryBoardId =
+          typeof parsed.boardId === "string"
+            ? parsed.boardId
+            : typeof parsed.run?.boardId === "string"
+              ? parsed.run.boardId
+              : undefined;
+        const memory =
+          auth.userId && memoryBoardId
+            ? await generationMemory(auth.userId, memoryBoardId, provider)
+            : undefined;
+        const result = await handleGenerate(provider, parsed, auth.userId, authoritative, memory);
         const ops = Array.isArray((result.body as { operations?: unknown[] })?.operations)
           ? (result.body as { operations: unknown[] }).operations.length
           : 0;
@@ -5242,6 +5288,21 @@ export function createApp(deps: AppDeps): App {
           return;
         }
 
+        // docs/23: assemble workspace memory BEFORE the stream opens, so a
+        // failure degrades cleanly to no memory rather than breaking mid-stream.
+        // Keyed on the board the request is about; the RESOLVED provider decides
+        // the classification outcome (a BYO cloud key is a different boundary).
+        const memoryBoardId =
+          typeof parsed.boardId === "string"
+            ? parsed.boardId
+            : typeof parsed.run?.boardId === "string"
+              ? parsed.run.boardId
+              : undefined;
+        const memory =
+          auth.userId && memoryBoardId
+            ? await generationMemory(auth.userId, memoryBoardId, requestProvider)
+            : undefined;
+
         // SSE headers are set once, AFTER every pre-flight gate. They used to
         // go out before the body was even read, which made the refusals above
         // unreachable as status codes: `writeHead` threw ERR_HTTP_HEADERS_SENT
@@ -5283,6 +5344,7 @@ export function createApp(deps: AppDeps): App {
             );
             return runId ? { runId } : {};
           },
+          memory,
         ).finally(() => clearInterval(heartbeat));
         closed = true;
         res.end();

@@ -4,7 +4,6 @@ import type { GenerateRequest } from "@lucent/ai";
 import { ASSISTANT_AUTHOR, applyOperations, createWorkspace } from "@lucent/core";
 import type { Operation } from "@lucent/core";
 import { handleGenerate } from "../src/generate.js";
-import { InMemoryBoardStore } from "../src/boards.js";
 
 const provider = new MockProvider();
 const emptySummary = summarizeWorkspace(createWorkspace());
@@ -530,7 +529,7 @@ describe("the topic fold at the generate boundary (Stage C5)", () => {
   });
 });
 
-describe("workspace memory on the authoritative path", () => {
+describe("workspace memory rides the model request", () => {
   /** A provider that records the request it was handed, applying nothing. */
   function capturingProvider() {
     const seen: { request?: GenerateRequest } = {};
@@ -550,69 +549,31 @@ describe("workspace memory on the authoritative path", () => {
     return { provider, seen };
   }
 
-  /** A stored board carrying one resolved decision, owned by `owner`. */
-  async function boardWithDecision(owner: string) {
-    const store = new InMemoryBoardStore();
-    const workspace = applyOperations(createWorkspace(), [
-      { op: "CREATE_NODE", id: "oauth", nodeType: "decision", label: "Use OAuth for login" },
-      {
-        op: "SET_STATEMENT",
-        id: "oauth",
-        statement: { kind: "decision", status: "resolved", topic: "authentication" },
-      },
-    ]);
-    const now = Date.now();
-    await store.put({
-      id: "brd_mem",
-      orgId: "org_mem",
-      ownerId: owner,
-      name: "Checkout",
-      workspace,
-      createdAt: now,
-      updatedAt: now,
-    });
-    return store;
-  }
-
-  it("injects the board's accumulated decisions into the model request", async () => {
+  // The digest is assembled by the route (app.ts) under its access +
+  // classification gates and handed to handleGenerate; the pipeline's job is
+  // only to forward it to the FIRST model call. These cover that contract; the
+  // assembly + leak gates are covered in generate-memory.test.ts.
+  it("forwards the assembled memory digest to the model", async () => {
     const { provider, seen } = capturingProvider();
-    const store = await boardWithDecision("u1");
-    // The client summary is deliberately EMPTY: memory must come from durable
-    // server state, not from whatever the client chose to send.
     const result = await handleGenerate(
       provider,
-      { message: "add the login step", summary: emptySummary, boardId: "brd_mem" },
+      { message: "add the login step", summary: emptySummary },
       "u1",
-      { boardId: "brd_mem", store },
+      undefined,
+      'Project memory for "Checkout":\n\nSettled decisions:\n  - Use OAuth (oauth)',
     );
     expect(result.status).toBe(200);
-    expect(seen.request?.memory).toBeDefined();
     expect(seen.request?.memory).toContain("Settled decisions");
-    expect(seen.request?.memory).toContain("Use OAuth for login");
+    expect(seen.request?.memory).toContain("Use OAuth");
   });
 
-  it("sends no memory on the advisory path (no authoritative board)", async () => {
+  it("sends no memory when none is assembled", async () => {
     const { provider, seen } = capturingProvider();
     const result = await handleGenerate(provider, {
       message: "add the login step",
       summary: emptySummary,
     });
     expect(result.status).toBe(200);
-    expect(seen.request?.memory).toBeUndefined();
-  });
-
-  it("sends no memory when the caller does not own the board", async () => {
-    const { provider, seen } = capturingProvider();
-    const store = await boardWithDecision("someone-else");
-    const result = await handleGenerate(
-      provider,
-      { message: "add the login step", summary: emptySummary, boardId: "brd_mem" },
-      "u1",
-      { boardId: "brd_mem", store },
-    );
-    expect(result.status).toBe(200);
-    // Not the owner → advisory validation, and a board you don't own never
-    // leaks its memory into your prompt.
     expect(seen.request?.memory).toBeUndefined();
   });
 });
