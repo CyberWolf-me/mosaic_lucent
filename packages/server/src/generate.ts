@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { REQUEST_LIMITS, streamViaGenerate } from "@lucent/ai";
+import { REQUEST_LIMITS, streamViaGenerate, summarizeWorkspace } from "@lucent/ai";
 import type { GenerateResult, LLMProvider, StreamCallbacks, TokenUsage } from "@lucent/ai";
 import {
   ASSISTANT_AUTHOR,
@@ -14,8 +14,9 @@ import {
   stampAuthorship,
   existingTopics,
   foldStatementTopics,
+  layoutStrategyFor,
 } from "@lucent/core";
-import type { Operation, Shape, Workspace } from "@lucent/core";
+import type { DiagramKind, Operation, Shape, Workspace } from "@lucent/core";
 import type { BoardStore } from "./boards.js";
 
 /**
@@ -515,6 +516,58 @@ async function requestRepair(
   }
 }
 
+/** Which kinds are a connected graph (their meaning IS the connections), so an
+ * edgeless or floating-node result is a defect worth one re-ask — unlike
+ * grid/timeline/storymap, where standalone items are legitimate. */
+function expectsEdges(kind: DiagramKind): boolean {
+  const s = layoutStrategyFor(kind);
+  return s === "layered" || s === "tree" || s === "radial" || s === "swimlane";
+}
+
+/** Of `ids`, those with no incident edge in `ws` — floating semantic nodes. */
+function floatingAmong(ws: Workspace, ids: readonly string[]): string[] {
+  const connected = new Set<string>();
+  for (const e of Object.values(ws.edges)) {
+    connected.add(e.source);
+    connected.add(e.target);
+  }
+  return ids.filter((id) => ws.nodes[id] && !connected.has(id));
+}
+
+/**
+ * Connectivity re-ask (the "a semantic node must never float" rule): when a
+ * generation on a connected-graph kind leaves nodes with no connectors — the
+ * "horizontal row of unconnected boxes" symptom — ask the model once to wire
+ * them in. It is told to return CONNECT_NODES only; the caller validates and
+ * merges what comes back and never loops.
+ */
+async function requestConnect(
+  provider: LLMProvider,
+  today: string | undefined,
+  workspace: Workspace,
+  floatingIds: string[],
+): Promise<GenerateResult | null> {
+  const named = floatingIds
+    .slice(0, 40)
+    .map((id) => `${id} (${workspace.nodes[id]?.label ?? "?"})`)
+    .join(", ");
+  const message = [
+    "The diagram you just built left these nodes disconnected, with no connectors:",
+    named,
+    "Add CONNECT_NODES operations so every one of them is wired into the graph with a meaningful relationship verb (leads_to, calls, depends_on, branch, …) — a semantic node must never float.",
+    "Return ONLY CONNECT_NODES operations against the current board; create no new nodes.",
+  ].join("\n");
+  try {
+    return await provider.generateOperations({
+      message: message.slice(0, REQUEST_LIMITS.messageChars),
+      summary: summarizeWorkspace(workspace),
+      ...(today ? { today } : {}),
+    });
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Meter both attempts: a repair round is real spend, so its tokens join the
  * first call's rather than replacing them. Absent counts stay absent (M4
@@ -750,8 +803,9 @@ async function runGeneratePipeline(
   }
 
   // Only the keys the provider actually reported: a model that omits usage must
-  // not be metered as having used zero tokens.
-  const completion: NonNullable<HandleResult["completion"]> = {
+  // not be metered as having used zero tokens. `let`, because a connectivity
+  // re-ask below is extra spend whose tokens must join these.
+  let completion: NonNullable<HandleResult["completion"]> = {
     ...(result.model ? { model: result.model } : {}),
     ...(usageFor(result, firstResult) ? { usage: usageFor(result, firstResult)! } : {}),
   };
@@ -778,13 +832,58 @@ async function runGeneratePipeline(
     ? partial.skipped.map((s) => ({ op: s.op.op, reason: s.reason }))
     : undefined;
   // From here on, this is what actually applies.
-  const appliedOps = partial ? partial.applied : operations;
+  const appliedBase = partial ? partial.applied : operations;
+  let mergedWorkspace = partial ? partial.workspace : applyOperations(workspace, appliedBase);
+
+  // CONNECTIVITY GUARD (the "a semantic node must never float" rule): a
+  // generation on a connected-graph kind that left nodes with no connectors —
+  // the "row of unconnected boxes" symptom — gets ONE bounded re-ask to wire
+  // them in. It fires only when this batch created >=2 nodes with a floating
+  // one among them, so an ordinary edge-bearing generation pays nothing; the
+  // re-ask may add only CONNECT_NODES, validated and partial-applied exactly
+  // like the first batch, and never loops.
+  let connectOps: Operation[] = [];
+  const createdIds = appliedBase.flatMap((op) => (op.op === "CREATE_NODE" ? [op.id] : []));
+  if (createdIds.length >= 2 && expectsEdges(mergedWorkspace.diagramKind)) {
+    const floating = floatingAmong(mergedWorkspace, createdIds);
+    if (floating.length > 0) {
+      const connect = await requestConnect(provider, parsed.data.today, mergedWorkspace, floating);
+      if (connect) {
+        const candidate = stampAuthorship(
+          withoutTrust(connect.operations.filter((op) => op.op === "CONNECT_NODES")),
+          userId ?? ASSISTANT_AUTHOR,
+        );
+        const connErrors = validateOperations(mergedWorkspace, candidate);
+        const connApplied =
+          connErrors.length > 0
+            ? applyValidOperations(mergedWorkspace, candidate).applied
+            : candidate;
+        if (connApplied.length > 0) {
+          connectOps = connApplied;
+          mergedWorkspace = applyOperations(mergedWorkspace, connApplied);
+        }
+        if (connect.usage) {
+          const sum = (a?: number, b?: number) =>
+            a === undefined ? b : b === undefined ? a : a + b;
+          completion = {
+            ...completion,
+            usage: {
+              inputTokens: sum(completion.usage?.inputTokens, connect.usage.inputTokens),
+              outputTokens: sum(completion.usage?.outputTokens, connect.usage.outputTokens),
+            },
+          };
+        }
+      }
+    }
+  }
+  const appliedOps = connectOps.length > 0 ? [...appliedBase, ...connectOps] : appliedBase;
 
   // Persist the merged board so the next request validates against the new state.
   if (authoritative && authoritativeBoard) {
-    // On a partial batch the partial result IS the new state (its workspace
-    // was produced by the same sequential application the client will run).
-    const updated = partial ? partial.workspace : applyOperations(workspace, appliedOps);
+    // `mergedWorkspace` already reflects the partial application AND any
+    // connectivity edges added above, so it is the exact state the client will
+    // reach by applying `appliedOps`.
+    const updated = mergedWorkspace;
     await authoritative.store.put({
       ...authoritativeBoard,
       workspace: updated,

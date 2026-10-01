@@ -577,3 +577,76 @@ describe("workspace memory rides the model request", () => {
     expect(seen.request?.memory).toBeUndefined();
   });
 });
+
+describe("connectivity guard (no floating nodes)", () => {
+  /** A provider that returns `first` on call 1 and `second` on the re-ask. */
+  function twoCallStub(first: Operation[], second: Operation[]) {
+    let n = 0;
+    const provider = {
+      name: "two-call",
+      async generateOperations() {
+        n += 1;
+        return { operations: n === 1 ? first : second };
+      },
+      async generateAnswer() {
+        throw new Error("two-call stub cannot answer");
+      },
+      async generateExternalPlan() {
+        throw new Error("two-call stub cannot select external actions");
+      },
+    };
+    return { provider, calls: () => n };
+  }
+
+  const NODES: Operation[] = [
+    { op: "CREATE_NODE", id: "a", nodeType: "start", label: "A" },
+    { op: "CREATE_NODE", id: "b", nodeType: "process", label: "B" },
+    { op: "CREATE_NODE", id: "c", nodeType: "end", label: "C" },
+  ];
+  const EDGES: Operation[] = [
+    { op: "CONNECT_NODES", source: "a", target: "b", relationship: "leads_to" },
+    { op: "CONNECT_NODES", source: "b", target: "c", relationship: "leads_to" },
+  ];
+
+  it("re-asks and wires up an edgeless flowchart result", async () => {
+    const { provider, calls } = twoCallStub(NODES, EDGES);
+    const result = await handleGenerate(provider, {
+      message: "draw a flow",
+      summary: emptySummary,
+    });
+    expect(result.status).toBe(200);
+    expect(calls()).toBe(2); // the connectivity re-ask fired
+    const ops = (result.body as { operations: Operation[] }).operations;
+    expect(ops.filter((o) => o.op === "CONNECT_NODES")).toHaveLength(2);
+    expect(ops).toHaveLength(5);
+  });
+
+  it("does NOT re-ask on a grid kind (matrix is edgeless by design)", async () => {
+    const { provider, calls } = twoCallStub(NODES, EDGES);
+    const result = await handleGenerate(provider, {
+      message: "a 2x2 matrix",
+      summary: { ...emptySummary, diagramKind: "matrix" },
+    });
+    expect(result.status).toBe(200);
+    expect(calls()).toBe(1); // grid: standalone cells are legitimate
+    const ops = (result.body as { operations: Operation[] }).operations;
+    expect(ops.filter((o) => o.op === "CONNECT_NODES")).toHaveLength(0);
+  });
+
+  it("does NOT re-ask when the result is already connected", async () => {
+    const { provider, calls } = twoCallStub([...NODES, ...EDGES], []);
+    const result = await handleGenerate(provider, { message: "flow", summary: emptySummary });
+    expect(result.status).toBe(200);
+    expect(calls()).toBe(1); // nothing floated, so no re-ask
+  });
+
+  it("leaves a single new node alone (no edges possible or needed)", async () => {
+    const { provider, calls } = twoCallStub(
+      [{ op: "CREATE_NODE", id: "only", nodeType: "note", label: "Just one" }],
+      EDGES,
+    );
+    const result = await handleGenerate(provider, { message: "one note", summary: emptySummary });
+    expect(result.status).toBe(200);
+    expect(calls()).toBe(1); // <2 created nodes: nothing to connect
+  });
+});
