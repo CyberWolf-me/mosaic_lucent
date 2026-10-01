@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import { Ico, ToolIco } from "./icons.js";
 import { useSettings, type Accent, type GridStyle, type Theme } from "../settings.js";
 import { getSessionUser } from "../session.js";
-import { sttProviderStatus } from "../stt/index.js";
 import {
   exportFormatChips,
   fetchBilling,
@@ -382,8 +381,15 @@ export function SettingsModal({
   // on mount: sign-in happens in the profile menu, which remounts this modal.
   const [account] = useState(() => getSessionUser());
   const accountInitials = account ? initialsFor(account.name || account.email) : "";
-  // Recomputed on each render so editing the LiveKit fields updates the hint.
-  const livekitStatus = sttProviderStatus().find((p) => p.id === "livekit");
+  // The LiveKit hint must reflect the settings being edited HERE, not the
+  // module-global provider config — that only the canvas/meeting views keep in
+  // sync, and it reads empty until one of them mounts, so Settings would show
+  // "add a token endpoint" even though the default is set. With a token
+  // endpoint present (the default) there is nothing to add, matching the
+  // "nothing to set up here" copy; the hint only appears if a BYO user clears it.
+  const livekitReason = s.livekitTokenUrl.trim()
+    ? null
+    : "Add a LiveKit token endpoint under Advanced — the browser must never hold a LiveKit API secret.";
 
   // docs/23 S3 / docs/24 Phase C: the workspace's provider policy — a fact
   // that lives server-side (the org's settings), not a client preference. It
@@ -737,12 +743,12 @@ export function SettingsModal({
                     mints a short-lived access token and tells the browser where to connect, so the
                     browser never holds a LiveKit API secret. Nothing to set up here.
                   </div>
-                  {livekitStatus?.reason && (
+                  {livekitReason && (
                     <div
                       className="desc"
                       style={{ marginTop: 8, marginBottom: 0, color: "var(--amber-1)" }}
                     >
-                      {livekitStatus.reason}
+                      {livekitReason}
                     </div>
                   )}
                   <details style={{ marginTop: 10 }}>
