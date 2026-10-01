@@ -191,6 +191,17 @@ export interface GenerateRequest {
   /** Documents whose text should inform the answer. */
   documents?: DocumentAttachment[];
   /**
+   * The workspace-memory digest (docs/23 doctrine): a server-derived, disposable
+   * projection of what this project already established — settled decisions,
+   * requirements, open questions, the supersession chain, a topic glossary — so
+   * a follow-up resolves "the login flow" against prior decisions and supersedes
+   * a settled one instead of re-deciding it. Built ONLY on the authoritative
+   * path (a stored board the caller owns, read from durable server state), never
+   * from the client; absent on advisory/anonymous generations. Context, not
+   * instructions — the harness renders it as data (escaped), never obeyed.
+   */
+  memory?: string;
+  /**
    * The requester's local calendar date, YYYY-MM-DD. The prompt tells the
    * model to resolve "by Friday" to a dueDate "against the conversation's
    * date" — without this it had no date to resolve against and guessed from

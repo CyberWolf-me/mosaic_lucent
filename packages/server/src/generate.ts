@@ -17,6 +17,7 @@ import {
 } from "@lucent/core";
 import type { Operation, Shape, Workspace } from "@lucent/core";
 import type { BoardStore } from "./boards.js";
+import { buildMemoryDigest } from "./generateContext.js";
 
 /**
  * Request handling for POST /api/generate, framework-free so it can run under
@@ -648,13 +649,37 @@ async function runGeneratePipeline(
     };
   }
 
+  // Resolve the authoritative board up front — before the model call — so its
+  // durable state can seed the workspace-memory digest (docs/23). Authoritative
+  // only when a stored board backs this request AND belongs to the caller: the
+  // HTTP layer checks ownership too, but enforcing it here means the function
+  // that touches the data can never be talked past with a hand-built call. A
+  // board owned by someone else falls back to advisory validation and is never
+  // read from or written to.
+  const candidateBoard = authoritative
+    ? await authoritative.store.get(authoritative.boardId)
+    : undefined;
+  const authoritativeBoard =
+    candidateBoard && userId === candidateBoard.ownerId ? candidateBoard : undefined;
+
+  // Workspace memory (the "workspace remembers" north star) rides the FIRST
+  // model call only — not the bounded repair round below, which fixes validator
+  // complaints that memory can't help with and whose re-send would double the
+  // context cost of a failure. Derived from durable server state, never the
+  // client summary; null off the authoritative path, so advisory/anonymous
+  // generations are unchanged.
+  const memory = authoritativeBoard
+    ? buildMemoryDigest(authoritativeBoard.workspace, authoritativeBoard.name)
+    : null;
+  const modelRequest = memory ? { ...parsed.data, memory } : parsed.data;
+
   let result;
   try {
     result = stream
       ? await (provider.streamOperations
-          ? provider.streamOperations(parsed.data, stream)
-          : streamViaGenerate(provider, parsed.data, stream))
-      : await provider.generateOperations(parsed.data);
+          ? provider.streamOperations(modelRequest, stream)
+          : streamViaGenerate(provider, modelRequest, stream))
+      : await provider.generateOperations(modelRequest);
   } catch (err) {
     return {
       ok: false,
@@ -676,16 +701,9 @@ async function runGeneratePipeline(
   const filtered = withoutTrust(result.operations.filter((op) => !isHumanOnlyOperation(op.op)));
   const permitted = stampAuthorship(filtered, userId ?? ASSISTANT_AUTHOR);
 
-  // Authoritative when a stored board backs this request AND belongs to the
-  // caller. The HTTP layer checks ownership too; enforcing it here means the
-  // function that touches the data can never be talked past with a hand-built
-  // call. A board owned by someone else falls back to advisory validation and
-  // is never read from or written to.
-  const candidateBoard = authoritative
-    ? await authoritative.store.get(authoritative.boardId)
-    : undefined;
-  const authoritativeBoard =
-    candidateBoard && userId === candidateBoard.ownerId ? candidateBoard : undefined;
+  // Authoritative board + ownership were resolved before the model call (above),
+  // so the digest could ride the first request; the stored workspace is the
+  // validation oracle here, else the request's own summary.
   const workspace = authoritativeBoard
     ? authoritativeBoard.workspace
     : workspaceFromSummary(parsed.data.summary);

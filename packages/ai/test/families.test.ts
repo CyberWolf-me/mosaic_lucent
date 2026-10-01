@@ -77,8 +77,8 @@ describe("the system prompt carries the registry's family catalog", () => {
     expect(SYSTEM_PROMPT).toContain("when it says rows are hidden");
   });
 
-  it("is version 17 and leaves no placeholder unresolved", () => {
-    expect(SYSTEM_PROMPT_VERSION).toBe(17);
+  it("is version 18 and leaves no placeholder unresolved", () => {
+    expect(SYSTEM_PROMPT_VERSION).toBe(18);
     expect(SYSTEM_PROMPT).not.toMatch(/\{\{[^}\n]{1,40}\}\}/);
     // The hand-written list it replaced is gone, not duplicated.
     expect(SYSTEM_PROMPT).not.toContain("Diagram kinds and what each is for");

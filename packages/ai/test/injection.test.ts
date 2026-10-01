@@ -350,6 +350,7 @@ describe("SYSTEM_PROMPT states the trust boundary", () => {
   it("names every envelope tag it asks the model to distrust", () => {
     for (const tag of [
       "<board-context>",
+      "<workspace-memory>",
       "<untrusted-document>",
       "<untrusted-comment>",
       "<untrusted-turn>",

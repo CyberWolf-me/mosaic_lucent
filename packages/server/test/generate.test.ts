@@ -1,8 +1,10 @@
 import { describe, it, expect } from "vitest";
 import { MockProvider, summarizeWorkspace } from "@lucent/ai";
+import type { GenerateRequest } from "@lucent/ai";
 import { ASSISTANT_AUTHOR, applyOperations, createWorkspace } from "@lucent/core";
 import type { Operation } from "@lucent/core";
 import { handleGenerate } from "../src/generate.js";
+import { InMemoryBoardStore } from "../src/boards.js";
 
 const provider = new MockProvider();
 const emptySummary = summarizeWorkspace(createWorkspace());
@@ -525,5 +527,92 @@ describe("the topic fold at the generate boundary (Stage C5)", () => {
     expect(setOp && setOp.op === "SET_STATEMENT" ? setOp.statement?.topic : undefined).toBe(
       "monetization",
     );
+  });
+});
+
+describe("workspace memory on the authoritative path", () => {
+  /** A provider that records the request it was handed, applying nothing. */
+  function capturingProvider() {
+    const seen: { request?: GenerateRequest } = {};
+    const provider = {
+      name: "capture",
+      async generateOperations(request: GenerateRequest) {
+        seen.request = request;
+        return { operations: [] as Operation[] };
+      },
+      async generateAnswer() {
+        throw new Error("capture provider cannot answer");
+      },
+      async generateExternalPlan() {
+        throw new Error("capture provider cannot select external actions");
+      },
+    };
+    return { provider, seen };
+  }
+
+  /** A stored board carrying one resolved decision, owned by `owner`. */
+  async function boardWithDecision(owner: string) {
+    const store = new InMemoryBoardStore();
+    const workspace = applyOperations(createWorkspace(), [
+      { op: "CREATE_NODE", id: "oauth", nodeType: "decision", label: "Use OAuth for login" },
+      {
+        op: "SET_STATEMENT",
+        id: "oauth",
+        statement: { kind: "decision", status: "resolved", topic: "authentication" },
+      },
+    ]);
+    const now = Date.now();
+    await store.put({
+      id: "brd_mem",
+      orgId: "org_mem",
+      ownerId: owner,
+      name: "Checkout",
+      workspace,
+      createdAt: now,
+      updatedAt: now,
+    });
+    return store;
+  }
+
+  it("injects the board's accumulated decisions into the model request", async () => {
+    const { provider, seen } = capturingProvider();
+    const store = await boardWithDecision("u1");
+    // The client summary is deliberately EMPTY: memory must come from durable
+    // server state, not from whatever the client chose to send.
+    const result = await handleGenerate(
+      provider,
+      { message: "add the login step", summary: emptySummary, boardId: "brd_mem" },
+      "u1",
+      { boardId: "brd_mem", store },
+    );
+    expect(result.status).toBe(200);
+    expect(seen.request?.memory).toBeDefined();
+    expect(seen.request?.memory).toContain("Settled decisions");
+    expect(seen.request?.memory).toContain("Use OAuth for login");
+  });
+
+  it("sends no memory on the advisory path (no authoritative board)", async () => {
+    const { provider, seen } = capturingProvider();
+    const result = await handleGenerate(provider, {
+      message: "add the login step",
+      summary: emptySummary,
+    });
+    expect(result.status).toBe(200);
+    expect(seen.request?.memory).toBeUndefined();
+  });
+
+  it("sends no memory when the caller does not own the board", async () => {
+    const { provider, seen } = capturingProvider();
+    const store = await boardWithDecision("someone-else");
+    const result = await handleGenerate(
+      provider,
+      { message: "add the login step", summary: emptySummary, boardId: "brd_mem" },
+      "u1",
+      { boardId: "brd_mem", store },
+    );
+    expect(result.status).toBe(200);
+    // Not the owner → advisory validation, and a board you don't own never
+    // leaks its memory into your prompt.
+    expect(seen.request?.memory).toBeUndefined();
   });
 });

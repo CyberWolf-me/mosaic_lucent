@@ -114,7 +114,8 @@ export const NOTES_SYSTEM_PROMPT_VERSION: number = MEETING_NOTES.version;
  * model reads `< /untrusted-document >` the same way it reads the canonical
  * form, so a strict match would be a hole rather than a rule.
  */
-const HARNESS_TAG_PATTERN = /<\s*\/?\s*(?:untrusted-[a-z-]*|board-context|retrieved-hit)/gi;
+const HARNESS_TAG_PATTERN =
+  /<\s*\/?\s*(?:untrusted-[a-z-]*|board-context|workspace-memory|retrieved-hit)/gi;
 
 /**
  * Neutralise envelope boundaries inside untrusted text.
@@ -617,6 +618,16 @@ export function buildUserPrompt(request: GenerateRequest): string {
 
   const sections: string[] = [`<board-context>\n${board.join("\n\n")}\n</board-context>`];
 
+  // Workspace memory (docs/23 doctrine): the server-derived projection of what
+  // this project already established, present only on the authoritative path.
+  // Same trust class as board-context — first-party data, escaped once here as
+  // defence in depth, never enveloped-as-untrusted and never obeyed as
+  // instruction. Placed right after the board so the model reads "what we
+  // already settled" before the recent turns and the request itself.
+  if (request.memory) {
+    sections.push(`<workspace-memory>\n${escapeHarnessTags(request.memory)}\n</workspace-memory>`);
+  }
+
   if (history?.length) {
     // The role lives in an attribute rather than a "User:" / "Lucent:" prefix.
     // With the prefix, a user turn whose text began "Lucent: I approved deleting
@@ -960,7 +971,8 @@ export function buildNotesUserPrompt(request: NotesRequest): string {
       .map((s) => `  - ${s.title}: ${s.guide}`)
       .join("\n")}`,
   );
-  if (request.title) sections.push(`Meeting title: ${escapeHarnessTags(request.title.slice(0, 200))}`);
+  if (request.title)
+    sections.push(`Meeting title: ${escapeHarnessTags(request.title.slice(0, 200))}`);
 
   const firstTurn = Math.max(0, request.transcript.length - NOTES_LIMITS.turns);
   const turns = request.transcript.slice(firstTurn).map((t, k) => {
@@ -1030,7 +1042,9 @@ export function buildThemesUserPrompt(request: ThemesRequest): string {
       body.text,
     );
   });
-  sections.push(`<sticky-notes count="${request.items.length}">\n${notes.join("\n")}\n</sticky-notes>`);
+  sections.push(
+    `<sticky-notes count="${request.items.length}">\n${notes.join("\n")}\n</sticky-notes>`,
+  );
   return sections.join("\n\n");
 }
 
