@@ -213,7 +213,13 @@ export const NodeCard = memo(function NodeCard({
   bpmnShape,
   details,
 }: NodeCardProps) {
-  const drag = useRef<{ sx: number; sy: number; moved: boolean } | null>(null);
+  // `ox`/`oy` capture the node's position at grab time. The live `x`/`y` props
+  // already fold in the in-flight drag delta (DiagramLayer applies the override
+  // before rendering), so computing the new position from them re-adds the
+  // whole gesture every frame and the node flies off. Anchor to the start.
+  const drag = useRef<{ sx: number; sy: number; ox: number; oy: number; moved: boolean } | null>(
+    null,
+  );
   const [dragging, setDragging] = useState(false);
 
   // A node that carries a statement renders as a statement card: the kind
@@ -275,7 +281,7 @@ export const NodeCard = memo(function NodeCard({
     setDragging(false);
     if (!d) return;
     if (d.moved) {
-      onMove?.(x + (clientX - d.sx) / scale, y + (clientY - d.sy) / scale, true);
+      onMove?.(d.ox + (clientX - d.sx) / scale, d.oy + (clientY - d.sy) / scale, true);
     }
   };
 
@@ -291,7 +297,7 @@ export const NodeCard = memo(function NodeCard({
     if (!additive && state !== "selected") {
       onClick?.(false);
     }
-    drag.current = { sx: e.clientX, sy: e.clientY, moved: false };
+    drag.current = { sx: e.clientX, sy: e.clientY, ox: x, oy: y, moved: false };
     // Capture keeps the move/up stream glued to the card even when the
     // pointer leaves its bounds (skill §2: respect the grab, track 1:1).
     try {
@@ -306,14 +312,18 @@ export const NodeCard = memo(function NodeCard({
     const d = drag.current;
     if (!d || !onMove) return;
     // Hysteresis in screen px: a tap that jitters a few pixels stays a click.
-    if (!d.moved && Math.abs(e.clientX - d.sx) < DRAG_HYSTERESIS_PX && Math.abs(e.clientY - d.sy) < DRAG_HYSTERESIS_PX) {
+    if (
+      !d.moved &&
+      Math.abs(e.clientX - d.sx) < DRAG_HYSTERESIS_PX &&
+      Math.abs(e.clientY - d.sy) < DRAG_HYSTERESIS_PX
+    ) {
       return;
     }
     if (!d.moved) {
       d.moved = true;
       setDragging(true);
     }
-    onMove(x + (e.clientX - d.sx) / scale, y + (e.clientY - d.sy) / scale, false);
+    onMove(d.ox + (e.clientX - d.sx) / scale, d.oy + (e.clientY - d.sy) / scale, false);
   };
 
   const onPointerUp = (e: React.PointerEvent) => {
@@ -363,7 +373,9 @@ export const NodeCard = memo(function NodeCard({
         ...(opacity !== undefined && opacity !== 1
           ? { opacity, transition: "opacity 160ms ease" }
           : {}),
-        ...(stmt ? ({ "--stmt-tint": statementTint ?? KIND_TINT[stmt.kind] } as CSSProperties) : {}),
+        ...(stmt
+          ? ({ "--stmt-tint": statementTint ?? KIND_TINT[stmt.kind] } as CSSProperties)
+          : {}),
         animationDelay: state === "emerging" ? `${delay}ms, ${delay + 400}ms` : `${delay}ms`,
       }}
     >
