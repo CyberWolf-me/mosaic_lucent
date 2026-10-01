@@ -551,7 +551,7 @@ export function DiagramLayer({
           // not on the board yet. 0 (the normal immediate draw) once the sketch
           // clears, or for an edge between two already-present nodes.
           const sketchEdgeDelay = (() => {
-            if (!sketchOrder) return 0;
+            if (!sketchOrder || dragOverride) return 0;
             const later = Math.max(sketchOrder[e.source] ?? -1, sketchOrder[e.target] ?? -1);
             return later >= 0 ? later * SKETCH_STEP + SKETCH_EDGE_LAG : 0;
           })();
@@ -697,7 +697,7 @@ export function DiagramLayer({
         // instant mount (delay 0 on the culled live canvas, a gentle index
         // stagger on an uncounted preview).
         const delay =
-          sketchOrder && sketchOrder[n.id] != null
+          sketchOrder && sketchOrder[n.id] != null && !dragOverride
             ? sketchOrder[n.id]! * SKETCH_STEP
             : view
               ? 0

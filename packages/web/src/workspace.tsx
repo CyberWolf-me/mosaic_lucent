@@ -329,6 +329,8 @@ export interface WorkspaceState {
   /** Sketch choreography: nodeId → flow-order index for the batch just
    * generated, so the canvas reveals it node-by-node; null when idle. */
   sketchOrder: Record<string, number> | null;
+  /** End the sketch reveal now (called when the user starts interacting). */
+  cancelSketch: () => void;
   /** UX-2: which generation phase the pill should name; null when idle. */
   genPhase: GenPhase | null;
   /** UX-2: abort the in-flight generation; safe before apply, no-op otherwise. */
@@ -835,6 +837,17 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
    * has played, so pans and manual edits stay instant. */
   const [sketchOrder, setSketchOrder] = useState<Record<string, number> | null>(null);
   const sketchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** End the reveal immediately. The moment the user grabs a node, the sketch
+   * animation (which hides each node/edge until its turn) must get out of the
+   * way — otherwise a drag during the ~2s reveal fights the still-hidden cards
+   * and connectors and reads as a glitch. Idempotent. */
+  const cancelSketch = useCallback(() => {
+    if (sketchTimer.current) {
+      clearTimeout(sketchTimer.current);
+      sketchTimer.current = null;
+    }
+    setSketchOrder((cur) => (cur === null ? cur : null));
+  }, []);
   /** UX-2: named generation phase; drives the pill status + Cancel. */
   const [genPhase, setGenPhase] = useState<GenPhase | null>(null);
   const genAbortRef = useRef<AbortController | null>(null);
@@ -2652,6 +2665,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     streamChars,
     streamNodes,
     sketchOrder,
+    cancelSketch,
     genPhase,
     cancelSend,
     listening,

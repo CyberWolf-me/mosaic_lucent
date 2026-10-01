@@ -296,6 +296,7 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
     streamChars,
     streamNodes,
     sketchOrder,
+    cancelSketch,
     genPhase: aiPhase,
     cancelSend,
     canvasPhase,
@@ -1380,6 +1381,9 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
 
   const moveNode = useCallback(
     (id: string, x: number, y: number, commit: boolean) => {
+      // Grabbing a node ends the sketch reveal at once, so a drag never fights
+      // a node or connector that the choreography still has hidden.
+      cancelSketch();
       const origin = workspace.nodes[id]?.position;
       // The group that travels together: the multi-selection when the dragged
       // node is part of it, otherwise just this node.
@@ -1421,7 +1425,7 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
       if (ops.length === 0) return;
       applyManual(ops, ops.length > 1 ? `Move ${ops.length} nodes` : "Move node");
     },
-    [applyManual, workspace.nodes, selectedNodes],
+    [applyManual, workspace.nodes, selectedNodes, cancelSketch],
   );
 
   /** Click/shift-click a node. Additive keeps the existing multi-selection. */
