@@ -226,6 +226,56 @@ describe("OpenAI-compatible streaming", () => {
     expect(calls).toBe(2);
     expect(bodies[1]).toMatchObject({ tool_choice: "auto" });
   });
+
+  it("falls back to the non-streaming path when the streamed tool JSON is malformed", async () => {
+    // A flaky gateway dumps a buffered response that stops mid-array, so the
+    // accumulated tool arguments won't parse. The stream path must recover by
+    // re-asking without streaming rather than failing the whole generation.
+    const broken = '{"operations": [{"op": "CREATE_NODE", "id": "a", "nodeType": "step"'; // truncated
+    const streamFrames = [
+      "data: " +
+        JSON.stringify({
+          model: "routed-model",
+          choices: [{ delta: { tool_calls: [{ function: { arguments: broken } }] } }],
+        }) +
+        "\n\n",
+      "data: [DONE]\n\n",
+    ];
+    const okBody = {
+      choices: [
+        {
+          message: {
+            content: JSON.stringify({
+              operations: [{ op: "CREATE_NODE", id: "a", nodeType: "step", label: "A" }],
+              explanation: "ok",
+            }),
+          },
+        },
+      ],
+    };
+    let calls = 0;
+    const provider = new OpenAICompatibleProvider({
+      apiKey: "k",
+      baseUrl: "https://gateway.test/v1/chat/completions",
+      model: "m",
+      fetchImpl: (async () => {
+        calls += 1;
+        if (calls === 1) return sseResponse(streamFrames);
+        return new Response(JSON.stringify(okBody), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }) as typeof fetch,
+      maxRetries: 3,
+    });
+    const result = await provider.streamOperations(
+      { message: "x", summary: EMPTY_SUMMARY },
+      collecting(),
+    );
+    expect(result.operations).toHaveLength(1);
+    expect(result.operations[0]).toMatchObject({ op: "CREATE_NODE", id: "a" });
+    expect(calls).toBe(2); // streamed JSON unparseable → exactly one non-streaming re-ask
+  });
 });
 
 describe("Anthropic streaming", () => {

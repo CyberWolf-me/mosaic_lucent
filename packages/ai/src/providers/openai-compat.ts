@@ -137,7 +137,13 @@ function withNonRecursiveTools(bodyText: string): string {
   const body = JSON.parse(bodyText) as Record<string, unknown>;
   if (Array.isArray(body.tools)) {
     body.tools = JSON.parse(JSON.stringify(body.tools), (key, value) => {
-      if (key === "children" && value && typeof value === "object" && value.items && value.items["$ref"]) {
+      if (
+        key === "children" &&
+        value &&
+        typeof value === "object" &&
+        value.items &&
+        value.items["$ref"]
+      ) {
         return { type: "array", items: { type: "object", additionalProperties: true } };
       }
       return value;
@@ -530,7 +536,10 @@ export class OpenAICompatibleProvider implements LLMProvider {
   private async forcedTool<T extends object>(
     system: string,
     user: string,
-    tool: { type: "function"; function: { name: string; description: string; parameters: unknown } },
+    tool: {
+      type: "function";
+      function: { name: string; description: string; parameters: unknown };
+    },
     parse: (raw: string | object) => T,
     maxTokens = 4096,
   ): Promise<T & ReturnType<typeof completionMeta>> {
@@ -549,7 +558,10 @@ export class OpenAICompatibleProvider implements LLMProvider {
     modelToUse: string,
     system: string,
     user: string,
-    tool: { type: "function"; function: { name: string; description: string; parameters: unknown } },
+    tool: {
+      type: "function";
+      function: { name: string; description: string; parameters: unknown };
+    },
     parse: (raw: string | object) => T,
     maxTokens: number,
   ): Promise<T & ReturnType<typeof completionMeta>> {
@@ -561,7 +573,9 @@ export class OpenAICompatibleProvider implements LLMProvider {
         { role: "user", content: user },
       ],
       tools: [tool],
-      tool_choice: this.forceAutoToolChoice ? "auto" : { type: "function", function: { name: toolName } },
+      tool_choice: this.forceAutoToolChoice
+        ? "auto"
+        : { type: "function", function: { name: toolName } },
       max_tokens: maxTokens,
       temperature: 0.2,
       stream: false,
@@ -603,8 +617,13 @@ export class OpenAICompatibleProvider implements LLMProvider {
       }
       const data = (await response.json()) as ChatResponse;
       const message = data.choices?.[0]?.message;
-      const meta = completionMeta(data.model ?? modelToUse, data.usage?.prompt_tokens, data.usage?.completion_tokens);
-      const call = message?.tool_calls?.find((c) => c.function?.name === toolName) ?? message?.tool_calls?.[0];
+      const meta = completionMeta(
+        data.model ?? modelToUse,
+        data.usage?.prompt_tokens,
+        data.usage?.completion_tokens,
+      );
+      const call =
+        message?.tool_calls?.find((c) => c.function?.name === toolName) ?? message?.tool_calls?.[0];
       const draft = call?.function?.arguments
         ? parse(call.function.arguments)
         : parse(message?.content ?? "");
@@ -864,7 +883,19 @@ export class OpenAICompatibleProvider implements LLMProvider {
       usage?.prompt_tokens,
       usage?.completion_tokens,
     );
-    if (argumentsText !== "") return parseToolArguments(argumentsText, meta);
+    if (argumentsText !== "") {
+      try {
+        return parseToolArguments(argumentsText, meta);
+      } catch {
+        // The streamed tool-call JSON came back malformed or truncated — a flaky
+        // gateway dumping a buffered response, or a model that stopped mid-array
+        // ("Tool arguments were not valid JSON"). Nothing was applied (the client
+        // only saw prose), so re-ask without streaming, which carries its own
+        // retry ladder and often parses cleanly the second time. Same escape
+        // hatch as the zero-content case below.
+        return this.executeGenerateOperations(request, modelToUse);
+      }
+    }
     if (proseText !== "") return parseModelJson(proseText, meta);
     // Some routes close an SSE stream with zero content even though the same request
     // answers over the non-streaming endpoint. Nothing was emitted to the caller,
