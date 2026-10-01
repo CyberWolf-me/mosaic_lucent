@@ -324,6 +324,11 @@ export interface WorkspaceState {
   busy: boolean;
   /** M5/E1: streamed-payload characters received so far while busy; 0 otherwise. */
   streamChars: number;
+  /** Node labels parsed from the stream so far — a live build preview; [] when idle. */
+  streamNodes: string[];
+  /** Sketch choreography: nodeId → flow-order index for the batch just
+   * generated, so the canvas reveals it node-by-node; null when idle. */
+  sketchOrder: Record<string, number> | null;
   /** UX-2: which generation phase the pill should name; null when idle. */
   genPhase: GenPhase | null;
   /** UX-2: abort the in-flight generation; safe before apply, no-op otherwise. */
@@ -820,6 +825,16 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [busy, setBusy] = useState(false);
   /** M5/E1: characters of the streamed payload received so far (display only). */
   const [streamChars, setStreamChars] = useState(0);
+  /** Node labels parsed from the stream as the model writes them — a live
+   * preview of the diagram taking shape (display only; the validated batch at
+   * `done` is still authoritative). */
+  const [streamNodes, setStreamNodes] = useState<string[]>([]);
+  /** Google-Stitch-style reveal: nodeId → its position in the just-generated
+   * batch's flow sequence, so the canvas sketches the diagram in node-by-node
+   * (connectors drawing after each). Null when idle; cleared once the sequence
+   * has played, so pans and manual edits stay instant. */
+  const [sketchOrder, setSketchOrder] = useState<Record<string, number> | null>(null);
+  const sketchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** UX-2: named generation phase; drives the pill status + Cancel. */
   const [genPhase, setGenPhase] = useState<GenPhase | null>(null);
   const genAbortRef = useRef<AbortController | null>(null);
@@ -1559,13 +1574,25 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         // `chat` (not withUser) is the prior conversation; the current message is
         // sent separately, so passing withUser would duplicate it.
         let streamed = 0;
+        let deltaBuffer = "";
         let sawDelta = false;
+        setStreamNodes([]);
         const result = await streamGenerate(
           text,
           workspace,
           (delta) => {
             streamed += delta.length;
             setStreamChars(streamed);
+            // Progressive preview: surface node labels AS the model writes them,
+            // so the wait shows the diagram taking shape rather than an opaque
+            // character count. A heuristic parse of the streamed op JSON — it
+            // only drives the progress display; the validated batch at `done`
+            // is still the single source of truth for the canvas.
+            deltaBuffer += delta;
+            const labels = [...deltaBuffer.matchAll(/"label"\s*:\s*"((?:[^"\\]|\\.)*)"/g)].map(
+              (m) => (m[1] ?? "").replace(/\\"/g, '"'),
+            );
+            if (labels.length) setStreamNodes(labels);
             if (!sawDelta) {
               sawDelta = true;
               setGenPhase("constructing");
@@ -1587,6 +1614,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           },
         );
         setStreamChars(0);
+        setStreamNodes([]);
         setGenPhase("validating");
         // Answer-only reply (a question about the board): no ops, just explain.
         // A "this belongs on its own board" reply (the prompt's parallel-diagram
@@ -1808,6 +1836,22 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           return { outcome: "answered", text: explanation, reply };
         } else {
           const next = applyStamped();
+          // Google-Stitch-style reveal: sketch the new nodes in FLOW ORDER with
+          // their connectors drawing in after each. The model emits CREATE_NODE
+          // start→end, so creation order is flow order. Cleared on a timer so
+          // later renders (pans, culling mounts, manual edits) stay instant —
+          // only this freshly generated batch choreographs.
+          const createdIds = foldedOps.flatMap((op) => (op.op === "CREATE_NODE" ? [op.id] : []));
+          if (createdIds.length >= 2) {
+            const order: Record<string, number> = {};
+            createdIds.forEach((id, idx) => (order[id] = idx));
+            setSketchOrder(order);
+            if (sketchTimer.current) clearTimeout(sketchTimer.current);
+            sketchTimer.current = setTimeout(
+              () => setSketchOrder(null),
+              Math.min(createdIds.length * 240 + 900, 6000),
+            );
+          }
           const conversation: ChatEntry[] = [
             ...withUser,
             {
@@ -2606,6 +2650,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     chat,
     busy,
     streamChars,
+    streamNodes,
+    sketchOrder,
     genPhase,
     cancelSend,
     listening,

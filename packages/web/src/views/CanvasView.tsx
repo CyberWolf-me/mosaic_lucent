@@ -294,6 +294,8 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
     chat,
     busy,
     streamChars,
+    streamNodes,
+    sketchOrder,
     genPhase: aiPhase,
     cancelSend,
     canvasPhase,
@@ -2951,19 +2953,29 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
     validating: "Checking every change…",
     applying: "Placing it on the board…",
   };
+  // A live build preview: the node labels the model has written so far, so the
+  // wait shows the diagram taking shape instead of an opaque character count.
+  // Falls back to the character count before any label has streamed.
+  const buildingPreview =
+    streamNodes.length > 0
+      ? `${streamNodes.length} node${streamNodes.length === 1 ? "" : "s"}: ${streamNodes
+          .slice(-3)
+          .join(" · ")}`
+      : streamChars > 0
+        ? `${streamChars} characters received`
+        : null;
   const status =
     canvasPhase === "generating"
       ? {
           text:
             (aiPhase ? PHASE_LABEL[aiPhase] : "Constructing your diagram…") +
-            (streamChars > 0 ? ` · ${streamChars} characters received` : ""),
+            (buildingPreview ? ` · ${buildingPreview}` : ""),
         }
       : canvasPhase === "proposing"
         ? { text: `Proposing ${proposal?.operations.length ?? 0} changes` }
         : null;
   const genPhase = aiPhase;
-  const genProgress =
-    canvasPhase === "generating" && streamChars > 0 ? `${streamChars} characters received` : null;
+  const genProgress = canvasPhase === "generating" ? buildingPreview : null;
 
   // P1-RF-001: a failed first generation returns to this hero, and the error
   // + retry used to live only in the collapsed conversation — invisible, the
@@ -3154,6 +3166,7 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
                 onToggleCollapse={toggleRegionCollapse}
                 expandedRegions={expandedRegions}
                 onToggleExpand={toggleRegionExpand}
+                sketchOrder={sketchOrder}
                 {...(tool === "select" && canEdit
                   ? { onMoveNode: moveNode, onRenameNode: renameNode }
                   : {})}

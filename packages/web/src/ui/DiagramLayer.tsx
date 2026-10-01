@@ -32,6 +32,12 @@ import type { Box } from "../board/geometry.js";
  * language. Pure presentation: positions already come from computeLayout.
  * `overrides` can force a node state (e.g. selected/proposed) by id.
  */
+/** Sketch-reveal pacing: ms between successive nodes, and how long after a
+ * node lands its connector begins to draw. ~12 nodes ≈ 2.9s — a deliberate,
+ * crafted build without feeling slow. */
+const SKETCH_STEP = 240;
+const SKETCH_EDGE_LAG = 140;
+
 export function DiagramLayer({
   workspace,
   selected,
@@ -53,6 +59,7 @@ export function DiagramLayer({
   onToggleCollapse,
   expandedRegions,
   onToggleExpand,
+  sketchOrder,
 }: {
   workspace: Workspace;
   selected?: string | null;
@@ -84,6 +91,13 @@ export function DiagramLayer({
    * live canvas; a preview leaves it out and every object renders.
    */
   viewport?: Box | null;
+  /**
+   * Google-Stitch-style reveal: nodeId → its index in the just-generated flow
+   * sequence. When present, those nodes animate in one-by-one (and their
+   * connectors draw after) instead of all at once. Absent on every render but
+   * the one right after a generation, so pans and edits stay instant.
+   */
+  sketchOrder?: Record<string, number> | null;
   /**
    * Region collapse (P1, docs/15 M3.3): ids of groups whose members render
    * as one summary card instead of their nodes and connectors. Render-local
@@ -166,8 +180,14 @@ export function DiagramLayer({
       ? (() => {
           const x = Math.min(nodeFrame.x, ...framed.map((r) => r.x));
           const y = Math.min(nodeFrame.y, ...framed.map((r) => r.y));
-          const right = Math.max(nodeFrame.x + nodeFrame.width, ...framed.map((r) => r.x + r.width));
-          const bottom = Math.max(nodeFrame.y + nodeFrame.height, ...framed.map((r) => r.y + r.height));
+          const right = Math.max(
+            nodeFrame.x + nodeFrame.width,
+            ...framed.map((r) => r.x + r.width),
+          );
+          const bottom = Math.max(
+            nodeFrame.y + nodeFrame.height,
+            ...framed.map((r) => r.y + r.height),
+          );
           return { x, y, width: right - x, height: bottom - y };
         })()
       : nodeFrame;
@@ -345,9 +365,13 @@ export function DiagramLayer({
                 style={{ fontSize: 11, color: "var(--ink-3)", marginTop: 4, opacity: 0.9 }}
               >
                 {[
-                  g.openDecisions > 0 ? `${g.openDecisions} open decision${g.openDecisions === 1 ? "" : "s"}` : "",
+                  g.openDecisions > 0
+                    ? `${g.openDecisions} open decision${g.openDecisions === 1 ? "" : "s"}`
+                    : "",
                   g.openRisks > 0 ? `${g.openRisks} risk${g.openRisks === 1 ? "" : "s"}` : "",
-                  g.openQuestions > 0 ? `${g.openQuestions} question${g.openQuestions === 1 ? "" : "s"}` : "",
+                  g.openQuestions > 0
+                    ? `${g.openQuestions} question${g.openQuestions === 1 ? "" : "s"}`
+                    : "",
                 ]
                   .filter(Boolean)
                   .join(" · ")}
@@ -374,7 +398,10 @@ export function DiagramLayer({
                     e.stopPropagation();
                     onToggleExpand(g.id);
                   },
-                  title: pill.length > 0 ? `${pill} — double-click to summarize` : "Double-click to summarize",
+                  title:
+                    pill.length > 0
+                      ? `${pill} — double-click to summarize`
+                      : "Double-click to summarize",
                 }
               : onToggleCollapse && g.kind
                 ? {
@@ -519,6 +546,15 @@ export function DiagramLayer({
           const cls = [proposed ? "dashed emerging" : isQuiet ? "edge-dep" : "", "appear"]
             .filter(Boolean)
             .join(" ");
+          // Sketch reveal: a connector draws in just after the LATER of its two
+          // endpoints has appeared, so a line never reaches for a node that is
+          // not on the board yet. 0 (the normal immediate draw) once the sketch
+          // clears, or for an edge between two already-present nodes.
+          const sketchEdgeDelay = (() => {
+            if (!sketchOrder) return 0;
+            const later = Math.max(sketchOrder[e.source] ?? -1, sketchOrder[e.target] ?? -1);
+            return later >= 0 ? later * SKETCH_STEP + SKETCH_EDGE_LAG : 0;
+          })();
           // Selection focus (P1): an edge stays fully drawn when EITHER
           // endpoint is prominent, so the selected node's relationships
           // remain readable while unrelated clusters recede.
@@ -553,11 +589,12 @@ export function DiagramLayer({
               pathLength={100}
               markerEnd={proposed ? "url(#arr-amber)" : "url(#arr)"}
               opacity={edgeFocus * density.opacity}
-              style={
-                edgeFocus !== 1 || density.opacity !== 1
+              style={{
+                ...(edgeFocus !== 1 || density.opacity !== 1
                   ? { transition: "opacity 160ms ease" }
-                  : undefined
-              }
+                  : {}),
+                ...(sketchEdgeDelay > 0 ? { animationDelay: `${sketchEdgeDelay}ms` } : {}),
+              }}
             />
           );
         })}
@@ -655,7 +692,16 @@ export function DiagramLayer({
         // The staggered entrance reads as a reveal on a small board, but once
         // culling is on cards mount as the camera moves, and a per-index delay
         // would make an ordinary pan look like the board loading in slow motion.
-        const delay = view ? 0 : i * 45;
+        // Sketch reveal: a freshly generated node waits its turn in flow order
+        // (sketchOrder), so the diagram draws itself in; otherwise the ordinary
+        // instant mount (delay 0 on the culled live canvas, a gentle index
+        // stagger on an uncounted preview).
+        const delay =
+          sketchOrder && sketchOrder[n.id] != null
+            ? sketchOrder[n.id]! * SKETCH_STEP
+            : view
+              ? 0
+              : i * 45;
         // Selection focus (P1): when a node is selected, it and its direct
         // neighbours stay at full strength while the rest of a busy board
         // recedes — the cheapest possible readability win, and purely
