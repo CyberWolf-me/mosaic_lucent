@@ -347,8 +347,83 @@
   line-height: 1.45;
   color: var(--ink-3);
 }
+
+/* Board-anchored input popover (image-gen / embed) — replaces window.prompt,
+   mirrors .vectors-pop so it reads as part of the board, not browser chrome. */
+.board-prompt-pop {
+  position: absolute;
+  top: 112px;
+  left: 50%;
+  z-index: 40;
+  width: min(360px, calc(100vw - 32px));
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px 14px;
+  border-radius: 14px;
+  background: oklch(from var(--paper-1) l c h / 0.98);
+  border: 1px solid oklch(from var(--paper-4) l c h / 0.7);
+  box-shadow: var(--elev-3, 0 12px 32px rgb(0 0 0 / 0.14));
+  animation: camera-nav-in 0.18s var(--e-out, ease-out) both;
+}
+.board-prompt-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink-0);
+}
+.board-prompt-close {
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: 7px;
+  font-size: 16px;
+  line-height: 1;
+  color: var(--ink-3);
+  background: transparent;
+  cursor: pointer;
+}
+.board-prompt-close:hover {
+  color: var(--ink-0);
+  background: var(--paper-3);
+}
+.board-prompt-input {
+  width: 100%;
+  padding: 9px 11px;
+  border-radius: 9px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--ink-0);
+  background: var(--paper-0);
+  border: 1px solid oklch(from var(--paper-4) l c h / 0.8);
+}
+.board-prompt-input:focus-visible {
+  outline: none;
+  border-color: var(--bloom-2);
+  box-shadow: 0 0 0 3px var(--bloom-wash);
+}
+.board-prompt-go {
+  align-self: flex-end;
+  padding: 8px 14px;
+  border: 0;
+  border-radius: 9px;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--paper-0);
+  background: var(--ink-0);
+  cursor: pointer;
+}
+.board-prompt-go:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
 @media (prefers-reduced-motion: reduce) {
   .vectors-pop,
+  .board-prompt-pop,
   .vectors-tile.is-loading {
     animation: none;
   }

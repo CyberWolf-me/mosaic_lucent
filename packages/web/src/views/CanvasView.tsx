@@ -14,6 +14,7 @@ import {
   type Tool,
   type DropKind,
 } from "../ui/ShapeToolbar.js";
+import { BoardPromptPopover } from "../ui/BoardPromptPopover.js";
 import { ToolIco } from "../ui/icons.js";
 import { EmptyState } from "./EmptyState.js";
 import { Tour } from "../ui/Tour.js";
@@ -827,7 +828,10 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
   // Supports both manual toolbar prompt and conversational voice/chat prompts.
   const generateImageShape = useCallback(
     async (customPrompt?: string): Promise<string | null> => {
-      const rawPrompt = customPrompt ?? window.prompt("Describe an image for Lucent to generate:");
+      // The input is collected by the board-anchored BoardPromptPopover (or a
+      // voice/chat prompt), never a native window.prompt — so a bare call with
+      // no prompt is a no-op rather than a browser dialog.
+      const rawPrompt = customPrompt;
       if (!rawPrompt) return null;
       const prompt = enrichImagePromptWithContext(rawPrompt, workspace, chat, projectName);
       notify("Generating reference image with Lucent Imagine…");
@@ -1235,31 +1239,34 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
     [applyManual, shapes, notify],
   );
 
-  // Embed flow: prompt for a URL, resolve it, and drop an embed shape.
-  const addEmbed = useCallback(() => {
-    const raw = window.prompt("Paste a GIF, YouTube/Vimeo, or web link to embed:");
-    if (!raw) return;
-    const info = resolveEmbed(raw);
-    if (!info) {
-      notify("That doesn't look like a valid http(s) URL.");
-      return;
-    }
-    const isIframe = info.mode === "iframe";
-    applyManual(
-      [
-        {
-          op: "CREATE_SHAPE",
-          id: shapeId(),
-          kind: "embed",
-          position: { x: 300, y: 220 },
-          size: isIframe ? { width: 400, height: 260 } : { width: 260, height: 200 },
-          src: info.src,
-          z: nextZ(shapes),
-        },
-      ],
-      "Add embed",
-    );
-  }, [applyManual, notify, shapes]);
+  // Embed flow: given a URL (from the board-anchored popover), resolve it and
+  // drop an embed shape. The URL arrives as an argument now — the native
+  // window.prompt that used to collect it rendered detached from the board.
+  const addEmbed = useCallback(
+    (raw: string) => {
+      const info = resolveEmbed(raw);
+      if (!info) {
+        notify("That doesn't look like a valid http(s) URL.");
+        return;
+      }
+      const isIframe = info.mode === "iframe";
+      applyManual(
+        [
+          {
+            op: "CREATE_SHAPE",
+            id: shapeId(),
+            kind: "embed",
+            position: { x: 300, y: 220 },
+            size: isIframe ? { width: 400, height: 260 } : { width: 260, height: 200 },
+            src: info.src,
+            z: nextZ(shapes),
+          },
+        ],
+        "Add embed",
+      );
+    },
+    [applyManual, notify, shapes],
+  );
 
   // Paste/duplicate a set of shapes offset by (dx,dy); selects the new copies.
   // Returns the new ids so callers (alt-drag) can keep dragging the copy.
@@ -2384,6 +2391,10 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
   // vector at the centre of the view. Brand marks keep their colour; outline
   // icons take the shape's ink.
   const [vectorsOpen, setVectorsOpen] = useState(false);
+  // The image-gen / embed toolbar buttons open this board-anchored input popover
+  // instead of a native window.prompt (which the browser pins to the top of the
+  // screen, detached from the board — the "different panel" the user hit).
+  const [boardPrompt, setBoardPrompt] = useState<null | { kind: "image" | "embed" }>(null);
   const [vectorsPrompt, setVectorsPrompt] = useState<string | undefined>(undefined);
   // "More like this" from the inspector opens Generate with the vector's prompt.
   useEffect(() => {
@@ -3091,6 +3102,16 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
 
   return (
     <div style={{ position: "absolute", inset: 0 }} onContextMenu={onCanvasContextMenu}>
+      {boardPrompt && canEdit && (
+        <BoardPromptPopover
+          kind={boardPrompt.kind}
+          onSubmit={(text) => {
+            if (boardPrompt.kind === "image") void generateImageShape(text);
+            else addEmbed(text);
+          }}
+          onClose={() => setBoardPrompt(null)}
+        />
+      )}
       {showHero ? (
         <>
           <div style={{ position: "absolute", inset: 0 }}>
@@ -3130,7 +3151,7 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
             }
             listening={listening}
             voicePhase={voicePhase}
-            onGenImage={() => generateImageShape()}
+            onGenImage={() => setBoardPrompt({ kind: "image" })}
             onBlankBoard={() => setBlankBoardStarted(true)}
             failedAttempt={heroFailure}
             generating={heroGenerating}
@@ -3486,8 +3507,8 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
             <ShapeToolbar
               activeTool={tool}
               onSelectTool={changeTool}
-              onEmbed={addEmbed}
-              onGenImage={generateImageShape}
+              onEmbed={() => setBoardPrompt({ kind: "embed" })}
+              onGenImage={() => setBoardPrompt({ kind: "image" })}
               onVectors={() => setVectorsOpen((v) => !v)}
               orientation="top"
             />
