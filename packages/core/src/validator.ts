@@ -359,7 +359,8 @@ export function validateOperations(workspace: Workspace, ops: Operation[]): Vali
         if (!shapes.has(op.id)) err(`shape "${op.id}" does not exist`);
         const kind = shapeKinds.get(op.id);
         if (kind !== undefined) {
-          if (op.vector && kind !== "vector") err(`only a vector shape carries paths, not "${kind}"`);
+          if (op.vector && kind !== "vector")
+            err(`only a vector shape carries paths, not "${kind}"`);
           if (op.table && kind !== "table")
             err(`only a table shape carries table data, not "${kind}"`);
           if (op.chart && kind !== "chart")

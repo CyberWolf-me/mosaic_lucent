@@ -442,7 +442,11 @@ describe("statementEvent derivation (Stage C3)", () => {
     if (!answered.ok) return;
     const res = await api(h, `/api/boards/${boardId}/history`, { token: alice.token });
     const row = res.body.items.find((i: any) => i.seq === answered.seq);
-    expect(row.statementEvent).toMatchObject({ kind: "question", status: "resolved", nodeId: "q1" });
+    expect(row.statementEvent).toMatchObject({
+      kind: "question",
+      status: "resolved",
+      nodeId: "q1",
+    });
   });
 
   it("a plain revision carries no statementEvent", async () => {

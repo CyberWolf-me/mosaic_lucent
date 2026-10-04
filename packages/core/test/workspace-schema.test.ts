@@ -83,7 +83,8 @@ describe("operation schema refuses sink-hostile strings", () => {
     ]);
     const parsed = parseWorkspace(JSON.parse(JSON.stringify(ws)));
     expect(parsed.ok).toBe(true);
-    if (parsed.ok) expect(parsed.workspace.shapes[baseShape.id]?.style?.fill).toBe("oklch(0.90 0.11 92)");
+    if (parsed.ok)
+      expect(parsed.workspace.shapes[baseShape.id]?.style?.fill).toBe("oklch(0.90 0.11 92)");
   });
 
   it("refuses a colour that is really markup", () => {

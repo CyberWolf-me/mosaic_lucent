@@ -274,12 +274,10 @@ export const registerScopedAskRoutes: RegisterRoutes = (router, s) => {
       meetings: projectMeetings(scopeMeetings),
       meetingsTruncated: scopeMeetings.length > ASK_DIGEST_LIMITS.meetings,
       ...(retrieved.length ? { retrieved } : {}),
-      nodeIndex: rows
-        .slice(0, ASK_DIGEST_LIMITS.nodeIndex)
-        .map((r) => ({
-          id: `${r.boardId}:${r.id}`,
-          label: r.label.slice(0, ASK_DIGEST_LIMITS.nodeLabel),
-        })),
+      nodeIndex: rows.slice(0, ASK_DIGEST_LIMITS.nodeIndex).map((r) => ({
+        id: `${r.boardId}:${r.id}`,
+        label: r.label.slice(0, ASK_DIGEST_LIMITS.nodeLabel),
+      })),
       ...(body.history ? { conversation: body.history } : {}),
     };
 

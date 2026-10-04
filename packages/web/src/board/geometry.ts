@@ -293,7 +293,10 @@ export const escapeAttr = (t: string): string => escapeXml(t);
  * other end. Shared by the live ShapeLinkLayer and the export, so a link is
  * drawn the same in both.
  */
-export function shapeLinkAnchor(box: Box, toward: { x: number; y: number }): { x: number; y: number } {
+export function shapeLinkAnchor(
+  box: Box,
+  toward: { x: number; y: number },
+): { x: number; y: number } {
   const cx = box.x + box.width / 2;
   const cy = box.y + box.height / 2;
   const dx = toward.x - cx;
@@ -506,19 +509,24 @@ export function buildBoardSvg(workspace: Workspace, pad = 40, slide?: string): s
       const cell = (text: string, ci: number, ri: number, header: boolean) => {
         const cx = x + ci * colW + 6;
         const cy = y + ri * rowH + rowH / 2;
-        const clip = text.length > Math.max(1, Math.floor(colW / 7))
-          ? text.slice(0, Math.max(1, Math.floor(colW / 7) - 1)) + "…"
-          : text;
+        const clip =
+          text.length > Math.max(1, Math.floor(colW / 7))
+            ? text.slice(0, Math.max(1, Math.floor(colW / 7) - 1)) + "…"
+            : text;
         return `<text x="${cx.toFixed(1)}" y="${cy.toFixed(1)}" fill="${header ? "#fff" : "#ddd"}" font-family="sans-serif" font-size="12" font-weight="${header ? 600 : 400}" dominant-baseline="middle">${escapeXml(clip)}</text>`;
       };
       const gridLines: string[] = [];
       for (let c = 1; c < cols; c++) {
         const gx = x + c * colW;
-        gridLines.push(`<line x1="${gx.toFixed(1)}" y1="${y}" x2="${gx.toFixed(1)}" y2="${y + sh}" stroke="#3a3a40"/>`);
+        gridLines.push(
+          `<line x1="${gx.toFixed(1)}" y1="${y}" x2="${gx.toFixed(1)}" y2="${y + sh}" stroke="#3a3a40"/>`,
+        );
       }
       for (let r = 1; r < totalRows; r++) {
         const gy = y + r * rowH;
-        gridLines.push(`<line x1="${x}" y1="${gy.toFixed(1)}" x2="${x + sw}" y2="${gy.toFixed(1)}" stroke="#3a3a40"/>`);
+        gridLines.push(
+          `<line x1="${x}" y1="${gy.toFixed(1)}" x2="${x + sw}" y2="${gy.toFixed(1)}" stroke="#3a3a40"/>`,
+        );
       }
       const cells: string[] = [];
       t.columns.forEach((c, ci) => cells.push(cell(c.header, ci, 0, true)));
@@ -628,14 +636,20 @@ export function buildBoardSvg(workspace: Workspace, pad = 40, slide?: string): s
         `<rect x="${s.position.x}" y="${s.position.y}" width="${s.size.width}" height="${s.size.height}" rx="${s.kind === "ellipse" ? s.size.height / 2 : 6}" fill="${escapeAttr(fill)}" stroke="${escapeAttr(s.style?.stroke ?? "#0000")}"/>` +
           (s.text
             ? // The words, without the rich-text markup the canvas draws (richText.ts).
-              wrappedSvgText(plainText(s.text), s.position.x + 10, s.position.y + 22, s.size.width - 20)
+              wrappedSvgText(
+                plainText(s.text),
+                s.position.x + 10,
+                s.position.y + 22,
+                s.size.width - 20,
+              )
             : ""),
       );
     }
     if (s.rotation && parts.length > before) {
       const cx = s.position.x + s.size.width / 2;
       const cy = s.position.y + s.size.height / 2;
-      parts[parts.length - 1] = `<g transform="rotate(${s.rotation} ${cx} ${cy})">${parts[parts.length - 1]}</g>`;
+      parts[parts.length - 1] =
+        `<g transform="rotate(${s.rotation} ${cx} ${cy})">${parts[parts.length - 1]}</g>`;
     }
     // Opacity, as the canvas draws it (a highlighter's stroke, the
     // inspector's opacity) — exports used to leave it out.
@@ -854,7 +868,12 @@ export class VelocityTracker {
  * Re-targeting mid-flight just moves `target`; motion stays continuous, which
  * is what makes interruption clean. Returns the new value.
  */
-export function approach(current: number, target: number, speedPerSec: number, dtSec: number): number {
+export function approach(
+  current: number,
+  target: number,
+  speedPerSec: number,
+  dtSec: number,
+): number {
   if (current === target || dtSec <= 0) return target;
   const k = 1 - Math.exp(-speedPerSec * dtSec);
   const next = current + (target - current) * k;

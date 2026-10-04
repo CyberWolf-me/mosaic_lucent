@@ -25,7 +25,11 @@ describe("today anchors relative deadlines", () => {
 
   it("sits in the user prompt, before the request, only when given", () => {
     const summary = summarizeWorkspace(createWorkspace());
-    const withDate = buildUserPrompt({ message: "Sam drafts it by Friday", summary, today: "2026-09-23" });
+    const withDate = buildUserPrompt({
+      message: "Sam drafts it by Friday",
+      summary,
+      today: "2026-09-23",
+    });
     expect(withDate.indexOf("Today is Wednesday")).toBeGreaterThan(-1);
     expect(withDate.indexOf("Today is")).toBeLessThan(withDate.indexOf("User request:"));
     const without = buildUserPrompt({ message: "Sam drafts it by Friday", summary });

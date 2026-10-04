@@ -47,10 +47,7 @@ describe("parseDelimited", () => {
   it("reads CSV with a header row", () => {
     const t = parseDelimited("name,role\nAda,Engineer\nGrace,Admiral");
     expect(t?.columns.map((c) => c.header)).toEqual(["name", "role"]);
-    expect(t?.rows).toEqual([
-      { cells: ["Ada", "Engineer"] },
-      { cells: ["Grace", "Admiral"] },
-    ]);
+    expect(t?.rows).toEqual([{ cells: ["Ada", "Engineer"] }, { cells: ["Grace", "Admiral"] }]);
   });
 
   it("handles quoted fields with commas, quotes and newlines", () => {
@@ -96,7 +93,9 @@ describe("readDelimited", () => {
     expect(r.table.rows.length).toBeGreaterThan(0);
     expect(tableDataSchema.safeParse(r.table).success).toBe(true);
     // parseDelimited gives the same fitted table.
-    expect(parseDelimited([header, row].join("\n"))).toEqual(readDelimited([header, row].join("\n"))!.table);
+    expect(parseDelimited([header, row].join("\n"))).toEqual(
+      readDelimited([header, row].join("\n"))!.table,
+    );
   });
 });
 
@@ -185,7 +184,10 @@ describe("table edits", () => {
     // Every body row may go; the header stays.
     expect(ok(deleteTableRow(ok(deleteTableRow(base, 0)), 0)).rows).toEqual([]);
     expect(deleteTableRow(base, 7).ok).toBe(false);
-    const fullRows = createTable(["A"], Array.from({ length: TABLE_LIMITS.rows }, () => [""]));
+    const fullRows = createTable(
+      ["A"],
+      Array.from({ length: TABLE_LIMITS.rows }, () => [""]),
+    );
     expect(insertTableRow(fullRows).ok).toBe(false);
   });
 
@@ -207,7 +209,14 @@ describe("table edits", () => {
 
   it("lands as an UPDATE_SHAPE that undoes", () => {
     const ws = applyOperations(createWorkspace(), [
-      { op: "CREATE_SHAPE", id: "t", kind: "table", position: { x: 0, y: 0 }, size: { width: 300, height: 120 }, table: base },
+      {
+        op: "CREATE_SHAPE",
+        id: "t",
+        kind: "table",
+        position: { x: 0, y: 0 },
+        size: { width: 300, height: 120 },
+        table: base,
+      },
     ]);
     const edit: Operation[] = [{ op: "UPDATE_SHAPE", id: "t", table: ok(insertTableColumn(base)) }];
     expect(validateOperations(ws, edit)).toEqual([]);
@@ -292,29 +301,87 @@ describe("table and chart payloads belong to their own shape kinds", () => {
     series: [{ name: "Revenue", values: [3] }],
   };
   const base = applyOperations(createWorkspace(), [
-    { op: "CREATE_SHAPE", id: "note", kind: "sticky", position: { x: 0, y: 0 }, size: { width: 150, height: 110 }, text: "hi" },
-    { op: "CREATE_SHAPE", id: "t1", kind: "table", position: { x: 0, y: 0 }, size: { width: 300, height: 120 }, table },
+    {
+      op: "CREATE_SHAPE",
+      id: "note",
+      kind: "sticky",
+      position: { x: 0, y: 0 },
+      size: { width: 150, height: 110 },
+      text: "hi",
+    },
+    {
+      op: "CREATE_SHAPE",
+      id: "t1",
+      kind: "table",
+      position: { x: 0, y: 0 },
+      size: { width: 300, height: 120 },
+      table,
+    },
   ]);
 
   it("refuses a table or chart riding another kind, and a table or chart shape with no data", () => {
     const refused: Operation[][] = [
-      [{ op: "CREATE_SHAPE", id: "x", kind: "sticky", position: { x: 0, y: 0 }, size: { width: 10, height: 10 }, table }],
-      [{ op: "CREATE_SHAPE", id: "x", kind: "rect", position: { x: 0, y: 0 }, size: { width: 10, height: 10 }, chart }],
-      [{ op: "CREATE_SHAPE", id: "x", kind: "table", position: { x: 0, y: 0 }, size: { width: 10, height: 10 } }],
-      [{ op: "CREATE_SHAPE", id: "x", kind: "chart", position: { x: 0, y: 0 }, size: { width: 10, height: 10 } }],
+      [
+        {
+          op: "CREATE_SHAPE",
+          id: "x",
+          kind: "sticky",
+          position: { x: 0, y: 0 },
+          size: { width: 10, height: 10 },
+          table,
+        },
+      ],
+      [
+        {
+          op: "CREATE_SHAPE",
+          id: "x",
+          kind: "rect",
+          position: { x: 0, y: 0 },
+          size: { width: 10, height: 10 },
+          chart,
+        },
+      ],
+      [
+        {
+          op: "CREATE_SHAPE",
+          id: "x",
+          kind: "table",
+          position: { x: 0, y: 0 },
+          size: { width: 10, height: 10 },
+        },
+      ],
+      [
+        {
+          op: "CREATE_SHAPE",
+          id: "x",
+          kind: "chart",
+          position: { x: 0, y: 0 },
+          size: { width: 10, height: 10 },
+        },
+      ],
       [{ op: "UPDATE_SHAPE", id: "note", table }],
       [{ op: "UPDATE_SHAPE", id: "t1", chart }],
     ];
-    for (const ops of refused) expect(validateOperations(base, ops), JSON.stringify(ops[0])).not.toEqual([]);
+    for (const ops of refused)
+      expect(validateOperations(base, ops), JSON.stringify(ops[0])).not.toEqual([]);
   });
 
   it("knows the kind of a shape created earlier in the same batch", () => {
     const ops: Operation[] = [
-      { op: "CREATE_SHAPE", id: "c1", kind: "chart", position: { x: 0, y: 0 }, size: { width: 200, height: 120 }, chart },
+      {
+        op: "CREATE_SHAPE",
+        id: "c1",
+        kind: "chart",
+        position: { x: 0, y: 0 },
+        size: { width: 200, height: 120 },
+        chart,
+      },
       { op: "UPDATE_SHAPE", id: "c1", chart: { ...chart, type: "line" } },
     ];
     expect(validateOperations(base, ops)).toEqual([]);
-    expect(validateOperations(base, [...ops, { op: "UPDATE_SHAPE", id: "c1", table }])).not.toEqual([]);
+    expect(validateOperations(base, [...ops, { op: "UPDATE_SHAPE", id: "c1", table }])).not.toEqual(
+      [],
+    );
   });
 
   it("undoing a table edit restores the previous table exactly", () => {

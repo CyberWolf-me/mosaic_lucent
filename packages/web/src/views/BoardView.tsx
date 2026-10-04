@@ -29,7 +29,7 @@ interface ActiveDrag {
  * over the same semantic model — no separate task store.
  */
 export function BoardView({ onOpenSettings }: { onOpenSettings: (section?: string) => void }) {
-  const { workspace, chat, send, setView, applyManual, boardId , projectName } = useWorkspace();
+  const { workspace, chat, send, setView, applyManual, boardId, projectName } = useWorkspace();
   const [message, setMessage] = useState("");
   const [activeDrag, setActiveDrag] = useState<ActiveDrag | null>(null);
   const [overCol, setOverCol] = useState<IssueStatusCategory | null>(null);
@@ -83,7 +83,9 @@ export function BoardView({ onOpenSettings }: { onOpenSettings: (section?: strin
       if (!node?.issue || node.issue.statusCategory === category) return;
       // Keep a human-readable status too, defaulting to the column's own label.
       const label = BOARD_COLUMNS.find((c) => c.category === category)!.label;
-      const ops: Operation[] = [{ op: "UPDATE_ISSUE", id, status: label, statusCategory: category }];
+      const ops: Operation[] = [
+        { op: "UPDATE_ISSUE", id, status: label, statusCategory: category },
+      ];
       applyManual(ops, `Move "${node.label}" to ${label}`);
     },
     [applyManual, workspace.nodes],

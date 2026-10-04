@@ -40,8 +40,8 @@ describe("turnEffect — what one conversation turn did to the board", () => {
 
   it("a layout-only turn is empty", () => {
     expect(isEmptyEffect(turnEffect([]))).toBe(true);
-    expect(
-      isEmptyEffect(turnEffect([{ op: "SET_LAYOUT_INTENT", direction: "LR" }] as never)),
-    ).toBe(true);
+    expect(isEmptyEffect(turnEffect([{ op: "SET_LAYOUT_INTENT", direction: "LR" }] as never))).toBe(
+      true,
+    );
   });
 });

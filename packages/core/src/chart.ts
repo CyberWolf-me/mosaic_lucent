@@ -159,7 +159,13 @@ export type ChartPrimitive =
       width: number;
       role?: ChartRole;
     }
-  | { kind: "polyline"; points: Array<[number, number]>; stroke: string; width: number; role?: ChartRole }
+  | {
+      kind: "polyline";
+      points: Array<[number, number]>;
+      stroke: string;
+      width: number;
+      role?: ChartRole;
+    }
   | { kind: "path"; d: string; fill: string; role?: ChartRole }
   | {
       kind: "text";
@@ -222,7 +228,10 @@ function ellipsize(s: string, max: number): string {
   const chars = Array.from(s);
   if (chars.length <= max) return s;
   if (max <= 1) return max === 1 ? "…" : "";
-  return `${chars.slice(0, max - 1).join("").trimEnd()}…`;
+  return `${chars
+    .slice(0, max - 1)
+    .join("")
+    .trimEnd()}…`;
 }
 
 /** A text primitive whose string fits `px`, keeping the full text when cut. */
@@ -327,9 +336,24 @@ function legendPrimitives(
     let x = box.x;
     for (const e of row) {
       const ew = widthOf(e);
-      prims.push({ kind: "rect", x, y: y + 1, w: SWATCH, h: SWATCH, fill: e.color, role: "legend" });
+      prims.push({
+        kind: "rect",
+        x,
+        y: y + 1,
+        w: SWATCH,
+        h: SWATCH,
+        fill: e.color,
+        role: "legend",
+      });
       const name = fittedText(
-        { x: x + SWATCH + 4, y: y + SMALL, anchor: "start", fill: LABEL, size: SMALL, role: "legend" },
+        {
+          x: x + SWATCH + 4,
+          y: y + SMALL,
+          anchor: "start",
+          fill: LABEL,
+          size: SMALL,
+          role: "legend",
+        },
         e.name,
         ew - SWATCH - 4 - gap,
         LEGEND_NAME_CHARS,
@@ -354,7 +378,15 @@ function titleBand(data: ChartData, w: number, out: ChartPrimitive[]): ChartBox 
   if (!data.title) return undefined;
   const box = { x: PAD, y: PAD, w: Math.max(1, w - 2 * PAD), h: TITLE_H };
   const t = fittedText(
-    { x: w / 2, y: PAD + TITLE_SIZE, anchor: "middle", fill: LABEL, size: TITLE_SIZE, weight: 600, role: "title" },
+    {
+      x: w / 2,
+      y: PAD + TITLE_SIZE,
+      anchor: "middle",
+      fill: LABEL,
+      size: TITLE_SIZE,
+      weight: 600,
+      role: "title",
+    },
     data.title,
     box.w,
   );
@@ -428,12 +460,49 @@ function axisGeometry(
 
   ticks.forEach((t, i) => {
     const gy = yOf(t);
-    if (t !== 0) out.push({ kind: "line", x1: plot.x, y1: gy, x2: plot.x + plot.w, y2: gy, stroke: GRID, width: 1, role: "grid" });
-    out.push({ kind: "text", x: plot.x - 5, y: gy + 3, text: tickLabels[i]!, anchor: "end", fill: LABEL, size: SMALL, role: "tick" });
+    if (t !== 0)
+      out.push({
+        kind: "line",
+        x1: plot.x,
+        y1: gy,
+        x2: plot.x + plot.w,
+        y2: gy,
+        stroke: GRID,
+        width: 1,
+        role: "grid",
+      });
+    out.push({
+      kind: "text",
+      x: plot.x - 5,
+      y: gy + 3,
+      text: tickLabels[i]!,
+      anchor: "end",
+      fill: LABEL,
+      size: SMALL,
+      role: "tick",
+    });
   });
-  out.push({ kind: "line", x1: plot.x, y1: plot.y, x2: plot.x, y2: plot.y + plot.h, stroke: AXIS, width: 1, role: "axis" });
+  out.push({
+    kind: "line",
+    x1: plot.x,
+    y1: plot.y,
+    x2: plot.x,
+    y2: plot.y + plot.h,
+    stroke: AXIS,
+    width: 1,
+    role: "axis",
+  });
   // The category axis sits at zero, wherever zero falls in the range.
-  out.push({ kind: "line", x1: plot.x, y1: zeroY, x2: plot.x + plot.w, y2: zeroY, stroke: AXIS, width: 1, role: "axis" });
+  out.push({
+    kind: "line",
+    x1: plot.x,
+    y1: zeroY,
+    x2: plot.x + plot.w,
+    y2: zeroY,
+    stroke: AXIS,
+    width: 1,
+    role: "axis",
+  });
 
   const n = Math.max(1, data.labels.length, ...data.series.map((s) => s.values.length));
   const slot = plot.w / n;
@@ -463,9 +532,11 @@ function axisGeometry(
       const points: Array<[number, number]> = [];
       for (let i = 0; i < n; i++) {
         const v = s.values[i];
-        if (v !== undefined && Number.isFinite(v)) points.push([plot.x + slot * i + slot / 2, yOf(v)]);
+        if (v !== undefined && Number.isFinite(v))
+          points.push([plot.x + slot * i + slot / 2, yOf(v)]);
       }
-      if (points.length) out.push({ kind: "polyline", points, stroke: chartColor(si), width: 2, role: "mark" });
+      if (points.length)
+        out.push({ kind: "polyline", points, stroke: chartColor(si), width: 2, role: "mark" });
     });
   }
 
@@ -478,14 +549,24 @@ function axisGeometry(
     const label = data.labels[i];
     if (!label) continue;
     const t = fittedText(
-      { x: plot.x + slot * i + slot / 2, y: plot.y + plot.h + 12, anchor: "middle", fill: LABEL, size: SMALL, role: "label" },
+      {
+        x: plot.x + slot * i + slot / 2,
+        y: plot.y + plot.h + 12,
+        anchor: "middle",
+        fill: LABEL,
+        size: SMALL,
+        role: "label",
+      },
       label,
       slot * stride - 4,
     );
     if (t) out.push(t);
   }
 
-  return { prims: out, layout: { ...(title ? { title } : {}), ...(legend ? { legend } : {}), plot } };
+  return {
+    prims: out,
+    layout: { ...(title ? { title } : {}), ...(legend ? { legend } : {}), plot },
+  };
 }
 
 function pieGeometry(
@@ -547,7 +628,14 @@ function pieGeometry(
   const total = slices.reduce((a, e) => a + e.v, 0);
   if (total <= 0) {
     const t = fittedText(
-      { x: plot.x + plot.w / 2, y: plot.y + plot.h / 2, anchor: "middle", fill: MUTED, size: SMALL, role: "note" },
+      {
+        x: plot.x + plot.w / 2,
+        y: plot.y + plot.h / 2,
+        anchor: "middle",
+        fill: MUTED,
+        size: SMALL,
+        role: "note",
+      },
       "No positive values to plot",
       plot.w,
     );

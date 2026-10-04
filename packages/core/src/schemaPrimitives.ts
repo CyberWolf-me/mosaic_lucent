@@ -38,8 +38,7 @@ export const SVG_PATH_MAX_LENGTH = 4_000;
  * were oklch literals, so the schema refused every sticky the canvas created,
  * and a saved board holding one failed to load (docs/26 F7).
  */
-const CSS_COLOR =
-  /^(#[0-9a-fA-F]{3,8}|(?:rgba?|hsla?|oklch|oklab)\((?:[0-9.,\s%/+-]|deg)+\))$/;
+const CSS_COLOR = /^(#[0-9a-fA-F]{3,8}|(?:rgba?|hsla?|oklch|oklab)\((?:[0-9.,\s%/+-]|deg)+\))$/;
 
 /**
  * Icon references (docs/26 §6.2): `iconoir:<name>` for a concept icon,
@@ -95,7 +94,8 @@ export function normalizeIconRef(value: unknown): string | undefined {
   const raw = value.trim().toLowerCase().replace(/\s+/g, "-");
   const m = /^([a-z-]+):(.+)$/.exec(raw);
   if (!m) return undefined;
-  const set = m[1] === "iconoir" ? "iconoir" : /^(simple|si|simple-?icons?)$/.test(m[1]!) ? "simple" : "";
+  const set =
+    m[1] === "iconoir" ? "iconoir" : /^(simple|si|simple-?icons?)$/.test(m[1]!) ? "simple" : "";
   if (!set) return undefined;
   // Simple Icons slugs carry no dashes ("Node.js" → nodedotjs is the
   // registry's job; six have an underscore), so a kebab brand name from the

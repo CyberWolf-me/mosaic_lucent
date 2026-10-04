@@ -159,7 +159,8 @@ describe("BPMN export (docs/19 subset)", () => {
       ["task", "task"],
       ["step", "task"],
     ];
-    for (const [type] of types) ws.nodes[`x-${type}`] = { id: `x-${type}`, nodeType: type, label: type };
+    for (const [type] of types)
+      ws.nodes[`x-${type}`] = { id: `x-${type}`, nodeType: type, label: type };
     const { xml, warnings } = toBpmnXml(ws);
     const process = parseXml(xml).children.find((c) => c.name === "bpmn:process")!;
     for (const [type, tag] of types) {
@@ -186,7 +187,12 @@ describe("BPMN import (docs/19 subset)", () => {
     expect(Object.keys(workspace.nodes).length).toBe(7);
     expect(Object.keys(workspace.edges).length).toBe(7);
     expect(workspace.diagramKind).toBe("bpmn");
-    const registry: Record<string, string> = { entry: "entry", exit: "exit", choice: "choice", step: "task" };
+    const registry: Record<string, string> = {
+      entry: "entry",
+      exit: "exit",
+      choice: "choice",
+      step: "task",
+    };
     for (const [id, node] of Object.entries(board.nodes)) {
       expect(workspace.nodes[id]!.label).toBe(node.label);
       expect(workspace.nodes[id]!.nodeType).toBe(registry[node.nodeType]);

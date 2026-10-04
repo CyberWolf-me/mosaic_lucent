@@ -93,8 +93,7 @@ export function AnalyticsView({ onBack }: { onBack: () => void }) {
               limit: m.limit,
               used: m.used,
               unlimited: m.unlimited,
-              remaining:
-                m.limit === null || m.used === null ? null : Math.max(0, m.limit - m.used),
+              remaining: m.limit === null || m.used === null ? null : Math.max(0, m.limit - m.used),
             })),
           );
         }
@@ -304,10 +303,17 @@ function Sparkline({ series }: { series: { day: string; count: number }[] }) {
   const max = Math.max(1, ...series.map((p) => p.count));
   const stepX = series.length > 1 ? w / (series.length - 1) : w;
   const pts = series.map((p, i) => [i * stepX, h - (p.count / max) * (h - 2) - 1] as const);
-  const line = pts.map(([x, y], i) => `${i === 0 ? "M" : "L"}${x.toFixed(2)},${y.toFixed(2)}`).join(" ");
+  const line = pts
+    .map(([x, y], i) => `${i === 0 ? "M" : "L"}${x.toFixed(2)},${y.toFixed(2)}`)
+    .join(" ");
   const area = `${line} L${w},${h} L0,${h} Z`;
   return (
-    <svg className="boards-spark" viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" aria-hidden="true">
+    <svg
+      className="boards-spark"
+      viewBox={`0 0 ${w} ${h}`}
+      preserveAspectRatio="none"
+      aria-hidden="true"
+    >
       <path className="boards-spark-area" d={area} />
       <path className="boards-spark-line" d={line} vectorEffect="non-scaling-stroke" />
     </svg>

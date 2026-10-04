@@ -115,17 +115,26 @@ export function EmptyState({
           notify(`Couldn't read ${file.name} as an image.`);
           continue;
         }
-        next.push({ id, name: file.name, kind: "image", image: { mediaType: match[1]!, data: match[2]! } });
+        next.push({
+          id,
+          name: file.name,
+          kind: "image",
+          image: { mediaType: match[1]!, data: match[2]! },
+        });
       } else if (file.type.startsWith("text/") || TEXT_TYPES.test(file.name)) {
         const text = (await file.text()).slice(0, MAX_DOC_CHARS);
         if (!text.trim()) continue;
         next.push({ id, name: file.name, kind: "document", document: { name: file.name, text } });
       } else {
-        notify(`${file.name}: attach an image or a text file (.txt, .md, .csv, .json). For a PDF, paste its text.`);
+        notify(
+          `${file.name}: attach an image or a text file (.txt, .md, .csv, .json). For a PDF, paste its text.`,
+        );
       }
     }
     setReading(false);
-    setPicked((p) => [...p, ...next.filter((n) => !p.some((x) => x.id === n.id))].slice(0, MAX_FILES));
+    setPicked((p) =>
+      [...p, ...next.filter((n) => !p.some((x) => x.id === n.id))].slice(0, MAX_FILES),
+    );
     if (fileRef.current) fileRef.current.value = "";
   };
 
@@ -283,7 +292,11 @@ export function EmptyState({
             </>
           )}
           {onGenImage && (
-            <button className="hero-chip" onClick={onGenImage} title="Generate a reference image or logo">
+            <button
+              className="hero-chip"
+              onClick={onGenImage}
+              title="Generate a reference image or logo"
+            >
               <Ico.Sparkle /> Image
             </button>
           )}

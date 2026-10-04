@@ -355,8 +355,7 @@ html[data-theme="dark"] {
   gap: 5px;
   padding: 10px 12px 10px 14px;
   border-color: oklch(from var(--stmt-tint) l c h / 0.32);
-  background:
-    linear-gradient(90deg, var(--stmt-tint) 0 3px, transparent 3px),
+  background: linear-gradient(90deg, var(--stmt-tint) 0 3px, transparent 3px),
     linear-gradient(
       180deg,
       oklch(from var(--stmt-tint) l c h / 0.07),
@@ -365,8 +364,7 @@ html[data-theme="dark"] {
     var(--paper-0);
 }
 html[data-theme="dark"] .node.stmt {
-  background:
-    linear-gradient(90deg, var(--stmt-tint) 0 3px, transparent 3px),
+  background: linear-gradient(90deg, var(--stmt-tint) 0 3px, transparent 3px),
     linear-gradient(
       180deg,
       oklch(from var(--stmt-tint) l c h / 0.12),

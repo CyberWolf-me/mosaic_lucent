@@ -236,7 +236,10 @@ export async function inviteToOrg(
     body: JSON.stringify({ email, role }),
   });
   if (res?.status === 402) {
-    return { ok: false, error: "This workspace is out of seats. Upgrade the plan to invite more people." };
+    return {
+      ok: false,
+      error: "This workspace is out of seats. Upgrade the plan to invite more people.",
+    };
   }
   if (!res || !res.ok) return refusal(res, "Could not send that invite.");
   return { ok: true, value: null };

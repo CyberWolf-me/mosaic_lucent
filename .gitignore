@@ -10,3 +10,8 @@ coverage/
 .zcode/
 scratch/
 *.tar.gz
+.kilo/
+.agents/
+redesign/
+*.png
+lucent-field-report.html

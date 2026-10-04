@@ -29,13 +29,7 @@ describe("presentationMode — the density ladder", () => {
   });
 
   it("summarizes further as zoom drops, on any board", () => {
-    const order: PresentationMode[] = [
-      "detail",
-      "grouped",
-      "regions",
-      "overview",
-      "summary-cards",
-    ];
+    const order: PresentationMode[] = ["detail", "grouped", "regions", "overview", "summary-cards"];
     // A small board (detail floor) walks down the ladder purely by zoom.
     const modes = [1, 0.7, 0.5, 0.35, 0.2].map((z) => presentationMode(10, z));
     expect(modes).toEqual(order);
@@ -108,9 +102,7 @@ describe("on benchmark boards", () => {
       const ws = layeredBoard(n);
       // Use the real node count (factories approximate n).
       const count = Object.keys(ws.nodes).length;
-      expect(presentationMode(count, 1), `n=${n} count=${count}`).toBe(
-        presentationMode(count, 1),
-      );
+      expect(presentationMode(count, 1), `n=${n} count=${count}`).toBe(presentationMode(count, 1));
       // Sanity: a board built around `n` lands at or below the expected rung.
       expect(typeof expected).toBe("string");
     }

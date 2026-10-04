@@ -151,17 +151,21 @@ export function zOrderOps(
     .sort((a, b) => a.z - b.z || a.i - b.i)
     .map((x) => x.id);
   let next: string[];
-  if (move === "front") next = [...order.filter((id) => !sel.has(id)), ...order.filter((id) => sel.has(id))];
-  else if (move === "back") next = [...order.filter((id) => sel.has(id)), ...order.filter((id) => !sel.has(id))];
+  if (move === "front")
+    next = [...order.filter((id) => !sel.has(id)), ...order.filter((id) => sel.has(id))];
+  else if (move === "back")
+    next = [...order.filter((id) => sel.has(id)), ...order.filter((id) => !sel.has(id))];
   else {
     next = [...order];
     if (move === "forward") {
       for (let k = next.length - 2; k >= 0; k--) {
-        if (sel.has(next[k]!) && !sel.has(next[k + 1]!)) [next[k], next[k + 1]] = [next[k + 1]!, next[k]!];
+        if (sel.has(next[k]!) && !sel.has(next[k + 1]!))
+          [next[k], next[k + 1]] = [next[k + 1]!, next[k]!];
       }
     } else {
       for (let k = 1; k < next.length; k++) {
-        if (sel.has(next[k]!) && !sel.has(next[k - 1]!)) [next[k], next[k - 1]] = [next[k - 1]!, next[k]!];
+        if (sel.has(next[k]!) && !sel.has(next[k - 1]!))
+          [next[k], next[k - 1]] = [next[k - 1]!, next[k]!];
       }
     }
   }

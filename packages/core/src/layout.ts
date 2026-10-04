@@ -1,4 +1,11 @@
-import { DIAGRAM_KINDS, type DiagramKind, type Node, type Position, type Size, type Workspace } from "./model.js";
+import {
+  DIAGRAM_KINDS,
+  type DiagramKind,
+  type Node,
+  type Position,
+  type Size,
+  type Workspace,
+} from "./model.js";
 import { getLayoutOverride, type DiagramLayoutEngine } from "./layoutEngine.js";
 import { layoutStrategyFor, pseudoRoleFor } from "./representations.js";
 
@@ -149,10 +156,7 @@ export function nodeCardExtraHeight(
  * 1.5px a side — 32px of the width is never text). IBM Plex Mono's advance
  * is 0.6em (6.3px at 10.5px); 6.4 leaves slack for rounding.
  */
-export function nodeDetailsHeight(
-  details: Node["details"] | undefined,
-  cardWidth: number,
-): number {
+export function nodeDetailsHeight(details: Node["details"] | undefined, cardWidth: number): number {
   if (!details || details.sections.length === 0) return 0;
   const GAP = 6;
   const SECTION_CHROME = 1 + 4 + 4;
@@ -288,7 +292,10 @@ function dispatchLayoutWithRoutes(
   if (strategy === "grid") return { layout: gridLayout(workspace, merged), routes: {} };
   if (strategy === "storymap") return { layout: storyMapLayout(workspace, merged), routes: {} };
   const layered = layeredLayoutWithRoutes(workspace, options);
-  return { ...layered, layout: shrinkPseudoStates(workspace, workspace.diagramKind, layered.layout) };
+  return {
+    ...layered,
+    layout: shrinkPseudoStates(workspace, workspace.diagramKind, layered.layout),
+  };
 }
 
 function layeredLayoutWithRoutes(
@@ -1767,10 +1774,18 @@ export function timelineScale(
   workspace: Workspace,
 ): { t0: number; t1: number; span: number } | null {
   const times = [
-    ...new Set(Object.values(workspace.nodes).map(dueTime).filter((t): t is number => t !== undefined)),
+    ...new Set(
+      Object.values(workspace.nodes)
+        .map(dueTime)
+        .filter((t): t is number => t !== undefined),
+    ),
   ].sort((a, b) => a - b);
   if (times.length < 2) return null;
-  return { t0: times[0]!, t1: times[times.length - 1]!, span: Math.max(640, (times.length - 1) * 220) };
+  return {
+    t0: times[0]!,
+    t1: times[times.length - 1]!,
+    span: Math.max(640, (times.length - 1) * 220),
+  };
 }
 
 /** Axis ticks for a timeline board: weeks, months or quarters, by range. */
@@ -1780,7 +1795,20 @@ export function timelineTicks(workspace: Workspace): Array<{ x: number; label: s
   const { t0, t1, span } = scale;
   const range = t1 - t0;
   const xOf = (t: number) => ((t - t0) / range) * span;
-  const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const MONTHS = [
+    "Jan",
+    "Feb",
+    "Mar",
+    "Apr",
+    "May",
+    "Jun",
+    "Jul",
+    "Aug",
+    "Sep",
+    "Oct",
+    "Nov",
+    "Dec",
+  ];
   const ticks: Array<{ x: number; label: string }> = [];
   const start = new Date(t0);
   if (range <= 60 * DAY) {
@@ -1797,7 +1825,11 @@ export function timelineTicks(workspace: Workspace): Array<{ x: number; label: s
     for (; d.getTime() <= t1; d.setUTCMonth(d.getUTCMonth() + step)) {
       const m = d.getUTCMonth();
       const label =
-        step === 3 ? `Q${m / 3 + 1} ${d.getUTCFullYear()}` : m === 0 ? `${MONTHS[m]} ${d.getUTCFullYear()}` : MONTHS[m]!;
+        step === 3
+          ? `Q${m / 3 + 1} ${d.getUTCFullYear()}`
+          : m === 0
+            ? `${MONTHS[m]} ${d.getUTCFullYear()}`
+            : MONTHS[m]!;
       ticks.push({ x: xOf(d.getTime()), label });
     }
   }
@@ -1944,7 +1976,11 @@ function gridLayout(
       x: (i % perRow) * (colW + nodeGap) + (colW - size.get(id)!.width) / 2,
       y: Math.floor(i / perRow) * (rowH + nodeGap),
     }));
-    return { offsets, w: cols * colW + (cols - 1) * nodeGap, h: rows * rowH + (rows - 1) * nodeGap };
+    return {
+      offsets,
+      w: cols * colW + (cols - 1) * nodeGap,
+      h: rows * rowH + (rows - 1) * nodeGap,
+    };
   };
 
   const packed = cells.map(pack);
@@ -1953,7 +1989,12 @@ function gridLayout(
   // label ("Big bets · high impact, high effort") needs the width.
   const cellW = Math.max(360, Math.max(0, ...packed.map((p) => p.w)) + cellPad * 2);
   const cellH = Math.max(220, Math.max(0, ...packed.map((p) => p.h)) + cellPad * 2);
-  const cols = cells.length === 4 ? 2 : cells.length <= 3 ? Math.max(1, cells.length) : Math.ceil(Math.sqrt(cells.length));
+  const cols =
+    cells.length === 4
+      ? 2
+      : cells.length <= 3
+        ? Math.max(1, cells.length)
+        : Math.ceil(Math.sqrt(cells.length));
   const gap = 36;
   packed.forEach((p, i) => {
     const cx = (i % cols) * (cellW + gap) + cellW / 2;
@@ -1968,7 +2009,8 @@ function gridLayout(
   if (loose.length) {
     const p = pack(loose);
     const top = Math.ceil(cells.length / cols) * (cellH + gap) + gap;
-    for (const o of p.offsets) result[o.id] = { position: { x: o.x, y: top + o.y }, size: size.get(o.id)! };
+    for (const o of p.offsets)
+      result[o.id] = { position: { x: o.x, y: top + o.y }, size: size.get(o.id)! };
   }
   return result;
 }
@@ -2167,7 +2209,10 @@ function storyMapGeometry(
         const s = size.get(id)!;
         // Centred in the column, so cards of different widths still hang as
         // one column under their activity.
-        layout[id] = { position: { x: col.x + Math.round((col.width - s.width) / 2), y: top }, size: s };
+        layout[id] = {
+          position: { x: col.x + Math.round((col.width - s.width) / 2), y: top },
+          size: s,
+        };
         top += s.height + SM_STACK_GAP;
       }
     });
@@ -2242,7 +2287,11 @@ const PSEUDO_SIZE = 36;
  * (`pseudoRoleFor`), the same answer the canvas draws their shapes from — so a
  * node the layout shrinks is always one the canvas draws as a dot.
  */
-function shrinkPseudoStates(workspace: Workspace, kind: DiagramKind, layout: LayoutResult): LayoutResult {
+function shrinkPseudoStates(
+  workspace: Workspace,
+  kind: DiagramKind,
+  layout: LayoutResult,
+): LayoutResult {
   let out: LayoutResult | null = null;
   for (const [id, box] of Object.entries(layout)) {
     const t = workspace.nodes[id]?.nodeType;

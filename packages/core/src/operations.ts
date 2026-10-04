@@ -231,8 +231,8 @@ export function clampNodeDetails(
   sections: readonly NodeDetails["sections"][number][],
 ): NodeDetails | null {
   const flat = (s: string, max: number) =>
-    // eslint-disable-next-line no-control-regex
     s
+      // eslint-disable-next-line no-control-regex
       .replace(/[\u0000-\u001f\u007f]+/g, " ")
       .trim()
       .slice(0, max);

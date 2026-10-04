@@ -10,7 +10,15 @@ import {
 } from "@lucent/core";
 import { Ico, ToolIco } from "../ui/icons.js";
 import { DIAGRAM_LABELS } from "../scene.js";
-import { Button, Card, EmptyState, FilterChips, Page, PageHeader, type FilterItem } from "../ui/kit.js";
+import {
+  Button,
+  Card,
+  EmptyState,
+  FilterChips,
+  Page,
+  PageHeader,
+  type FilterItem,
+} from "../ui/kit.js";
 import { StatementGlyph } from "../ui/StatementGlyph.js";
 import { Dialog } from "../ui/primitives.js";
 import { reviewWorkspace, useWorkspace } from "../workspace.js";
@@ -642,7 +650,9 @@ export function DashboardView({ onOpenSettings }: { onOpenSettings: (section?: s
                 <TemplateGrid templates={filteredTemplates} onUse={startFromTemplate} />
               )}
             </div>
-          ) : filtered.length === 0 && boards.length === 0 && cloudState === "loading" ? null : filtered.length === 0 ? (
+          ) : filtered.length === 0 &&
+            boards.length === 0 &&
+            cloudState === "loading" ? null : filtered.length === 0 ? (
             <EmptyState
               compact
               title={q ? `No board matches “${search.trim()}”` : "No boards in this view"}

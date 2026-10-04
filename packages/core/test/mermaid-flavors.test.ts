@@ -305,7 +305,10 @@ describe("class diagrams → class", () => {
     const again = parseMermaid(out);
     const summary = (g: typeof again) => ({
       nodes: g.nodes
-        .map((n) => `${n.id}:${n.nodeType}:${n.label}:${JSON.stringify(n.details?.sections.map((s) => s.items))}`)
+        .map(
+          (n) =>
+            `${n.id}:${n.nodeType}:${n.label}:${JSON.stringify(n.details?.sections.map((s) => s.items))}`,
+        )
         .sort(),
       edges: g.edges.map((e) => `${e.source}>${e.target}:${e.relationship}`).sort(),
     });
@@ -458,7 +461,9 @@ describe("export per kind", () => {
       { op: "CONNECT_NODES", source: "draft", target: "live", relationship: "publish" },
     ]);
     const out = boardToMermaid(ws);
-    expect(out).toContain('  state "Draft" as draft\n  draft : being written\n  draft : autosaves\n');
+    expect(out).toContain(
+      '  state "Draft" as draft\n  draft : being written\n  draft : autosaves\n',
+    );
     const back = lands(mermaidToOps(out));
     // Mermaid descriptions carry no heading, so the title stays behind.
     expect(back.nodes.draft?.details).toEqual({

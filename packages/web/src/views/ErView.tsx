@@ -9,7 +9,7 @@ import { toEr } from "../board/er.js";
  * Each node becomes an entity table — its columns from the node's details
  * when it has them (V4) — and edges become labelled relationships. */
 export function ErView({ onOpenSettings }: { onOpenSettings: (section?: string) => void }) {
-  const { workspace, chat, send, setView , projectName } = useWorkspace();
+  const { workspace, chat, send, setView, projectName } = useWorkspace();
   const [message, setMessage] = useState("");
   const submit = () => {
     const text = message.trim();

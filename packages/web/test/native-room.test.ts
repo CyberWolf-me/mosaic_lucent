@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { roomPeers, remotePeers, localSpeaking, LOCAL_IDENTITY } from "../src/meeting-room/roomPeers.js";
+import {
+  roomPeers,
+  remotePeers,
+  localSpeaking,
+  LOCAL_IDENTITY,
+} from "../src/meeting-room/roomPeers.js";
 import {
   EXTERNAL_MEETING_CAPABILITIES,
   MOCK_MEETING_CAPABILITIES,
@@ -37,7 +42,11 @@ describe("roomPeers", () => {
   });
 
   it("excludes the local participant from remote tiles and reports its own speaking (F6)", () => {
-    let peers = roomPeers(new Map(), { type: "peer-joined", identity: LOCAL_IDENTITY, name: "You" });
+    let peers = roomPeers(new Map(), {
+      type: "peer-joined",
+      identity: LOCAL_IDENTITY,
+      name: "You",
+    });
     peers = roomPeers(peers, { type: "peer-joined", identity: "alice", name: "Alice" });
     // Remote list never contains "local", so the local person isn't drawn twice.
     expect(remotePeers(peers).map((p) => p.identity)).toEqual(["alice"]);

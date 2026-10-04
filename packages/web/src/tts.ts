@@ -99,7 +99,10 @@ export const browserTtsProvider: TtsProvider = {
     const cleanup = () => {
       if (finished) return;
       finished = true;
-      if (watchdog !== undefined) clearTimeout(watchdog);
+      if (watchdog !== undefined) {
+        clearTimeout(watchdog);
+        watchdog = undefined;
+      }
       notifyTtsEnd();
       resolveDone();
     };
@@ -164,7 +167,10 @@ export const hostedTtsProvider: TtsProvider = {
     const cleanup = () => {
       if (finished) return;
       finished = true;
-      if (watchdog !== undefined) clearTimeout(watchdog);
+      if (watchdog !== undefined) {
+        clearTimeout(watchdog);
+        watchdog = undefined;
+      }
       notifyTtsEnd();
       URL.revokeObjectURL(url);
       resolveDone();

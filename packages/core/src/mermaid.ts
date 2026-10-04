@@ -697,8 +697,10 @@ function classTypeFor(stereotype: string): string | undefined {
  */
 function classRelation(arrow: string): { relationship: string; reverse: boolean } {
   const dashed = arrow.includes("..");
-  if (arrow.startsWith("<|")) return { relationship: dashed ? "implements" : "inherits", reverse: true };
-  if (arrow.endsWith("|>")) return { relationship: dashed ? "implements" : "inherits", reverse: false };
+  if (arrow.startsWith("<|"))
+    return { relationship: dashed ? "implements" : "inherits", reverse: true };
+  if (arrow.endsWith("|>"))
+    return { relationship: dashed ? "implements" : "inherits", reverse: false };
   if (arrow.startsWith("*")) return { relationship: "composition", reverse: false };
   if (arrow.endsWith("*")) return { relationship: "composition", reverse: true };
   if (arrow.startsWith("o")) return { relationship: "aggregation", reverse: false };
@@ -780,7 +782,7 @@ function parseClass(lines: string[]): MermaidGraph {
       skipped++;
       continue;
     }
-    const ns =/^namespace\s+([\p{L}\p{N}_.-]+)\s*\{$/u.exec(line);
+    const ns = /^namespace\s+([\p{L}\p{N}_.-]+)\s*\{$/u.exec(line);
     if (ns) {
       const id = ns[1]!;
       if (!groups.some((g) => g.id === id)) groups.push({ id, label: id });

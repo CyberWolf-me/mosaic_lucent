@@ -35,14 +35,20 @@ await page.waitForURL(/view=canvas/, { timeout: 15000 }).catch(() => {});
 await page.waitForTimeout(800);
 for (let i = 0; i < 5; i++) {
   const s = page.getByRole("button", { name: /^Skip$/ });
-  if (await s.count()) { await s.first().click({ force: true }).catch(() => {}); await page.waitForTimeout(300); }
-  else break;
+  if (await s.count()) {
+    await s
+      .first()
+      .click({ force: true })
+      .catch(() => {});
+    await page.waitForTimeout(300);
+  } else break;
 }
 await page.goto(base + "/?view=meeting&voicehud=1", { waitUntil: "networkidle", timeout: 20000 });
 await page.waitForFunction(() => !!window.__lucentVoiceDebug, { timeout: 10000 });
 
 const macro = () => page.getAttribute(".voice-hud", "data-macro");
-const drive = (fn, ...args) => page.evaluate(([f, a]) => window.__lucentVoiceDebug[f](...a), [fn, args]);
+const drive = (fn, ...args) =>
+  page.evaluate(([f, a]) => window.__lucentVoiceDebug[f](...a), [fn, args]);
 const state = () => page.evaluate(() => window.__lucentVoiceDebug.state());
 
 await drive("setRecording", true);
@@ -62,7 +68,11 @@ check("A: back to LISTENING", (await macro()) === "LISTENING");
 
 // --- Case B: immediate follow-up, same speaker, NO re-wake ---
 const b1 = await drive("evaluate", "alice", "And what about PostgreSQL?");
-check("B: same-speaker follow-up answered without 'Lucent'", b1.action === "followup_query", `action=${b1.action}`);
+check(
+  "B: same-speaker follow-up answered without 'Lucent'",
+  b1.action === "followup_query",
+  `action=${b1.action}`,
+);
 
 // --- Case C: barge-in halts the answer ---
 await drive("aiStart");
@@ -75,15 +85,29 @@ check("C: barge-in interrupts TTS", c1.interrupted === true);
 await drive("aiDone", "Okay.");
 const future = Date.now() + 20_000;
 const d1 = await drive("evaluate", "alice", "Are you still there?", future);
-check("D: a turn after the window expires → dormant, ignored", d1.action === "ignore" || d1.action === "dismiss", `action=${d1.action}`);
+check(
+  "D: a turn after the window expires → dormant, ignored",
+  d1.action === "ignore" || d1.action === "dismiss",
+  `action=${d1.action}`,
+);
 check("D: lease is dormant", (await state()) === "dormant");
 
 // --- Case E: ordinary human conversation → Lucent stays silent ---
 const e1 = await drive("evaluate", "bob", "I think we should keep PostgreSQL");
-check("E: ordinary talk is not an invocation (ignored)", e1.action === "ignore", `action=${e1.action}`);
-check("E: still LISTENING, lease still dormant", (await macro()) === "LISTENING" && (await state()) === "dormant");
+check(
+  "E: ordinary talk is not an invocation (ignored)",
+  e1.action === "ignore",
+  `action=${e1.action}`,
+);
+check(
+  "E: still LISTENING, lease still dormant",
+  (await macro()) === "LISTENING" && (await state()) === "dormant",
+);
 
-if (headed) { console.log("\n(headed) leaving the window open 6s to watch…"); await page.waitForTimeout(6000); }
+if (headed) {
+  console.log("\n(headed) leaving the window open 6s to watch…");
+  await page.waitForTimeout(6000);
+}
 await browser.close();
 
 const failed = results.filter((r) => !r.pass);

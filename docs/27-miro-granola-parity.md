@@ -169,39 +169,41 @@ transcript rather than sharing one record. (10) follow-ups are N3.
 - **Mermaid in and out** (`core/src/mermaid.ts`, moved from web so the MCP
   server shares it). Three flavours are imported, each as the Lucent kind it
   means:
+
   - **Flowchart** (`flowchart` / `graph`) → flowchart, or process when it runs
     left-right. It reads chains (`A --> B --> C`), `&` fans, dotted, thick and
     circle/cross links, text on links (`-- yes -->`), one-line diagrams
     (`graph TD; A-->B`), v11 `@{ shape: … }`, subgraphs with bracket, quoted or
-    bare titles, and a ```` ```mermaid ```` fence or YAML front matter.
+    bare titles, and a ` ```mermaid ` fence or YAML front matter.
   - **`stateDiagram-v2`** → statemachine. `[*]` becomes start and end
     pseudo-states, `<<choice>>` becomes a decision, events become edge labels,
     and composite states become groups. A transition into a composite enters
     at its start.
   - **`mindmap`** → mindmap: the indentation tree becomes branch edges.
 
-  Styling, clicks, notes and descriptions are skipped *and counted*, so the
+  Styling, clicks, notes and descriptions are skipped _and counted_, so the
   toast says what didn't come in. Ids are prefixed per import, so pasting the
   same snippet twice lands twice. Paste Mermaid onto the canvas, or use
   **Paste Mermaid…**, which now reads the clipboard. The old `window.prompt`
   was single-line, so it dropped the newlines Mermaid needs.
 
-  An empty board *becomes* the diagram. A board with content *gains* it as a
+  An empty board _becomes_ the diagram. A board with content _gains_ it as a
   region of its own kind, so a pasted state diagram never turns an
   architecture into a state machine.
 
   Export is per kind: a state machine exports as `stateDiagram-v2`, a
   tree-shaped mind map as `mindmap`, and everything else as a flowchart. So
   the new families round-trip as themselves.
+
 - **MCP speaks Mermaid**: `import_mermaid` and `export_mermaid`, in both the
   local and the remote session, apply through the same
   validate-and-stamp pipeline as `apply_canvas_operations`.
 - **Stickies → structure.** Select three or more stickies, and the shape
   inspector offers **Sort into themes**, **Flowchart**, **Mind map** and
-  **2×2**. *Every result is a proposal* (`propose` on the send attachments;
+  **2×2**. _Every result is a proposal_ (`propose` on the send attachments;
   `proposeOps` for client-built batches).
   - **Sort into themes** asks the model only for meaning: `POST /api/themes`
-    returns themes of note *indices* (the `sticky-themes` prompt, with notes
+    returns themes of note _indices_ (the `sticky-themes` prompt, with notes
     enveloped as untrusted).
   - The client lays out the titled frames and the grid inside each one
     deterministically (`board/themeLayout.ts`).

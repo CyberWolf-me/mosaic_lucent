@@ -16,7 +16,14 @@ import { handleGenerate } from "../src/generate.js";
 const emptySummary = summarizeWorkspace(createWorkspace());
 
 const STICKY: Operation[] = [
-  { op: "CREATE_SHAPE", id: "s1", kind: "sticky", position: { x: 0, y: 0 }, size: { width: 160, height: 120 }, text: "the whole flow" },
+  {
+    op: "CREATE_SHAPE",
+    id: "s1",
+    kind: "sticky",
+    position: { x: 0, y: 0 },
+    size: { width: 160, height: 120 },
+    text: "the whole flow",
+  },
 ];
 const RICH_FLOW: Operation[] = [
   { op: "CREATE_NODE", id: "a", nodeType: "step", label: "Sign up" },
@@ -27,7 +34,9 @@ const RICH_FLOW: Operation[] = [
 ];
 const ONE_NODE: Operation[] = [{ op: "CREATE_NODE", id: "x", nodeType: "step", label: "X" }];
 
-function scriptedProvider(responses: GenerateResult[]): LLMProvider & { calls: Array<{ message: string }> } {
+function scriptedProvider(
+  responses: GenerateResult[],
+): LLMProvider & { calls: Array<{ message: string }> } {
   const calls: Array<{ message: string }> = [];
   return {
     name: "scripted",
@@ -51,7 +60,11 @@ describe("degenerate-result guard", () => {
   it("re-asks once and replaces a lone sticky note with the richer diagram", async () => {
     const provider = scriptedProvider([
       { operations: STICKY, usage: { inputTokens: 10, outputTokens: 5 } },
-      { operations: RICH_FLOW, explanation: "built the flow", usage: { inputTokens: 20, outputTokens: 8 } },
+      {
+        operations: RICH_FLOW,
+        explanation: "built the flow",
+        usage: { inputTokens: 20, outputTokens: 8 },
+      },
     ]);
     const result = await handleGenerate(provider, {
       message: "design a 5-step user onboarding flowchart",

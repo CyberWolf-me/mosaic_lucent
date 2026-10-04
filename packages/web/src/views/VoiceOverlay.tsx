@@ -211,7 +211,15 @@ export function VoiceOverlay({
           }}
         >
           <span className="mono" style={{ fontSize: 11, color: "var(--ink-3)" }}>
-            Press <kbd style={{ padding: "1px 5px", borderRadius: 4, background: "var(--paper-2)" }}>↵</kbd> to submit or <kbd style={{ padding: "1px 5px", borderRadius: 4, background: "var(--paper-2)" }}>Esc</kbd> to cancel
+            Press{" "}
+            <kbd style={{ padding: "1px 5px", borderRadius: 4, background: "var(--paper-2)" }}>
+              ↵
+            </kbd>{" "}
+            to submit or{" "}
+            <kbd style={{ padding: "1px 5px", borderRadius: 4, background: "var(--paper-2)" }}>
+              Esc
+            </kbd>{" "}
+            to cancel
           </span>
 
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>

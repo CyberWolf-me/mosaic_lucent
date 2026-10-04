@@ -83,10 +83,15 @@ describe("image timeout (LUCENT_IMAGE_TIMEOUT_MS)", () => {
     expect(imageTimeoutMs({ LUCENT_IMAGE_TIMEOUT_MS: "30000" })).toBe(30000);
     expect(imageTimeoutMs({ LUCENT_IMAGE_TIMEOUT_MS: "1500.7" })).toBe(1500);
     expect(imageTimeoutMs({ LUCENT_AI_TIMEOUT_MS: "9000" })).toBe(9000);
-    expect(imageTimeoutMs({ LUCENT_IMAGE_TIMEOUT_MS: "20000", LUCENT_AI_TIMEOUT_MS: "9000" })).toBe(20000);
+    expect(imageTimeoutMs({ LUCENT_IMAGE_TIMEOUT_MS: "20000", LUCENT_AI_TIMEOUT_MS: "9000" })).toBe(
+      20000,
+    );
     for (const bad of ["0", "-5", "abc", "", " ", "Infinity", "NaN"]) {
       expect(imageTimeoutMs({ LUCENT_IMAGE_TIMEOUT_MS: bad }), bad).toBeUndefined();
-      expect(imageTimeoutMs({ LUCENT_IMAGE_TIMEOUT_MS: bad, LUCENT_AI_TIMEOUT_MS: "9000" }), bad).toBe(9000);
+      expect(
+        imageTimeoutMs({ LUCENT_IMAGE_TIMEOUT_MS: bad, LUCENT_AI_TIMEOUT_MS: "9000" }),
+        bad,
+      ).toBe(9000);
     }
     expect(imageTimeoutMs({})).toBeUndefined();
   });
@@ -98,7 +103,8 @@ describe("image timeout (LUCENT_IMAGE_TIMEOUT_MS)", () => {
       "fetch",
       vi.fn(async (_url: string, init: RequestInit = {}) => {
         await new Promise((r) => setTimeout(r, 5));
-        if (init.signal?.aborted) throw new DOMException("The operation was aborted.", "AbortError");
+        if (init.signal?.aborted)
+          throw new DOMException("The operation was aborted.", "AbortError");
         return Response.json({ data: [{ b64_json: "AAAA" }] });
       }),
     );

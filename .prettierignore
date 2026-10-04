@@ -30,3 +30,8 @@ reference
 
 # Local editor/agent state, not repo content.
 .zcode
+.kilo
+.agents
+redesign
+*.png
+lucent-field-report.html

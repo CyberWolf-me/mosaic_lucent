@@ -306,7 +306,17 @@ export function inverseOperations(ops: readonly Operation[], before: Workspace):
         const prev = walking.shapes[op.id];
         if (!prev) break;
         const restore: Record<string, unknown> = { op: "UPDATE_SHAPE", id: op.id };
-        for (const key of ["position", "size", "rotation", "text", "vector", "table", "chart", "style", "z"] as const) {
+        for (const key of [
+          "position",
+          "size",
+          "rotation",
+          "text",
+          "vector",
+          "table",
+          "chart",
+          "style",
+          "z",
+        ] as const) {
           if (op[key] === undefined) continue;
           if (prev[key] !== undefined) restore[key] = prev[key];
         }

@@ -36,6 +36,7 @@ COPY packages/mcp/package.json packages/mcp/
 COPY packages/i18n/package.json packages/i18n/
 COPY packages/site/package.json packages/site/
 COPY packages/load/package.json packages/load/
+COPY packages/voice-agent/package.json packages/voice-agent/
 RUN npm ci --no-audit --no-fund
 
 FROM deps AS build
@@ -64,6 +65,7 @@ COPY packages/mcp/package.json packages/mcp/
 COPY packages/i18n/package.json packages/i18n/
 COPY packages/site/package.json packages/site/
 COPY packages/load/package.json packages/load/
+COPY packages/voice-agent/package.json packages/voice-agent/
 # Prod-only deps for the one workspace this image runs. `--omit=dev` drops
 # tsx/drizzle-kit/vitest/typescript; `-w @lucent/server` drops every other
 # workspace's runtime tree, which is what keeps the browser-side stack

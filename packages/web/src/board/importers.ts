@@ -185,7 +185,9 @@ export function tableShapeSize(t: TableData): { width: number; height: number } 
   const sample = t.rows.slice(0, 50);
   const width = t.columns.reduce((sum, c, i) => {
     const longest = Math.max(c.header.length, ...sample.map((r) => (r.cells[i] ?? "").length));
-    return sum + Math.min(240 + TABLE_CELL_PAD, Math.max(56, longest * TABLE_CHAR_PX + TABLE_CELL_PAD));
+    return (
+      sum + Math.min(240 + TABLE_CELL_PAD, Math.max(56, longest * TABLE_CHAR_PX + TABLE_CELL_PAD))
+    );
   }, 0);
   return {
     width: Math.min(960, Math.max(200, Math.round(width))),

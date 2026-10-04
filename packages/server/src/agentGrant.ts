@@ -67,7 +67,9 @@ export function verifyAgentGrant(
   const parts = token.split(".");
   if (parts.length !== 3 || parts[0] !== PREFIX) return null;
   const [, body, sig] = parts as [string, string, string];
-  const expected = b64url(createHmac("sha256", grantKey(secret)).update(`${PREFIX}.${body}`).digest());
+  const expected = b64url(
+    createHmac("sha256", grantKey(secret)).update(`${PREFIX}.${body}`).digest(),
+  );
   const a = Buffer.from(sig);
   const b = Buffer.from(expected);
   if (a.length !== b.length || !timingSafeEqual(a, b)) return null;

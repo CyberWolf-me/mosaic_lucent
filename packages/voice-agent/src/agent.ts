@@ -1,9 +1,4 @@
-import {
-  type JobContext,
-  defineAgent,
-  llm,
-  voice,
-} from "@livekit/agents";
+import { type JobContext, defineAgent, llm, voice } from "@livekit/agents";
 import * as deepgram from "@livekit/agents-plugin-deepgram";
 import * as openai from "@livekit/agents-plugin-openai";
 import * as silero from "@livekit/agents-plugin-silero";
@@ -154,7 +149,9 @@ export function resolveLlmConfig(env: Record<string, string | undefined>): {
 } {
   const apiKey = env.LUCENT_AI_KEY || env.OPENAI_API_KEY || "";
   const rawBase = env.LUCENT_AI_BASE_URL?.trim() || "";
-  const baseURL = rawBase ? rawBase.replace(/\/chat\/completions\/?$/i, "").replace(/\/+$/, "") : undefined;
+  const baseURL = rawBase
+    ? rawBase.replace(/\/chat\/completions\/?$/i, "").replace(/\/+$/, "")
+    : undefined;
   const model = env.LUCENT_AI_MODEL?.trim() || (baseURL ? "" : "gpt-4o-mini");
   if (!apiKey) {
     throw new Error(
@@ -320,9 +317,7 @@ export default defineAgent({
 
     // 3. Initialize STT, TTS, VAD, and LLM
     const deepgramKey =
-      process.env.DEEPGRAM_API_KEY ||
-      process.env.LUCENT_STT_KEY ||
-      process.env.LUCENT_TTS_KEY;
+      process.env.DEEPGRAM_API_KEY || process.env.LUCENT_STT_KEY || process.env.LUCENT_TTS_KEY;
 
     // The same provider the Lucent server is configured with — never a
     // hardcoded third party (it used to default to an external gateway, so

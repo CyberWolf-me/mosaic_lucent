@@ -54,19 +54,23 @@ describe("parseExplicitImageIntent", () => {
 
 describe("enrichImagePromptWithContext", () => {
   it("leaves detailed and specific prompts alone", () => {
-    const detailed = "a sleek futuristic glowing hexagon logo with cyan neon circuit patterns on black background";
+    const detailed =
+      "a sleek futuristic glowing hexagon logo with cyan neon circuit patterns on black background";
     expect(enrichImagePromptWithContext(detailed)).toBe(detailed);
   });
 
   it("enriches conversational and relative prompts using board entities and conversation context", () => {
     const chat = [
-      { role: "user", text: "i want to create a reservation platform for my restaurant name Mosaic" },
+      {
+        role: "user",
+        text: "i want to create a reservation platform for my restaurant name Mosaic",
+      },
       { role: "ai", text: "Created reservation platform architecture for Mosaic with full stack" },
     ];
     const workspace = {
       nodes: {
         "api-gw": { label: "API Gateway" },
-        "db": { label: "PostgreSQL" },
+        db: { label: "PostgreSQL" },
       },
     };
 

@@ -454,7 +454,11 @@ export class AnthropicProvider implements LLMProvider {
         throw new Error(`Anthropic request failed (${lastStatus}): ${lastDetail}`);
       }
       const data = (await response.json()) as AnthropicResponse;
-      const meta = completionMeta(data.model ?? this.model, data.usage?.input_tokens, data.usage?.output_tokens);
+      const meta = completionMeta(
+        data.model ?? this.model,
+        data.usage?.input_tokens,
+        data.usage?.output_tokens,
+      );
       const toolUse = data.content?.find((c) => c.type === "tool_use");
       const draft =
         toolUse?.input !== undefined

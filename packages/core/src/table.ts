@@ -77,16 +77,16 @@ export function createTable(
   rows: string[][] = [],
   aligns: (TableAlign | undefined)[] = [],
 ): TableData {
-  const columns: TableColumn[] = headers
-    .slice(0, TABLE_LIMITS.columns)
-    .map((header, i) => ({
-      header: header.slice(0, TABLE_LIMITS.headerChars),
-      ...(aligns[i] ? { align: aligns[i] } : {}),
-    }));
+  const columns: TableColumn[] = headers.slice(0, TABLE_LIMITS.columns).map((header, i) => ({
+    header: header.slice(0, TABLE_LIMITS.headerChars),
+    ...(aligns[i] ? { align: aligns[i] } : {}),
+  }));
   return {
     columns: columns.length ? columns : [{ header: "" }],
     rows: rows.slice(0, TABLE_LIMITS.rows).map((r) => ({
-      cells: r.slice(0, TABLE_LIMITS.columns).map((c) => String(c).slice(0, TABLE_LIMITS.cellChars)),
+      cells: r
+        .slice(0, TABLE_LIMITS.columns)
+        .map((c) => String(c).slice(0, TABLE_LIMITS.cellChars)),
     })),
   };
 }
@@ -313,7 +313,10 @@ export function insertTableRow(t: TableData, at = t.rows.length): TableEdit {
   }
   const i = clampIndex(at, t.rows.length);
   const blank = { cells: t.columns.map(() => "") };
-  return { ok: true, table: { columns: t.columns, rows: [...t.rows.slice(0, i), blank, ...t.rows.slice(i)] } };
+  return {
+    ok: true,
+    table: { columns: t.columns, rows: [...t.rows.slice(0, i), blank, ...t.rows.slice(i)] },
+  };
 }
 
 /** Delete row `index`. A table may have no body rows; the header stays. */
@@ -339,7 +342,9 @@ export function insertTableColumn(t: TableData, at = t.columns.length, header?: 
     return { ok: false, error: `A table holds at most ${TABLE_LIMITS.columns} columns.` };
   }
   const i = clampIndex(at, width);
-  const column: TableColumn = { header: (header ?? freshColumnName(t)).slice(0, TABLE_LIMITS.headerChars) };
+  const column: TableColumn = {
+    header: (header ?? freshColumnName(t)).slice(0, TABLE_LIMITS.headerChars),
+  };
   return withinTotal({
     columns: [...t.columns.slice(0, i), column, ...t.columns.slice(i)],
     rows: t.rows.map((r) => {

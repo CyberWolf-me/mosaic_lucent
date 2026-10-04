@@ -109,13 +109,7 @@ export interface RepresentationSpec {
 function diag(kind: DiagramKind): Operation {
   return { op: "CREATE_DIAGRAM", kind };
 }
-function nd(
-  p: string,
-  id: string,
-  nodeType: string,
-  label: string,
-  groupId?: string,
-): Operation {
+function nd(p: string, id: string, nodeType: string, label: string, groupId?: string): Operation {
   return {
     op: "CREATE_NODE",
     id: `${p}-${id}`,
@@ -151,7 +145,8 @@ export const REPRESENTATIONS: Record<DiagramKind, RepresentationSpec> = {
   flowchart: {
     kind: "flowchart",
     label: "Flowchart",
-    summary: "Steps and decisions in the order they happen — the default for a process or algorithm.",
+    summary:
+      "Steps and decisions in the order they happen — the default for a process or algorithm.",
     guidance: [
       'nodeType "start" / "end" for the terminals, "decision" for a branch point; label each',
       'branch edge with its condition ("yes", "no", "over limit").',
@@ -202,7 +197,9 @@ export const REPRESENTATIONS: Record<DiagramKind, RepresentationSpec> = {
     kind: "mindmap",
     label: "Mind map",
     summary: "A central idea with radiating branches — brainstorming and open exploration.",
-    guidance: ['One central node; connect every other node to its parent with relationship "branch".'],
+    guidance: [
+      'One central node; connect every other node to its parent with relationship "branch".',
+    ],
     nodeTypes: ["idea"],
     category: "structure",
     layout: "radial",
@@ -228,7 +225,7 @@ export const REPRESENTATIONS: Record<DiagramKind, RepresentationSpec> = {
     summary: "A person's path through stages of an experience, left to right.",
     guidance: [
       'nodeType "stage" for each stage, connected in the order the person moves through',
-      'them; a touchpoint, pain or feeling is a node connected to the stage it belongs to.',
+      "them; a touchpoint, pain or feeling is a node connected to the stage it belongs to.",
     ],
     nodeTypes: ["stage", "touchpoint", "pain"],
     category: "flow",
@@ -355,7 +352,8 @@ export const REPRESENTATIONS: Record<DiagramKind, RepresentationSpec> = {
   timeline: {
     kind: "timeline",
     label: "Timeline",
-    summary: "Milestones or phases along a time axis — roadmaps and schedules. Links to actions' due dates.",
+    summary:
+      "Milestones or phases along a time axis — roadmaps and schedules. Links to actions' due dates.",
     guidance: [
       "Give each dated item SET_ISSUE with dueDate (YYYY-MM-DD, resolved against today's",
       'date), nodeType "milestone" for milestones, and one CREATE_GROUP per lane (a team or',
@@ -412,7 +410,8 @@ export const REPRESENTATIONS: Record<DiagramKind, RepresentationSpec> = {
   statemachine: {
     kind: "statemachine",
     label: "State machine",
-    summary: "States and the transitions between them, with guards — use for lifecycles and status models.",
+    summary:
+      "States and the transitions between them, with guards — use for lifecycles and status models.",
     guidance: [
       'nodeType "state", one "start" and at least one "end" pseudo-state; each transition\'s',
       'relationship is the event, with a guard in brackets when it has one ("pay [card valid]").',
@@ -470,7 +469,7 @@ export const REPRESENTATIONS: Record<DiagramKind, RepresentationSpec> = {
     summary:
       "Software architecture at one C4 level — context, container or component — systems and their relationships.",
     guidance: [
-      "One level per diagram. Context: nodeType \"person\", \"system\" and \"external_system\".",
+      'One level per diagram. Context: nodeType "person", "system" and "external_system".',
       'Container: "container" and "database" nodes inside a CREATE_GROUP for the system',
       'boundary. Component: "component" nodes inside a CREATE_GROUP for their container.',
       "Put a node's technology and responsibility in its details; each edge's relationship",
@@ -502,7 +501,9 @@ export const REPRESENTATIONS: Record<DiagramKind, RepresentationSpec> = {
         nodeType: "container",
         label: "Web application",
         groupId: `${p}-boundary`,
-        details: { sections: [{ items: ["[React, Node.js]", "Shows the catalogue, takes orders"] }] },
+        details: {
+          sections: [{ items: ["[React, Node.js]", "Shows the catalogue, takes orders"] }],
+        },
       },
       {
         op: "CREATE_NODE",
@@ -560,7 +561,7 @@ export const REPRESENTATIONS: Record<DiagramKind, RepresentationSpec> = {
       "Actors exchanging messages over time — nodes are participants, edges are messages in order. Presented through the sequence lens.",
     guidance: [
       'nodeType "actor" per participant; each CONNECT_NODES is one message, created in the',
-      'order the messages happen, labelled with the message; a reply is its own edge back.',
+      "order the messages happen, labelled with the message; a reply is its own edge back.",
     ],
     nodeTypes: ["actor"],
     lens: "sequence",
@@ -833,9 +834,7 @@ export function representationCatalogPrompt(): string {
     "Pick the one whose shape matches the idea; the layout engine handles positions.",
   ];
   for (const category of ["flow", "structure", "planning"] as const) {
-    const specs = listRepresentations().filter(
-      (r) => r.aiCreatable && r.category === category,
-    );
+    const specs = listRepresentations().filter((r) => r.aiCreatable && r.category === category);
     if (specs.length === 0) continue;
     lines.push(`${CATEGORY_TITLE[category]}:`);
     for (const spec of specs) {

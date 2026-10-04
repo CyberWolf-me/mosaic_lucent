@@ -143,7 +143,8 @@ export function NotificationsView({
           ready && rows.length > 0 ? (
             unread > 0 ? (
               <>
-                {unread} {unread === 1 ? "thing" : "things"} <em>need{unread === 1 ? "s" : ""} you</em>
+                {unread} {unread === 1 ? "thing" : "things"}{" "}
+                <em>need{unread === 1 ? "s" : ""} you</em>
               </>
             ) : (
               <>
@@ -166,7 +167,9 @@ export function NotificationsView({
 
       {state.kind === "loading" && <NotifSkeleton />}
 
-      {state.kind === "failed" && <FailedState failure={state.failure} onRetry={() => void load()} />}
+      {state.kind === "failed" && (
+        <FailedState failure={state.failure} onRetry={() => void load()} />
+      )}
 
       {ready && rows.length === 0 && (
         <EmptyState
@@ -300,13 +303,7 @@ function NotifRow({
   );
 }
 
-function FailedState({
-  failure,
-  onRetry,
-}: {
-  failure: NotificationFailure;
-  onRetry: () => void;
-}) {
+function FailedState({ failure, onRetry }: { failure: NotificationFailure; onRetry: () => void }) {
   if (failure === "signed-out") {
     return (
       <EmptyState

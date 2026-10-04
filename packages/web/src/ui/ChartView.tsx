@@ -33,7 +33,15 @@ export function ChartView({
             return <rect key={i} x={p.x} y={p.y} width={p.w} height={p.h} fill={p.fill} />;
           case "line":
             return (
-              <line key={i} x1={p.x1} y1={p.y1} x2={p.x2} y2={p.y2} stroke={p.stroke} strokeWidth={p.width} />
+              <line
+                key={i}
+                x1={p.x1}
+                y1={p.y1}
+                x2={p.x2}
+                y2={p.y2}
+                stroke={p.stroke}
+                strokeWidth={p.width}
+              />
             );
           case "polyline":
             return (

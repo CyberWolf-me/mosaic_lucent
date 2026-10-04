@@ -57,7 +57,12 @@ describe("board serialize (Phase B)", () => {
         kind: "chart",
         position: { x: 0, y: 200 },
         size: { width: 300, height: 200 },
-        chart: { type: "bar", title: "Revenue", labels: ["Q1", "Q2"], series: [{ name: "EU", values: [3, -1] }] },
+        chart: {
+          type: "bar",
+          title: "Revenue",
+          labels: ["Q1", "Q2"],
+          series: [{ name: "EU", values: [3, -1] }],
+        },
       },
     ]);
     const md = boardToMarkdown(ws);

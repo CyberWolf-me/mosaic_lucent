@@ -23,7 +23,13 @@ import { densityBand, type DensityBand } from "./edgeTiers.js";
 
 export type PresentationMode = "detail" | "grouped" | "regions" | "overview" | "summary-cards";
 
-const MODE_ORDER: PresentationMode[] = ["detail", "grouped", "regions", "overview", "summary-cards"];
+const MODE_ORDER: PresentationMode[] = [
+  "detail",
+  "grouped",
+  "regions",
+  "overview",
+  "summary-cards",
+];
 
 /** The rung a density band sits at when the board is at rest (full zoom). */
 const BAND_FLOOR: Record<DensityBand, PresentationMode> = {

@@ -145,7 +145,8 @@ describe("uploadGeneratedImage", () => {
   it("keeps the mock's SVG inline without posting it (the store refuses SVG by design)", async () => {
     const fetchSpy = vi.fn(async () => Response.json({ error: "unsupported" }, { status: 415 }));
     vi.stubGlobal("fetch", fetchSpy);
-    const svg = "data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%2F%3E";
+    const svg =
+      "data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%2F%3E";
     expect(await uploadGeneratedImage(svg, "brd_1")).toBe(svg);
     expect(await uploadGeneratedImage("data:image/svg+xml;base64,PHN2Zy8+", "brd_1")).toBe(
       "data:image/svg+xml;base64,PHN2Zy8+",

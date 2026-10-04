@@ -63,7 +63,11 @@ describe("chartFromTable", () => {
 
 describe("chartDataSchema", () => {
   it("accepts a valid chart and requires at least one series", () => {
-    const ok: ChartData = { type: "pie", labels: ["A", "B"], series: [{ name: "n", values: [1, 2] }] };
+    const ok: ChartData = {
+      type: "pie",
+      labels: ["A", "B"],
+      series: [{ name: "n", values: [1, 2] }],
+    };
     expect(chartDataSchema.safeParse(ok).success).toBe(true);
     expect(chartDataSchema.safeParse({ type: "bar", labels: [], series: [] }).success).toBe(false);
   });
@@ -104,7 +108,8 @@ function yRange(p: Prim): [number, number] {
   if (p.kind === "rect") return [p.y, p.y + p.h];
   if (p.kind === "text") return [p.y - p.size, p.y];
   if (p.kind === "line") return [Math.min(p.y1, p.y2), Math.max(p.y1, p.y2)];
-  if (p.kind === "polyline") return [Math.min(...p.points.map((q) => q[1])), Math.max(...p.points.map((q) => q[1]))];
+  if (p.kind === "polyline")
+    return [Math.min(...p.points.map((q) => q[1])), Math.max(...p.points.map((q) => q[1]))];
   return [0, 0];
 }
 
@@ -142,7 +147,9 @@ describe("chartGeometry: negative values", () => {
       expect(b.y + b.h).toBeLessThanOrEqual(plot.y + plot.h + 0.01);
     }
     // The tick labels read a negative value.
-    expect(scene.prims.filter(isText).some((t) => t.role === "tick" && t.text.startsWith("-"))).toBe(true);
+    expect(
+      scene.prims.filter(isText).some((t) => t.role === "tick" && t.text.startsWith("-")),
+    ).toBe(true);
   });
 
   it("puts a line's negative points below the zero line", () => {
@@ -165,16 +172,23 @@ describe("chartGeometry: negative values", () => {
   it("leaves negative values out of a pie, and says so", () => {
     const prims = chartGeometry({ ...data, type: "pie" }, 320, 220);
     expect(prims.filter((p) => p.kind === "path")).toHaveLength(2);
-    expect(prims.filter(isText).some((t) => t.role === "note" && /negative/i.test(t.text))).toBe(true);
+    expect(prims.filter(isText).some((t) => t.role === "note" && /negative/i.test(t.text))).toBe(
+      true,
+    );
     // All non-positive: nothing to slice, but still a message rather than a blank box.
-    const none = chartGeometry({ ...data, type: "pie", series: [{ name: "x", values: [-1, 0] }] }, 320, 220);
+    const none = chartGeometry(
+      { ...data, type: "pie", series: [{ name: "x", values: [-1, 0] }] },
+      320,
+      220,
+    );
     expect(none.filter((p) => p.kind === "path")).toHaveLength(0);
     expect(none.filter(isText).some((t) => /no positive values/i.test(t.text))).toBe(true);
   });
 });
 
 describe("chartGeometry: the legend keeps to its own band", () => {
-  const longName = (i: number) => `Series ${i} ${"with a very long descriptive name ".repeat(4)}`.slice(0, 120);
+  const longName = (i: number) =>
+    `Series ${i} ${"with a very long descriptive name ".repeat(4)}`.slice(0, 120);
   const many: ChartData = {
     type: "bar",
     title: "Quarterly revenue by region and channel",
@@ -182,7 +196,8 @@ describe("chartGeometry: the legend keeps to its own band", () => {
     series: Array.from({ length: 12 }, (_, i) => ({ name: longName(i), values: [1, 2, 3, 4] })),
   };
 
-  const overlaps = (a: [number, number], b: [number, number]) => a[0] < b[1] - 0.01 && b[0] < a[1] - 0.01;
+  const overlaps = (a: [number, number], b: [number, number]) =>
+    a[0] < b[1] - 0.01 && b[0] < a[1] - 0.01;
 
   for (const [w, h] of [
     [320, 220],
@@ -255,7 +270,9 @@ describe("chartGeometry: the legend keeps to its own band", () => {
       expect(top).toBeGreaterThanOrEqual(legend.y - 0.01);
       expect(bottom).toBeLessThanOrEqual(legend.y + legend.h + 0.01);
     }
-    expect(prims.filter(isText).some((t) => t.role === "legend" && /^\+\d+ more$/.test(t.text))).toBe(true);
+    expect(
+      prims.filter(isText).some((t) => t.role === "legend" && /^\+\d+ more$/.test(t.text)),
+    ).toBe(true);
   });
 });
 
@@ -279,7 +296,13 @@ describe("chartToMarkdown", () => {
 
 describe("chart shapes through the op contract", () => {
   const chart = chartFromTable(
-    createTable(["Q", "V"], [["Q1", "3"], ["Q2", "6"]]),
+    createTable(
+      ["Q", "V"],
+      [
+        ["Q1", "3"],
+        ["Q2", "6"],
+      ],
+    ),
     { type: "line" },
   )!;
   const create: Operation = {

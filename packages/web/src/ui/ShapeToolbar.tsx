@@ -341,7 +341,13 @@ export function ShapeElement({
   const resizedBox = (r: NonNullable<typeof resizeRef.current>, e: React.PointerEvent) => {
     const corner = r.handle.length === 2;
     return resizeFromHandle(
-      { x: position.x, y: position.y, width: size.width, height: size.height, rotation: rotation ?? 0 },
+      {
+        x: position.x,
+        y: position.y,
+        width: size.width,
+        height: size.height,
+        rotation: rotation ?? 0,
+      },
       r.handle,
       { dx: (e.clientX - r.startX) / scale, dy: (e.clientY - r.startY) / scale },
       { lockAspect: keepsRatio && corner ? !e.shiftKey : e.shiftKey },
@@ -766,9 +772,7 @@ export function ShapeElement({
     ...(sty?.align ? { textAlign: sty.align } : {}),
     ...(sty?.opacity !== undefined ? { opacity: sty.opacity } : {}),
     ...(sty?.radius !== undefined ? { borderRadius: sty.radius } : {}),
-    ...((liveRotation ?? rotation)
-      ? { transform: `rotate(${liveRotation ?? rotation}deg)` }
-      : {}),
+    ...((liveRotation ?? rotation) ? { transform: `rotate(${liveRotation ?? rotation}deg)` } : {}),
   };
 
   // Inline editing uses a multi-line textarea so text/sticky notes support
@@ -828,14 +832,12 @@ export function ShapeElement({
         }}
       />
     )
+  ) : // Preserve newlines when displaying multi-line text.
+  // docs/26 §6.4: minimal rich text — headings, lists, code, marks, links.
+  text && hasRichText(text) ? (
+    <RichText text={text} />
   ) : (
-    // Preserve newlines when displaying multi-line text.
-    // docs/26 §6.4: minimal rich text — headings, lists, code, marks, links.
-    text && hasRichText(text) ? (
-      <RichText text={text} />
-    ) : (
-      <span style={{ whiteSpace: "pre-wrap" }}>{defaultText}</span>
-    )
+    <span style={{ whiteSpace: "pre-wrap" }}>{defaultText}</span>
   );
 
   const commonProps = {

@@ -104,9 +104,7 @@ const nodeSchema = z.object({
           turnKinds: z.array(z.string().min(1)).max(8).optional(),
           quote: z.string().max(240).optional(),
           createdFrom: z.array(z.string().min(1)).max(20).optional(),
-          conversation: z
-            .object({ at: z.number(), by: z.string().max(80).optional() })
-            .optional(),
+          conversation: z.object({ at: z.number(), by: z.string().max(80).optional() }).optional(),
         })
         .optional(),
     })

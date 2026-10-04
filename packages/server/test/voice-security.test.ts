@@ -148,8 +148,16 @@ describe("F1 · LiveKit rooms are authorized, not trusted", () => {
     const alice = await signup(h, "a2@example.com");
     const bob = await signup(h, "b2@example.com");
     for (const body of [undefined, JSON.stringify({ room: "lucent-voice" })]) {
-      const a = await api(h, "/api/livekit/token", { method: "POST", token: alice.token, ...(body ? { body } : {}) });
-      const b = await api(h, "/api/livekit/token", { method: "POST", token: bob.token, ...(body ? { body } : {}) });
+      const a = await api(h, "/api/livekit/token", {
+        method: "POST",
+        token: alice.token,
+        ...(body ? { body } : {}),
+      });
+      const b = await api(h, "/api/livekit/token", {
+        method: "POST",
+        token: bob.token,
+        ...(body ? { body } : {}),
+      });
       expect(roomOf(a.body.token)).toBe(`user-${alice.id}`);
       expect(roomOf(b.body.token)).toBe(`user-${bob.id}`);
     }
@@ -170,8 +178,14 @@ describe("F1 · LiveKit rooms are authorized, not trusted", () => {
 
   it("resolveRoomAccess: the policy table", () => {
     expect(resolveRoomAccess({}, "u1")).toEqual({ kind: "private", room: "user-u1" });
-    expect(resolveRoomAccess({ boardId: "b1" }, "u1")).toMatchObject({ room: "board-b1", minRole: "viewer" });
-    expect(resolveRoomAccess({ room: "voice_b1" }, "u1")).toMatchObject({ boardId: "b1", minRole: "editor" });
+    expect(resolveRoomAccess({ boardId: "b1" }, "u1")).toMatchObject({
+      room: "board-b1",
+      minRole: "viewer",
+    });
+    expect(resolveRoomAccess({ room: "voice_b1" }, "u1")).toMatchObject({
+      boardId: "b1",
+      minRole: "editor",
+    });
     expect(resolveRoomAccess({ room: "user-u2" }, "u1")).toEqual({ kind: "refused" });
   });
 });
@@ -188,7 +202,12 @@ describe("F2 · the voice agent's board grant", () => {
   it("expires, and is bound to its secret", () => {
     const grant = issueAgentGrant({ userId: "u1", boardId: "b1", ttlSeconds: 60 }, SECRET, 0);
     expect(verifyAgentGrant(grant, SECRET, 61_000)).toBeNull();
-    expect(verifyAgentGrant(issueAgentGrant({ userId: "u1", boardId: "b1" }, "another-secret-16c"), SECRET)).toBeNull();
+    expect(
+      verifyAgentGrant(
+        issueAgentGrant({ userId: "u1", boardId: "b1" }, "another-secret-16c"),
+        SECRET,
+      ),
+    ).toBeNull();
   });
 
   it("writes to its own board as AI on the user's behalf — and nowhere else", async () => {
@@ -218,7 +237,9 @@ describe("F2 · the voice agent's board grant", () => {
     const elsewhere = await api(h, `/api/boards/${boardB}/ops`, {
       method: "POST",
       agent: grant,
-      body: JSON.stringify({ ops: [{ op: "CREATE_NODE", id: "n2", nodeType: "service", label: "X" }] }),
+      body: JSON.stringify({
+        ops: [{ op: "CREATE_NODE", id: "n2", nodeType: "service", label: "X" }],
+      }),
     });
     expect(elsewhere.status).toBe(401);
     expect((await api(h, `/api/boards/${boardB}`, { agent: grant })).status).toBe(401);

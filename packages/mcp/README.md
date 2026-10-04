@@ -14,14 +14,14 @@ product.
 
 ## Tools
 
-| Tool | What it does |
-| --- | --- |
-| `get_board` | Read the current board as structured nodes, edges, groups, shapes. |
+| Tool                      | What it does                                                                                                                                        |
+| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `get_board`               | Read the current board as structured nodes, edges, groups, shapes.                                                                                  |
 | `apply_canvas_operations` | Apply validated operations (`CREATE_NODE`, `CONNECT_NODES`, `TRANSFORM_DIAGRAM`, …); anything the validator rejects is refused, never half-applied. |
-| `import_mermaid` | Turn a Mermaid flowchart / state / mind-map into validated operations. |
-| `export_mermaid` | Emit the board as Mermaid. |
-| `list_external_links` | List the board's connected Linear / GitHub / Jira items. |
-| `reset_board` | Clear the board (guarded). |
+| `import_mermaid`          | Turn a Mermaid flowchart / state / mind-map into validated operations.                                                                              |
+| `export_mermaid`          | Emit the board as Mermaid.                                                                                                                          |
+| `list_external_links`     | List the board's connected Linear / GitHub / Jira items.                                                                                            |
+| `reset_board`             | Clear the board (guarded).                                                                                                                          |
 
 Every write goes through the core validator → pure reducer → inverse-op
 history, so an agent's edits are checked, reversible, and never produce an

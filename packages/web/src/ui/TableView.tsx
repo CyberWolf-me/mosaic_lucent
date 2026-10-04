@@ -169,7 +169,9 @@ export function TableView({ table, shapeId }: { table: TableData; shapeId?: stri
       <input
         autoFocus
         aria-label={
-          cell.row === -1 ? `Column ${cell.col + 1} header` : `Row ${cell.row + 1}, column ${cell.col + 1}`
+          cell.row === -1
+            ? `Column ${cell.col + 1} header`
+            : `Row ${cell.row + 1}, column ${cell.col + 1}`
         }
         value={draft}
         maxLength={Math.max(0, Math.min(cap, room))}

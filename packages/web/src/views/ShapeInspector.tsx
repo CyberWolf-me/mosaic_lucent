@@ -11,7 +11,14 @@ import {
   type Shape,
   type TableEdit,
 } from "@lucent/core";
-import { chartBesideTableOp, cloneShapeOp, nextZ, shapeId, zOrderOps, type ZMove } from "../shapes.js";
+import {
+  chartBesideTableOp,
+  cloneShapeOp,
+  nextZ,
+  shapeId,
+  zOrderOps,
+  type ZMove,
+} from "../shapes.js";
 import { VectorSection } from "../vector/VectorSection.js";
 import { alignPositions, distributePositions, type AlignMode } from "../board/geometry.js";
 import { setTableCursor, useTableCursor, type TableCell } from "../ui/TableView.js";
@@ -224,14 +231,22 @@ function TableSection({
         <button
           onClick={addRow}
           disabled={locked}
-          title={locked ? lockTitle : cursor ? `Add a row below row ${cursor.row + 1}` : "Add a row at the end"}
+          title={
+            locked
+              ? lockTitle
+              : cursor
+                ? `Add a row below row ${cursor.row + 1}`
+                : "Add a row at the end"
+          }
         >
           + Row
         </button>
         <button
           onClick={deleteRow}
           disabled={locked || rows === 0}
-          title={locked ? lockTitle : rows === 0 ? "No rows to delete" : `Delete row ${rowTarget + 1}`}
+          title={
+            locked ? lockTitle : rows === 0 ? "No rows to delete" : `Delete row ${rowTarget + 1}`
+          }
         >
           − Row {rows > 0 ? rowTarget + 1 : ""}
         </button>
@@ -247,7 +262,13 @@ function TableSection({
         <button
           onClick={deleteColumn}
           disabled={locked || cols <= 1}
-          title={locked ? lockTitle : cols <= 1 ? "A table keeps at least one column" : `Delete column “${colName}”`}
+          title={
+            locked
+              ? lockTitle
+              : cols <= 1
+                ? "A table keeps at least one column"
+                : `Delete column “${colName}”`
+          }
         >
           − {colName}
         </button>
@@ -310,7 +331,9 @@ function ChartSection({
             disabled={locked}
             aria-pressed={chart.type === type}
             className={chart.type === type ? "active" : undefined}
-            title={locked ? "Unlock the chart to change it" : `Show as a ${label.toLowerCase()} chart`}
+            title={
+              locked ? "Unlock the chart to change it" : `Show as a ${label.toLowerCase()} chart`
+            }
           >
             {label}
           </button>
@@ -387,7 +410,11 @@ export function ShapeInspector({
           ...(patch.r !== undefined ? { rotation: patch.r } : {}),
         },
       ],
-      patch.r !== undefined ? "Rotate shape" : patch.w !== undefined || patch.h !== undefined ? "Resize shape" : "Move shape",
+      patch.r !== undefined
+        ? "Rotate shape"
+        : patch.w !== undefined || patch.h !== undefined
+          ? "Resize shape"
+          : "Move shape",
     );
   };
   const opacityOf = (s: Shape) => Math.round((s.style?.opacity ?? 1) * 100);
@@ -514,90 +541,103 @@ export function ShapeInspector({
           below would only draw a background and border around it. */}
       {!allVectors && (
         <>
-        <div className="insp-group">
-          <span className="insp-cap">Fill</span>
-          <div className="insp-swatches">
-            {FILLS.map((c) => (
+          <div className="insp-group">
+            <span className="insp-cap">Fill</span>
+            <div className="insp-swatches">
+              {FILLS.map((c) => (
+                <button
+                  key={c}
+                  className="insp-swatch"
+                  style={{ background: c }}
+                  onClick={() => setFill(c)}
+                  title="Fill"
+                  aria-label={`Fill ${c}`}
+                />
+              ))}
+            </div>
+          </div>
+          <div className="insp-group">
+            <span className="insp-cap">Stroke</span>
+            <div className="insp-swatches">
+              {STROKES.map((c) => (
+                <button
+                  key={c}
+                  className="insp-swatch"
+                  style={{ background: c }}
+                  onClick={() => setStroke(c)}
+                  title="Stroke"
+                  aria-label={`Stroke ${c}`}
+                />
+              ))}
+            </div>
+          </div>
+          <div className="insp-group">
+            <span className="insp-cap">Text</span>
+            <div className="segmented">
               <button
-                key={c}
-                className="insp-swatch"
-                style={{ background: c }}
-                onClick={() => setFill(c)}
-                title="Fill"
-                aria-label={`Fill ${c}`}
-              />
-            ))}
-          </div>
-        </div>
-        <div className="insp-group">
-          <span className="insp-cap">Stroke</span>
-          <div className="insp-swatches">
-            {STROKES.map((c) => (
+                onClick={toggleBold}
+                style={{ fontWeight: 700 }}
+                aria-label="Bold"
+                title="Bold"
+              >
+                B
+              </button>
+              <button onClick={() => setFontSize(12)} aria-label="Small text" title="Small">
+                S
+              </button>
+              <button onClick={() => setFontSize(16)} aria-label="Medium text" title="Medium">
+                M
+              </button>
+              <button onClick={() => setFontSize(22)} aria-label="Large text" title="Large">
+                L
+              </button>
+            </div>
+            <div className="segmented" style={{ marginTop: 6 }}>
+              <button onClick={() => setAlign("left")} aria-label="Align left" title="Align left">
+                ◧
+              </button>
               <button
-                key={c}
-                className="insp-swatch"
-                style={{ background: c }}
-                onClick={() => setStroke(c)}
-                title="Stroke"
-                aria-label={`Stroke ${c}`}
-              />
-            ))}
-          </div>
-        </div>
-        <div className="insp-group">
-          <span className="insp-cap">Text</span>
-          <div className="segmented">
-            <button onClick={toggleBold} style={{ fontWeight: 700 }} aria-label="Bold" title="Bold">
-              B
-            </button>
-            <button onClick={() => setFontSize(12)} aria-label="Small text" title="Small">
-              S
-            </button>
-            <button onClick={() => setFontSize(16)} aria-label="Medium text" title="Medium">
-              M
-            </button>
-            <button onClick={() => setFontSize(22)} aria-label="Large text" title="Large">
-              L
-            </button>
-          </div>
-          <div className="segmented" style={{ marginTop: 6 }}>
-            <button onClick={() => setAlign("left")} aria-label="Align left" title="Align left">
-              ◧
-            </button>
-            <button onClick={() => setAlign("center")} aria-label="Align center" title="Align center">
-              ▣
-            </button>
-            <button onClick={() => setAlign("right")} aria-label="Align right" title="Align right">
-              ◨
-            </button>
-          </div>
-          <div className="insp-swatches" style={{ marginTop: 6 }}>
-            {TEXT_COLORS.map((c) => (
+                onClick={() => setAlign("center")}
+                aria-label="Align center"
+                title="Align center"
+              >
+                ▣
+              </button>
               <button
-                key={c}
-                className="insp-swatch"
-                style={{ background: c }}
-                onClick={() => setColor(c)}
-                title="Text colour"
-                aria-label={`Text colour ${c}`}
-              />
-            ))}
+                onClick={() => setAlign("right")}
+                aria-label="Align right"
+                title="Align right"
+              >
+                ◨
+              </button>
+            </div>
+            <div className="insp-swatches" style={{ marginTop: 6 }}>
+              {TEXT_COLORS.map((c) => (
+                <button
+                  key={c}
+                  className="insp-swatch"
+                  style={{ background: c }}
+                  onClick={() => setColor(c)}
+                  title="Text colour"
+                  aria-label={`Text colour ${c}`}
+                />
+              ))}
+            </div>
           </div>
-        </div>
-        <div className="insp-group">
-          <span className="insp-cap">Corners</span>
-          <div className="segmented">
-            <button onClick={() => setRadius(0)} title="Square corners">
-              ▢
-            </button>
-            <button onClick={() => setRadius(8)} title="Rounded">
-              ▣
-            </button>
-            <button onClick={() => setRadius(22)} title="Very rounded">
-              ◍
-            </button>
+          <div className="insp-group">
+            <span className="insp-cap">Corners</span>
+            <div className="segmented">
+              <button onClick={() => setRadius(0)} title="Square corners">
+                ▢
+              </button>
+              <button onClick={() => setRadius(8)} title="Rounded">
+                ▣
+              </button>
+              <button onClick={() => setRadius(22)} title="Very rounded">
+                ◍
+              </button>
+            </div>
           </div>
-        </div>
         </>
       )}
       {onStructure && stickyCount >= 3 && (
@@ -680,8 +720,18 @@ export function ShapeInspector({
             <>
               <NumField label="X" value={one.position.x} onCommit={(x) => setGeometry({ x })} />
               <NumField label="Y" value={one.position.y} onCommit={(y) => setGeometry({ y })} />
-              <NumField label="W" value={one.size.width} min={4} onCommit={(w) => setGeometry({ w })} />
-              <NumField label="H" value={one.size.height} min={4} onCommit={(h) => setGeometry({ h })} />
+              <NumField
+                label="W"
+                value={one.size.width}
+                min={4}
+                onCommit={(w) => setGeometry({ w })}
+              />
+              <NumField
+                label="H"
+                value={one.size.height}
+                min={4}
+                onCommit={(h) => setGeometry({ h })}
+              />
               <NumField
                 label="↻"
                 title="Rotation, degrees"

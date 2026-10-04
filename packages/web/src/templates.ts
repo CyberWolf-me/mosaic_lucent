@@ -159,7 +159,13 @@ export const TEMPLATES: Template[] = [
         { op: "CREATE_DIAGRAM", kind: "matrix" },
         ...cells.flatMap(([label, seed], i): Operation[] => [
           { op: "CREATE_GROUP", id: `${run}-c${i}`, label, children: [] },
-          { op: "CREATE_NODE", id: `${run}-n${i}`, nodeType: "idea", label: seed, groupId: `${run}-c${i}` },
+          {
+            op: "CREATE_NODE",
+            id: `${run}-n${i}`,
+            nodeType: "idea",
+            label: seed,
+            groupId: `${run}-c${i}`,
+          },
         ]),
       ];
     },
@@ -187,7 +193,13 @@ export const TEMPLATES: Template[] = [
         { op: "CREATE_GROUP", id: `${run}-product`, label: "Product", children: [] },
         { op: "CREATE_GROUP", id: `${run}-eng`, label: "Engineering", children: [] },
         ...items.flatMap(([lane, label, type, offset], i): Operation[] => [
-          { op: "CREATE_NODE", id: `${run}-i${i}`, nodeType: type, label, groupId: `${run}-${lane}` },
+          {
+            op: "CREATE_NODE",
+            id: `${run}-i${i}`,
+            nodeType: type,
+            label,
+            groupId: `${run}-${lane}`,
+          },
           {
             op: "SET_ISSUE",
             id: `${run}-i${i}`,
@@ -222,7 +234,12 @@ export const TEMPLATES: Template[] = [
       return [
         { op: "CREATE_DIAGRAM", kind: "statemachine" },
         ...states.map(
-          ([id, nodeType, label]): Operation => ({ op: "CREATE_NODE", id: `${run}-${id}`, nodeType, label }),
+          ([id, nodeType, label]): Operation => ({
+            op: "CREATE_NODE",
+            id: `${run}-${id}`,
+            nodeType,
+            label,
+          }),
         ),
         ...moves.map(
           ([a, b, event]): Operation => ({

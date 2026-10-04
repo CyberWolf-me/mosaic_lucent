@@ -139,10 +139,7 @@ async function uploadDataUrl(dataUrl: string, boardId: string): Promise<string |
  * Unlike `placeImage` this does NOT downscale: a generated image is already
  * sized for the canvas.
  */
-export async function uploadGeneratedImage(
-  src: string,
-  boardId: string | null,
-): Promise<string> {
+export async function uploadGeneratedImage(src: string, boardId: string | null): Promise<string> {
   if (!boardId || !src.startsWith("data:") || isSvgDataUrl(src)) return src;
   return (await uploadDataUrl(src, boardId)) ?? src;
 }

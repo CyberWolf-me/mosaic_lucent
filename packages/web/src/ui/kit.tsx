@@ -165,8 +165,7 @@ export function StatTile({
   tone?: StatementFields["kind"] | "alert";
   onClick?: () => void;
 }) {
-  const color =
-    tone === "alert" ? "var(--madder)" : tone ? KIND_TINT[tone] : "var(--ink-0)";
+  const color = tone === "alert" ? "var(--madder)" : tone ? KIND_TINT[tone] : "var(--ink-0)";
   const body = (
     <>
       <div className="stat-label">{label}</div>
