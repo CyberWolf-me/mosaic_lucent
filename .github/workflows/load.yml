@@ -31,7 +31,7 @@ jobs:
       # k6's official image, pinned: a k6 release is a measurement change.
       - uses: grafana/setup-k6-action@v1
         with:
-          k6-version: v1.4.0
+          k6-version: 1.8.1
 
       - name: Boot backend (mock provider, free-tier gates live)
         run: |

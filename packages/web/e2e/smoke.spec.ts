@@ -32,7 +32,7 @@ test("signup → describe → mock generation paints the canvas", async ({ page 
   await page.getByRole("button", { name: "Create account" }).click();
 
   // A fresh user lands on the canvas, which shows the hero prompt while empty.
-  const prompt = page.getByPlaceholder(/I'm building an e-commerce platform/i);
+  const prompt = page.getByLabel("Describe what you want to build");
   await expect(prompt).toBeVisible({ timeout: 30_000 });
 
   // Describe something. The mock provider answers with the e-commerce seed.
