@@ -236,7 +236,8 @@ describe("Voice Agent Context and Tools", () => {
             relationship: "queries",
           },
         },
-        shapes: { s1: { id: "s1", kind: "sticky", text: "Architecture note" } },
+        groups: { g1: { id: "g1", label: "Backend Services" } },
+        shapes: { s1: { id: "s1", kind: "sticky", text: "Architecture note", position: { x: 400, y: 200 }, size: { width: 200, height: 160 } } },
         wireframes: {
           w1: {
             id: "w1",
@@ -262,7 +263,10 @@ describe("Voice Agent Context and Tools", () => {
         totalNodes: number;
         nodes: Array<{ id: string; label: string }>;
         totalEdges: number;
+        totalGroups: number;
+        groups: Array<{ id: string; label: string }>;
         totalShapes: number;
+        shapes: Array<{ id: string; x?: number; y?: number }>;
         totalWireframes: number;
       };
 
@@ -270,7 +274,10 @@ describe("Voice Agent Context and Tools", () => {
       expect(res.totalNodes).toBe(2);
       expect(res.nodes[0].label).toBe("API Gateway");
       expect(res.totalEdges).toBe(1);
+      expect(res.totalGroups).toBe(1);
+      expect(res.groups[0].label).toBe("Backend Services");
       expect(res.totalShapes).toBe(1);
+      expect(res.shapes[0].x).toBe(400);
       expect(res.totalWireframes).toBe(1);
 
       vi.unstubAllGlobals();

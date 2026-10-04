@@ -142,20 +142,15 @@ function ViewFor({
       return <IntelligenceView onOpenSettings={onOpenSettings} />;
     case "execution":
       return <ExecutionView onOpenSettings={onOpenSettings} />;
-    case "wireframe":
-      return <WireframeView onOpenSettings={onOpenSettings} />;
-    case "sequence":
-      return <SequenceView onOpenSettings={onOpenSettings} />;
-    case "er":
-      return <ErView onOpenSettings={onOpenSettings} />;
-    case "board":
-      return <BoardView onOpenSettings={onOpenSettings} />;
-    case "document":
-      return <DocumentView onOpenSettings={onOpenSettings} />;
     case "admin":
       return <AdminView onBack={backFromOrgPage} />;
     case "analytics":
       return <AnalyticsView onBack={backFromOrgPage} />;
+    case "wireframe":
+    case "sequence":
+    case "er":
+    case "board":
+    case "document":
     case "canvas":
     default:
       // G2: a phone-shaped viewport with content gets the read-only mobile

@@ -8,14 +8,21 @@ import { boardToMarkdown } from "../board/serialize.js";
 /** Board → Document (docs/15 Phase D). Renders the board as a readable
  * Markdown-style outline; the underlying text is the same boardToMarkdown used
  * for export, so the view and the file stay in sync. */
-export function DocumentView({ onOpenSettings }: { onOpenSettings: (section?: string) => void }) {
+export function DocumentView({
+  onOpenSettings,
+  embedded = false,
+  onSelectPrompt,
+}: {
+  onOpenSettings?: (section?: string) => void;
+  embedded?: boolean;
+  onSelectPrompt?: (text: string) => void;
+}) {
   const { workspace, chat, send, setView, projectName } = useWorkspace();
   const [message, setMessage] = useState("");
   const submit = () => {
     const text = message.trim();
     if (!text) return;
     setMessage("");
-    setView("canvas");
     void send(text);
   };
 
@@ -23,6 +30,100 @@ export function DocumentView({ onOpenSettings }: { onOpenSettings: (section?: st
   const lines = md.split("\n");
   const isEmpty =
     Object.keys(workspace.nodes).length === 0 && Object.keys(workspace.shapes).length === 0;
+
+  const docBody = isEmpty ? (
+    <div className="view-empty" style={embedded ? { top: 90, bottom: 96 } : undefined}>
+      <div className="view-empty-icon">
+        <Ico.Book />
+      </div>
+      <h2>Nothing to write up yet</h2>
+      <p>
+        This document is generated from your board — sections come from nodes and groups.
+        Describe something below and it will appear here.
+      </p>
+      {onSelectPrompt && (
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center", marginTop: 12 }}>
+          {["Create an executive summary document", "Write up system requirements from this diagram"].map((s) => (
+            <button
+              key={s}
+              onClick={() => onSelectPrompt(s)}
+              style={{
+                fontSize: 12,
+                color: "var(--ink-2)",
+                padding: "6px 12px",
+                border: "1px solid var(--stroke-1)",
+                borderRadius: 999,
+                background: "oklch(from var(--canvas-1) l c h / 0.5)",
+                cursor: "pointer",
+              }}
+            >
+              {s}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  ) : (
+    <div
+      style={{
+        position: "absolute",
+        top: 90,
+        left: "50%",
+        transform: "translateX(-50%)",
+        width: 720,
+        maxWidth: "calc(100vw - 200px)",
+        bottom: 96,
+        overflow: "auto",
+      }}
+    >
+      <div className="doc-page">
+        {lines.map((line, i) => {
+          if (line.startsWith("# "))
+            return (
+              <h1 key={i} className="doc-h1">
+                {line.slice(2)}
+              </h1>
+            );
+          if (line.startsWith("## "))
+            return (
+              <h2 key={i} className="doc-h2">
+                {line.slice(3)}
+              </h2>
+            );
+          if (line.startsWith("### "))
+            return (
+              <h3 key={i} className="doc-h3">
+                {line.slice(4)}
+              </h3>
+            );
+          if (line.startsWith("- "))
+            return (
+              <div key={i} className="doc-li">
+                • {renderInline(line.slice(2))}
+              </div>
+            );
+          if (line.trim() === "") return <div key={i} style={{ height: 8 }} />;
+          return (
+            <div key={i} className="doc-p">
+              {renderInline(line)}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+
+  if (embedded) {
+    return (
+      <div style={{ position: "absolute", inset: 0, overflow: "hidden" }}>
+        <div style={{ position: "absolute", inset: 0 }}>
+          <div className="canvas-grid" />
+          <div className="canvas-vignette" />
+        </div>
+        {docBody}
+      </div>
+    );
+  }
 
   return (
     <div style={{ position: "absolute", inset: 0 }}>
@@ -36,70 +137,11 @@ export function DocumentView({ onOpenSettings }: { onOpenSettings: (section?: st
           { label: projectName || "Untitled board", view: "canvas" },
           { label: "Document", current: true },
         ]}
-        onOpenSettings={onOpenSettings}
+        onOpenSettings={onOpenSettings ?? (() => {})}
       />
       <LeftRail />
 
-      {isEmpty ? (
-        <div className="view-empty">
-          <div className="view-empty-icon">
-            <Ico.Book />
-          </div>
-          <h2>Nothing to write up yet</h2>
-          <p>
-            This document is generated from your board — sections come from nodes and groups.
-            Describe something below and it will appear here.
-          </p>
-        </div>
-      ) : (
-        <div
-          style={{
-            position: "absolute",
-            top: 90,
-            left: "50%",
-            transform: "translateX(-50%)",
-            width: 720,
-            maxWidth: "calc(100vw - 200px)",
-            bottom: 96,
-            overflow: "auto",
-          }}
-        >
-          <div className="doc-page">
-            {lines.map((line, i) => {
-              if (line.startsWith("# "))
-                return (
-                  <h1 key={i} className="doc-h1">
-                    {line.slice(2)}
-                  </h1>
-                );
-              if (line.startsWith("## "))
-                return (
-                  <h2 key={i} className="doc-h2">
-                    {line.slice(3)}
-                  </h2>
-                );
-              if (line.startsWith("### "))
-                return (
-                  <h3 key={i} className="doc-h3">
-                    {line.slice(4)}
-                  </h3>
-                );
-              if (line.startsWith("- "))
-                return (
-                  <div key={i} className="doc-li">
-                    • {renderInline(line.slice(2))}
-                  </div>
-                );
-              if (line.trim() === "") return <div key={i} style={{ height: 8 }} />;
-              return (
-                <div key={i} className="doc-p">
-                  {renderInline(line)}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
+      {docBody}
 
       <AIPill
         placeholder="Refine the document or ask a question…"

@@ -931,7 +931,11 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
     // Selected images and file/text objects travel with the request, so
     // "turn this screenshot into a wireframe" has something to look at.
     const attachments = collectAttachments(workspace, sel);
-    void send(text, sel, attachments);
+    const textToSend =
+      lens === "wireframe" && !/\b(?:wireframe|ui mockup|prototype|mockup)\b/i.test(text)
+        ? `Create a wireframe UI mockup for: ${text}. Emit a CREATE_WIREFRAME operation with root kind "screen".`
+        : text;
+    void send(textToSend, sel, attachments);
   }, [
     message,
     send,
@@ -943,6 +947,7 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
     generateImageShape,
     proposal,
     notify,
+    lens,
   ]);
 
   const clearVoiceTimers = () => {
@@ -2934,6 +2939,15 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
   }
   const drawShapes = visibleShapes(shapes, shapeCull, shapeKeep);
 
+  const LENS_LABELS: Record<string, string> = {
+    visual: "Diagram",
+    kanban: "Kanban",
+    document: "Document",
+    wireframe: "Wireframe",
+    sequence: "Sequence",
+    er: "ER diagram",
+  };
+
   const crumbs: Crumb[] = [
     { label: "Boards", view: "dashboard" },
     // The board's real name — a previous fix pinned the fallback to a
@@ -2941,9 +2955,11 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
     // the same bug class the identical-project-names fix (02afaa5) covered.
     {
       label: projectName || "Untitled board",
-      current: true,
-      rename: true,
+      current: lens === "visual",
+      rename: lens === "visual",
+      ...(lens !== "visual" ? { view: "canvas" } : {}),
     },
+    ...(lens !== "visual" ? [{ label: LENS_LABELS[lens] ?? lens, current: true }] : []),
   ];
 
   // What the board KNOWS, in the top bar: its kind, then the live count of
@@ -3093,20 +3109,11 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
   const showHero =
     (canvasPhase === "empty" || heroGenerating) && !drawingArmed && !blankBoardStarted;
 
-  // UX-1: lenses render here, inside the Canvas entry — one board URL
-  // (?view=canvas&lens=kanban) covers them. Each lens view is a full
-  // surface (own TopBar/LeftRail/composer); the rail's Canvas button
-  // returns to the visual lens. No separate destinations, no bouncing.
-  if (lens !== "visual") {
-    if (lens === "kanban") return <BoardView onOpenSettings={onOpenSettings} />;
-    if (lens === "document") return <DocumentView onOpenSettings={onOpenSettings} />;
-    if (lens === "wireframe") return <WireframeView onOpenSettings={onOpenSettings} />;
-    if (lens === "sequence") return <SequenceView onOpenSettings={onOpenSettings} />;
-    if (lens === "er") return <ErView onOpenSettings={onOpenSettings} />;
-  }
-
   return (
-    <div style={{ position: "absolute", inset: 0 }} onContextMenu={onCanvasContextMenu}>
+    <div
+      style={{ position: "absolute", inset: 0 }}
+      onContextMenu={lens === "visual" ? onCanvasContextMenu : undefined}
+    >
       {boardPrompt && canEdit && (
         <BoardPromptPopover
           kind={boardPrompt.kind}
@@ -3117,7 +3124,17 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
           onClose={() => setBoardPrompt(null)}
         />
       )}
-      {showHero ? (
+      {lens === "kanban" ? (
+        <BoardView embedded onSelectPrompt={setMessage} />
+      ) : lens === "wireframe" ? (
+        <WireframeView embedded onSelectPrompt={setMessage} />
+      ) : lens === "document" ? (
+        <DocumentView embedded onSelectPrompt={setMessage} />
+      ) : lens === "sequence" ? (
+        <SequenceView embedded onSelectPrompt={setMessage} />
+      ) : lens === "er" ? (
+        <ErView embedded onSelectPrompt={setMessage} />
+      ) : showHero ? (
         <>
           <div style={{ position: "absolute", inset: 0 }}>
             <div className="canvas-grid" />
@@ -3897,6 +3914,114 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
             <button className="icon-btn" onClick={retryLayout} title="Re-run the layout refinement">
               Retry layout
             </button>
+          )}
+        </>
+      )}
+      {lens !== "visual" && (
+        <>
+          <TopBar crumbs={crumbs} meta={meta} onOpenSettings={onOpenSettings} />
+          {boardId !== null && syncStatus !== "online" && (
+            <div
+              className="sync-banner"
+              role="status"
+              aria-live="polite"
+              style={{
+                position: "absolute",
+                top: 120,
+                left: "50%",
+                transform: "translateX(-50%)",
+                zIndex: 30,
+                fontSize: 12,
+                padding: "6px 14px",
+                borderRadius: 999,
+                border: "1px solid var(--stroke-2)",
+                background: "oklch(from var(--canvas-2) l c h / 0.92)",
+                color: "var(--ink-1)",
+              }}
+            >
+              {syncStatus === "connecting"
+                ? "Reconnecting… edits are queued."
+                : "Offline — edits save locally and sync when the server is reachable."}
+            </div>
+          )}
+          {peerEditors.length > 0 && (
+            <div
+              className="peer-banner"
+              role="status"
+              style={{
+                position: "absolute",
+                top: 152,
+                left: "50%",
+                transform: "translateX(-50%)",
+                zIndex: 30,
+                fontSize: 11.5,
+                padding: "5px 12px",
+                borderRadius: 999,
+                border: "1px solid var(--stroke-1)",
+                background: "oklch(from var(--canvas-2) l c h / 0.85)",
+                color: "var(--ink-2)",
+              }}
+            >
+              {peerEditors.length === 1
+                ? "A collaborator is editing a selection."
+                : `${peerEditors.length} collaborators are editing selections.`}
+            </div>
+          )}
+          <LeftRail onOpenSettings={onOpenSettings} />
+
+          {canvasPhase === "proposing" && <ProposalPanel />}
+
+          <VoiceAgentBar
+            state={voiceAgentState}
+            muted={voiceAgentMuted}
+            lines={voiceAgentLines}
+            onToggleMute={toggleVoiceAgentMute}
+            onDisconnect={() => {
+              voiceAgentCtrlRef.current?.disconnect();
+              voiceAgentCtrlRef.current = null;
+              setVoiceAgentState("disconnected");
+              notify("Voice agent call ended.");
+            }}
+          />
+
+          {mode !== "present" && (
+            <AIPill
+              status={status}
+              phase={genPhase}
+              progressNote={genProgress}
+              onCancel={busy ? () => cancelSend() : undefined}
+              placeholder={
+                canvasPhase === "proposing"
+                  ? "Review proposal on right (⌘↵ to apply, Esc to cancel), or describe edits…"
+                  : lens === "kanban"
+                    ? "Add a story, move a card, assign someone, or organize backlog…"
+                    : lens === "wireframe"
+                      ? "Describe a screen, add UI elements, or modify wireframe…"
+                      : lens === "document"
+                        ? "Refine the document or ask a question…"
+                        : "Refine, add, or transform — just describe it"
+              }
+              value={message}
+              onChange={setMessage}
+              onSubmit={submit}
+              mode={pillMode}
+              onModeChange={setPillMode}
+              onCitation={onCitation}
+              listening={listening}
+              onToggleMic={toggleVoice}
+              voicePhase={voicePhase}
+              voiceSupported={voiceSupported}
+              onToggleVoiceAgent={toggleVoiceAgent}
+              voiceAgentActive={
+                voiceAgentState !== "idle" &&
+                voiceAgentState !== "disconnected" &&
+                voiceAgentState !== "error"
+              }
+              history={chat}
+              busy={busy}
+              shifted={canvasPhase === "proposing"}
+              readOnly={readOnly}
+            />
           )}
         </>
       )}

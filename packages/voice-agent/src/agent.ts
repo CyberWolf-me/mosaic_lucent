@@ -25,11 +25,15 @@ You are interacting with the user over a real-time duplex voice call while they 
 - Talk WITH the person like an active, collaborative teammate at the whiteboard. Never read out raw change lists. Briefly state what you did or answer their question, then suggest the next step or ask what they'd like next.
 - When the user asks a question, share advice or ideas proactively, and offer to diagram them.
 
-# Canvas Tools
+# Canvas Tools & Organizing Elements
 - 'apply_canvas_operations' changes the board. Call it whenever the user asks to build, add, modify, organize, or connect diagram elements.
-- Never give nodes positions or coordinates — Lucent's layout engine places them automatically.
-- 'get_board_summary' lists what is currently on the board. Call it before editing or connecting things that already exist, or to answer questions about the board.
-- Only confirm a diagram or element is created after 'apply_canvas_operations' succeeds.
+- 'get_board_summary' lists what is currently on the board (nodes, edges, groups, shapes/notes). Call it before modifying or organizing existing elements, or to answer questions.
+- Never give nodes positions or coordinates — Lucent's layout engine places nodes automatically.
+- Sticky notes and manual shapes DO have explicit (x, y) coordinates:
+  - When the user asks to organize, rearrange, or clean up notes/stickies: call 'get_board_summary' to inspect them, then emit 'MOVE_SHAPE' with appropriate coordinates to arrange them into neat columns, rows, or a grid (e.g. 240px horizontal spacing, 180px vertical spacing).
+  - To organize semantic nodes: group related nodes using 'CREATE_GROUP' (and update nodes with 'groupId'), connect flows using 'CONNECT_NODES', or transform diagram structure.
+  - DO NOT emit 'SET_LAYOUT_INTENT' alone to satisfy an organization request: 'SET_LAYOUT_INTENT' only updates intent metadata and does NOT move, align, or reorganize items on the canvas. To actually reorganize, emit 'MOVE_SHAPE' for shapes or 'CREATE_GROUP' / 'CONNECT_NODES' for nodes.
+- Only confirm a diagram or element is created or reorganized after 'apply_canvas_operations' succeeds.
 
 # Conversational Flow
 - When asked to build or add something: immediately call 'apply_canvas_operations', then speak 1-2 friendly sentences explaining what is now on the board and asking what to add next.
@@ -270,6 +274,7 @@ export function createGetBoardSummaryTool(config: AgentContextConfig) {
           id: n.id,
           type: n.nodeType,
           label: n.label,
+          groupId: n.groupId,
           pos: n.position,
         }));
         const edges = Object.values(ws.edges || {}).map((e) => ({
@@ -277,10 +282,19 @@ export function createGetBoardSummaryTool(config: AgentContextConfig) {
           to: e.target,
           label: e.relationship,
         }));
+        const groups = Object.values(ws.groups || {}).map((g) => ({
+          id: g.id,
+          label: g.label,
+          kind: g.kind,
+        }));
         const shapes = Object.values(ws.shapes || {}).map((s) => ({
           id: s.id,
           kind: s.kind,
           text: s.text,
+          x: s.position?.x,
+          y: s.position?.y,
+          width: s.size?.width,
+          height: s.size?.height,
         }));
         const wireframes = Object.values(ws.wireframes || {}).map((w) => ({
           id: w.id,
@@ -296,6 +310,8 @@ export function createGetBoardSummaryTool(config: AgentContextConfig) {
           nodes,
           totalEdges: edges.length,
           edges,
+          totalGroups: groups.length,
+          groups,
           totalShapes: shapes.length,
           shapes,
           totalWireframes: wireframes.length,
@@ -355,11 +371,18 @@ export default defineAgent({
     const getSummary = createGetBoardSummaryTool(config);
 
     // 5. Initialize the AgentSession orchestrator
+    // Disable preemptiveGeneration and raise endpointing minDelay to 1000ms.
+    // This stops rapid intermediate STT chunk triggers from generating concurrent
+    // LLM calls that exhaust provider rate limits (e.g. 5 req/min) and create latency.
     const session = new voice.AgentSession({
       stt,
       tts,
       vad,
       llm: llmInstance,
+      turnHandling: {
+        preemptiveGeneration: { enabled: false },
+        endpointing: { minDelay: 1000, maxDelay: 4000 },
+      },
     });
 
     const agent = new voice.Agent({

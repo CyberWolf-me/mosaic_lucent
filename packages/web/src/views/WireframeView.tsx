@@ -15,7 +15,15 @@ const VIEWPORT_SIZE: Record<Wireframe["viewport"], { w: number; label: string }>
 /** Wireframe artifact. Now data-driven: renders real workspace.wireframes
  * produced by CREATE_WIREFRAME operations (docs/03, docs/05). Falls back to a
  * prompt when none exist yet. */
-export function WireframeView({ onOpenSettings }: { onOpenSettings: (section?: string) => void }) {
+export function WireframeView({
+  onOpenSettings,
+  embedded = false,
+  onSelectPrompt,
+}: {
+  onOpenSettings?: (section?: string) => void;
+  embedded?: boolean;
+  onSelectPrompt?: (text: string) => void;
+}) {
   const { workspace, chat, send, setView, projectName } = useWorkspace();
   const [message, setMessage] = useState("");
 
@@ -35,6 +43,135 @@ export function WireframeView({ onOpenSettings }: { onOpenSettings: (section?: s
   const wireframe = wireframes[0];
   const size = wireframe ? VIEWPORT_SIZE[wireframe.viewport] : VIEWPORT_SIZE.desktop;
 
+  const wireframeBody = wireframe ? (
+    <div
+      style={{
+        position: "absolute",
+        left: embedded ? 60 : 0,
+        right: 0,
+        top: 76,
+        bottom: 96,
+        display: "flex",
+        justifyContent: "center",
+        alignItems: "flex-start",
+        overflow: "auto",
+        padding: "0 40px",
+      }}
+    >
+      <div
+        className="frame"
+        style={{
+          position: "relative",
+          width: size.w,
+          margin: "0 auto",
+          padding: "32px 16px 16px",
+        }}
+      >
+        <div className="frame-label" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <Ico.Grid /> {wireframe.title} · Wireframe · {size.label}
+        </div>
+        <div className="wf-browser">
+          <div className="wf-browser-bar">
+            <span className="wf-dot" />
+            <span className="wf-dot" />
+            <span className="wf-dot" />
+            <div className="wf-url">shop.example.com/checkout</div>
+          </div>
+          <div className="wf-canvas">
+            <WireframeRenderer wireframe={wireframe} />
+          </div>
+        </div>
+      </div>
+    </div>
+  ) : (
+    <div
+      style={{
+        position: "absolute",
+        inset: 0,
+        top: 76,
+        bottom: 96,
+        left: embedded ? 60 : 0,
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 16,
+        padding: "0 40px",
+      }}
+    >
+      <div
+        style={{
+          width: 46,
+          height: 46,
+          borderRadius: 12,
+          background: "var(--canvas-3)",
+          display: "grid",
+          placeItems: "center",
+          color: "var(--ink-2)",
+        }}
+      >
+        <Ico.Grid />
+      </div>
+      <h2
+        style={{
+          fontSize: 22,
+          letterSpacing: "-0.02em",
+          color: "var(--ink-0)",
+          textAlign: "center",
+        }}
+      >
+        No wireframe yet
+      </h2>
+      <p
+        style={{
+          fontSize: 13.5,
+          color: "var(--ink-2)",
+          maxWidth: 420,
+          textAlign: "center",
+          lineHeight: 1.55,
+        }}
+      >
+        Describe a screen and Lucent builds an editable wireframe from your workspace — try
+        "design a checkout wireframe".
+      </p>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center" }}>
+        {[
+          "Design a checkout wireframe",
+          "Wireframe a dashboard with a sidebar",
+          "Mock up a sign-in screen",
+        ].map((s) => (
+          <button
+            key={s}
+            onClick={() => (onSelectPrompt ? onSelectPrompt(s) : setMessage(s))}
+            style={{
+              fontSize: 12,
+              color: "var(--ink-2)",
+              padding: "6px 12px",
+              border: "1px solid var(--stroke-1)",
+              borderRadius: 999,
+              background: "oklch(from var(--canvas-1) l c h / 0.5)",
+              cursor: "pointer",
+            }}
+          >
+            {s}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+
+  if (embedded) {
+    return (
+      <div style={{ position: "absolute", inset: 0, overflow: "hidden" }}>
+        <div style={{ position: "absolute", inset: 0 }}>
+          <div className="canvas-grid" />
+          <div className="canvas-vignette" />
+        </div>
+        {wireframeBody}
+      </div>
+    );
+  }
+
   return (
     <div style={{ position: "absolute", inset: 0 }}>
       <div style={{ position: "absolute", inset: 0 }}>
@@ -47,122 +184,11 @@ export function WireframeView({ onOpenSettings }: { onOpenSettings: (section?: s
           { label: projectName || "Untitled board", view: "canvas" },
           { label: wireframe?.title ?? "Wireframe", current: true },
         ]}
-        onOpenSettings={onOpenSettings}
+        onOpenSettings={onOpenSettings ?? (() => {})}
       />
       <LeftRail />
 
-      {wireframe ? (
-        <div
-          style={{
-            position: "absolute",
-            left: 0,
-            right: 0,
-            top: 76,
-            bottom: 96,
-            display: "flex",
-            justifyContent: "center",
-            alignItems: "flex-start",
-            overflow: "auto",
-            padding: "0 40px",
-          }}
-        >
-          <div
-            className="frame"
-            style={{
-              position: "relative",
-              width: size.w,
-              margin: "0 auto",
-              padding: "32px 16px 16px",
-            }}
-          >
-            <div className="frame-label" style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              <Ico.Grid /> {wireframe.title} · Wireframe · {size.label}
-            </div>
-            <div className="wf-browser">
-              <div className="wf-browser-bar">
-                <span className="wf-dot" />
-                <span className="wf-dot" />
-                <span className="wf-dot" />
-                <div className="wf-url">shop.example.com/checkout</div>
-              </div>
-              <div className="wf-canvas">
-                <WireframeRenderer wireframe={wireframe} />
-              </div>
-            </div>
-          </div>
-        </div>
-      ) : (
-        <div
-          style={{
-            position: "absolute",
-            inset: 0,
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            justifyContent: "center",
-            gap: 16,
-            padding: "0 40px",
-          }}
-        >
-          <div
-            style={{
-              width: 46,
-              height: 46,
-              borderRadius: 12,
-              background: "var(--canvas-3)",
-              display: "grid",
-              placeItems: "center",
-              color: "var(--ink-2)",
-            }}
-          >
-            <Ico.Grid />
-          </div>
-          <h2
-            style={{
-              fontSize: 22,
-              letterSpacing: "-0.02em",
-              color: "var(--ink-0)",
-              textAlign: "center",
-            }}
-          >
-            No wireframe yet
-          </h2>
-          <p
-            style={{
-              fontSize: 13.5,
-              color: "var(--ink-2)",
-              maxWidth: 420,
-              textAlign: "center",
-              lineHeight: 1.55,
-            }}
-          >
-            Describe a screen and Lucent builds an editable wireframe from your workspace — try
-            "design a checkout wireframe".
-          </p>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center" }}>
-            {[
-              "Design a checkout wireframe",
-              "Wireframe a dashboard with a sidebar",
-              "Mock up a sign-in screen",
-            ].map((s) => (
-              <button
-                key={s}
-                onClick={() => setMessage(s)}
-                style={{
-                  fontSize: 12,
-                  color: "var(--ink-2)",
-                  padding: "6px 12px",
-                  border: "1px solid var(--stroke-1)",
-                  borderRadius: 999,
-                  background: "oklch(from var(--canvas-1) l c h / 0.5)",
-                }}
-              >
-                {s}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
+      {wireframeBody}
 
       <AIPill
         placeholder={

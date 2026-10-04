@@ -10,7 +10,15 @@ import { toSequence } from "../board/sequence.js";
  * When the board has nodes, actors/messages derive from them. When it doesn't,
  * an empty state explains that rather than showing a demo flow that reads as
  * real board data; the sample is available behind an explicit toggle. */
-export function SequenceView({ onOpenSettings }: { onOpenSettings: (section?: string) => void }) {
+export function SequenceView({
+  onOpenSettings,
+  embedded = false,
+  onSelectPrompt,
+}: {
+  onOpenSettings?: (section?: string) => void;
+  embedded?: boolean;
+  onSelectPrompt?: (text: string) => void;
+}) {
   const { workspace, chat, send, setView, projectName } = useWorkspace();
   const [message, setMessage] = useState("");
   const [showSample, setShowSample] = useState(false);
@@ -18,7 +26,6 @@ export function SequenceView({ onOpenSettings }: { onOpenSettings: (section?: st
     const text = message.trim();
     if (!text) return;
     setMessage("");
-    setView("canvas");
     void send(text);
   };
 
@@ -49,44 +56,38 @@ export function SequenceView({ onOpenSettings }: { onOpenSettings: (section?: st
   const byId = Object.fromEntries(actors.map((a) => [a.id, a]));
   const bottomY = Math.max(580, MSG_bottom(messages) + 60);
 
-  return (
-    <div style={{ position: "absolute", inset: 0 }}>
-      <div style={{ position: "absolute", inset: 0 }}>
-        <div className="canvas-grid" />
-        <div className="canvas-vignette" />
+  const seqBody = !usingReal && !showSample ? (
+    <div className="view-empty" style={embedded ? { top: 90, bottom: 96 } : undefined}>
+      <div className="view-empty-icon">
+        <Ico.Flow />
       </div>
-      <TopBar
-        crumbs={[
-          { label: "Boards", view: "dashboard" },
-          { label: projectName || "Untitled board", view: "canvas" },
-          { label: "Sequence", current: true },
-        ]}
-        onOpenSettings={onOpenSettings}
-      />
-      <LeftRail />
-
-      {!usingReal && !showSample ? (
-        <div className="view-empty">
-          <div className="view-empty-icon">
-            <Ico.Flow />
-          </div>
-          <h2>No sequence yet</h2>
-          <p>
-            Actors and messages are derived from your board's nodes and connections. Describe a flow
-            below and Lucent builds it, or look at a sample first.
-          </p>
-          <button className="btn ghost" onClick={() => setShowSample(true)}>
-            Show a sample sequence
+      <h2>No sequence yet</h2>
+      <p>
+        Actors and messages are derived from your board's nodes and connections. Describe a flow
+        below and Lucent builds it, or look at a sample first.
+      </p>
+      <div style={{ display: "flex", gap: 8, alignItems: "center", justifyContent: "center", marginTop: 8 }}>
+        <button className="btn ghost" onClick={() => setShowSample(true)}>
+          Show a sample sequence
+        </button>
+        {onSelectPrompt && (
+          <button
+            className="btn ghost"
+            onClick={() => onSelectPrompt("Create a checkout sequence diagram with User, API, Stripe, and Database")}
+          >
+            Create checkout sequence
           </button>
+        )}
+      </div>
+    </div>
+  ) : (
+    <div style={{ position: "absolute", inset: 0, top: embedded ? 76 : 0, bottom: embedded ? 96 : 0, left: embedded ? 60 : 0, overflow: "auto" }}>
+      {showingSample && (
+        <div className="sample-banner">
+          Sample data — not your board.
+          <button onClick={() => setShowSample(false)}>Hide</button>
         </div>
-      ) : (
-        <div style={{ position: "absolute", inset: 0, overflow: "auto" }}>
-          {showingSample && (
-            <div className="sample-banner">
-              Sample data — not your board.
-              <button onClick={() => setShowSample(false)}>Hide</button>
-            </div>
-          )}
+      )}
           <div
             className="frame"
             style={{
@@ -179,7 +180,37 @@ export function SequenceView({ onOpenSettings }: { onOpenSettings: (section?: st
             );
           })}
         </div>
-      )}
+      );
+
+  if (embedded) {
+    return (
+      <div style={{ position: "absolute", inset: 0, overflow: "hidden" }}>
+        <div style={{ position: "absolute", inset: 0 }}>
+          <div className="canvas-grid" />
+          <div className="canvas-vignette" />
+        </div>
+        {seqBody}
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ position: "absolute", inset: 0 }}>
+      <div style={{ position: "absolute", inset: 0 }}>
+        <div className="canvas-grid" />
+        <div className="canvas-vignette" />
+      </div>
+      <TopBar
+        crumbs={[
+          { label: "Boards", view: "dashboard" },
+          { label: projectName || "Untitled board", view: "canvas" },
+          { label: "Sequence", current: true },
+        ]}
+        onOpenSettings={onOpenSettings ?? (() => {})}
+      />
+      <LeftRail />
+
+      {seqBody}
 
       <AIPill
         placeholder="Add a step, show alternate path, or transform…"
