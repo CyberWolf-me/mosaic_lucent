@@ -4,6 +4,7 @@ on:
   push:
     branches: ["**"]
   pull_request:
+  workflow_dispatch:
 
 # The default GITHUB_TOKEN is read-only for everything these jobs do. CodeQL
 # needs security-events: write and therefore lives in its own workflow.
