@@ -15,3 +15,13 @@ scratch/
 redesign/
 *.png
 lucent-field-report.html
+scripts/*-probe.mjs
+scripts/*-verify.mjs
+scripts/*-dump.mjs
+scripts/live-tour.mjs
+scripts/mod-test.mjs
+scripts/model-bakeoff.mjs
+scripts/nav-persist.mjs
+scripts/repair-check.mjs
+scripts/stream-peek.mjs
+scripts/export-check.mjs
