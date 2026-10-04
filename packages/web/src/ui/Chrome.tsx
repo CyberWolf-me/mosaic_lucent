@@ -453,7 +453,7 @@ function PublicLink({ boardId }: { boardId: string }) {
 }
 
 function ShareDialog({ onClose }: { onClose: () => void }) {
-  const { syncStatus, syncRole, boardId, peers, startSharing } = useWorkspace();
+  const { syncStatus, syncRole, boardId, peers, startSharingDetailed } = useWorkspace();
   const [copied, setCopied] = useState(false);
   const [copyFailed, setCopyFailed] = useState(false);
   const [sharing, setSharing] = useState(false);
@@ -544,10 +544,11 @@ function ShareDialog({ onClose }: { onClose: () => void }) {
   const share = async () => {
     setSharing(true);
     setError(null);
-    const id = await startSharing();
+    const res = await startSharingDetailed();
     setSharing(false);
-    if (!id)
-      setError("Couldn't publish the board. Check you're signed in and the server is running.");
+    if (!res.ok) {
+      setError(res.error);
+    }
   };
 
   /** Mint a fresh link. The previous token stays valid until it's revoked. */

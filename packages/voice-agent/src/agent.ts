@@ -7,6 +7,7 @@ import {
   type Operation,
   isHumanOnlyOperation,
   repairOperations,
+  sanitizeRawOperations,
   stampAuthorship,
   toolParametersJsonSchema,
   type Workspace,
@@ -21,17 +22,18 @@ You are interacting with the user over a real-time duplex voice call while they 
 - Keep your spoken responses concise, conversational, and natural (1 to 3 sentences maximum).
 - Respond in plain conversational text only. NEVER use markdown, bullet points, asterisks, tables, or raw JSON in your speech.
 - Never recite technical IDs (like "node_123" or "brd_456") to the user. Refer to components by their human labels (e.g. "the Auth Service", "the API Gateway").
-- Talk WITH the person like a teammate at the whiteboard. Never read out a list of what changed or the operations you sent, and don't describe what's inside what you built — they can see it. Say what you did in a few words ("Done — login now leads to the dashboard."), then keep the conversation going: ask ONE short question about what they want next, or suggest the obvious next step.
-- When the request is vague, ask one short question before building. When they ask something about the board, answer it (use get_board_summary) instead of changing anything.
+- Talk WITH the person like an active, collaborative teammate at the whiteboard. Never read out raw change lists. Briefly state what you did or answer their question, then suggest the next step or ask what they'd like next.
+- When the user asks a question, share advice or ideas proactively, and offer to diagram them.
 
 # Canvas Tools
-- 'apply_canvas_operations' changes the board. Its parameter schema IS the operation contract: send exactly the fields it defines and nothing else. One invalid operation rejects the whole batch.
-- Never give nodes positions or coordinates — Lucent's layout engine places them. Create nodes first, then connect them with the ids you just gave them. Edges connect nodes only; a wireframe is not a node.
-- 'get_board_summary' lists what is on the board, with ids and labels. Call it before editing or connecting things that already exist, and to answer questions about the board.
-- Only say something is on the board after 'apply_canvas_operations' returned success: true. When it returns success: false, NOTHING changed: correct the operations from its errors and try once more, and if that fails too, tell the person plainly that it didn't work. Never say a change is done, or "already there", unless get_board_summary shows it.
+- 'apply_canvas_operations' changes the board. Call it whenever the user asks to build, add, modify, organize, or connect diagram elements.
+- Never give nodes positions or coordinates — Lucent's layout engine places them automatically.
+- 'get_board_summary' lists what is currently on the board. Call it before editing or connecting things that already exist, or to answer questions about the board.
+- Only confirm a diagram or element is created after 'apply_canvas_operations' succeeds.
 
 # Conversational Flow
-- When asked to build something: call 'apply_canvas_operations', then say in a sentence what's there now and ask what they'd like next.
+- When asked to build or add something: immediately call 'apply_canvas_operations', then speak 1-2 friendly sentences explaining what is now on the board and asking what to add next.
+- If the user greets you or asks how you can help, warmly introduce yourself as Lucent and suggest what kinds of diagrams (system architectures, flowcharts, user journeys, wireframes) you can create together.
 - If the user interrupts mid-sentence, immediately adapt to their new instruction.
 `;
 
@@ -177,8 +179,10 @@ export function createApplyOpsTool(config: AgentContextConfig) {
       }
       if (!config.grant) return NO_GRANT;
 
-      // Filter out human-only operations and repair candidate operations
-      const candidate = operations.filter(
+      // Sanitize model operations for field tolerances, then filter human-only operations
+      const sanitized = sanitizeRawOperations(operations);
+      const opList = Array.isArray(sanitized) ? sanitized : [];
+      const candidate = opList.filter(
         (op): op is Operation =>
           typeof op === "object" &&
           op !== null &&
@@ -371,5 +375,8 @@ export default defineAgent({
       room: ctx.room,
       agent,
     });
+
+    // Proactively greet the user once connected so they know the voice session is live
+    session.say("Hey, I'm Lucent! What would you like to build or design on the canvas today?");
   },
 });

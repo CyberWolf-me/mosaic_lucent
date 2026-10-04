@@ -3,7 +3,7 @@ import { repairOperations } from "../src/repair.js";
 import { validateOperations } from "../src/validator.js";
 import { applyOperations } from "../src/reducer.js";
 import { createWorkspace } from "../src/model.js";
-import type { Operation } from "../src/operations.js";
+import { parseOperations, type Operation } from "../src/operations.js";
 
 describe("repairOperations", () => {
   it("moves CREATE_GROUP ahead of nodes that reference it", () => {
@@ -208,5 +208,27 @@ describe("statement ops keep their trailing bucket (Stage C2)", () => {
     expect(validateOperations(createWorkspace(), fixed)).toEqual([]);
     const ws = applyOperations(createWorkspace(), fixed);
     expect(ws.nodes.old?.statement?.status).toBe("superseded");
+  });
+});
+
+describe("sanitizeRawOperations tolerance", () => {
+  it("normalizes CHANGE_NODE_TYPE and aliases when nodeType is under type or newType", () => {
+    const raw = [
+      { op: "CREATE_NODE", id: "n1", type: "task", label: "Task 1" },
+      { op: "SET_NODE_TYPE", id: "n1", type: "in-progress" },
+      { op: "CHANGE_NODE_TYPE", id: "n1", newType: "done" },
+      { op: "CHANGE_NODE_TYPE", id: "n1" }, // omitted nodeType
+      { op: "CHANGE_TEXT", id: "n1", label: "Renamed Task" },
+      { op: "MOVE_NODE", id: "n1", x: 100, y: 200 },
+      { op: "CONNECT_NODES", from: "n1", to: "n2" },
+    ];
+    const fixed = parseOperations(raw);
+    expect(fixed[0]).toMatchObject({ op: "CREATE_NODE", id: "n1", nodeType: "task", label: "Task 1" });
+    expect(fixed[1]).toMatchObject({ op: "CHANGE_NODE_TYPE", id: "n1", nodeType: "in-progress" });
+    expect(fixed[2]).toMatchObject({ op: "CHANGE_NODE_TYPE", id: "n1", nodeType: "done" });
+    expect(fixed[3]).toMatchObject({ op: "CHANGE_NODE_TYPE", id: "n1", nodeType: "step" });
+    expect(fixed[4]).toMatchObject({ op: "CHANGE_TEXT", id: "n1", text: "Renamed Task" });
+    expect(fixed[5]).toMatchObject({ op: "MOVE_NODE", id: "n1", position: { x: 100, y: 200 } });
+    expect(fixed[6]).toMatchObject({ op: "CONNECT_NODES", source: "n1", target: "n2" });
   });
 });

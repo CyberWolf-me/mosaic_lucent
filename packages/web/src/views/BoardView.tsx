@@ -38,7 +38,6 @@ export function BoardView({ onOpenSettings }: { onOpenSettings: (section?: strin
     const text = message.trim();
     if (!text) return;
     setMessage("");
-    setView("canvas");
     void send(text);
   };
 

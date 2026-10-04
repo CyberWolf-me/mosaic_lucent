@@ -27,9 +27,7 @@ export function WireframeView({ onOpenSettings }: { onOpenSettings: (section?: s
     const prompt = /\b(?:wireframe|ui mockup|prototype|mockup)\b/i.test(text)
       ? text
       : `Create a wireframe UI mockup for: ${text}. Emit a CREATE_WIREFRAME operation with root kind "screen".`;
-    // A generated wireframe lands on the canvas as a CREATE_WIREFRAME op; switch
-    // to canvas so the interactive frame and rendered UI are visible.
-    setView("canvas");
+    // Send prompt directly without bouncing the user out of the wireframe lens
     void send(prompt);
   };
 

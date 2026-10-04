@@ -113,21 +113,46 @@ async function authed(path: string, init?: RequestInit): Promise<Response | null
  * invisible from the list call for the org they were actually looking at. The
  * caller knows which org is on screen, so it has to say which.
  */
+export interface SaveBoardResult {
+  ok: boolean;
+  board?: BoardSummary;
+  error?: string;
+  status?: number;
+}
+
+export async function saveBoardDetailed(
+  orgId: string,
+  name: string,
+  workspace: Workspace,
+  id?: string,
+): Promise<SaveBoardResult> {
+  const res = await authed("/api/boards", {
+    method: "POST",
+    body: JSON.stringify({ ...(id ? { id } : {}), orgId, name, workspace }),
+  });
+  if (!res) {
+    return { ok: false, error: "Please sign in to save or connect this board." };
+  }
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as { error?: string; reason?: string };
+    return {
+      ok: false,
+      error: body.error ?? `Board save failed with status ${res.status}.`,
+      status: res.status,
+    };
+  }
+  const body = (await res.json()) as BoardSummary;
+  return { ok: true, board: { ...body, orgId } };
+}
+
 export async function saveBoard(
   orgId: string,
   name: string,
   workspace: Workspace,
   id?: string,
 ): Promise<BoardSummary | null> {
-  const res = await authed("/api/boards", {
-    method: "POST",
-    body: JSON.stringify({ ...(id ? { id } : {}), orgId, name, workspace }),
-  });
-  if (!res || !res.ok) return null;
-  const body = (await res.json()) as BoardSummary;
-  // The 201 answers {id, name, updatedAt}; the tenant is the one we just asked
-  // for, and callers that cache the summary need it on the object.
-  return { ...body, orgId };
+  const result = await saveBoardDetailed(orgId, name, workspace, id);
+  return result.ok ? result.board ?? null : null;
 }
 
 /**

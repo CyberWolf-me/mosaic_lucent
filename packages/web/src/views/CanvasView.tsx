@@ -328,6 +328,7 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
     syncStatus,
     boardId,
     startSharing,
+    startSharingDetailed,
     setPresence,
     spotlight,
     setSpotlight,
@@ -1177,11 +1178,15 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
     let activeBoardId = boardId;
     if (!activeBoardId) {
       notify("Connecting board for voice session…");
-      activeBoardId = await startSharing();
+      const shareResult = await startSharingDetailed();
+      if (!shareResult.ok) {
+        notify(`Voice session requires a board: ${shareResult.error}`);
+        return;
+      }
+      activeBoardId = shareResult.boardId;
     }
 
     if (!activeBoardId) {
-      notify("Voice agent call requires a board — please sign in or try again.");
       return;
     }
 
@@ -1205,7 +1210,7 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
     } catch (err) {
       notify(`Voice Agent connection failed: ${(err as Error).message}`);
     }
-  }, [boardId, voiceAgentState, notify, startSharing]);
+  }, [boardId, voiceAgentState, notify, startSharingDetailed]);
 
   const toggleVoiceAgentMute = useCallback(async () => {
     if (!voiceAgentCtrlRef.current) return;

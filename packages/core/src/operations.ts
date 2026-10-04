@@ -758,6 +758,15 @@ const OP_ALIASES: Record<string, string> = {
   LINK: "CONNECT_NODES",
   REMOVE_NODE: "DELETE_NODE",
   DELETE: "DELETE_NODE",
+  SET_NODE_TYPE: "CHANGE_NODE_TYPE",
+  UPDATE_NODE_TYPE: "CHANGE_NODE_TYPE",
+  CHANGE_TYPE: "CHANGE_NODE_TYPE",
+  SET_TYPE: "CHANGE_NODE_TYPE",
+  MODIFY_NODE_TYPE: "CHANGE_NODE_TYPE",
+  RENAME_NODE: "CHANGE_TEXT",
+  SET_LABEL: "CHANGE_TEXT",
+  UPDATE_TEXT: "CHANGE_TEXT",
+  UPDATE_LABEL: "CHANGE_TEXT",
 };
 
 /**
@@ -807,7 +816,7 @@ export function sanitizeRawOperations(raw: unknown): unknown {
     if (!knownOps.has(op)) {
       if (copy.source && copy.target) {
         op = "CONNECT_NODES";
-      } else if (copy.label || copy.nodeType) {
+      } else if (copy.label || copy.nodeType || copy.type) {
         op = "CREATE_NODE";
       }
     }
@@ -819,10 +828,15 @@ export function sanitizeRawOperations(raw: unknown): unknown {
         copy.id = `node_${Math.random().toString(36).slice(2, 9)}`;
       }
       if (typeof copy.nodeType !== "string" || !copy.nodeType.trim()) {
-        copy.nodeType = "service";
+        const candidate = copy.type ?? copy.node_type ?? copy.kind ?? copy.newType;
+        if (typeof candidate === "string" && candidate.trim()) {
+          copy.nodeType = candidate.trim();
+        } else {
+          copy.nodeType = "service";
+        }
       }
       if (typeof copy.label !== "string") {
-        copy.label = String(copy.label ?? copy.id ?? "");
+        copy.label = String(copy.label ?? copy.title ?? copy.text ?? copy.name ?? copy.id ?? "");
       }
       // A malformed icon costs the icon, never the node: repair what can be
       // repaired ("SI:Stripe" → "simple:stripe") and drop the rest.
@@ -830,6 +844,26 @@ export function sanitizeRawOperations(raw: unknown): unknown {
         const icon = normalizeIconRef(copy.icon);
         if (icon) copy.icon = icon;
         else delete copy.icon;
+      }
+    }
+    if (copy.op === "CHANGE_NODE_TYPE") {
+      if (typeof copy.nodeType !== "string" || !copy.nodeType.trim()) {
+        const candidate = copy.type ?? copy.newType ?? copy.to ?? copy.node_type ?? copy.kind;
+        if (typeof candidate === "string" && candidate.trim()) {
+          copy.nodeType = candidate.trim();
+        } else {
+          copy.nodeType = "step";
+        }
+      }
+    }
+    if (copy.op === "CHANGE_TEXT") {
+      if (typeof copy.text !== "string") {
+        copy.text = String(copy.text ?? copy.label ?? copy.newText ?? copy.title ?? copy.name ?? "");
+      }
+    }
+    if (copy.op === "MOVE_NODE") {
+      if (!copy.position && typeof copy.x === "number" && typeof copy.y === "number") {
+        copy.position = { x: copy.x, y: copy.y };
       }
     }
     if (copy.op === "SET_NODE_ICON" && copy.icon !== null && copy.icon !== undefined) {
@@ -840,6 +874,8 @@ export function sanitizeRawOperations(raw: unknown): unknown {
       copy.details = splitDetailLines(copy.details);
     }
     if (copy.op === "CONNECT_NODES" || copy.op === "DISCONNECT_NODES") {
+      if (!copy.source && typeof copy.from === "string") copy.source = copy.from;
+      if (!copy.target && typeof copy.to === "string") copy.target = copy.to;
       if (copy.relationship === null || copy.relationship === undefined) {
         copy.relationship = "";
       }

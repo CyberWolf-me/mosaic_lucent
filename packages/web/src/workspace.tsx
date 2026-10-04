@@ -54,6 +54,7 @@ import {
   joinBoard,
   listServerProposals,
   saveBoard,
+  saveBoardDetailed,
   askLucent,
   type BoardRole,
   type ServerProposal,
@@ -386,6 +387,12 @@ export interface WorkspaceState {
    * or null when not signed in / the server refused.
    */
   startSharing: () => Promise<string | null>;
+  /**
+   * Same as startSharing, but returns detailed error information if sharing/saving fails.
+   */
+  startSharingDetailed: () => Promise<
+    { ok: true; boardId: string } | { ok: false; error: string }
+  >;
   /**
    * Open a board that lives on the server, by board id. Distinct from
    * `openProject`, which loads a local project out of localStorage: a server
@@ -1400,16 +1407,23 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
    * step that turns a local board into a shared one — the realtime room is keyed
    * by board id, so it has to exist server-side before anyone can join it.
    */
-  const startSharing = useCallback(async (): Promise<string | null> => {
+  const startSharingDetailed = useCallback(async (): Promise<
+    { ok: true; boardId: string } | { ok: false; error: string }
+  > => {
     // A board belongs to a tenant, and when the client does not say which the
     // server falls back to `memberships[0]` (app.ts:2183) -- whichever org the
     // membership query returned first. A user in two orgs would publish into an
     // arbitrary one and then not find the board in the list for the org they
     // were looking at. Resolve the org that is actually on screen and name it.
     const { current } = await loadOrgs();
-    if (!current) return null;
-    const summary = await saveBoard(current.id, projectName, workspace, boardId ?? undefined);
-    if (!summary) return null;
+    if (!current) {
+      return { ok: false, error: "Please sign in to save or share boards." };
+    }
+    const res = await saveBoardDetailed(current.id, projectName, workspace, boardId ?? undefined);
+    if (!res.ok || !res.board) {
+      return { ok: false, error: res.error ?? "Failed to save board on the server." };
+    }
+    const summary = res.board;
     setBoardId(summary.id);
     setSharedBoardId(summary.id);
     if (typeof window !== "undefined") {
@@ -1418,8 +1432,13 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       window.history.replaceState(null, "", u.toString());
     }
     connectSync(summary.id, workspace);
-    return summary.id;
+    return { ok: true, boardId: summary.id };
   }, [projectName, workspace, boardId, connectSync]);
+
+  const startSharing = useCallback(async (): Promise<string | null> => {
+    const res = await startSharingDetailed();
+    return res.ok ? res.boardId : null;
+  }, [startSharingDetailed]);
 
   // Rejoin the shared board after a reload, and honour a ?board=<id> link so an
   // invitee lands in the same room rather than their own local board. When the
@@ -2687,6 +2706,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     canComment,
     boardId,
     startSharing,
+    startSharingDetailed,
     openBoard,
     send,
     proposeOps,
