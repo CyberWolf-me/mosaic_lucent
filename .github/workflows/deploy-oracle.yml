@@ -39,12 +39,21 @@ jobs:
         run: |
           tar -czf deploy.tar.gz \
             packages/core/dist \
+            packages/core/package.json \
             packages/ai/dist \
+            packages/ai/package.json \
             packages/server/dist \
+            packages/server/package.json \
             packages/server/migrations \
             packages/mcp/dist \
+            packages/mcp/package.json \
             packages/voice-agent/dist \
+            packages/voice-agent/package.json \
             packages/web/dist \
+            packages/web/package.json \
+            packages/i18n/package.json \
+            packages/site/package.json \
+            packages/load/package.json \
             ecosystem.config.cjs \
             package.json \
             package-lock.json
@@ -67,6 +76,10 @@ jobs:
             echo "Extracting deployment bundle into /home/opc/lucent..."
             tar -xzf /home/opc/deploy.tar.gz -C /home/opc/lucent/
             rm -f /home/opc/deploy.tar.gz
+
+            echo "Installing and syncing production dependencies..."
+            cd /home/opc/lucent
+            npm install --no-audit --no-fund
 
             echo "Updating web static assets in /var/www/lucent..."
             mkdir -p /var/www/lucent
