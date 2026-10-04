@@ -10,15 +10,10 @@ name: CodeQL
 # repositories, part of Advanced Security for private ones. Until it is enabled
 # the init step fails loudly rather than silently passing.
 
+# CodeQL analysis requires GitHub Advanced Security for private repositories.
+# Triggered manually via workflow_dispatch; re-enable push/schedule triggers if GHAS is active or if made public.
 on:
-  push:
-    branches: ["main"]
-  pull_request:
-    branches: ["main"]
-  schedule:
-    # Mondays, 04:27 UTC. Off the hour on purpose: scheduled runs cluster on
-    # :00 and sit in a queue.
-    - cron: "27 4 * * 1"
+  workflow_dispatch:
 
 # Deliberately narrower than ci.yml's `branches: ["**"]`: feature branches are
 # covered by the pull_request trigger, and a full suite on every branch push
