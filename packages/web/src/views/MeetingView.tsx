@@ -54,6 +54,10 @@ import {
   promptFromTranscript,
   renameMeeting,
   saveMeeting,
+  getLastActiveMeetingId,
+  setLastActiveMeetingId,
+  saveLocalMeeting,
+  deleteLocalMeeting,
   writeMeetingSummary,
   notifyMeetingOwners,
   type MeetingRecap,
@@ -256,6 +260,7 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
     setView,
     send,
     boardId,
+    projectId,
     projectName,
     workspace,
     onCitation,
@@ -264,6 +269,9 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
     proposeOps,
     readOnly,
   } = useWorkspace();
+  const currentScope = boardId || projectId;
+  const currentScopeRef = useRef(currentScope);
+  currentScopeRef.current = currentScope;
   // The capture's callbacks are armed once per capture; they reach the
   // CURRENT send through this ref (docs/28 F13's leftover, F21).
   const sendRef = useRef(send);
@@ -565,25 +573,40 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
 
   // Prior meetings for this board, so the view opens on real state.
   useEffect(() => {
-    if (!boardId) return;
+    const scope = boardId || projectId;
+    if (!scope) return;
     let cancelled = false;
     void (async () => {
-      const rows = await listMeetings(boardId);
+      const rows = await listMeetings(boardId, projectId);
       if (!cancelled) {
         setSaved(rows ?? []);
         // The ✦ provenance jump (Stage A): the canvas set ?meeting=<id> so
         // this view opens directly on the transcript that created the node.
-        const wanted = new URL(window.location.href).searchParams.get("meeting");
-        if (wanted) {
+        const wanted =
+          new URL(window.location.href).searchParams.get("meeting") ||
+          getLastActiveMeetingId(scope);
+        if (wanted && wanted !== "new") {
           const match = (rows ?? []).find((m) => m.id === wanted);
-          if (match) setSelectedMeeting(match);
+          if (match) {
+            setSelectedMeeting(match);
+            return;
+          }
+        }
+        if (
+          wanted !== "new" &&
+          rows &&
+          rows.length > 0 &&
+          !recording &&
+          turnsRef.current.length === 0
+        ) {
+          setSelectedMeeting(rows[0] ?? null);
         }
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [boardId]);
+  }, [boardId, projectId, recording]);
 
   // The turn jump (Stage C1): an Ask citation set ?turn=<start> (alongside
   // ?meeting=). Once the transcript is on screen, scroll the turn into view
@@ -912,7 +935,12 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
         startedAt: capturedFrom,
         mode: selectedMode,
         board: () => boardIdRef.current,
-        store: { open: saveMeeting, append: appendMeetingTurns, end: endMeeting },
+        scopeFallback: () => currentScopeRef.current,
+        store: {
+          open: (b, input) => saveMeeting(b, input, currentScopeRef.current),
+          append: (b, mId, t) => appendMeetingTurns(b, mId, t, currentScopeRef.current),
+          end: (b, mId) => endMeeting(b, mId, currentScopeRef.current),
+        },
         onOpened: (stored) => {
           // A capture started since owns the live id now.
           if (captureRef.current !== capture) return;
@@ -920,6 +948,9 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
           setLiveMeetingId(stored.id);
           // It may have started a scheduled meeting: it takes that name.
           setLiveTitle(stored.title ?? null);
+          if (currentScopeRef.current) {
+            setLastActiveMeetingId(currentScopeRef.current, stored.id);
+          }
         },
       });
       captureRef.current = capture;
@@ -948,6 +979,11 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
    * in the meantime (the async end must not yank the view off it).
    */
   const openStoredCapture = (stored: MeetingTranscript, captured: MeetingTurn[]): void => {
+    const scope = currentScopeRef.current;
+    if (scope) {
+      setLastActiveMeetingId(scope, stored.id);
+    }
+    meetingInUrl(stored.id);
     setSaved((prev) =>
       prev.some((m) => m.id === stored.id)
         ? prev.map((m) => (m.id === stored.id ? stored : m))
@@ -981,19 +1017,31 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
     const captured = turnsRef.current;
     const unflushed = captured.length - (capture?.persisted ?? 0);
     const board = capture?.boardId ?? boardId;
-    if (capture && captured.length > 0) {
+    if (captured.length > 0) {
       void (async () => {
-        const ended = await capture.finish(captured);
+        let ended = capture ? await capture.finish(captured) : null;
+        if (!ended) {
+          ended = await saveMeeting(
+            boardId,
+            {
+              turns: captured,
+              startedAt: startedAt ?? Date.now(),
+              endedAt: Date.now(),
+              mode: selectedMode,
+            },
+            currentScopeRef.current,
+          );
+        }
         // A capture started while this end was in flight owns the live id now.
         if (captureRef.current === null) liveMeetingIdRef.current = null;
         if (ended) {
           // The ended record joins the saved list (it was never added at
           // start, so the old in-place update left it missing until reload).
           openStoredCapture(ended, captured);
-        } else if (capture.boardId ?? boardIdRef.current) {
+        } else if (capture?.boardId ?? boardIdRef.current) {
           // Offline or refused: the lines stay on screen, and Save meeting
           // retries into this same transcript.
-          unsavedCaptureRef.current = { capture, turns: captured };
+          unsavedCaptureRef.current = { capture: capture!, turns: captured };
           notify("Couldn't save the meeting — use Save meeting to retry.");
         }
       })();
@@ -1123,7 +1171,8 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
   }, [recording, turns]);
 
   const onSave = async (): Promise<void> => {
-    if (!boardId) {
+    const scope = currentScopeRef.current;
+    if (!scope) {
       notify("Share the board first — meetings save against a server board.");
       return;
     }
@@ -1138,23 +1187,23 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
     const stored =
       pending && pending.turns === turnsRef.current
         ? await pending.capture.finish(pending.turns)
-        : await saveMeeting(boardId, {
-            turns,
-            startedAt: startedAt ?? Date.now(),
-            endedAt: Date.now(),
-            mode: selectedMode,
-          });
+        : await saveMeeting(
+            boardId,
+            {
+              turns,
+              startedAt: startedAt ?? Date.now(),
+              endedAt: Date.now(),
+              mode: selectedMode,
+            },
+            scope,
+          );
     setSaving(false);
     if (!stored) {
       notify("Couldn't save the meeting.");
       return;
     }
     unsavedCaptureRef.current = null;
-    setSaved((prev) => [stored, ...prev]);
-    turnsRef.current = [];
-    setTurns([]);
-    setStartedAt(null);
-    setSelectedMeeting(stored);
+    openStoredCapture(stored, turns);
     notify("Meeting saved to this board.");
   };
 
@@ -1193,13 +1242,14 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
   const [editingTurn, setEditingTurn] = useState<{ turn: number; text: string } | null>(null);
   useEffect(() => setEditingTurn(null), [shown?.id]);
   const saveCorrection = async (): Promise<void> => {
-    if (!editingTurn || !shown || !boardId) return;
+    const scope = currentScopeRef.current;
+    if (!editingTurn || !shown || !scope) return;
     const text = editingTurn.text.trim();
     if (!text || text === displayTurns[editingTurn.turn]?.text) {
       setEditingTurn(null);
       return;
     }
-    const updated = await correctTurn(boardId, shown.id, editingTurn.turn, text);
+    const updated = await correctTurn(boardId, shown.id, editingTurn.turn, text, scope);
     if (!updated) {
       notify("Couldn't save the correction — try again.");
       return;
@@ -1214,8 +1264,9 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
   const [titleDraft, setTitleDraft] = useState("");
   const [confirmTrash, setConfirmTrash] = useState(false);
   const saveTitle = async (): Promise<void> => {
-    if (!shown || !boardId) return;
-    const updated = await renameMeeting(boardId, shown.id, titleDraft);
+    const scope = currentScopeRef.current;
+    if (!shown || !scope) return;
+    const updated = await renameMeeting(boardId, shown.id, titleDraft, scope);
     if (!updated) {
       notify("Couldn't rename the meeting — try again.");
       return;
@@ -1232,8 +1283,22 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
   // mounted by a running capture (F14) — read it again as the view appears.
   useEffect(() => {
     if (view !== "meeting") return;
-    const wanted = new URL(window.location.href).searchParams.get("meeting");
-    if (!wanted || selectedMeeting?.id === wanted) return;
+    const scope = currentScopeRef.current;
+    const wanted =
+      new URL(window.location.href).searchParams.get("meeting") ||
+      (scope ? getLastActiveMeetingId(scope) : null);
+    if (!wanted || wanted === "new" || selectedMeeting?.id === wanted) {
+      if (
+        !wanted &&
+        !selectedMeeting &&
+        saved.length > 0 &&
+        !recording &&
+        turnsRef.current.length === 0
+      ) {
+        setSelectedMeeting(saved[0] ?? null);
+      }
+      return;
+    }
     const match = saved.find((m) => m.id === wanted);
     if (match) setSelectedMeeting(match);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1404,6 +1469,11 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
     setTurnFocus(null);
     setQuery("");
     setTurnFilter("all");
+    const scope = currentScopeRef.current;
+    if (scope) {
+      setLastActiveMeetingId(scope, m?.id ?? "new");
+    }
+    meetingInUrl(m?.id ?? null);
   };
 
   // Ask citations: a node opens on the canvas; a turn of a meeting this board
@@ -2533,8 +2603,16 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
             }
             actions={
               // docs/28 S10: an editor names a past meeting (ADR 0045).
-              phase === "saved" && shown && boardId && !readOnly && !renaming ? (
+              phase === "saved" && shown && !readOnly && !renaming ? (
                 <>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => openMeeting(null)}
+                    title="Start a new meeting capture"
+                  >
+                    <Ico.Plus /> New meeting
+                  </Button>
                   <Button
                     size="sm"
                     variant="ghost"
@@ -2551,22 +2629,28 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
                       size="sm"
                       variant="danger"
                       onClick={async () => {
-                        const result = await trashMeeting(boardId, shown.id);
-                        setConfirmTrash(false);
-                        if (!result.ok) {
-                          notify(result.error);
-                          return;
+                        const currentScope = currentScopeRef.current;
+                        if (currentScope) {
+                          deleteLocalMeeting(currentScope, shown.id);
                         }
+                        if (boardId && !shown.id.startsWith("mtg_loc_")) {
+                          const result = await trashMeeting(boardId, shown.id);
+                          if (!result.ok) {
+                            notify(result.error);
+                            return;
+                          }
+                        }
+                        setConfirmTrash(false);
                         notify(
-                          "Moved the meeting to the trash — restore it from Admin → Trash for 30 days.",
+                          boardId && !shown.id.startsWith("mtg_loc_")
+                            ? "Moved the meeting to the trash — restore it from Admin → Trash for 30 days."
+                            : "Deleted the meeting.",
                         );
-                        const params = new URLSearchParams(window.location.search);
-                        params.delete("meeting");
-                        window.history.replaceState(null, "", `?${params.toString()}`);
-                        setView("canvas");
+                        setSaved((prev) => prev.filter((m) => m.id !== shown.id));
+                        openMeeting(null);
                       }}
                     >
-                      Move to trash
+                      {shown.id.startsWith("mtg_loc_") ? "Delete" : "Move to trash"}
                     </Button>
                   ) : (
                     <Button size="sm" variant="ghost" onClick={() => setConfirmTrash(true)}>
@@ -2770,7 +2854,7 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
                     <Ico.Mic />
                   </span>
                 }
-                title="No meeting captured on this board yet"
+                title={saved.length > 0 ? "Start a new meeting" : "No meeting captured on this board yet"}
                 body={
                   <>
                     Start recording and the transcript fills in on the right. In Intelligence mode

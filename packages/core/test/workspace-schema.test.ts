@@ -351,4 +351,14 @@ describe("statement and provenance persistence (Stage C2)", () => {
     const result = parseWorkspace(bad);
     expect(result.ok).toBe(false);
   });
+
+  it("tolerates an empty workspace name and defaults it to Untitled", () => {
+    const unnamed = {
+      ...createWorkspace(),
+      name: "",
+    };
+    const result = parseWorkspace(unnamed);
+    expect(result.ok).toBe(true);
+    expect(result.workspace?.name).toBe("Untitled");
+  });
 });

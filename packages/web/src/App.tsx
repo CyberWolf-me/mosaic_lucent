@@ -98,7 +98,11 @@ function Router({ onOpenSettings }: { onOpenSettings: (section?: string) => void
   // recording. It sits in a fixed first slot so switching views never
   // remounts it; `display: contents` keeps its layout as if unwrapped.
   const { capture } = useMeetingSession();
-  const keepMeeting = view === "meeting" || capture !== null;
+  const [visitedMeeting, setVisitedMeeting] = useState(false);
+  useEffect(() => {
+    if (view === "meeting") setVisitedMeeting(true);
+  }, [view]);
+  const keepMeeting = visitedMeeting || view === "meeting" || capture !== null;
   return (
     <>
       {keepMeeting && (

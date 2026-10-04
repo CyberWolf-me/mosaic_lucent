@@ -6,6 +6,7 @@ import { Button, EmptyState, Page, PageHeader, SectionLabel } from "../ui/kit.js
 import { loadOrgs } from "../orgs.js";
 import { hasSession } from "../session.js";
 import {
+  getLocalMeetings,
   listInvitedMeetings,
   listWorkspaceMeetings,
   meetingName,
@@ -36,7 +37,7 @@ type LoadState =
   | { kind: "ready"; meetings: MeetingSummary[] };
 
 export function MeetingsView({ onOpenSettings }: { onOpenSettings: (section?: string) => void }) {
-  const { boardId, projectName, openBoard, setView } = useWorkspace();
+  const { boardId, projectId, projectName, openBoard, setView } = useWorkspace();
   const { notify } = useToast();
   const [state, setState] = useState<LoadState>({ kind: "loading" });
   const [scheduling, setScheduling] = useState<Array<{ id: string; name: string }> | null>(null);
@@ -44,13 +45,35 @@ export function MeetingsView({ onOpenSettings }: { onOpenSettings: (section?: st
 
   const load = useCallback(async () => {
     setState({ kind: "loading" });
+    const local = boardId || projectId ? getLocalMeetings(boardId || projectId) : [];
+    const localSummaries: MeetingSummary[] = local.map((m) => ({
+      id: m.id,
+      boardId: m.boardId || boardId || projectId,
+      boardName: projectName || "Current board",
+      title: m.title ?? null,
+      status: m.endedAt ? "ended" : "live",
+      startedAt: m.startedAt,
+      endedAt: m.endedAt,
+      turnCount: m.turns.length,
+      mode: m.mode ?? null,
+      createdBy: m.createdBy ?? "You",
+    }));
+
     if (!hasSession()) {
-      setState({ kind: "signed-out" });
+      if (localSummaries.length > 0) {
+        setState({ kind: "ready", meetings: localSummaries });
+      } else {
+        setState({ kind: "signed-out" });
+      }
       return;
     }
     const { current } = await loadOrgs();
     if (!current) {
-      setState({ kind: "signed-out" });
+      if (localSummaries.length > 0) {
+        setState({ kind: "ready", meetings: localSummaries });
+      } else {
+        setState({ kind: "signed-out" });
+      }
       return;
     }
     setOrgId(current.id);
@@ -59,16 +82,21 @@ export function MeetingsView({ onOpenSettings }: { onOpenSettings: (section?: st
       listInvitedMeetings(),
     ]);
     if (meetings === null) {
-      setState({ kind: "failed" });
+      if (localSummaries.length > 0) {
+        setState({ kind: "ready", meetings: localSummaries });
+      } else {
+        setState({ kind: "failed" });
+      }
       return;
     }
     // Meetings you're invited to on boards outside this workspace join the list.
     const known = new Set(meetings.map((m) => m.id));
+    const extraLocal = localSummaries.filter((m) => !known.has(m.id));
     setState({
       kind: "ready",
-      meetings: [...meetings, ...invited.filter((m) => !known.has(m.id))],
+      meetings: [...meetings, ...invited.filter((m) => !known.has(m.id)), ...extraLocal],
     });
-  }, []);
+  }, [boardId, projectId, projectName]);
 
   useEffect(() => {
     void load();
@@ -101,13 +129,13 @@ export function MeetingsView({ onOpenSettings }: { onOpenSettings: (section?: st
   };
 
   const open = async (m: MeetingSummary): Promise<void> => {
-    if (m.boardId !== boardId && !(await openBoard(m.boardId))) {
+    if (m.boardId !== boardId && !m.id.startsWith("mtg_loc_") && !(await openBoard(m.boardId))) {
       notify("Couldn't open that meeting's board — you may no longer have access.");
       return;
     }
     const params = new URLSearchParams(window.location.search);
     params.set("meeting", m.id);
-    params.set("board", m.boardId);
+    if (m.boardId) params.set("board", m.boardId);
     window.history.replaceState(null, "", `?${params.toString()}`);
     setView("meeting");
   };

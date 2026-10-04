@@ -38,12 +38,14 @@ export interface CaptureDurabilityOptions {
   /**
    * The server board, read at the first persist and then fixed for the
    * capture's life: a board shared mid-capture still gets the meeting, and
-   * switching boards never moves it. Null means a local board — nothing is
-   * sent until one exists.
+   * switching boards never moves it. Null means a local board — falls back
+   * to scopeFallback.
    */
   board: () => string | null;
+  /** Fallback scope identifier (e.g. projectId) when not attached to a server board. */
+  scopeFallback?: () => string | null;
   store: CaptureStore;
-  /** Called once, when the server transcript opens. */
+  /** Called once, when the server or local transcript opens. */
   onOpened?: (stored: MeetingTranscript) => void;
 }
 
@@ -57,7 +59,7 @@ export interface CaptureDurability {
   persist(turns: readonly MeetingTurn[]): Promise<void>;
   /**
    * Flush `turns`, then end the transcript. Resolves to the ended record, or
-   * null when there is nothing to end (no turns, no board) or a turn is still
+   * null when there is nothing to end (no turns, no scope) or a turn is still
    * unsaved — the transcript is then left open, so a retry appends to it
    * instead of writing the meeting twice.
    */
@@ -79,27 +81,32 @@ export function createCaptureDurability(options: CaptureDurabilityOptions): Capt
   // land while a request is in flight go out together in the next one.
   let latest: readonly MeetingTurn[] = [];
 
+  const effectiveScope = (): string | null => {
+    boardId ??= options.board();
+    return boardId || (options.scopeFallback ? options.scopeFallback() : null);
+  };
+
   const step = async (): Promise<void> => {
     const turns = latest;
     if (persisted >= turns.length) return;
-    boardId ??= options.board();
-    if (!boardId) return;
+    const scope = effectiveScope();
+    if (!scope) return;
     const from = persisted;
     const batch = turns.slice(from);
     const stored =
       meetingId === null
-        ? await store.open(boardId, {
+        ? await store.open(boardId ?? scope, {
             turns: batch,
             startedAt: options.startedAt,
             ...(options.mode ? { mode: options.mode } : {}),
           })
-        : await store.append(boardId, meetingId, batch);
+        : await store.append(boardId ?? scope, meetingId, batch);
     if (!stored) return;
     if (meetingId === null) {
       meetingId = stored.id;
       options.onOpened?.(stored);
     }
-    // The server holds the full list; trust its length over our slice
+    // The server/store holds the full list; trust its length over our slice
     // arithmetic so a normalization on the server still converges.
     persisted = Math.max(from + batch.length, stored.turns.length);
   };
@@ -115,8 +122,9 @@ export function createCaptureDurability(options: CaptureDurabilityOptions): Capt
     async finish(turns) {
       await persist(turns);
       if (turns.length === 0 || persisted < turns.length) return null;
-      if (boardId === null || meetingId === null) return null;
-      return store.end(boardId, meetingId).catch(() => null);
+      const scope = effectiveScope();
+      if (scope === null || meetingId === null) return null;
+      return store.end(boardId ?? scope, meetingId).catch(() => null);
     },
     get boardId() {
       return boardId;

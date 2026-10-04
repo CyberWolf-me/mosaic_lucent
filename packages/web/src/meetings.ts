@@ -46,6 +46,68 @@ export interface MeetingTranscript {
   cancelledBy?: string;
 }
 
+const LOCAL_MEETINGS_PREFIX = "luc_meetings_";
+const ACTIVE_MEETING_PREFIX = "luc_active_meeting_";
+
+export function getLocalMeetings(scopeId: string): MeetingTranscript[] {
+  if (typeof window === "undefined" || !scopeId) return [];
+  try {
+    const raw = localStorage.getItem(`${LOCAL_MEETINGS_PREFIX}${scopeId}`);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as MeetingTranscript[];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveLocalMeeting(scopeId: string, meeting: MeetingTranscript): void {
+  if (typeof window === "undefined" || !scopeId) return;
+  try {
+    const existing = getLocalMeetings(scopeId);
+    const index = existing.findIndex((m) => m.id === meeting.id);
+    const updated =
+      index >= 0
+        ? existing.map((m) => (m.id === meeting.id ? meeting : m))
+        : [meeting, ...existing];
+    localStorage.setItem(`${LOCAL_MEETINGS_PREFIX}${scopeId}`, JSON.stringify(updated));
+  } catch {}
+}
+
+export function deleteLocalMeeting(scopeId: string, meetingId: string): void {
+  if (typeof window === "undefined" || !scopeId) return;
+  try {
+    const existing = getLocalMeetings(scopeId);
+    const updated = existing.filter((m) => m.id !== meetingId);
+    localStorage.setItem(`${LOCAL_MEETINGS_PREFIX}${scopeId}`, JSON.stringify(updated));
+  } catch {}
+}
+
+export function getLastActiveMeetingId(scopeId: string): string | null {
+  if (typeof window === "undefined" || !scopeId) return null;
+  try {
+    return (
+      sessionStorage.getItem(`${ACTIVE_MEETING_PREFIX}${scopeId}`) ??
+      localStorage.getItem(`${ACTIVE_MEETING_PREFIX}${scopeId}`)
+    );
+  } catch {
+    return null;
+  }
+}
+
+export function setLastActiveMeetingId(scopeId: string, meetingId: string | null): void {
+  if (typeof window === "undefined" || !scopeId) return;
+  try {
+    if (meetingId) {
+      sessionStorage.setItem(`${ACTIVE_MEETING_PREFIX}${scopeId}`, meetingId);
+      localStorage.setItem(`${ACTIVE_MEETING_PREFIX}${scopeId}`, meetingId);
+    } else {
+      sessionStorage.removeItem(`${ACTIVE_MEETING_PREFIX}${scopeId}`);
+      localStorage.removeItem(`${ACTIVE_MEETING_PREFIX}${scopeId}`);
+    }
+  } catch {}
+}
+
 /** A scheduled meeting's plan (docs/28 S2) — the server's MeetingSchedule. */
 export interface MeetingSchedule {
   scheduledFor: number;
@@ -230,17 +292,37 @@ export function correctedTurns(
 
 /** Correct what one turn says (editor). Null on failure. */
 export async function correctTurn(
-  boardId: string,
+  boardId: string | null | undefined,
   meetingId: string,
   turn: number,
   text: string,
+  scopeFallback?: string | null,
 ): Promise<MeetingTranscript | null> {
-  const res = await apiFetch(
-    `/api/boards/${encodeURIComponent(boardId)}/meetings/${encodeURIComponent(meetingId)}/turns/${turn}/correction`,
-    { method: "POST", body: JSON.stringify({ text }) },
-  );
-  if (!res.ok) return null;
-  return (await res.json()) as MeetingTranscript;
+  const scopeId = boardId || scopeFallback;
+  if (boardId && !meetingId.startsWith("mtg_loc_")) {
+    try {
+      const res = await apiFetch(
+        `/api/boards/${encodeURIComponent(boardId)}/meetings/${encodeURIComponent(meetingId)}/turns/${turn}/correction`,
+        { method: "POST", body: JSON.stringify({ text }) },
+      );
+      if (res.ok) {
+        const row = (await res.json()) as MeetingTranscript;
+        if (scopeId) saveLocalMeeting(scopeId, row);
+        return row;
+      }
+    } catch {}
+  }
+  if (scopeId) {
+    const list = getLocalMeetings(scopeId);
+    const m = list.find((x) => x.id === meetingId);
+    if (m) {
+      m.corrections ??= [];
+      m.corrections.push({ turn, text, by: "you", at: Date.now() });
+      saveLocalMeeting(scopeId, m);
+      return m;
+    }
+  }
+  return null;
 }
 
 /**
@@ -410,16 +492,35 @@ export async function listInvitedMeetings(): Promise<MeetingSummary[]> {
 
 /** Name a meeting; an empty title makes it untitled again. Null on failure. */
 export async function renameMeeting(
-  boardId: string,
+  boardId: string | null | undefined,
   meetingId: string,
   title: string,
+  scopeFallback?: string | null,
 ): Promise<MeetingTranscript | null> {
-  const res = await apiFetch(
-    `/api/boards/${encodeURIComponent(boardId)}/meetings/${encodeURIComponent(meetingId)}`,
-    { method: "PATCH", body: JSON.stringify({ title }) },
-  );
-  if (!res.ok) return null;
-  return (await res.json()) as MeetingTranscript;
+  const scopeId = boardId || scopeFallback;
+  if (boardId && !meetingId.startsWith("mtg_loc_")) {
+    try {
+      const res = await apiFetch(
+        `/api/boards/${encodeURIComponent(boardId)}/meetings/${encodeURIComponent(meetingId)}`,
+        { method: "PATCH", body: JSON.stringify({ title }) },
+      );
+      if (res.ok) {
+        const row = (await res.json()) as MeetingTranscript;
+        if (scopeId) saveLocalMeeting(scopeId, row);
+        return row;
+      }
+    } catch {}
+  }
+  if (scopeId) {
+    const list = getLocalMeetings(scopeId);
+    const m = list.find((x) => x.id === meetingId);
+    if (m) {
+      m.title = title.trim() || undefined;
+      saveLocalMeeting(scopeId, m);
+      return m;
+    }
+  }
+  return null;
 }
 
 // The keyword classifier lives in @lucent/ai (docs/26 A5): the server's
@@ -456,15 +557,40 @@ export function promptFromTranscript(meeting: MeetingTranscript): string {
 
 /** Save the in-progress capture to the board. Returns the stored transcript or null. */
 export async function saveMeeting(
-  boardId: string,
-  input: { turns: MeetingTurn[]; startedAt: number; endedAt?: number | null; mode?: string },
+  boardId: string | null | undefined,
+  input: { turns: MeetingTurn[]; startedAt: number; endedAt?: number | null; mode?: string; title?: string },
+  scopeFallback?: string | null,
 ): Promise<MeetingTranscript | null> {
-  const res = await apiFetch(`/api/boards/${encodeURIComponent(boardId)}/meetings`, {
-    method: "POST",
-    body: JSON.stringify(input),
-  });
-  if (!res.ok) return null;
-  return (await res.json()) as MeetingTranscript;
+  const scopeId = boardId || scopeFallback || "default";
+  if (boardId) {
+    try {
+      const res = await apiFetch(`/api/boards/${encodeURIComponent(boardId)}/meetings`, {
+        method: "POST",
+        body: JSON.stringify(input),
+      });
+      if (res.ok) {
+        const serverRecord = (await res.json()) as MeetingTranscript;
+        saveLocalMeeting(boardId, serverRecord);
+        return serverRecord;
+      }
+    } catch {}
+  }
+
+  // Fallback to local storage (for local boards, offline dev, or unshared workspaces)
+  const localMeeting: MeetingTranscript = {
+    id: `mtg_loc_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+    boardId: boardId || scopeId,
+    orgId: "local",
+    startedAt: input.startedAt,
+    endedAt: input.endedAt ?? null,
+    turns: input.turns,
+    createdBy: "You",
+    createdAt: Date.now(),
+    ...(input.mode ? { mode: input.mode } : {}),
+    ...(input.title ? { title: input.title } : {}),
+  };
+  saveLocalMeeting(scopeId, localMeeting);
+  return localMeeting;
 }
 
 /**
@@ -474,16 +600,34 @@ export async function saveMeeting(
  * (wrong id, or it already ended — the caller falls back to a fresh save).
  */
 export async function appendMeetingTurns(
-  boardId: string,
+  boardId: string | null | undefined,
   meetingId: string,
   turns: MeetingTurn[],
+  scopeFallback?: string | null,
 ): Promise<MeetingTranscript | null> {
-  const res = await apiFetch(
-    `/api/boards/${encodeURIComponent(boardId)}/meetings/${encodeURIComponent(meetingId)}/turns`,
-    { method: "POST", body: JSON.stringify({ turns }) },
-  );
-  if (!res.ok) return null;
-  return (await res.json()) as MeetingTranscript;
+  const scopeId = boardId || scopeFallback || "default";
+  if (boardId && !meetingId.startsWith("mtg_loc_")) {
+    try {
+      const res = await apiFetch(
+        `/api/boards/${encodeURIComponent(boardId)}/meetings/${encodeURIComponent(meetingId)}/turns`,
+        { method: "POST", body: JSON.stringify({ turns }) },
+      );
+      if (res.ok) {
+        const updated = (await res.json()) as MeetingTranscript;
+        saveLocalMeeting(boardId, updated);
+        return updated;
+      }
+    } catch {}
+  }
+
+  const localList = getLocalMeetings(scopeId);
+  const found = localList.find((m) => m.id === meetingId);
+  if (found && found.endedAt === null) {
+    found.turns.push(...turns);
+    saveLocalMeeting(scopeId, found);
+    return found;
+  }
+  return null;
 }
 
 /**
@@ -493,21 +637,55 @@ export async function appendMeetingTurns(
  * treats it like the abandon path — nothing to recover locally).
  */
 export async function endMeeting(
-  boardId: string,
+  boardId: string | null | undefined,
   meetingId: string,
+  scopeFallback?: string | null,
 ): Promise<MeetingTranscript | null> {
-  const res = await apiFetch(
-    `/api/boards/${encodeURIComponent(boardId)}/meetings/${encodeURIComponent(meetingId)}/end`,
-    { method: "POST", body: JSON.stringify({ endedAt: Date.now() }) },
-  );
-  if (!res.ok) return null;
-  return (await res.json()) as MeetingTranscript;
+  const scopeId = boardId || scopeFallback || "default";
+  if (boardId && !meetingId.startsWith("mtg_loc_")) {
+    try {
+      const res = await apiFetch(
+        `/api/boards/${encodeURIComponent(boardId)}/meetings/${encodeURIComponent(meetingId)}/end`,
+        { method: "POST", body: JSON.stringify({ endedAt: Date.now() }) },
+      );
+      if (res.ok) {
+        const ended = (await res.json()) as MeetingTranscript;
+        saveLocalMeeting(boardId, ended);
+        return ended;
+      }
+    } catch {}
+  }
+
+  const localList = getLocalMeetings(scopeId);
+  const found = localList.find((m) => m.id === meetingId);
+  if (found) {
+    found.endedAt = Date.now();
+    saveLocalMeeting(scopeId, found);
+    return found;
+  }
+  return null;
 }
 
 /** The board's saved meetings, newest first; null when the call fails. */
-export async function listMeetings(boardId: string): Promise<MeetingTranscript[] | null> {
-  const res = await apiFetch(`/api/boards/${encodeURIComponent(boardId)}/meetings`);
-  if (!res.ok) return null;
-  const body = (await res.json()) as { meetings?: MeetingTranscript[] };
-  return Array.isArray(body.meetings) ? body.meetings : [];
+export async function listMeetings(
+  boardId?: string | null,
+  scopeFallback?: string | null,
+): Promise<MeetingTranscript[] | null> {
+  const scopeId = boardId || scopeFallback;
+  const localRows = scopeId ? getLocalMeetings(scopeId) : [];
+
+  if (boardId) {
+    try {
+      const res = await apiFetch(`/api/boards/${encodeURIComponent(boardId)}/meetings`);
+      if (res.ok) {
+        const body = (await res.json()) as { meetings?: MeetingTranscript[] };
+        const serverRows = Array.isArray(body.meetings) ? body.meetings : [];
+        const serverIds = new Set(serverRows.map((m) => m.id));
+        const merged = [...serverRows, ...localRows.filter((m) => !serverIds.has(m.id))];
+        return merged;
+      }
+    } catch {}
+  }
+
+  return localRows;
 }
