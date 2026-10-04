@@ -11,6 +11,7 @@
     "preview": "vite preview",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
+    "test:workflows": "playwright test e2e/workflows",
     "icons": "node ../../scripts/build-icons.mjs"
   },
   "dependencies": {

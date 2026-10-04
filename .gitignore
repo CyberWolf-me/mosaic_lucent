@@ -25,3 +25,5 @@ scripts/nav-persist.mjs
 scripts/repair-check.mjs
 scripts/stream-peek.mjs
 scripts/export-check.mjs
+test-results/
+playwright-report/

@@ -41,6 +41,7 @@ import {
   MODE_NOTES,
   isMeetingMode,
   modeAllowsExtraction,
+  type MeetingMode,
 } from "../meeting-modes.js";
 import {
   appendMeetingTurns,
@@ -404,48 +405,7 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
     const t = setInterval(() => setHudTick((n) => n + 1), 500);
     return () => clearInterval(t);
   }, [voiceHud]);
-  // Debug-only voice-loop driver (docs/26 §7 headed verification). Behind
-  // ?voicehud=1 it exposes the REAL conversational-lease manager on window so a
-  // headed Playwright run can step cases A–E (invocation, follow-up, barge-in,
-  // expiry, cross-talk) and watch the HUD transition — no mic, no AI call, and
-  // never present in the ordinary product surface.
-  useEffect(() => {
-    if (!voiceHud || typeof window === "undefined") return;
-    const mgr = leaseManagerRef.current;
-    const bump = () => setHudTick((n) => n + 1);
-    const hook = {
-      setRecording: (on: boolean) => setRecording(on),
-      evaluate: (speaker: string, text: string, now?: number) => {
-        setLastSpeaker(speaker);
-        setTurns((t) => [...t, { speaker, at: now ?? Date.now(), text }]);
-        const res = mgr.evaluateTurn({ speaker, text }, now);
-        bump();
-        return res;
-      },
-      bargeIn: (speaker: string, text: string, now?: number) => {
-        const res = mgr.onBargeIn(speaker, text, now);
-        bump();
-        return res;
-      },
-      aiStart: () => {
-        mgr.onAiStartResponding();
-        bump();
-      },
-      aiDone: (answer: string, now?: number) => {
-        mgr.onTtsDone(answer, now);
-        bump();
-      },
-      dismiss: () => {
-        mgr.dismissLease();
-        bump();
-      },
-      state: () => mgr.getState(),
-    };
-    (window as unknown as { __lucentVoiceDebug?: typeof hook }).__lucentVoiceDebug = hook;
-    return () => {
-      delete (window as unknown as { __lucentVoiceDebug?: typeof hook }).__lucentVoiceDebug;
-    };
-  }, [voiceHud]);
+
   // A joining link (?call=1, copied from the call) opens the lobby — never
   // joins by itself: the person picks their devices first (docs/28 S4). The
   // parameter stays until they join or put the call away, because the app
@@ -659,6 +619,54 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
   );
+
+  const initCapture = (mode = selectedMode): CaptureDurability => {
+    const capturedFrom = Date.now();
+    setStartedAt(capturedFrom);
+    // A fresh capture starts a fresh transcript; the saved list keeps the
+    // prior meetings. The document follows the capture. The server
+    // transcript opens with the first turn that lands (meetingCapture.ts):
+    // no board → capture still works locally and nothing is sent.
+    turnsRef.current = [];
+    setTurns([]);
+    setSelectedMeeting(null);
+    setVoiceAnswers([]);
+    unsavedCaptureRef.current = null;
+    liveMeetingIdRef.current = null;
+    setLiveMeetingId(null);
+    setLiveTitle(null);
+    const capture = createCaptureDurability({
+      startedAt: capturedFrom,
+      mode,
+      board: () => boardIdRef.current,
+      scopeFallback: () => currentScopeRef.current,
+      store: {
+        open: (b, input) => saveMeeting(b, input, currentScopeRef.current),
+        append: (b, mId, t) => appendMeetingTurns(b, mId, t, currentScopeRef.current),
+        end: (b, mId) => endMeeting(b, mId, currentScopeRef.current),
+      },
+      onOpened: (stored) => {
+        // A capture started since owns the live id now.
+        if (captureRef.current !== capture) return;
+        liveMeetingIdRef.current = stored.id;
+        setLiveMeetingId(stored.id);
+        // It may have started a scheduled meeting: it takes that name.
+        setLiveTitle(stored.title ?? null);
+        if (currentScopeRef.current) {
+          setLastActiveMeetingId(currentScopeRef.current, stored.id);
+        }
+      },
+    });
+    captureRef.current = capture;
+    setExtractQueued(0);
+    setLastExtractStatus(null);
+    // Fresh capture resets the engine clock — including a stuck in-flight
+    // flag, which the old refs carried across restarts and wedged the
+    // loop with. Reset-on-start recovers by construction.
+    engineRef.current.reset();
+    setRecording(true);
+    return capture;
+  };
 
   const startRecording = (): void => {
     // docs/28 F19: a viewer's capture could never be saved (the server
@@ -917,50 +925,7 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
       : provider.start(voiceCallbacks);
     if (session) {
       voiceRef.current = session;
-      const capturedFrom = Date.now();
-      setStartedAt(capturedFrom);
-      // A fresh capture starts a fresh transcript; the saved list keeps the
-      // prior meetings. The document follows the capture. The server
-      // transcript opens with the first turn that lands (meetingCapture.ts):
-      // no board → capture still works locally and nothing is sent.
-      turnsRef.current = [];
-      setTurns([]);
-      setSelectedMeeting(null);
-      setVoiceAnswers([]);
-      unsavedCaptureRef.current = null;
-      liveMeetingIdRef.current = null;
-      setLiveMeetingId(null);
-      setLiveTitle(null);
-      const capture = createCaptureDurability({
-        startedAt: capturedFrom,
-        mode: selectedMode,
-        board: () => boardIdRef.current,
-        scopeFallback: () => currentScopeRef.current,
-        store: {
-          open: (b, input) => saveMeeting(b, input, currentScopeRef.current),
-          append: (b, mId, t) => appendMeetingTurns(b, mId, t, currentScopeRef.current),
-          end: (b, mId) => endMeeting(b, mId, currentScopeRef.current),
-        },
-        onOpened: (stored) => {
-          // A capture started since owns the live id now.
-          if (captureRef.current !== capture) return;
-          liveMeetingIdRef.current = stored.id;
-          setLiveMeetingId(stored.id);
-          // It may have started a scheduled meeting: it takes that name.
-          setLiveTitle(stored.title ?? null);
-          if (currentScopeRef.current) {
-            setLastActiveMeetingId(currentScopeRef.current, stored.id);
-          }
-        },
-      });
-      captureRef.current = capture;
-      setExtractQueued(0);
-      setLastExtractStatus(null);
-      // Fresh capture resets the engine clock — including a stuck in-flight
-      // flag, which the old refs carried across restarts and wedged the
-      // loop with. Reset-on-start recovers by construction.
-      engineRef.current.reset();
-      setRecording(true);
+      initCapture(selectedMode);
       // docs/28 A3.5: everyone else in the call is transcribed on their own
       // device, and their lines arrive here under the name LiveKit knows them
       // by — the same path as this device's own lines: classified, extracted,
@@ -1075,6 +1040,64 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
         : null,
     );
   }, [recording, turns.length, startedAt, boardId, publishCapture]);
+
+  // Debug-only voice-loop driver (docs/26 §7 headed verification). Behind
+  // ?voicehud=1 it exposes the REAL conversational-lease manager on window so a
+  // headed or headless Playwright run can step cases A–E (invocation, follow-up, barge-in,
+  // expiry, cross-talk) and drive capture lifecycle — no mic, no AI call, and
+  // never present in the ordinary product surface.
+  useEffect(() => {
+    if (!voiceHud || typeof window === "undefined") return;
+    const mgr = leaseManagerRef.current;
+    const bump = () => setHudTick((n) => n + 1);
+    const hook = {
+      startCapture: (mode?: MeetingMode) => {
+        initCapture(mode ?? modeRef.current);
+        bump();
+      },
+      stopCapture: () => {
+        stopRecordingRef.current?.();
+        bump();
+      },
+      setRecording: (on: boolean) => setRecording(on),
+      evaluate: (speaker: string, text: string, now?: number) => {
+        setLastSpeaker(speaker);
+        const turn: MeetingTurn = {
+          speaker,
+          at: now ?? Date.now(),
+          text,
+          kind: classifyTurn(text),
+        };
+        appendTurn(turn);
+        void captureRef.current?.persist(turnsRef.current);
+        const res = mgr.evaluateTurn({ speaker, text }, now);
+        bump();
+        return res;
+      },
+      bargeIn: (speaker: string, text: string, now?: number) => {
+        const res = mgr.onBargeIn(speaker, text, now);
+        bump();
+        return res;
+      },
+      aiStart: () => {
+        mgr.onAiStartResponding();
+        bump();
+      },
+      aiDone: (answer: string, now?: number) => {
+        mgr.onTtsDone(answer, now);
+        bump();
+      },
+      dismiss: () => {
+        mgr.dismissLease();
+        bump();
+      },
+      state: () => mgr.getState(),
+    };
+    (window as unknown as { __lucentVoiceDebug?: typeof hook }).__lucentVoiceDebug = hook;
+    return () => {
+      delete (window as unknown as { __lucentVoiceDebug?: typeof hook }).__lucentVoiceDebug;
+    };
+  }, [voiceHud]);
 
   // ---- The live extraction loop (M2), driven by the meeting engine -----
   // While recording, new finals accumulate. On the hybrid trigger (enough new
