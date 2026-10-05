@@ -2,7 +2,9 @@ import {
   computeLayout,
   storyMapGrid,
   type DiagramKind,
+  type Node,
   type Shape,
+  type ShapeLink,
   type StoryMapGrid,
   type Workspace,
 } from "@lucent/core";
@@ -362,6 +364,70 @@ export function visibleShapes(
     (s) =>
       keep?.has(s.id) || overlaps(view, s.position.x, s.position.y, s.size.width, s.size.height),
   );
+}
+
+/**
+ * Manual connectors (ShapeLink) worth drawing. Tested against the bounding box
+ * spanning both endpoint objects (shapes or diagram nodes), with the same keep
+ * and drag escape hatches as visibleEdges.
+ */
+export function visibleShapeLinks(
+  shapeLinks: ShapeLink[],
+  workspaceOrShapes:
+    | Workspace
+    | Record<string, Shape>
+    | ReadonlyMap<string, Shape>,
+  view: Rect | null,
+  keep?: ReadonlySet<string>,
+  dragOverride?: { id: string; x: number; y: number } | null,
+): ShapeLink[] {
+  if (!view) return shapeLinks;
+  const isWs =
+    workspaceOrShapes &&
+    "shapes" in workspaceOrShapes &&
+    typeof (workspaceOrShapes as Workspace).shapes === "object";
+  const shapes = isWs ? (workspaceOrShapes as Workspace).shapes : workspaceOrShapes;
+  const nodes = isWs ? (workspaceOrShapes as Workspace).nodes : undefined;
+
+  const boxOf = (id: string): Box | null => {
+    let s: Shape | undefined;
+    if (shapes instanceof Map) {
+      s = shapes.get(id);
+    } else if (shapes && typeof shapes === "object") {
+      s = (shapes as Record<string, Shape>)[id];
+    }
+    if (s) {
+      if (s.hidden) return null;
+      const pos = dragOverride?.id === id ? { x: dragOverride.x, y: dragOverride.y } : s.position;
+      return { x: pos.x, y: pos.y, width: s.size.width, height: s.size.height };
+    }
+    if (nodes) {
+      const n = nodes instanceof Map ? (nodes as Map<string, Node>).get(id) : nodes[id];
+      if (n?.position) {
+        return {
+          x: n.position.x,
+          y: n.position.y,
+          width: n.size?.width ?? 160,
+          height: n.size?.height ?? 64,
+        };
+      }
+    }
+    return null;
+  };
+
+  return shapeLinks.filter((l) => {
+    if (keep?.has(l.id) || keep?.has(l.source) || keep?.has(l.target)) return true;
+    if (dragOverride && (dragOverride.id === l.source || dragOverride.id === l.target)) return true;
+    const a = boxOf(l.source);
+    const b = boxOf(l.target);
+    if (!a || !b) return false;
+    const pad = 16;
+    const minX = Math.min(a.x, b.x) - pad;
+    const minY = Math.min(a.y, b.y) - pad;
+    const maxX = Math.max(a.x + a.width, b.x + b.width) + pad;
+    const maxY = Math.max(a.y + a.height, b.y + b.height) + pad;
+    return overlaps(view, minX, minY, maxX - minX, maxY - minY);
+  });
 }
 
 /**

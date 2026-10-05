@@ -10,8 +10,10 @@ import {
   resizeFromHandle,
   shapeLinkEnds,
   shapeLinkPath,
+  type Box,
   type ResizeHandle,
 } from "../board/geometry.js";
+import { cullRect, visibleShapeLinks, type Rect } from "../board/culling.js";
 import { embedModeOf } from "../embed.js";
 import { hasRichText } from "../richText.js";
 import { RichText } from "./RichText.js";
@@ -1011,13 +1013,31 @@ export function ShapeLinkLayer({
   dragOverride,
   selectedLink,
   onSelectLink,
+  cull,
+  viewport,
 }: {
   workspace: import("@lucent/core").Workspace;
   dragOverride: { id: string; x: number; y: number } | null;
   selectedLink?: string | null;
   onSelectLink?: (id: string) => void;
+  cull?: Rect | null;
+  viewport?: Box | null;
 }) {
-  const links = Object.values(workspace.shapeLinks);
+  const rawLinks = Object.values(workspace.shapeLinks);
+  if (rawLinks.length === 0) return null;
+  const activeCull =
+    cull !== undefined
+      ? cull
+      : viewport
+        ? cullRect(
+            viewport,
+            rawLinks.length +
+              Object.keys(workspace.shapes).length +
+              Object.keys(workspace.nodes).length,
+          )
+        : null;
+  const keep = selectedLink ? new Set([selectedLink]) : undefined;
+  const links = visibleShapeLinks(rawLinks, workspace, activeCull, keep, dragOverride);
   if (links.length === 0) return null;
   // Anchors and paths come from board/geometry, shared with the export, so a
   // connector is drawn the same live and on paper.

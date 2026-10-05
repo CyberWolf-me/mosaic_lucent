@@ -222,4 +222,33 @@ describe("parseToolArguments", () => {
     expect((result.operations[3] as { relationship: string }).relationship).toBe("");
     expect((result.operations[4] as { relationship: string }).relationship).toBe("");
   });
+
+  it("parses valid clarification question and options", () => {
+    const result = parseToolArguments({
+      operations: [],
+      explanation: "Which auth flow would you like?",
+      clarification: {
+        question: "Select your preferred authentication method:",
+        options: ["OAuth2 with Google/GitHub", "Email + Password", "Magic Link"],
+      },
+    });
+    expect(result.clarification).toBeDefined();
+    expect(result.clarification?.question).toBe("Select your preferred authentication method:");
+    expect(result.clarification?.options).toEqual([
+      "OAuth2 with Google/GitHub",
+      "Email + Password",
+      "Magic Link",
+    ]);
+  });
+
+  it("drops malformed clarification with fewer than 2 options", () => {
+    const result = parseToolArguments({
+      operations: [],
+      clarification: {
+        question: "Choose one",
+        options: ["Only one"],
+      },
+    });
+    expect(result.clarification).toBeUndefined();
+  });
 });

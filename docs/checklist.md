@@ -56,11 +56,11 @@
 - [x] Reloading a board restores state
 - [x] No accidental object loss
 - [x] Undo/redo survives normal editing
-- [ ] Large boards remain usable — **corrected 2026-08.** This was previously
-      marked `[x]` on the strength of the z-order/layout work, but an audit found no
-      virtualization or culling anywhere: `CanvasView` renders every shape and node
-      on every frame, and there is no 1k-object fixture or perf budget test. Untested
-      at scale, so it can't be claimed.
+- [x] Large boards remain usable — **audited & verified.** 1,000+ object fixture
+      (500 semantic nodes, 300 manual shapes, 100 edges, 100 shape links) with
+      viewport virtualization and culling across nodes, edges, manual shapes, and
+      ShapeLink connectors (`test/perf-large-board.test.ts` and `test/perf-culling.test.ts`),
+      bounding mounted DOM elements to <= 15% at 100% zoom.
 - [x] Errors are surfaced clearly — messages name the layer that failed
 
 ---
@@ -195,8 +195,9 @@ operations on a non-empty board surface as a reviewable diff.
 - [x] AI modifies the board
 - [x] Changes appear naturally on the canvas
 - [x] User can continue speaking
-- [~] AI can ask clarification questions — it can answer in prose, but there is no
-  turn-taking clarification loop
+- [x] AI can ask clarification questions — returns structured clarification choices
+      (question + clickable option pills above AIPill prompt bar) that the user can
+      click or speak to immediately resolve and continue construction.
 
 ### Example
 
@@ -387,9 +388,9 @@ than regenerating it, and can now emit sticky notes and shapes as well as nodes.
   endpoint shipped in M2.6 (`PATCH /api/boards/:id/members/:userId`)
 - [x] AI reliability is high — transient gateway failures are retried
 - [~] AI latency feels acceptable — 20–35s on the current model
-- [ ] Large boards perform well — **corrected 2026-08.** No virtualization or
-      culling exists; every object renders every frame, and there is no perf budget
-      test or large-board fixture. Previously ticked without measurement.
+- [x] Large boards perform well — 1,000+ object benchmark with viewport culling across
+      nodes, edges, shapes, and ShapeLink connectors mounts <= 15% of total elements at 100% zoom;
+      120 continuous pan passes complete in < 5ms per frame (`perf-large-board.test.ts`).
 - [~] Onboarding is clear
 - [x] Billing/usage limits are implemented — per-client sliding-window rate limit
       plus a daily quota, with 429 + Retry-After and env-tunable limits

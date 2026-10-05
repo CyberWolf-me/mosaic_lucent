@@ -504,6 +504,9 @@ export interface WorkspaceState {
    * arrives straight from `JSON.parse`: it is parsed here, not by the caller.
    */
   importWorkspace: (imported: unknown, name?: string) => void;
+  /** Clarification question and options when intent is ambiguous. */
+  clarification: import("@lucent/core").ClarificationChoice | null;
+  clearClarification: () => void;
 }
 
 const Ctx = createContext<WorkspaceState | null>(null);
@@ -868,6 +871,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
    * so the toggle survives view switches the same way the conversation does.
    */
   const [pillMode, setPillMode] = useState<"build" | "ask">("build");
+  const [clarification, setClarification] = useState<import("@lucent/core").ClarificationChoice | null>(null);
+  const clearClarification = useCallback(() => setClarification(null), []);
   // A pending proposal restores from the project record (2026-09: the
   // reliability fix — a refresh used to drop the AI's proposed ops). Terminal
   // records stay on disk as the audit trail but don't reopen the panel.
@@ -1598,6 +1603,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       const withUser: ChatEntry[] = [...chat, { role: "user", text }];
       setChat(withUser);
       setBusy(true);
+      setClarification(null);
       // UX-2: named phases replace the raw char counter as the status model.
       const aborter = new AbortController();
       genAbortRef.current = aborter;
@@ -1648,6 +1654,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         setStreamChars(0);
         setStreamNodes([]);
         setGenPhase("validating");
+        if (result.clarification) {
+          setClarification(result.clarification);
+        }
         // Answer-only reply (a question about the board): no ops, just explain.
         // A "this belongs on its own board" reply (the prompt's parallel-diagram
         // rule) is the other case that arrives with no ops — the explanation says
@@ -2741,6 +2750,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     startNewBoardFor,
     openProject,
     importWorkspace,
+    clarification,
+    clearClarification,
   };
   // reference tick so lint keeps the dependency; forces context identity refresh
   void tick;

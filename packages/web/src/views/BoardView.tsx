@@ -39,7 +39,7 @@ export function BoardView({
   onSelectPrompt?: (text: string) => void;
   onSendPrompt?: (text: string) => void;
 }) {
-  const { workspace, chat, send, setView, applyManual, boardId, projectName } = useWorkspace();
+  const { workspace, chat, send, clarification, setView, applyManual, boardId, projectName } = useWorkspace();
   const [message, setMessage] = useState("");
   const [activeDrag, setActiveDrag] = useState<ActiveDrag | null>(null);
   const [overCol, setOverCol] = useState<IssueStatusCategory | null>(null);
@@ -386,6 +386,8 @@ export function BoardView({
         value={message}
         onChange={setMessage}
         onSubmit={submit}
+        clarification={clarification}
+        onSelectClarification={(choice) => void send(choice)}
         history={chat}
       />
       <StatusBadge>

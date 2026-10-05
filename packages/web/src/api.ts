@@ -20,6 +20,8 @@ export interface GenerateResponse {
   explanation: string | null;
   /** What Lucent says back in a voice conversation; absent from older servers. */
   reply?: string | null;
+  /** Clarification question and options when intent is ambiguous. */
+  clarification?: import("@lucent/core").ClarificationChoice | null;
   provider: string;
   /** How much of the monthly allowance is left, or null when none was reported. */
   allowance: Allowance | null;
@@ -529,6 +531,7 @@ export async function streamGenerate(
         operations?: Operation[];
         explanation?: string | null;
         reply?: string | null;
+        clarification?: unknown;
         provider?: string;
         warnings?: Array<{ op: string; reason: string }>;
         runId?: unknown;
@@ -538,6 +541,13 @@ export async function streamGenerate(
         operations: Array.isArray(body.operations) ? body.operations : [],
         explanation: body.explanation ?? null,
         reply: typeof body.reply === "string" ? body.reply : null,
+        clarification:
+          body.clarification &&
+          typeof body.clarification === "object" &&
+          "question" in body.clarification &&
+          "options" in body.clarification
+            ? (body.clarification as import("@lucent/core").ClarificationChoice)
+            : null,
         provider: body.provider ?? "unknown",
         allowance: null,
         warnings: Array.isArray(body.warnings) ? body.warnings : undefined,

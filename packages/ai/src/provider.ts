@@ -243,6 +243,8 @@ export interface GenerateResult {
   model?: string;
   /** Token counts for this completion, when the provider reported them. */
   usage?: TokenUsage;
+  /** Clarification question and options when intent is ambiguous. */
+  clarification?: import("@lucent/core").ClarificationChoice;
 }
 
 /**

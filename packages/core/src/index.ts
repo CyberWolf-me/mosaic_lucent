@@ -31,3 +31,4 @@ export * from "./routing.js";
 export * from "./representations.js";
 export * from "./mermaid.js";
 export * from "./transcriptImport.js";
+export * from "./digest.js";

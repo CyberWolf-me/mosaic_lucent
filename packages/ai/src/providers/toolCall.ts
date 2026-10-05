@@ -23,6 +23,7 @@ interface ToolArgs {
   operations?: unknown;
   explanation?: unknown;
   reply?: unknown;
+  clarification?: unknown;
 }
 
 /**
@@ -88,12 +89,32 @@ function toResult(parsed: ToolArgs, source: string, meta?: CompletionMeta): Gene
       throw new Error(`Model returned invalid operations (${source}): ${issues}`);
     }
   }
+
+  let clarification: import("@lucent/core").ClarificationChoice | undefined;
+  if (
+    parsed.clarification &&
+    typeof parsed.clarification === "object" &&
+    "question" in parsed.clarification &&
+    "options" in parsed.clarification
+  ) {
+    const c = parsed.clarification as { question: unknown; options: unknown };
+    if (typeof c.question === "string" && Array.isArray(c.options)) {
+      const options = c.options.filter(
+        (opt): opt is string => typeof opt === "string" && opt.trim().length > 0,
+      );
+      if (options.length >= 2) {
+        clarification = { question: c.question.trim(), options };
+      }
+    }
+  }
+
   return {
     operations,
     ...(typeof parsed.explanation === "string" ? { explanation: parsed.explanation } : {}),
     ...(typeof parsed.reply === "string" && parsed.reply.trim()
       ? { reply: parsed.reply.trim() }
       : {}),
+    ...(clarification ? { clarification } : {}),
     ...(meta?.model ? { model: meta.model } : {}),
     ...(meta?.usage ? { usage: meta.usage } : {}),
   };

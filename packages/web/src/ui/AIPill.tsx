@@ -56,6 +56,8 @@ export function AIPill({
   progressNote = null,
   onCancel,
   voicePhase = "idle",
+  clarification = null,
+  onSelectClarification,
 }: {
   /** Mode-aware callers pass one; the default stays the Build wording. */
   placeholder?: string;
@@ -100,6 +102,10 @@ export function AIPill({
   onCancel?: () => void;
   /** A voice conversation with Lucent, and where it is (voiceConversation.ts). */
   voicePhase?: VoicePhase;
+  /** Clarification question and options when intent is ambiguous. */
+  clarification?: import("@lucent/core").ClarificationChoice | null;
+  /** Callback when user selects a clarification option. */
+  onSelectClarification?: (choice: string) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   // The prompt field grows with its text; when it passes one line the pill
@@ -197,6 +203,75 @@ export function AIPill({
         <div className={`voice-phase is-${voicePhase}`} role="status" aria-live="polite">
           <span className="voice-phase-dot" aria-hidden />
           {voiceLine}
+        </div>
+      )}
+
+      {clarification && (
+        <div
+          className="clarification-bar"
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            gap: 6,
+            padding: "8px 14px",
+            background: "oklch(from var(--paper-0) l c h / 0.94)",
+            backdropFilter: "blur(20px)",
+            borderRadius: 16,
+            border: "1px solid var(--amber-2)",
+            boxShadow: "var(--elev-2)",
+            animation: "pill-in 0.2s var(--e-out) both",
+            maxWidth: 620,
+          }}
+          role="region"
+          aria-label="Clarification options"
+        >
+          <div
+            style={{
+              fontSize: 12,
+              fontWeight: 500,
+              color: "var(--ink-0)",
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+            }}
+          >
+            <Ico.Sparkle style={{ color: "var(--amber-1)", width: 14, height: 14 }} />
+            <span>{clarification.question}</span>
+          </div>
+          <div
+            style={{
+              display: "flex",
+              flexWrap: "wrap",
+              gap: 6,
+              justifyContent: "center",
+            }}
+          >
+            {clarification.options.map((opt, i) => (
+              <button
+                key={i}
+                type="button"
+                className="btn-atelier sm"
+                style={{
+                  fontSize: 11.5,
+                  padding: "3px 10px",
+                  borderRadius: 999,
+                  background: "var(--canvas-2)",
+                  border: "1px solid var(--stroke-2)",
+                  cursor: "pointer",
+                  color: "var(--ink-0)",
+                  transition: "all 0.15s ease",
+                }}
+                onClick={() => {
+                  if (onSelectClarification) {
+                    onSelectClarification(opt);
+                  }
+                }}
+              >
+                {opt}
+              </button>
+            ))}
+          </div>
         </div>
       )}
       <div

@@ -14,6 +14,12 @@ import { AI_FORBIDDEN_OPS, AI_OPERATION_NAMES, operationUnionSchema } from "./op
  * positions, the AI never sets them).
  */
 
+/** A clarification question with discrete choices emitted when intent is ambiguous. */
+export interface ClarificationChoice {
+  question: string;
+  options: string[];
+}
+
 /** A JSON Schema object, loose enough to hand to any provider SDK. */
 export type JsonSchema = Record<string, unknown>;
 
@@ -103,6 +109,26 @@ export function toolParametersJsonSchema(): JsonSchema {
           "key change in plain words (no IDs, no lists), and when it genuinely " +
           "helps, end with ONE short question or an offer of the next step. One to " +
           "three short sentences. When `operations` is empty, answer or ask here too.",
+      },
+      clarification: {
+        type: "object",
+        description:
+          "When the user's request is ambiguous or has multiple distinct architectural/design paths, " +
+          "provide a clarification question and 2 to 4 distinct options the user can choose from. " +
+          "When this is set, `operations` may be empty or contain an initial draft.",
+        properties: {
+          question: {
+            type: "string",
+            description: "The specific clarifying question.",
+          },
+          options: {
+            type: "array",
+            items: { type: "string" },
+            description: "2 to 4 concise options formatted as choices (e.g. 'OAuth2 + JWT', 'Session Cookies').",
+          },
+        },
+        required: ["question", "options"],
+        additionalProperties: false,
       },
     },
     required: ["operations"],

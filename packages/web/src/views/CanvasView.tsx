@@ -99,7 +99,7 @@ import {
 import { cloneShapeOp, nextZ, normalizeZ, shapeId, zOrderOps, type ZMove } from "../shapes.js";
 import { resolveEmbed } from "../embed.js";
 import { boardToMarkdown, boardToCsv } from "../board/serialize.js";
-import { boardToMermaid, detectMermaid } from "@lucent/core";
+import { boardToMermaid, detectMermaid, generateBoardDigest } from "@lucent/core";
 import type { Shape } from "@lucent/core";
 import { planMermaidImport } from "../board/mermaidImport.js";
 import {
@@ -307,6 +307,7 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
     listening,
     setListening,
     send,
+    clarification,
     proposeOps,
     ask,
     pillMode,
@@ -2749,6 +2750,24 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
       ),
     [workspace, downloadText],
   );
+  const exportDigest = useCallback(
+    () =>
+      downloadText(
+        generateBoardDigest(workspace, projectName),
+        "md",
+        "text/markdown",
+        "Exported executive board digest as Markdown.",
+      ),
+    [workspace, projectName, downloadText],
+  );
+  const copyDigest = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(generateBoardDigest(workspace, projectName));
+      notify("Copied board digest to clipboard.");
+    } catch {
+      notify("Clipboard access was blocked. Use Export → Board Digest instead.");
+    }
+  }, [workspace, projectName, notify]);
   const exportCsv = useCallback(
     () => downloadText(boardToCsv(workspace), "csv", "text/csv", "Exported board as CSV."),
     [workspace, downloadText],
@@ -3287,6 +3306,8 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
                   setSelectedShapes(new Set());
                   setSelected(null);
                 }}
+                cull={shapeCull}
+                viewport={viewportBox}
               />
               {drawShapes.map((sh) => {
                 const withDrag =
@@ -3761,9 +3782,16 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
               )}
               <button onClick={exportJson}>JSON</button>
               <button onClick={exportMarkdown}>Markdown</button>
+              <button
+                onClick={exportDigest}
+                title="Executive digest with governance metrics, decisions, actions, risks and Mermaid diagram"
+              >
+                Board Digest (.md)
+              </button>
               <button onClick={exportCsv}>CSV</button>
               <button onClick={exportMermaid}>Mermaid</button>
               <div className="export-sep" />
+              <button onClick={() => void copyDigest()}>Copy Board Digest</button>
               <button onClick={() => void copyMermaid()}>Copy Mermaid</button>
               <button onClick={() => void importMermaid()}>Paste Mermaid…</button>
             </div>
@@ -3977,6 +4005,8 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
               value={message}
               onChange={setMessage}
               onSubmit={submit}
+              clarification={clarification}
+              onSelectClarification={(choice) => void send(choice)}
               mode={pillMode}
               onModeChange={setPillMode}
               onCitation={onCitation}
