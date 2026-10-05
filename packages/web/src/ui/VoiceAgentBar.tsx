@@ -26,6 +26,8 @@ export function VoiceAgentBar({
         return "Connecting Voice Agent…";
       case "agent_speaking":
         return "Lucent Speaking…";
+      case "thinking":
+        return "Lucent is thinking & organizing…";
       case "listening":
         return muted ? "Microphone Muted" : "Listening to you…";
       case "error":
@@ -41,6 +43,8 @@ export function VoiceAgentBar({
         return "var(--amber-1)";
       case "agent_speaking":
         return "var(--amber-2)";
+      case "thinking":
+        return "var(--amber-1)";
       case "listening":
         return muted ? "var(--ink-3)" : "var(--sig-green)";
       case "error":

@@ -1043,7 +1043,7 @@ export function LeftRail({
   side?: "left" | "right";
   onOpenSettings?: (section?: string) => void;
 }) {
-  const { view, setView, lens, setLens, newProject, workspace } = useWorkspace();
+  const { view, setView, lens, setLens, newProject, workspace, boardId, projectId } = useWorkspace();
   const [confirmNew, setConfirmNew] = useState(false);
 
   // Does the current board hold work worth warning about before replacing it?
@@ -1082,7 +1082,13 @@ export function LeftRail({
                 title={it.label}
                 aria-label={it.label}
                 aria-current={active ? "page" : undefined}
-                onClick={() => setView(it.view)}
+                onClick={() => {
+                  if (it.id === "meeting" && (boardId || projectId)) {
+                    setView("meeting");
+                  } else {
+                    setView(it.view);
+                  }
+                }}
               >
                 <Icon />
               </button>
@@ -1182,6 +1188,8 @@ export function ZoomBadge({
   onFit,
   overviewOn,
   onToggleOverview,
+  zenMode,
+  onToggleZen,
 }: {
   zoom: number;
   onZoomIn?: () => void;
@@ -1191,6 +1199,9 @@ export function ZoomBadge({
   /** Current overview (minimap) visibility, when the toggle is offered. */
   overviewOn?: boolean;
   onToggleOverview?: () => void;
+  /** Zen mode hides distracting chrome for immersion on laptops. */
+  zenMode?: boolean;
+  onToggleZen?: () => void;
 }) {
   return (
     <div
@@ -1198,8 +1209,8 @@ export function ZoomBadge({
       style={{
         position: "absolute",
         bottom: 20,
-        // Clear of the rail (x 12–68).
-        left: 84,
+        // Clear of the rail (x 12–68) unless zen mode is active.
+        left: zenMode ? 20 : 84,
         zIndex: 25,
         display: "flex",
         alignItems: "center",
@@ -1209,6 +1220,7 @@ export function ZoomBadge({
         fontSize: 11,
         fontFamily: "var(--font-mono)",
         userSelect: "none",
+        transition: "left 0.2s cubic-bezier(0.16, 1, 0.3, 1)",
       }}
     >
       <button
@@ -1247,6 +1259,20 @@ export function ZoomBadge({
           title={overviewOn ? "Hide board overview" : "Show board overview"}
         >
           Map
+        </button>
+      )}
+      {onToggleZen && (
+        <button
+          style={{
+            padding: "0 6px",
+            fontSize: 11,
+            color: zenMode ? "var(--accent)" : "var(--ink-3)",
+            fontWeight: zenMode ? 600 : 400,
+          }}
+          onClick={onToggleZen}
+          title={zenMode ? "Exit Zen mode (Z)" : "Zen mode (Z)"}
+        >
+          {zenMode ? "Zen (On)" : "Zen"}
         </button>
       )}
     </div>

@@ -370,6 +370,7 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
   const [templatesOpen, setTemplatesOpen] = useState(false);
   const [timerOpen, setTimerOpen] = useState(false);
   const [overviewOpen, setOverviewOpen] = useState(true);
+  const [zenMode, setZenMode] = useState(false);
   /** Object the keyboard asked to edit (Enter). Cleared once editing starts. */
   const [renameNodeId, setRenameNodeId] = useState<string | null>(null);
   // Region collapse (P1): render-local, keyed by group id, deliberately NOT
@@ -501,6 +502,26 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
       notify(last.text);
     }
   }, [chat, notify]);
+
+  const pillPlaceholder = useMemo(() => {
+    if (canvasPhase === "proposing") {
+      return "Review proposal on right (⌘↵ to apply, Esc to cancel), or describe edits…";
+    }
+    switch (lens) {
+      case "kanban":
+        return "Add a story, move a card, assign someone, or organize backlog…";
+      case "wireframe":
+        return "Describe a screen, add UI elements, or modify wireframe…";
+      case "document":
+        return "Refine the document or ask a question…";
+      case "sequence":
+        return "Add messages, participants, or sequence flows…";
+      case "er":
+        return "Add entities, attributes, relationships, or tables…";
+      default:
+        return "Refine, add, or transform — just describe it";
+    }
+  }, [canvasPhase, lens]);
 
   // Typed turns: speak Lucent's reply aloud only when "AI sound" is on. A
   // voice conversation speaks its own replies (and listens again after).
@@ -794,6 +815,13 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
       const next = map[e.key.toLowerCase()];
       if (next) {
         changeTool(next);
+      } else if (e.key.toLowerCase() === "z") {
+        e.preventDefault();
+        setZenMode((prev) => {
+          const next = !prev;
+          notify(next ? "Zen mode active (Press Z to restore chrome)" : "Zen mode disabled");
+          return next;
+        });
       } else if (e.key === "Escape") {
         if (proposal) {
           cancelProposal();
@@ -3125,15 +3153,15 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
         />
       )}
       {lens === "kanban" ? (
-        <BoardView embedded onSelectPrompt={setMessage} />
+        <BoardView embedded onSelectPrompt={setMessage} onSendPrompt={(t) => void send(t)} />
       ) : lens === "wireframe" ? (
-        <WireframeView embedded onSelectPrompt={setMessage} />
+        <WireframeView embedded onSelectPrompt={setMessage} onSendPrompt={(t) => void send(t)} />
       ) : lens === "document" ? (
-        <DocumentView embedded onSelectPrompt={setMessage} />
+        <DocumentView embedded onSelectPrompt={setMessage} onSendPrompt={(t) => void send(t)} />
       ) : lens === "sequence" ? (
-        <SequenceView embedded onSelectPrompt={setMessage} />
+        <SequenceView embedded onSelectPrompt={setMessage} onSendPrompt={(t) => void send(t)} />
       ) : lens === "er" ? (
-        <ErView embedded onSelectPrompt={setMessage} />
+        <ErView embedded onSelectPrompt={setMessage} onSendPrompt={(t) => void send(t)} />
       ) : showHero ? (
         <>
           <div style={{ position: "absolute", inset: 0 }}>
@@ -3444,87 +3472,6 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
           {/* Polish lives in the Board-tools menu (UX-1): one entry point,
               not a permanent button competing with the canvas. */}
 
-          <TopBar crumbs={crumbs} meta={meta} onOpenSettings={onOpenSettings} />
-          {/* Screen-reader mirror of board structure: counts plus selection,
-              announced politely on change. Visual focus-dimming (focusSet) has
-              no DOM-focus meaning, so without this structural edits are silent
-              for assistive tech. */}
-          <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">
-            {t("canvas.status.summary", locale, {
-              name: workspace.name || "untitled",
-              nodes: Object.keys(workspace.nodes).length,
-              shapes: Object.keys(workspace.shapes).length,
-            })}{" "}
-            {selected !== null || selectedShapes.size > 0 || selectedNodes.size > 0
-              ? t("canvas.status.selected", locale, {
-                  n:
-                    selectedNodes.size +
-                    selectedShapes.size +
-                    (selected !== null && !selectedNodes.has(selected) ? 1 : 0),
-                })
-              : t("canvas.status.nothing", locale)}
-          </div>
-          {readOnly && (
-            <div className="readonly-banner" role="status" aria-live="polite">
-              <Ico.Eye />
-              <span>
-                {canComment
-                  ? "You can comment on this board. Ask the owner for edit access to change it."
-                  : "You're viewing this board. Ask the owner for edit access to change it."}
-              </span>
-            </div>
-          )}
-          {/* UX-6: realtime awareness. The protocol is sequenced + correct;
-              the surface was toast-only. A persistent bar names the state. */}
-          {boardId !== null && syncStatus !== "online" && (
-            <div
-              className="sync-banner"
-              role="status"
-              aria-live="polite"
-              style={{
-                position: "absolute",
-                // Below the top tool row (y 68–110).
-                top: 120,
-                left: "50%",
-                transform: "translateX(-50%)",
-                zIndex: 30,
-                fontSize: 12,
-                padding: "6px 14px",
-                borderRadius: 999,
-                border: "1px solid var(--stroke-2)",
-                background: "oklch(from var(--canvas-2) l c h / 0.92)",
-                color: "var(--ink-1)",
-              }}
-            >
-              {syncStatus === "connecting"
-                ? "Reconnecting… edits are queued."
-                : "Offline — edits save locally and sync when the server is reachable."}
-            </div>
-          )}
-          {/* UX-6: contest awareness — a peer acting on a selection you can see. */}
-          {peerEditors.length > 0 && (
-            <div
-              className="peer-banner"
-              role="status"
-              style={{
-                position: "absolute",
-                top: 152,
-                left: "50%",
-                transform: "translateX(-50%)",
-                zIndex: 30,
-                fontSize: 11.5,
-                padding: "5px 12px",
-                borderRadius: 999,
-                border: "1px solid var(--stroke-1)",
-                background: "oklch(from var(--canvas-2) l c h / 0.85)",
-                color: "var(--ink-2)",
-              }}
-            >
-              {peerEditors.length === 1
-                ? "A collaborator is editing a selection."
-                : `${peerEditors.length} collaborators are editing selections.`}
-            </div>
-          )}
           {canEdit && (
             <ShapeToolbar
               activeTool={tool}
@@ -3535,7 +3482,6 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
               orientation="top"
             />
           )}
-          <LeftRail onOpenSettings={onOpenSettings} />
 
           {/* UX-1 L1/L2/L3: one Board-tools menu (L2) replaces the four-button
               right pileup (Polish/Templates/Timer/Vote). The comment bell
@@ -3730,8 +3676,6 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
           {timerOpen && <TimerWidget onClose={() => setTimerOpen(false)} />}
           {templatesOpen && <TemplatePicker onClose={() => setTemplatesOpen(false)} />}
 
-          {canvasPhase === "proposing" && <ProposalPanel />}
-
           {/* The node inspector (Atelier): one selected node, what it IS —
               kind, lifecycle, the words behind it, its connections as
               sentences, the decisions it came from, the statement editor.
@@ -3782,52 +3726,6 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
             />
           )}
 
-          <VoiceAgentBar
-            state={voiceAgentState}
-            muted={voiceAgentMuted}
-            lines={voiceAgentLines}
-            onToggleMute={toggleVoiceAgentMute}
-            onDisconnect={() => {
-              voiceAgentCtrlRef.current?.disconnect();
-              voiceAgentCtrlRef.current = null;
-              setVoiceAgentState("disconnected");
-              notify("Voice agent call ended.");
-            }}
-          />
-
-          {mode !== "present" && (
-            <AIPill
-              status={status}
-              phase={genPhase}
-              progressNote={genProgress}
-              onCancel={busy ? () => cancelSend() : undefined}
-              placeholder={
-                canvasPhase === "proposing"
-                  ? "Review proposal on right (⌘↵ to apply, Esc to cancel), or describe edits…"
-                  : "Refine, add, or transform — just describe it"
-              }
-              value={message}
-              onChange={setMessage}
-              onSubmit={submit}
-              mode={pillMode}
-              onModeChange={setPillMode}
-              onCitation={onCitation}
-              listening={listening}
-              onToggleMic={toggleVoice}
-              voicePhase={voicePhase}
-              voiceSupported={voiceSupported}
-              onToggleVoiceAgent={toggleVoiceAgent}
-              voiceAgentActive={
-                voiceAgentState !== "idle" &&
-                voiceAgentState !== "disconnected" &&
-                voiceAgentState !== "error"
-              }
-              history={chat}
-              busy={busy}
-              shifted={canvasPhase === "proposing"}
-              readOnly={readOnly}
-            />
-          )}
           <ZoomBadge
             zoom={zoom}
             onZoomIn={() => controls.current?.zoomIn()}
@@ -3836,6 +3734,14 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
             onFit={() => sendCanvasCommand({ kind: "fit" })}
             overviewOn={overviewOpen}
             onToggleOverview={() => setOverviewOpen((v) => !v)}
+            zenMode={zenMode}
+            onToggleZen={() =>
+              setZenMode((prev) => {
+                const next = !prev;
+                notify(next ? "Zen mode active (Press Z to restore chrome)" : "Zen mode disabled");
+                return next;
+              })
+            }
           />
           <div className="export-btn export-menu">
             <button title="Export board">
@@ -3871,7 +3777,7 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
             />
           )}
           <StatusBadge>
-            {canvasPhase === "generating" || canvasPhase === "voice" ? (
+            {canvasPhase === "generating" || canvasPhase === "voice" || voiceAgentState === "thinking" || busy ? (
               <span
                 style={{
                   width: 6,
@@ -3879,6 +3785,7 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
                   borderRadius: 999,
                   background: "var(--amber-1)",
                   boxShadow: "0 0 8px var(--amber-glow)",
+                  animation: "pulse 1.2s infinite ease-in-out",
                 }}
               />
             ) : (
@@ -3893,8 +3800,14 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
               />
             )}
             <span className="mono">
-              {shapes.length > 0 ? `${shapes.length} shape${shapes.length > 1 ? "s" : ""} · ` : ""}
-              {nodeCount} nodes
+              {voiceAgentState === "thinking"
+                ? "Lucent is thinking & organizing…"
+                : busy || canvasPhase === "generating"
+                  ? "Updating board…"
+                  : shapes.length > 0
+                    ? `${shapes.length} shape${shapes.length > 1 ? "s" : ""} · `
+                    : ""}
+              {voiceAgentState !== "thinking" && !busy && canvasPhase !== "generating" && `${nodeCount} nodes`}
               {openThreads > 0 ? ` · ${openThreads} open comment${openThreads > 1 ? "s" : ""}` : ""}
               {selected ? " · 1 selected" : settings.autosave ? " · Autosaved" : ""}
               {/* Semantic-zoom note (UX-4): edge labels hide below 70% (see
@@ -3917,9 +3830,77 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
           )}
         </>
       )}
-      {lens !== "visual" && (
+      {!showHero && (
         <>
-          <TopBar crumbs={crumbs} meta={meta} onOpenSettings={onOpenSettings} />
+          <div style={{ display: zenMode ? "none" : "contents" }}>
+            <TopBar crumbs={crumbs} meta={meta} onOpenSettings={onOpenSettings} />
+          </div>
+          {zenMode && (
+            <div
+              style={{
+                position: "absolute",
+                top: 16,
+                left: "50%",
+                transform: "translateX(-50%)",
+                zIndex: 40,
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                padding: "5px 14px",
+                borderRadius: 999,
+                background: "oklch(from var(--canvas-2) l c h / 0.88)",
+                backdropFilter: "blur(8px)",
+                border: "1px solid var(--stroke-2)",
+                boxShadow: "0 4px 16px rgba(0,0,0,0.12)",
+                fontSize: 12,
+                fontFamily: "var(--font-mono)",
+                color: "var(--ink-1)",
+                userSelect: "none",
+              }}
+            >
+              <span>Zen Mode</span>
+              <button
+                className="icon-btn"
+                style={{ padding: "2px 8px", fontSize: 11, borderRadius: 6, background: "var(--canvas-3)" }}
+                onClick={() => {
+                  setZenMode(false);
+                  notify("Zen mode disabled");
+                }}
+                title="Exit Zen Mode (Z)"
+              >
+                Exit (Z)
+              </button>
+            </div>
+          )}
+          {/* Screen-reader mirror of board structure: counts plus selection,
+              announced politely on change. Visual focus-dimming (focusSet) has
+              no DOM-focus meaning, so without this structural edits are silent
+              for assistive tech. */}
+          <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+            {t("canvas.status.summary", locale, {
+              name: workspace.name || "untitled",
+              nodes: Object.keys(workspace.nodes).length,
+              shapes: Object.keys(workspace.shapes).length,
+            })}{" "}
+            {selected !== null || selectedShapes.size > 0 || selectedNodes.size > 0
+              ? t("canvas.status.selected", locale, {
+                  n:
+                    selectedNodes.size +
+                    selectedShapes.size +
+                    (selected !== null && !selectedNodes.has(selected) ? 1 : 0),
+                })
+              : t("canvas.status.nothing", locale)}
+          </div>
+          {readOnly && (
+            <div className="readonly-banner" role="status" aria-live="polite">
+              <Ico.Eye />
+              <span>
+                {canComment
+                  ? "You can comment on this board. Ask the owner for edit access to change it."
+                  : "You're viewing this board. Ask the owner for edit access to change it."}
+              </span>
+            </div>
+          )}
           {boardId !== null && syncStatus !== "online" && (
             <div
               className="sync-banner"
@@ -3967,7 +3948,9 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
                 : `${peerEditors.length} collaborators are editing selections.`}
             </div>
           )}
-          <LeftRail onOpenSettings={onOpenSettings} />
+          <div style={{ display: zenMode ? "none" : "contents" }}>
+            <LeftRail onOpenSettings={onOpenSettings} />
+          </div>
 
           {canvasPhase === "proposing" && <ProposalPanel />}
 
@@ -3990,17 +3973,7 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
               phase={genPhase}
               progressNote={genProgress}
               onCancel={busy ? () => cancelSend() : undefined}
-              placeholder={
-                canvasPhase === "proposing"
-                  ? "Review proposal on right (⌘↵ to apply, Esc to cancel), or describe edits…"
-                  : lens === "kanban"
-                    ? "Add a story, move a card, assign someone, or organize backlog…"
-                    : lens === "wireframe"
-                      ? "Describe a screen, add UI elements, or modify wireframe…"
-                      : lens === "document"
-                        ? "Refine the document or ask a question…"
-                        : "Refine, add, or transform — just describe it"
-              }
+              placeholder={pillPlaceholder}
               value={message}
               onChange={setMessage}
               onSubmit={submit}

@@ -4,6 +4,7 @@ export type VoiceAgentState =
   | "idle"
   | "connecting"
   | "listening"
+  | "thinking"
   | "agent_speaking"
   | "error"
   | "disconnected";
@@ -188,7 +189,12 @@ export async function startVoiceAgentSession(
         if (isAgent) {
           onStateChange("agent_speaking");
         } else {
-          onStateChange("listening");
+          const isLocalSpeaking = speakers.some(
+            (s) => s.identity === room.localParticipant?.identity,
+          );
+          if (isLocalSpeaking) {
+            onStateChange("listening");
+          }
         }
       },
     );
@@ -214,6 +220,9 @@ export async function startVoiceAgentSession(
             isAgent,
             timestamp: Date.now(),
           });
+          if (!isAgent && seg.final && seg.text.trim()) {
+            onStateChange("thinking");
+          }
         }
       },
     );

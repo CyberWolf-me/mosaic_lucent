@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import type { Operation } from "@lucent/core";
 import { trashMeeting } from "../trash.js";
 import type { FormEvent, ReactNode } from "react";
 import { Ico } from "../ui/icons.js";
@@ -542,9 +543,16 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
         setSaved(rows ?? []);
         // The ✦ provenance jump (Stage A): the canvas set ?meeting=<id> so
         // this view opens directly on the transcript that created the node.
-        const wanted =
-          new URL(window.location.href).searchParams.get("meeting") ||
-          getLastActiveMeetingId(scope);
+        const urlMeeting = new URL(window.location.href).searchParams.get("meeting");
+        const activeMeetingId = getLastActiveMeetingId(scope);
+        const wanted = urlMeeting || activeMeetingId;
+
+        // If explicitly requested a new meeting (?meeting=new), don't preselect existing
+        if (urlMeeting === "new") {
+          setSelectedMeeting(null);
+          return;
+        }
+
         if (wanted && wanted !== "new") {
           const match = (rows ?? []).find((m) => m.id === wanted);
           if (match) {
@@ -553,7 +561,6 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
           }
         }
         if (
-          wanted !== "new" &&
           rows &&
           rows.length > 0 &&
           !recording &&
@@ -1409,6 +1416,188 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
     return counts;
   }, [workspace, saved]);
 
+  const onDropRecapToBoard = (meeting: MeetingTranscript): void => {
+    const title = meeting.title ?? `Meeting (${fmtDay(meeting.startedAt)})`;
+    const groupId = `grp_mtg_${Date.now()}`;
+    const childIds: string[] = [];
+    const ops: Operation[] = [];
+
+    // 1. Group container
+    ops.push({
+      op: "CREATE_GROUP",
+      id: groupId,
+      label: `📋 ${title}`,
+      children: [],
+    });
+
+    // 2. Overview / Summary node
+    const firstSectionItem = meeting.recap?.sections?.[0]?.items?.[0]?.text;
+    const summaryText =
+      firstSectionItem ??
+      (meeting.turns.length > 0
+        ? `Meeting recap with ${meeting.turns.length} turns recorded on ${fmtDay(meeting.startedAt)}.`
+        : "Meeting recap");
+    const summaryNodeId = `node_summary_${Date.now()}`;
+    childIds.push(summaryNodeId);
+    ops.push({
+      op: "CREATE_NODE",
+      id: summaryNodeId,
+      nodeType: "document",
+      label: `Overview: ${summaryText.slice(0, 160)}`,
+      groupId,
+    });
+
+    // 3. Collect decisions & action items & open questions
+    const decisions: string[] = [];
+    const actions: Array<{ label: string; assignee?: string }> = [];
+    const questions: string[] = [];
+
+    for (const sec of brief.sections) {
+      for (const it of sec.items) {
+        if (sec.kind === "decision") decisions.push(it.label);
+        else if (sec.kind === "action") actions.push({ label: it.label, assignee: it.assignee });
+        else if (sec.kind === "question") questions.push(it.label);
+      }
+    }
+
+    if (decisions.length === 0 && meeting.recap?.sections) {
+      for (const s of meeting.recap.sections) {
+        const titleLower = s.title.toLowerCase();
+        for (const it of s.items) {
+          if (titleLower.includes("decision") || titleLower.includes("resolved")) {
+            decisions.push(it.text);
+          } else if (titleLower.includes("action") || titleLower.includes("next step") || titleLower.includes("todo")) {
+            actions.push({ label: it.text });
+          } else if (titleLower.includes("question") || titleLower.includes("risk") || titleLower.includes("open")) {
+            questions.push(it.text);
+          }
+        }
+      }
+    }
+
+    if (decisions.length === 0 && actions.length === 0) {
+      for (const t of meeting.turns) {
+        if (t.kind === "decision") decisions.push(t.text);
+        else if (t.kind === "action") {
+          actions.push({
+            label: t.text,
+            assignee: t.speaker !== "You" ? t.speaker : undefined,
+          });
+        } else if (t.kind === "hypothesis" || t.text.includes("?")) {
+          questions.push(t.text);
+        }
+      }
+    }
+
+    let lastId = summaryNodeId;
+    decisions.slice(0, 6).forEach((d, idx) => {
+      const dId = `node_dec_${Date.now()}_${idx}`;
+      childIds.push(dId);
+      ops.push({
+        op: "CREATE_NODE",
+        id: dId,
+        nodeType: "decision",
+        label: `🎯 ${d}`,
+        groupId,
+      });
+      ops.push({
+        op: "SET_STATEMENT",
+        id: dId,
+        statement: {
+          kind: "decision",
+          status: "resolved",
+        },
+      });
+      ops.push({
+        op: "CONNECT_NODES",
+        source: summaryNodeId,
+        target: dId,
+        relationship: "decided",
+      });
+      lastId = dId;
+    });
+
+    actions.slice(0, 8).forEach((a, idx) => {
+      const aId = `node_act_${Date.now()}_${idx}`;
+      childIds.push(aId);
+      ops.push({
+        op: "CREATE_NODE",
+        id: aId,
+        nodeType: "task",
+        label: `⚡ ${a.label}`,
+        groupId,
+      });
+      ops.push({
+        op: "SET_STATEMENT",
+        id: aId,
+        statement: {
+          kind: "action",
+          status: "open",
+        },
+      });
+      ops.push({
+        op: "SET_ISSUE",
+        id: aId,
+        issue: {
+          type: "task",
+          status: "To Do",
+          statusCategory: "todo",
+          ...(a.assignee ? { assignee: a.assignee } : {}),
+        },
+      });
+      ops.push({
+        op: "CONNECT_NODES",
+        source: lastId,
+        target: aId,
+        relationship: "next step",
+      });
+    });
+
+    questions.slice(0, 4).forEach((q, idx) => {
+      const qId = `node_q_${Date.now()}_${idx}`;
+      childIds.push(qId);
+      ops.push({
+        op: "CREATE_NODE",
+        id: qId,
+        nodeType: "question",
+        label: `❓ ${q}`,
+        groupId,
+      });
+      ops.push({
+        op: "SET_STATEMENT",
+        id: qId,
+        statement: {
+          kind: "question",
+          status: "open",
+        },
+      });
+      ops.push({
+        op: "CONNECT_NODES",
+        source: summaryNodeId,
+        target: qId,
+        relationship: "open question",
+      });
+    });
+
+    const groupOp = ops.find((o) => o.op === "CREATE_GROUP") as { children: string[] } | undefined;
+    if (groupOp) {
+      groupOp.children = childIds;
+    }
+
+    if (ops.length <= 1) {
+      notify("No recap or points to add from this meeting yet.");
+      return;
+    }
+
+    void proposeOps(
+      ops,
+      "Add meeting recap to board",
+      `Meeting Recap: Added ${childIds.length} items from ${title} to board`,
+    );
+    notify(`Added ${childIds.length} meeting items to canvas proposal.`);
+    setView("canvas");
+  };
+
   const speakers = useMemo(() => speakersOf(displayTurns), [displayTurns]);
   const turnBase = shown?.startedAt ?? startedAt ?? displayTurns[0]?.at ?? null;
 
@@ -1493,8 +1682,8 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
     setQuery("");
     setTurnFilter("all");
     const scope = currentScopeRef.current;
-    if (scope) {
-      setLastActiveMeetingId(scope, m?.id ?? "new");
+    if (scope && m?.id) {
+      setLastActiveMeetingId(scope, m.id);
     }
     meetingInUrl(m?.id ?? null);
   };
@@ -2076,15 +2265,26 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
             title="Nothing on this board cites this meeting yet"
             body="Extract it and Lucent adds the decisions, actions, questions and risks it finds to the board — each one linked back to the turns that produced it."
             action={
-              <Button
-                variant="primary"
-                size="sm"
-                onClick={() => onExtract(shown)}
-                disabled={!boardId || shown.turns.length === 0 || readOnly}
-                title={readOnly ? VIEWER_CAPTURE_REASON : undefined}
-              >
-                Extract to board <Ico.Arrow />
-              </Button>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <Button
+                  variant="primary"
+                  size="sm"
+                  onClick={() => onDropRecapToBoard(shown)}
+                  disabled={(!boardId && !projectId) || readOnly}
+                  title={readOnly ? VIEWER_CAPTURE_REASON : undefined}
+                >
+                  <Ico.Sparkle /> Add recap to board
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => onExtract(shown)}
+                  disabled={(!boardId && !projectId) || shown.turns.length === 0 || readOnly}
+                  title={readOnly ? VIEWER_CAPTURE_REASON : undefined}
+                >
+                  Extract to diagram <Ico.Arrow />
+                </Button>
+              </div>
             }
           />
         );
@@ -2733,15 +2933,26 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
                   </Button>
                 )}
                 {shown && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => onExtract(shown)}
-                    disabled={!boardId || readOnly}
-                    title={readOnly ? VIEWER_CAPTURE_REASON : undefined}
-                  >
-                    Extract to board <Ico.Arrow />
-                  </Button>
+                  <>
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      onClick={() => onDropRecapToBoard(shown)}
+                      disabled={(!boardId && !projectId) || readOnly}
+                      title={readOnly ? VIEWER_CAPTURE_REASON : undefined}
+                    >
+                      <Ico.Sparkle /> Add recap to board
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => onExtract(shown)}
+                      disabled={(!boardId && !projectId) || readOnly}
+                      title={readOnly ? VIEWER_CAPTURE_REASON : undefined}
+                    >
+                      Extract to diagram <Ico.Arrow />
+                    </Button>
+                  </>
                 )}
                 {displayTurns.length > 0 && (
                   <Button

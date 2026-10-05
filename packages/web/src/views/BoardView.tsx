@@ -32,10 +32,12 @@ export function BoardView({
   onOpenSettings,
   embedded = false,
   onSelectPrompt,
+  onSendPrompt,
 }: {
   onOpenSettings?: (section?: string) => void;
   embedded?: boolean;
   onSelectPrompt?: (text: string) => void;
+  onSendPrompt?: (text: string) => void;
 }) {
   const { workspace, chat, send, setView, applyManual, boardId, projectName } = useWorkspace();
   const [message, setMessage] = useState("");
@@ -144,51 +146,164 @@ export function BoardView({
     if (next) moveTo(id, next.category);
   };
 
+  const diagramNodes = Object.values(workspace.nodes);
+  const unassignedNodes = diagramNodes.filter((n) => !n.issue);
+
+  const convertNodesToIssues = (nodes: Node[]) => {
+    if (nodes.length === 0) return;
+    const ops: Operation[] = nodes.map((n) => ({
+      op: "SET_ISSUE",
+      id: n.id,
+      issue: {
+        type: "task",
+        status: "To Do",
+        statusCategory: "todo",
+        priority: "medium",
+      },
+    }));
+    applyManual(ops, `Convert ${ops.length} nodes to Kanban cards`);
+  };
+
+  const triggerPrompt = (text: string) => {
+    if (onSendPrompt) onSendPrompt(text);
+    else if (onSelectPrompt) onSelectPrompt(text);
+    else void send(text);
+  };
+
   const boardBody =
     total === 0 ? (
       <div className="view-empty" style={embedded ? { top: 90, bottom: 96 } : undefined}>
         <div className="view-empty-icon">
           <Ico.Layers />
         </div>
-        <h2>No work items yet</h2>
-        <p>
-          Cards come from nodes with issue fields. Ask Lucent to "break the checkout epic into
-          stories" or "make a sprint backlog", or add issue details to a node, and they'll appear
-          here as a Kanban board.
-        </p>
-        {onSelectPrompt && (
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center", marginTop: 12 }}>
-            {[
-              "Break the current flow into sprint backlog stories",
-              "Add a task for backend authentication",
-              "Turn nodes into Kanban cards",
-            ].map((s) => (
+        {diagramNodes.length > 0 ? (
+          <>
+            <h2>Convert Diagram to Kanban</h2>
+            <p>
+              This board has {diagramNodes.length} diagram node{diagramNodes.length === 1 ? "" : "s"}.
+              You can convert them directly into Kanban cards or ask AI to break them into sprint backlog stories.
+            </p>
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "center", marginTop: 14 }}>
               <button
-                key={s}
-                onClick={() => onSelectPrompt(s)}
+                onClick={() => convertNodesToIssues(diagramNodes)}
                 style={{
-                  fontSize: 12,
-                  color: "var(--ink-2)",
-                  padding: "6px 12px",
-                  border: "1px solid var(--stroke-1)",
-                  borderRadius: 999,
-                  background: "oklch(from var(--canvas-1) l c h / 0.5)",
+                  fontSize: 13,
+                  fontWeight: 500,
+                  color: "var(--ink-0)",
+                  padding: "8px 16px",
+                  border: "1px solid var(--accent-1, #6366f1)",
+                  borderRadius: 8,
+                  background: "var(--accent-tint, rgba(99, 102, 241, 0.12))",
                   cursor: "pointer",
                 }}
               >
-                {s}
+                Convert all {diagramNodes.length} nodes to cards
               </button>
-            ))}
-          </div>
+              <button
+                onClick={() => triggerPrompt("Break the current diagram nodes into sprint backlog stories with priorities")}
+                style={{
+                  fontSize: 13,
+                  fontWeight: 500,
+                  color: "var(--ink-1)",
+                  padding: "8px 16px",
+                  border: "1px solid var(--stroke-2)",
+                  borderRadius: 8,
+                  background: "var(--canvas-2)",
+                  cursor: "pointer",
+                }}
+              >
+                Break into sprint stories with AI
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
+            <h2>No work items yet</h2>
+            <p>
+              Cards come from nodes with issue fields. Ask Lucent to "break the checkout epic into
+              stories" or "make a sprint backlog", or add issue details to a node, and they'll appear
+              here as a Kanban board.
+            </p>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center", marginTop: 12 }}>
+              {[
+                "Break the current flow into sprint backlog stories",
+                "Add a task for backend authentication",
+                "Turn nodes into Kanban cards",
+              ].map((s) => (
+                <button
+                  key={s}
+                  onClick={() => triggerPrompt(s)}
+                  style={{
+                    fontSize: 12,
+                    color: "var(--ink-2)",
+                    padding: "6px 12px",
+                    border: "1px solid var(--stroke-1)",
+                    borderRadius: 999,
+                    background: "oklch(from var(--canvas-1) l c h / 0.5)",
+                    cursor: "pointer",
+                  }}
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
+          </>
         )}
       </div>
     ) : (
-      <div
-        className="board-columns"
-        role="list"
-        aria-label="Work board"
-        style={embedded ? { top: 76, bottom: 96, left: 68 } : undefined}
-      >
+      <>
+        {unassignedNodes.length > 0 && (
+          <div
+            style={{
+              position: "absolute",
+              top: embedded ? 78 : 58,
+              left: embedded ? 76 : 16,
+              right: 16,
+              zIndex: 10,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              padding: "6px 14px",
+              background: "oklch(from var(--canvas-2) l c h / 0.95)",
+              border: "1px solid var(--stroke-2)",
+              borderRadius: 8,
+              fontSize: 12,
+              color: "var(--ink-1)",
+              backdropFilter: "blur(8px)",
+            }}
+          >
+            <span>
+              💡 {unassignedNodes.length} diagram node{unassignedNodes.length === 1 ? "" : "s"} not yet in Kanban.
+            </span>
+            <button
+              onClick={() => convertNodesToIssues(unassignedNodes)}
+              style={{
+                fontSize: 11.5,
+                fontWeight: 500,
+                padding: "3px 10px",
+                borderRadius: 6,
+                border: "1px solid var(--stroke-2)",
+                background: "var(--canvas-1)",
+                color: "var(--ink-0)",
+                cursor: "pointer",
+              }}
+            >
+              Add to To Do
+            </button>
+          </div>
+        )}
+        <div
+          className="board-columns"
+          role="list"
+          aria-label="Work board"
+          style={
+            embedded
+              ? { top: unassignedNodes.length > 0 ? 116 : 76, bottom: 96, left: 68 }
+              : unassignedNodes.length > 0
+                ? { top: 96 }
+                : undefined
+          }
+        >
         {BOARD_COLUMNS.map((col) => {
           const cards = columns[col.category];
           return (
@@ -232,7 +347,8 @@ export function BoardView({
             </div>
           );
         })}
-      </div>
+        </div>
+      </>
     );
 
   if (embedded) {

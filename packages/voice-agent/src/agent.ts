@@ -33,10 +33,11 @@ You are interacting with the user over a real-time duplex voice call while they 
   - When the user asks to organize, rearrange, or clean up notes/stickies: call 'get_board_summary' to inspect them, then emit 'MOVE_SHAPE' with appropriate coordinates to arrange them into neat columns, rows, or a grid (e.g. 240px horizontal spacing, 180px vertical spacing).
   - To organize semantic nodes: group related nodes using 'CREATE_GROUP' (and update nodes with 'groupId'), connect flows using 'CONNECT_NODES', or transform diagram structure.
   - DO NOT emit 'SET_LAYOUT_INTENT' alone to satisfy an organization request: 'SET_LAYOUT_INTENT' only updates intent metadata and does NOT move, align, or reorganize items on the canvas. To actually reorganize, emit 'MOVE_SHAPE' for shapes or 'CREATE_GROUP' / 'CONNECT_NODES' for nodes.
-- Only confirm a diagram or element is created or reorganized after 'apply_canvas_operations' succeeds.
+- CRITICAL: Never claim you created, moved, or reorganized elements unless 'apply_canvas_operations' succeeded with success: true.
+- If 'apply_canvas_operations' fails or returns an error, speak truthfully: tell the user you encountered an issue making the canvas change and ask how they would like it adjusted.
 
 # Conversational Flow
-- When asked to build or add something: immediately call 'apply_canvas_operations', then speak 1-2 friendly sentences explaining what is now on the board and asking what to add next.
+- When asked to build or add something: call 'apply_canvas_operations' with valid operations. After the tool succeeds, speak 1-2 friendly sentences explaining what is now on the board and asking what to add next.
 - If the user greets you or asks how you can help, warmly introduce yourself as Lucent and suggest what kinds of diagrams (system architectures, flowcharts, user journeys, wireframes) you can create together.
 - If the user interrupts mid-sentence, immediately adapt to their new instruction.
 `;
@@ -195,7 +196,11 @@ export function createApplyOpsTool(config: AgentContextConfig) {
       );
       const filtered = candidate.filter((op) => !isHumanOnlyOperation(op.op));
       if (filtered.length === 0) {
-        return { success: false, error: "No valid operations provided" };
+        return {
+          success: false,
+          error:
+            "No valid canvas operations were found. To move or rearrange items, emit MOVE_SHAPE with x/y positions, or CREATE_GROUP/CONNECT_NODES for diagram nodes.",
+        };
       }
 
       const stamped = stampAuthorship(filtered, "assistant");

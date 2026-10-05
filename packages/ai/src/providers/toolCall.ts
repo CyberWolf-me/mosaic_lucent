@@ -1,4 +1,9 @@
-import { safeParseOperations, sanitizeRawOperations } from "@lucent/core";
+import {
+  type Operation,
+  operationsSchema,
+  safeParseOperations,
+  sanitizeRawOperations,
+} from "@lucent/core";
 import type { GenerateResult, TokenUsage } from "../provider.js";
 import type { AnswerResult } from "../answer.js";
 import { answerArgumentsSchema } from "../answer.js";
@@ -58,12 +63,33 @@ export function completionMeta(
 }
 
 function toResult(parsed: ToolArgs, source: string, meta?: CompletionMeta): GenerateResult {
-  const result = safeParseOperations(sanitizeRawOperations(parsed.operations ?? []));
-  if (!result.success) {
-    throw new Error(`Model returned invalid operations (${source}): ${result.error.message}`);
+  const sanitized = sanitizeRawOperations(parsed.operations ?? []);
+  const result = safeParseOperations(sanitized);
+  let operations: Operation[];
+
+  if (result.success) {
+    operations = result.data;
+  } else {
+    // If the full batch failed, filter out invalid operations while salvaging valid ones
+    const salvaged: Operation[] = [];
+    if (Array.isArray(sanitized)) {
+      for (const op of sanitized) {
+        const single = operationsSchema.element.safeParse(op);
+        if (single.success) salvaged.push(single.data);
+      }
+    }
+    if (salvaged.length > 0) {
+      operations = salvaged;
+    } else {
+      const issues = result.error.issues
+        .slice(0, 3)
+        .map((i) => `${i.path.join(".") || "item"}: ${i.message}`)
+        .join("; ");
+      throw new Error(`Model returned invalid operations (${source}): ${issues}`);
+    }
   }
   return {
-    operations: result.data,
+    operations,
     ...(typeof parsed.explanation === "string" ? { explanation: parsed.explanation } : {}),
     ...(typeof parsed.reply === "string" && parsed.reply.trim()
       ? { reply: parsed.reply.trim() }

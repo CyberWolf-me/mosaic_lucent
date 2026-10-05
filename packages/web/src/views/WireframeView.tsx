@@ -19,10 +19,12 @@ export function WireframeView({
   onOpenSettings,
   embedded = false,
   onSelectPrompt,
+  onSendPrompt,
 }: {
   onOpenSettings?: (section?: string) => void;
   embedded?: boolean;
   onSelectPrompt?: (text: string) => void;
+  onSendPrompt?: (text: string) => void;
 }) {
   const { workspace, chat, send, setView, projectName } = useWorkspace();
   const [message, setMessage] = useState("");
@@ -135,6 +137,28 @@ export function WireframeView({
         "design a checkout wireframe".
       </p>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center" }}>
+        {Object.keys(workspace.nodes).length > 0 && (
+          <button
+            onClick={() => {
+              const p = `Generate an interactive wireframe mockup based on the ${projectName || "current"} flow and nodes on this board`;
+              if (onSendPrompt) onSendPrompt(p);
+              else if (onSelectPrompt) onSelectPrompt(p);
+              else void send(p);
+            }}
+            style={{
+              fontSize: 12.5,
+              fontWeight: 500,
+              color: "var(--ink-0)",
+              padding: "7px 14px",
+              border: "1px solid var(--accent-1, #6366f1)",
+              borderRadius: 999,
+              background: "var(--accent-tint, rgba(99, 102, 241, 0.12))",
+              cursor: "pointer",
+            }}
+          >
+            ✨ Wireframe current flow ({projectName || "Diagram"})
+          </button>
+        )}
         {[
           "Design a checkout wireframe",
           "Wireframe a dashboard with a sidebar",
@@ -142,7 +166,11 @@ export function WireframeView({
         ].map((s) => (
           <button
             key={s}
-            onClick={() => (onSelectPrompt ? onSelectPrompt(s) : setMessage(s))}
+            onClick={() => {
+              if (onSendPrompt) onSendPrompt(s);
+              else if (onSelectPrompt) onSelectPrompt(s);
+              else setMessage(s);
+            }}
             style={{
               fontSize: 12,
               color: "var(--ink-2)",

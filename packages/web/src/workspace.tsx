@@ -1909,17 +1909,27 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         // message already says what to do instead — so only transport and
         // provider failures carry the prompt. A user Cancel is never
         // retriable-as-failure: nothing was applied and retry is the pill.
-        const msg = (err as Error).message ?? "";
-        const cancelled = /^cancelled\b/i.test(msg);
+        const rawMsg = (err as Error).message ?? "";
+        const cancelled = /^cancelled\b/i.test(rawMsg);
         const retriable =
           !cancelled &&
           !(err instanceof PlanRefusalError) &&
-          !/quota|rate limit|plan|auth|access/i.test(msg);
+          !/quota|rate limit|plan|auth|access/i.test(rawMsg);
+
+        let userMsg = rawMsg;
+        if (/Model returned invalid operations|invalid diagram operations|safeParseOperations|invalid_type/i.test(rawMsg)) {
+          userMsg = "Lucent had trouble formatting the layout operations for that request. Try describing the change a bit differently.";
+        } else if (/failed to fetch|networkerror|fetch failed/i.test(rawMsg)) {
+          userMsg = "Unable to reach the server. Please check your connection.";
+        } else if (/rate limit|too many requests|429/i.test(rawMsg)) {
+          userMsg = "AI provider rate limit reached. Please wait a moment before trying again.";
+        }
+
         const conversation: ChatEntry[] = [
           ...withUser,
           {
             role: "error",
-            text: (err as Error).message,
+            text: userMsg,
             ...(retriable && text ? { retryPrompt: text } : {}),
           },
         ];
@@ -1930,7 +1940,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         persist(workspace, conversation, projectName);
         return cancelled
           ? { outcome: "cancelled" }
-          : { outcome: "failed", error: (err as Error).message };
+          : { outcome: "failed", error: userMsg };
       } finally {
         setBusy(false);
         setGenPhase(null);

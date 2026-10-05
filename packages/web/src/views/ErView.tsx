@@ -12,10 +12,12 @@ export function ErView({
   onOpenSettings,
   embedded = false,
   onSelectPrompt,
+  onSendPrompt,
 }: {
   onOpenSettings?: (section?: string) => void;
   embedded?: boolean;
   onSelectPrompt?: (text: string) => void;
+  onSendPrompt?: (text: string) => void;
 }) {
   const { workspace, chat, send, setView, projectName } = useWorkspace();
   const [message, setMessage] = useState("");
@@ -38,27 +40,29 @@ export function ErView({
         Entity tables derive from your board's nodes, and relationships from the connections
         between them. Describe a data model below and Lucent builds it.
       </p>
-      {onSelectPrompt && (
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center", marginTop: 12 }}>
-          {["Create an ER diagram for Users, Orders, Products, and Payments", "Generate data model entities"].map((s) => (
-            <button
-              key={s}
-              onClick={() => onSelectPrompt(s)}
-              style={{
-                fontSize: 12,
-                color: "var(--ink-2)",
-                padding: "6px 12px",
-                border: "1px solid var(--stroke-1)",
-                borderRadius: 999,
-                background: "oklch(from var(--canvas-1) l c h / 0.5)",
-                cursor: "pointer",
-              }}
-            >
-              {s}
-            </button>
-          ))}
-        </div>
-      )}
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center", marginTop: 12 }}>
+        {["Create an ER diagram for Users, Orders, Products, and Payments", "Generate data model entities"].map((s) => (
+          <button
+            key={s}
+            onClick={() => {
+              if (onSendPrompt) onSendPrompt(s);
+              else if (onSelectPrompt) onSelectPrompt(s);
+              else setMessage(s);
+            }}
+            style={{
+              fontSize: 12,
+              color: "var(--ink-2)",
+              padding: "6px 12px",
+              border: "1px solid var(--stroke-1)",
+              borderRadius: 999,
+              background: "oklch(from var(--canvas-1) l c h / 0.5)",
+              cursor: "pointer",
+            }}
+          >
+            {s}
+          </button>
+        ))}
+      </div>
     </div>
   ) : (
     <div

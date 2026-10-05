@@ -12,10 +12,12 @@ export function DocumentView({
   onOpenSettings,
   embedded = false,
   onSelectPrompt,
+  onSendPrompt,
 }: {
   onOpenSettings?: (section?: string) => void;
   embedded?: boolean;
   onSelectPrompt?: (text: string) => void;
+  onSendPrompt?: (text: string) => void;
 }) {
   const { workspace, chat, send, setView, projectName } = useWorkspace();
   const [message, setMessage] = useState("");
@@ -41,27 +43,29 @@ export function DocumentView({
         This document is generated from your board — sections come from nodes and groups.
         Describe something below and it will appear here.
       </p>
-      {onSelectPrompt && (
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center", marginTop: 12 }}>
-          {["Create an executive summary document", "Write up system requirements from this diagram"].map((s) => (
-            <button
-              key={s}
-              onClick={() => onSelectPrompt(s)}
-              style={{
-                fontSize: 12,
-                color: "var(--ink-2)",
-                padding: "6px 12px",
-                border: "1px solid var(--stroke-1)",
-                borderRadius: 999,
-                background: "oklch(from var(--canvas-1) l c h / 0.5)",
-                cursor: "pointer",
-              }}
-            >
-              {s}
-            </button>
-          ))}
-        </div>
-      )}
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center", marginTop: 12 }}>
+        {["Create an executive summary document", "Write up system requirements from this diagram"].map((s) => (
+          <button
+            key={s}
+            onClick={() => {
+              if (onSendPrompt) onSendPrompt(s);
+              else if (onSelectPrompt) onSelectPrompt(s);
+              else setMessage(s);
+            }}
+            style={{
+              fontSize: 12,
+              color: "var(--ink-2)",
+              padding: "6px 12px",
+              border: "1px solid var(--stroke-1)",
+              borderRadius: 999,
+              background: "oklch(from var(--canvas-1) l c h / 0.5)",
+              cursor: "pointer",
+            }}
+          >
+            {s}
+          </button>
+        ))}
+      </div>
     </div>
   ) : (
     <div

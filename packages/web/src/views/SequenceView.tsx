@@ -14,10 +14,12 @@ export function SequenceView({
   onOpenSettings,
   embedded = false,
   onSelectPrompt,
+  onSendPrompt,
 }: {
   onOpenSettings?: (section?: string) => void;
   embedded?: boolean;
   onSelectPrompt?: (text: string) => void;
+  onSendPrompt?: (text: string) => void;
 }) {
   const { workspace, chat, send, setView, projectName } = useWorkspace();
   const [message, setMessage] = useState("");
@@ -70,14 +72,17 @@ export function SequenceView({
         <button className="btn ghost" onClick={() => setShowSample(true)}>
           Show a sample sequence
         </button>
-        {onSelectPrompt && (
-          <button
-            className="btn ghost"
-            onClick={() => onSelectPrompt("Create a checkout sequence diagram with User, API, Stripe, and Database")}
-          >
-            Create checkout sequence
-          </button>
-        )}
+        <button
+          className="btn ghost"
+          onClick={() => {
+            const p = "Create a checkout sequence diagram with User, API, Stripe, and Database";
+            if (onSendPrompt) onSendPrompt(p);
+            else if (onSelectPrompt) onSelectPrompt(p);
+            else void send(p);
+          }}
+        >
+          Create checkout sequence
+        </button>
       </div>
     </div>
   ) : (

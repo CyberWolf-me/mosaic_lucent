@@ -11,6 +11,7 @@ import {
   listWorkspaceMeetings,
   meetingName,
   type MeetingSummary,
+  type MeetingTranscript,
 } from "../meetings.js";
 import { listBoards } from "../boards.js";
 import { ScheduleMeetingDialog } from "./ScheduleMeeting.js";
@@ -45,7 +46,16 @@ export function MeetingsView({ onOpenSettings }: { onOpenSettings: (section?: st
 
   const load = useCallback(async () => {
     setState({ kind: "loading" });
-    const local = boardId || projectId ? getLocalMeetings(boardId || projectId) : [];
+    const localA = boardId ? getLocalMeetings(boardId) : [];
+    const localB = projectId && projectId !== boardId ? getLocalMeetings(projectId) : [];
+    const seenLocal = new Set<string>();
+    const local: MeetingTranscript[] = [];
+    for (const m of [...localA, ...localB]) {
+      if (!seenLocal.has(m.id)) {
+        seenLocal.add(m.id);
+        local.push(m);
+      }
+    }
     const localSummaries: MeetingSummary[] = local.map((m) => ({
       id: m.id,
       boardId: m.boardId || boardId || projectId,
@@ -182,6 +192,34 @@ export function MeetingsView({ onOpenSettings }: { onOpenSettings: (section?: st
         lede="Every meeting on the boards you can see in this workspace — open one to read its transcript, brief and notes."
         actions={state.kind === "ready" && state.meetings.length > 0 ? startHere : undefined}
       />
+
+      {(boardId || projectId) && (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            padding: "12px 18px",
+            marginBottom: 20,
+            borderRadius: 12,
+            border: "1px solid var(--stroke-2)",
+            background: "var(--canvas-2)",
+            boxShadow: "0 2px 8px rgba(0,0,0,0.06)",
+          }}
+        >
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 600, color: "var(--ink-0)", display: "flex", alignItems: "center", gap: 6 }}>
+              <Ico.Flow width={14} height={14} /> Active Board: {projectName || "Current board"}
+            </div>
+            <div style={{ fontSize: 12, color: "var(--ink-2)", marginTop: 2 }}>
+              View and capture meeting transcripts, decisions, and briefs for this board.
+            </div>
+          </div>
+          <Button variant="primary" size="sm" onClick={() => setView("meeting")}>
+            <Ico.Present /> Open Board Meeting
+          </Button>
+        </div>
+      )}
 
       {state.kind === "loading" && (
         <div className="boards-notif-skeleton" role="status" aria-label="Loading meetings">
