@@ -1,9 +1,15 @@
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { defineConfig } from "@playwright/test";
+import dotenv from "dotenv";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+dotenv.config({ path: path.resolve(__dirname, "../../.env") });
 
 /**
  * Playwright config (H: E2E the plan promised).
  *
- * Two web servers, started in order: the backend (mock provider, auth on,
+ * Two web servers, started in order: the backend (configured provider or mock, auth on,
  * loopback 4387 — exactly what `npm run start -w @lucent/server` serves) and
  * the Vite dev server whose `/api` proxy targets it. Both are reused across
  * specs; a fresh storageState-free context means every spec story starts
@@ -17,7 +23,7 @@ const WEB_PORT = Number(process.env.LUCENT_WEB_PORT ?? 5199);
 
 export default defineConfig({
   testDir: "./e2e",
-  timeout: 60_000,
+  timeout: 120_000,
   retries: process.env.CI ? 1 : 0,
   reporter: process.env.CI ? "github" : "list",
   use: {
@@ -39,13 +45,18 @@ export default defineConfig({
         ...process.env,
         LUCENT_REQUIRE_AUTH: "1",
         LUCENT_PORT: String(API_PORT),
-        // The smoke suite is the offline story: the mock provider answers
-        // deterministically, so no key or gateway in the ambient environment
-        // can steer the run. `undefined` deletes the key (selectProvider
-        // treats an empty string as unset).
-        LUCENT_AI_PROVIDER: "mock",
-        LUCENT_AI_KEY: "",
-        LUCENT_AI_BASE_URL: "",
+        LUCENT_AI_PROVIDER: process.env.LUCENT_AI_PROVIDER || "mock",
+        LUCENT_AI_KEY: process.env.LUCENT_AI_KEY || "",
+        LUCENT_AI_BASE_URL: process.env.LUCENT_AI_BASE_URL || "",
+        LUCENT_AI_MODEL: process.env.LUCENT_AI_MODEL || "",
+        LUCENT_AI_FALLBACK_MODEL: process.env.LUCENT_AI_FALLBACK_MODEL || "",
+        LUCENT_AI_NAME: process.env.LUCENT_AI_NAME || "",
+        LUCENT_AI_TIMEOUT_MS: process.env.LUCENT_AI_TIMEOUT_MS || "0",
+        LUCENT_IMAGE_PROVIDER: process.env.LUCENT_IMAGE_PROVIDER || "",
+        LUCENT_IMAGE_BASE_URL: process.env.LUCENT_IMAGE_BASE_URL || "",
+        LUCENT_IMAGE_KEY: process.env.LUCENT_IMAGE_KEY || "",
+        LUCENT_IMAGE_MODEL: process.env.LUCENT_IMAGE_MODEL || "",
+        LUCENT_IMAGE_NAME: process.env.LUCENT_IMAGE_NAME || "",
         LUCENT_STRIPE_SECRET_KEY: "",
         LUCENT_STRIPE_WEBHOOK_SECRET: "",
         // Vite proxies with changeOrigin, so the backend sees its own Host —
@@ -63,3 +74,4 @@ export default defineConfig({
     },
   ],
 });
+

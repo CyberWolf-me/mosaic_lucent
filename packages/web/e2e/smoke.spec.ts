@@ -39,8 +39,8 @@ test("signup → describe → mock generation paints the canvas", async ({ page 
   await prompt.fill("Design an e-commerce flow");
   await prompt.press("Enter");
 
-  // The graph the mock builds: the Customer actor and its first edge.
-  await expect(page.getByText("Customer").first()).toBeVisible({ timeout: 60_000 });
+  // The graph built by the provider paints nodes onto the canvas.
+  await expect(page.locator(".node").first()).toBeVisible({ timeout: 60_000 });
 
   // The surface users spend their day on.
   const canvas = await new AxeBuilder({ page }).analyze();

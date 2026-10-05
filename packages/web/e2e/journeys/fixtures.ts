@@ -67,11 +67,17 @@ export class Journey {
     return this.page.evaluate(() => {
       const els = [...document.querySelectorAll(".node")] as HTMLElement[];
       const pick = (re: RegExp) =>
-        els.map((e) => (re.exec(e.textContent || "")?.[1] || "").trim()).filter(Boolean);
+        els
+          .map((e) => {
+            const metaText = e.querySelector(".node-meta")?.textContent?.trim() || "";
+            const m = re.exec(metaText) || re.exec(e.textContent || "");
+            return (m?.[1] || "").trim();
+          })
+          .filter(Boolean);
       return {
         nodes: els.length,
         labels: els.map((e) => (e.textContent || "").replace(/\s+/g, " ").trim()),
-        roles: pick(/\b(START|PROCESS|END|DECISION|DATA|ACTOR|SYSTEM|TERMINAL|MERGE)\b/i),
+        roles: pick(/(START|PROCESS|END|DECISION|DATA|ACTOR|SYSTEM|TERMINAL|MERGE)/i),
         selected: document.querySelectorAll(".node.selected").length,
         bodyText: (document.body.textContent || "").replace(/\s+/g, " ").slice(0, 4_000),
       };

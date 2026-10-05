@@ -44,7 +44,7 @@ export function registerSystemRoutes(router: AppRouter, s: RouteServices): void 
    * LUCENT_METRICS_VERBOSE=1, because error messages can carry provider
    * payloads.
    */
-  router.get("/metrics", async (ctx) => {
+  const handleMetrics = async (ctx: { req: IncomingMessage; res: ServerResponse }) => {
     if (!(await metricsGateOpen(ctx.req, ctx.res))) return;
     const snap = s.telemetry.snapshot();
     send(ctx.res, 200, {
@@ -57,7 +57,10 @@ export function registerSystemRoutes(router: AppRouter, s: RouteServices): void 
       usage: { ...s.usage.snapshot(), limits: s.limits },
       provider: s.provider.name,
     });
-  });
+  };
+
+  router.get("/metrics", handleMetrics);
+  router.get("/api/metrics", handleMetrics);
 
   /**
    * The same registry in the Prometheus text exposition format.

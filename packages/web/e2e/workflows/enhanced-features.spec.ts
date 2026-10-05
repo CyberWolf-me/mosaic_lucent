@@ -40,7 +40,7 @@ test.describe("Workflow: Enhanced Features (Clarification, Digest Export & Virtu
             question: "Which authentication pattern should we build?",
             options: ["OAuth2 + JWT", "Session Cookies", "Magic Links"],
           },
-          provider: "mock",
+          provider: "openai",
         });
         const sseBody = `event: phase\ndata: {"phase":"understanding"}\n\nevent: done\ndata: ${donePayload}\n\n`;
         await route.fulfill({
