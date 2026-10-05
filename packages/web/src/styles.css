@@ -3408,8 +3408,17 @@ html[data-board="sketch"] .frame-tag {
   box-shadow: var(--elev-3);
   backdrop-filter: blur(20px);
 }
-.export-menu:hover .export-pop {
+.export-menu:hover .export-pop,
+.export-menu.open .export-pop {
   display: flex;
+}
+.export-menu .export-pop::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  height: 12px;
 }
 .export-menu .export-pop button {
   text-align: left;

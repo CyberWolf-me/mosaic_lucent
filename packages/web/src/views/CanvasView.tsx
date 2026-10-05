@@ -2788,6 +2788,8 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
     }
   }, [workspace, notify]);
 
+  const [exportOpen, setExportOpen] = useState(false);
+
   /**
    * Stickies → structure (docs/27 D2), always as a proposal. Sorting into
    * themes asks only for MEANING (themes of note indices, /api/themes) and
@@ -3764,11 +3766,14 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
               })
             }
           />
-          <div className="export-btn export-menu">
-            <button title="Export board">
+          <div className={`export-btn export-menu${exportOpen ? " open" : ""}`}>
+            <button
+              title="Export board"
+              onClick={() => setExportOpen((prev) => !prev)}
+            >
               <Ico.Share /> Export
             </button>
-            <div className="export-pop">
+            <div className="export-pop" onClick={() => setExportOpen(false)}>
               <button onClick={exportSvg}>SVG</button>
               <button onClick={exportPng}>PNG</button>
               <button onClick={exportPdf}>PDF</button>
