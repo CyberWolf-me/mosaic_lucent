@@ -813,6 +813,7 @@ function ShareDialog({ onClose }: { onClose: () => void }) {
                     className="btn"
                     onClick={() => void mintLink()}
                     disabled={minting}
+                    aria-label="Create invite link"
                     style={{ fontSize: 11.5, whiteSpace: "nowrap" }}
                   >
                     {minting ? "…" : invite ? "New link" : "Create link"}
@@ -1211,7 +1212,7 @@ export function ZoomBadge({
         bottom: 20,
         // Clear of the rail (x 12–68) unless zen mode is active.
         left: zenMode ? 20 : 84,
-        zIndex: 25,
+        zIndex: 35,
         display: "flex",
         alignItems: "center",
         gap: 6,
@@ -1270,6 +1271,8 @@ export function ZoomBadge({
             fontWeight: zenMode ? 600 : 400,
           }}
           onClick={onToggleZen}
+          aria-label="Toggle Zen mode"
+          data-testid="toggle-zen"
           title={zenMode ? "Exit Zen mode (Z)" : "Zen mode (Z)"}
         >
           {zenMode ? "Zen (On)" : "Zen"}

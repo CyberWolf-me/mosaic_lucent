@@ -10,8 +10,18 @@ import { reactionTally, voteRanking, voteTally } from "@lucent/core";
  * views stay declarative.
  */
 
+import { getSessionUser } from "../session.js";
+
 /** Local participant id. Multiplayer identity replaces this without a schema change. */
 export const ME = "me";
+
+function resolveMe(): string {
+  try {
+    return getSessionUser()?.id ?? ME;
+  } catch {
+    return ME;
+  }
+}
 
 /** Emoji offered in the reaction picker. Deliberately small and unambiguous. */
 export const REACTION_EMOJI = ["👍", "❤️", "🎉", "🤔", "⚠️"] as const;
@@ -22,8 +32,9 @@ function annotationId(prefix: string): string {
 
 /** The current participant's vote for a target, if any. */
 export function myVoteFor(workspace: Workspace, targetId: string): string | null {
+  const me = resolveMe();
   const found = Object.values(workspace.votes ?? {}).find(
-    (v) => v.targetId === targetId && v.by === ME,
+    (v) => v.targetId === targetId && (v.by === me || v.by === ME),
   );
   return found?.id ?? null;
 }
@@ -34,8 +45,9 @@ export function myVoteFor(workspace: Workspace, targetId: string): string | null
  */
 export function toggleVoteOps(workspace: Workspace, targetId: string): Operation[] {
   const existing = myVoteFor(workspace, targetId);
+  const me = resolveMe();
   if (existing) return [{ op: "REMOVE_VOTE", id: existing }];
-  return [{ op: "ADD_VOTE", id: annotationId("vote"), targetId, by: ME }];
+  return [{ op: "ADD_VOTE", id: annotationId("vote"), targetId, by: me }];
 }
 
 /** Clear a whole round; omit targetId to reset every vote on the board. */
@@ -49,8 +61,9 @@ export function myReactionFor(
   targetId: string,
   emoji: string,
 ): string | null {
+  const me = resolveMe();
   const found = Object.values(workspace.reactions ?? {}).find(
-    (r) => r.targetId === targetId && r.emoji === emoji && r.by === ME,
+    (r) => r.targetId === targetId && r.emoji === emoji && (r.by === me || r.by === ME),
   );
   return found?.id ?? null;
 }
@@ -62,8 +75,9 @@ export function toggleReactionOps(
   emoji: string,
 ): Operation[] {
   const existing = myReactionFor(workspace, targetId, emoji);
+  const me = resolveMe();
   if (existing) return [{ op: "REMOVE_REACTION", id: existing }];
-  return [{ op: "ADD_REACTION", id: annotationId("react"), targetId, emoji, by: ME }];
+  return [{ op: "ADD_REACTION", id: annotationId("react"), targetId, emoji, by: me }];
 }
 
 /** A readable label for a voted/reacted object, for the results list. */
