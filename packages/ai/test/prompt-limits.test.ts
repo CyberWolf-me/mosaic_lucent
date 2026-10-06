@@ -248,4 +248,37 @@ describe("untrusted content cannot widen the operation vocabulary", () => {
     expect(outsideEnvelopes(rendered)).not.toContain(AI_OPERATION_NAMES.join(", "));
     expect(outsideEnvelopes(rendered)).not.toContain("CREATE_NODE, DELETE_NODE");
   });
+
+  describe("slash command prompt expansion", () => {
+    it("expands known slash commands into architectural steering prompts", () => {
+      const renderedDecompose = prompt({ message: "/decompose AuthGateway" });
+      expect(userRegion(renderedDecompose)).toContain("[Mode: Component Decomposition]");
+      expect(userRegion(renderedDecompose)).toContain('Decompose "AuthGateway"');
+
+      const renderedThreat = prompt({ message: "/threat-model PaymentService" });
+      expect(userRegion(renderedThreat)).toContain("[Mode: Threat Model & Security Audit]");
+      expect(userRegion(renderedThreat)).toContain('STRIDE and security architecture review with focus on "PaymentService"');
+
+      const renderedEdgeCases = prompt({ message: "/edge-cases Checkout Flow" });
+      expect(userRegion(renderedEdgeCases)).toContain("[Mode: Edge Cases & Error Handling]");
+      expect(userRegion(renderedEdgeCases)).toContain('Discover edge cases and error handling for "Checkout Flow"');
+
+      const renderedSequence = prompt({ message: "/sequence User Registration" });
+      expect(userRegion(renderedSequence)).toContain("[Mode: Sequence Diagram Generation]");
+      expect(userRegion(renderedSequence)).toContain('Transform this workflow for "User Registration"');
+
+      const renderedSimplify = prompt({ message: "/simplify" });
+      expect(userRegion(renderedSimplify)).toContain("[Mode: Architecture Simplification]");
+
+      const renderedTranslate = prompt({ message: "/translate Spanish" });
+      expect(userRegion(renderedTranslate)).toContain("[Mode: Diagram Translation]");
+      expect(userRegion(renderedTranslate)).toContain("Translate all diagram node labels, group titles, and text notes to Spanish");
+    });
+
+    it("leaves standard prompt text untouched if not a slash command", () => {
+      const rendered = prompt({ message: "draw an authentication flow with redis session store" });
+      expect(userRegion(rendered)).toBe("draw an authentication flow with redis session store");
+    });
+  });
 });
+

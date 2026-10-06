@@ -9,7 +9,57 @@ import { useWorkspace } from "../workspace.js";
 import { StatementGlyph } from "./StatementGlyph.js";
 import { KIND_LABEL } from "../statementUi.js";
 import { isEmptyEffect, type TurnEffect } from "../turnEffect.js";
-import type { StatementKind } from "@lucent/core";
+import {
+  filterSlashCommands,
+  parseSlashCommand,
+  type SlashCommandDef,
+  type StatementKind,
+} from "@lucent/core";
+
+function SlashIcon({ icon }: { icon: SlashCommandDef["icon"] }) {
+  switch (icon) {
+    case "layers":
+      return <Ico.Layers />;
+    case "shield":
+      return (
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+        </svg>
+      );
+    case "alert-triangle":
+      return (
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+          <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" />
+          <line x1="12" y1="9" x2="12" y2="13" />
+          <line x1="12" y1="17" x2="12.01" y2="17" />
+        </svg>
+      );
+    case "git-commit":
+      return (
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="12" cy="12" r="4" />
+          <line x1="1.05" y1="12" x2="7" y2="12" />
+          <line x1="17" y1="12" x2="22.95" y2="12" />
+        </svg>
+      );
+    case "minimize":
+      return (
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3" />
+        </svg>
+      );
+    case "globe":
+      return (
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="12" cy="12" r="10" />
+          <line x1="2" y1="12" x2="22" y2="12" />
+          <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+        </svg>
+      );
+    default:
+      return <Ico.Sparkle />;
+  }
+}
 
 /**
  * Floating conversational pill ported from reference/components/ai_pill.jsx.
@@ -121,6 +171,50 @@ export function AIPill({
   const statusText = phaseText ?? status?.text ?? null;
   const conversing = voicePhase !== "idle";
   const voiceLine = voicePhaseLabel(voicePhase);
+
+  const [selectedIndex, setSelectedIndex] = useState(0);
+  const [dismissedQuery, setDismissedQuery] = useState<string | null>(null);
+
+  // Slash commands popover logic
+  const isSlashActive =
+    !readOnly &&
+    value.startsWith("/") &&
+    !value.includes(" ") &&
+    value !== dismissedQuery;
+  const slashSuggestions = isSlashActive ? filterSlashCommands(value) : [];
+  const showSlashMenu = slashSuggestions.length > 0;
+  const activeIndex = showSlashMenu
+    ? Math.min(Math.max(0, selectedIndex), slashSuggestions.length - 1)
+    : 0;
+
+  // Active recognized slash command badge when typed with arguments
+  const activeSlashCmd = !showSlashMenu && value.startsWith("/") ? parseSlashCommand(value) : null;
+
+  const handleSelectSlashCommand = (cmd: SlashCommandDef) => {
+    onChange?.(`${cmd.command} `);
+    setDismissedQuery(null);
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (!showSlashMenu) return;
+
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setSelectedIndex((prev) => (prev + 1) % slashSuggestions.length);
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setSelectedIndex((prev) => (prev - 1 + slashSuggestions.length) % slashSuggestions.length);
+    } else if (e.key === "Enter" || e.key === "Tab") {
+      e.preventDefault();
+      const chosen = slashSuggestions[activeIndex];
+      if (chosen) {
+        handleSelectSlashCommand(chosen);
+      }
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      setDismissedQuery(value);
+    }
+  };
 
   return (
     <div className={`ai-pill-wrap${shifted ? " shifted" : ""}`}>
@@ -274,6 +368,63 @@ export function AIPill({
           </div>
         </div>
       )}
+      {showSlashMenu && (
+        <div className="slash-menu" role="listbox" aria-label="AI Slash Commands">
+          <div className="slash-menu-head">
+            <span className="slash-menu-title">
+              <Ico.Sparkle style={{ width: 13, height: 13, color: "var(--amber-1)" }} />
+              AI Command Presets
+            </span>
+            <div className="slash-menu-hints">
+              <span>↑↓ Navigate</span>
+              <span>↵ Select</span>
+              <span>Esc Close</span>
+            </div>
+          </div>
+          <div className="slash-list">
+            {slashSuggestions.map((cmd, idx) => {
+              const isSelected = idx === activeIndex;
+              return (
+                <div
+                  key={cmd.id}
+                  className={`slash-item${isSelected ? " selected" : ""}`}
+                  role="option"
+                  aria-selected={isSelected}
+                  onClick={() => handleSelectSlashCommand(cmd)}
+                  onMouseEnter={() => setSelectedIndex(idx)}
+                >
+                  <div className="slash-item-icon">
+                    <SlashIcon icon={cmd.icon} />
+                  </div>
+                  <div className="slash-item-body">
+                    <div className="slash-item-header">
+                      <span className="slash-item-cmd">{cmd.command}</span>
+                      <span className={`slash-item-cat cat-${cmd.category}`}>
+                        {cmd.category}
+                      </span>
+                    </div>
+                    <span className="slash-item-desc">{cmd.description}</span>
+                  </div>
+                  <span className="slash-item-action">
+                    {cmd.placeholder ? "Fill" : "Run"}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+      {activeSlashCmd?.definition && (
+        <div className="slash-active-badge" role="status">
+          <SlashIcon icon={activeSlashCmd.definition.icon} />
+          <span className="badge-cmd">{activeSlashCmd.definition.command}</span>
+          <span className="badge-placeholder">
+            {activeSlashCmd.args
+              ? `Target: "${activeSlashCmd.args}"`
+              : activeSlashCmd.definition.placeholder}
+          </span>
+        </div>
+      )}
       <div
         className={`ai-pill ${listening ? "listening" : ""}${readOnly ? " read-only" : ""}${multiline ? " multiline" : ""}`}
       >
@@ -331,6 +482,7 @@ export function AIPill({
               id={inputId}
               value={value}
               onChange={(v) => onChange?.(v)}
+              onKeyDown={handleKeyDown}
               onSubmit={() => onSubmit?.()}
               onMultilineChange={setMultiline}
               maxHeight={168}
@@ -340,7 +492,7 @@ export function AIPill({
                   : (placeholder ??
                     (askMode
                       ? "Ask about this board's history…"
-                      : "Ask Lucent to build something…"))
+                      : "Type / for AI commands or describe what to build…"))
               }
             />
             {listening && (
@@ -362,6 +514,19 @@ export function AIPill({
               </div>
             )}
           </>
+        )}
+        {!readOnly && (
+          <button
+            type="button"
+            className="slash-trigger-btn"
+            title="Browse AI Slash Commands (/)"
+            onClick={() => {
+              setDismissedQuery(null);
+              onChange?.("/");
+            }}
+          >
+            /
+          </button>
         )}
         {!readOnly && <span className="kbd">⌘K</span>}
         {!readOnly && (

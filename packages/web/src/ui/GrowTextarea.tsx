@@ -14,6 +14,7 @@ export function GrowTextarea({
   id,
   value,
   onChange,
+  onKeyDown,
   onSubmit,
   placeholder,
   disabled,
@@ -27,6 +28,7 @@ export function GrowTextarea({
   id?: string;
   value: string;
   onChange: (v: string) => void;
+  onKeyDown?: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void;
   onSubmit?: () => void;
   placeholder?: string;
   disabled?: boolean;
@@ -87,6 +89,8 @@ export function GrowTextarea({
       style={{ resize: "none", ...style }}
       onChange={(e) => onChange(e.target.value)}
       onKeyDown={(e) => {
+        onKeyDown?.(e);
+        if (e.defaultPrevented) return;
         if (e.key !== "Enter") return;
         // A newline: Shift/Alt/Ctrl+Enter, or an IME candidate being chosen.
         if (e.shiftKey || e.altKey || e.ctrlKey || e.nativeEvent.isComposing) return;

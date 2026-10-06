@@ -6,6 +6,7 @@ import { capChartSummary, capTableSummary, REQUEST_LIMITS } from "./provider.js"
 import type { ChartSummary, GenerateRequest, TableSummary } from "./provider.js";
 import type { AnswerRequest } from "./answer.js";
 import type { ExternalPlanRequest } from "./externalPlan.js";
+import { parseSlashCommand, expandSlashCommandPrompt } from "@lucent/core";
 
 /**
  * The prompt harness is the model-independent asset (docs/09 section 0). It
@@ -698,7 +699,9 @@ export function buildUserPrompt(request: GenerateRequest): string {
   const dateLine = todayLine(request.today);
   if (dateLine) sections.push(dateLine);
 
-  const asked = clamp(message, PAYLOAD_LIMITS.message);
+  const parsedCmd = parseSlashCommand(message);
+  const effectiveMessage = parsedCmd ? expandSlashCommandPrompt(parsedCmd) : message;
+  const asked = clamp(effectiveMessage, PAYLOAD_LIMITS.message);
   sections.push(
     `User request: ${escapeHarnessTags(asked.text)}${
       asked.dropped ? ` [the harness dropped ${asked.dropped} characters over its limit]` : ""

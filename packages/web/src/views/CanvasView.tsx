@@ -520,7 +520,7 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
       case "er":
         return "Add entities, attributes, relationships, or tables…";
       default:
-        return "Refine, add, or transform — just describe it";
+        return "Refine, add, or transform — type / for AI commands…";
     }
   }, [canvasPhase, lens]);
 
