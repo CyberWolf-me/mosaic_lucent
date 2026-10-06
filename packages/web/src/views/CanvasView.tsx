@@ -100,7 +100,7 @@ import { cloneShapeOp, nextZ, normalizeZ, shapeId, zOrderOps, type ZMove } from 
 import { resolveEmbed } from "../embed.js";
 import { boardToMarkdown, boardToCsv } from "../board/serialize.js";
 import { boardToMermaid, detectMermaid, generateBoardDigest } from "@lucent/core";
-import type { Shape } from "@lucent/core";
+import type { Shape, Node } from "@lucent/core";
 import { planMermaidImport } from "../board/mermaidImport.js";
 import {
   classifyImport,
@@ -1495,6 +1495,55 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
       if (!ok) notify("Couldn't rename that node.");
     },
     [applyManual, notify],
+  );
+
+  /** In-canvas AI micro-action handlers (Initiative 3) */
+  const handleNodeElaborate = useCallback(
+    (n: Node) => {
+      void send(
+        `Elaborate on the "${n.label}" node (${n.nodeType}): decompose it into 3-4 connected sub-steps or internal processes with appropriate connectors.`,
+        [n.id],
+      );
+    },
+    [send],
+  );
+
+  const handleNodeErrorHandling = useCallback(
+    (n: Node) => {
+      void send(
+        `Add error handling and failure recovery to the "${n.label}" node: attach a decision gateway, validation check, and fallback/failure path.`,
+        [n.id],
+      );
+    },
+    [send],
+  );
+
+  const handleNodeConvertType = useCallback(
+    (n: Node, nextType: string) => {
+      const ok = applyManual(
+        [{ op: "CHANGE_NODE_TYPE", id: n.id, nodeType: nextType }],
+        `Change type to ${nextType}`,
+      );
+      if (!ok) notify("Couldn't change node type.");
+    },
+    [applyManual, notify],
+  );
+
+  const handleNodeExplain = useCallback(
+    (n: Node) => {
+      void send(
+        `Explain the "${n.label}" (${n.nodeType}) component, its purpose, dependencies, and role in this architecture.`,
+        [n.id],
+      );
+    },
+    [send],
+  );
+
+  const handleNodeCustomPrompt = useCallback(
+    (n: Node, prompt: string) => {
+      void send(`For the "${n.label}" node: ${prompt}`, [n.id]);
+    },
+    [send],
   );
 
   const selectShape = useCallback(
@@ -3296,7 +3345,15 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
                 onToggleExpand={toggleRegionExpand}
                 sketchOrder={sketchOrder}
                 {...(tool === "select" && canEdit
-                  ? { onMoveNode: moveNode, onRenameNode: renameNode }
+                  ? {
+                      onMoveNode: moveNode,
+                      onRenameNode: renameNode,
+                      onAiElaborate: handleNodeElaborate,
+                      onAiErrorHandling: handleNodeErrorHandling,
+                      onConvertNodeType: handleNodeConvertType,
+                      onAiExplain: handleNodeExplain,
+                      onAiCustomPrompt: handleNodeCustomPrompt,
+                    }
                   : {})}
               />
               <ShapeLinkLayer

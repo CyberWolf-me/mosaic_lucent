@@ -8,8 +8,10 @@ import {
   timelineTicks,
   type DensityBand,
   type Workspace,
+  type Node,
 } from "@lucent/core";
 import { anchor, ConnectorDefs, makePath, NodeCard, type NodeState } from "./atoms.js";
+import { NodeAiToolbar } from "./NodeAiToolbar.js";
 import { autoIconFor } from "../icons/auto.js";
 import { KIND_TINT } from "../statementUi.js";
 import { DIAGRAM_LABELS, bpmnShapeFor, facesFor } from "../scene.js";
@@ -60,6 +62,11 @@ export function DiagramLayer({
   expandedRegions,
   onToggleExpand,
   sketchOrder,
+  onAiElaborate,
+  onAiErrorHandling,
+  onConvertNodeType,
+  onAiExplain,
+  onAiCustomPrompt,
 }: {
   workspace: Workspace;
   selected?: string | null;
@@ -116,6 +123,16 @@ export function DiagramLayer({
    */
   expandedRegions?: ReadonlySet<string>;
   onToggleExpand?: (groupId: string) => void;
+  /** In-canvas AI micro-action to elaborate/decompose selected node (Initiative 3) */
+  onAiElaborate?: (node: Node) => void;
+  /** In-canvas AI micro-action to attach error-handling / decision branch (Initiative 3) */
+  onAiErrorHandling?: (node: Node) => void;
+  /** In-canvas instant semantic node type conversion (Initiative 3) */
+  onConvertNodeType?: (node: Node, newType: string) => void;
+  /** In-canvas AI micro-action to explain selected node (Initiative 3) */
+  onAiExplain?: (node: Node) => void;
+  /** In-canvas AI micro-action with freeform prompt scoped to selected node (Initiative 3) */
+  onAiCustomPrompt?: (node: Node, prompt: string) => void;
 }) {
   // Derived once per workspace instead of once per render: on a large board the
   // scene mapping, the id index, the group boxes and the frame bounds were all
@@ -772,6 +789,42 @@ export function DiagramLayer({
           />
         );
       })}
+
+      {(() => {
+        const focused =
+          selected && (!selectedNodes || selectedNodes.size <= 1)
+            ? finalNodes.find((n) => n.id === selected)
+            : null;
+        if (!focused) return null;
+        const actualNode = workspace.nodes[focused.id];
+        if (!actualNode) return null;
+        if (
+          !onAiElaborate &&
+          !onAiErrorHandling &&
+          !onConvertNodeType &&
+          !onAiExplain &&
+          !onAiCustomPrompt
+        )
+          return null;
+
+        return (
+          <NodeAiToolbar
+            key={`node-ai-toolbar-${focused.id}`}
+            node={actualNode}
+            x={focused.cx - focused.w / 2}
+            y={focused.cy - focused.h / 2}
+            w={focused.w}
+            h={focused.h}
+            scale={scale}
+            onElaborate={() => onAiElaborate?.(actualNode)}
+            onErrorHandling={() => onAiErrorHandling?.(actualNode)}
+            onConvertType={(newType) => onConvertNodeType?.(actualNode, newType)}
+            onExplain={() => onAiExplain?.(actualNode)}
+            onCustomPrompt={(prompt) => onAiCustomPrompt?.(actualNode, prompt)}
+            onClose={() => onSelect?.(focused.id, false)}
+          />
+        );
+      })()}
     </div>
   );
 }
