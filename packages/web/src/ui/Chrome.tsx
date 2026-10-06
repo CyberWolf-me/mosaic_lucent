@@ -9,6 +9,7 @@ import { Dialog } from "./primitives.js";
 import { useWorkspace, type CanvasLens, type View } from "../workspace.js";
 import { WorkspaceRulesModal } from "./WorkspaceRulesModal.js";
 import { SpecImportModal } from "./SpecImportModal.js";
+import { CodeExportModal } from "./CodeExportModal.js";
 import {
   classifyBoard,
   createShareLink,
@@ -62,6 +63,7 @@ export function TopBar({
   const [share, setShare] = useState(false);
   const [showRules, setShowRules] = useState(false);
   const [showSpecImport, setShowSpecImport] = useState(false);
+  const [showCodeExport, setShowCodeExport] = useState(false);
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState(projectName);
 
@@ -156,7 +158,17 @@ export function TopBar({
               aria-label="Import code or specification"
               title="Import OpenAPI, SQL DDL, Prisma schema, or Docker Compose"
             >
-              <Ico.Code /> Import
+              <Ico.Upload /> Import
+            </button>
+          )}
+          {boardActions && (
+            <button
+              className="icon-btn"
+              onClick={() => setShowCodeExport(true)}
+              aria-label="Export production code"
+              title="Export to XState, Prisma, SQL DDL, Docker Compose, or TypeScript"
+            >
+              <Ico.Code /> Export Code
             </button>
           )}
           {boardActions && (
@@ -188,6 +200,7 @@ export function TopBar({
         </>
       </div>
       {showSpecImport && <SpecImportModal onClose={() => setShowSpecImport(false)} />}
+      {showCodeExport && <CodeExportModal onClose={() => setShowCodeExport(false)} />}
       {showRules && <WorkspaceRulesModal onClose={() => setShowRules(false)} />}
       {share && <ShareDialog onClose={() => setShare(false)} />}
     </div>
