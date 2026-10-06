@@ -33,3 +33,4 @@ export * from "./mermaid.js";
 export * from "./transcriptImport.js";
 export * from "./digest.js";
 export * from "./slashCommands.js";
+export * from "./workspaceRules.js";

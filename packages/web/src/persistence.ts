@@ -268,6 +268,11 @@ export interface ProjectData extends ProjectMeta {
    * older saves.
    */
   proposalHistory?: PersistedProposal[];
+  /**
+   * Workspace architectural rules & durable context: persistent tech stack,
+   * architectural constraints, naming conventions, and prohibited patterns.
+   */
+  rules?: string;
 }
 
 /** How many decided proposals the project remembers. */

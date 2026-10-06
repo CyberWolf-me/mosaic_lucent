@@ -52,6 +52,11 @@ export interface StoredBoard {
    * operation must never be able to publish a board.
    */
   publicToken?: string | null;
+  /**
+   * Workspace architectural rules & durable context: persistent tech stack,
+   * architectural constraints, naming conventions, and prohibited patterns.
+   */
+  rules?: string | null;
 }
 
 /** An explicit grant of access to one board. */

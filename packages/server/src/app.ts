@@ -4251,6 +4251,7 @@ export function createApp(deps: AppDeps): App {
               name?: string;
               workspace?: unknown;
               classification?: unknown;
+              rules?: unknown;
             })
           : {};
         // M2.1: every board lives in an org the user is a member of. The
@@ -4303,6 +4304,10 @@ export function createApp(deps: AppDeps): App {
             return;
           }
         }
+        if (body.rules !== undefined && typeof body.rules !== "string" && body.rules !== null) {
+          send(res, 400, { error: "invalid rules", detail: "rules must be a string or null" });
+          return;
+        }
         // M4: the `boards` ceiling, on creation only. An update must never be
         // refused for a limit the org is already over -- that would strand
         // existing work behind a paywall, and a downgrade routinely leaves an org
@@ -4335,6 +4340,11 @@ export function createApp(deps: AppDeps): App {
             ? { classification: body.classification }
             : existing?.classification
               ? { classification: existing.classification }
+              : {}),
+          ...(body.rules !== undefined
+            ? { rules: body.rules === null ? null : (body.rules as string).slice(0, 8000) }
+            : existing?.rules !== undefined
+              ? { rules: existing.rules }
               : {}),
           createdAt: existing?.createdAt ?? now,
           updatedAt: now,

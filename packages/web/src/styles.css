@@ -7708,3 +7708,97 @@ textarea:focus-visible {
   text-underline-offset: 2px;
   cursor: pointer;
 }
+
+/* --- Workspace Architectural Rules Modal (Initiative 2) --- */
+.rule-template-chip {
+  font-size: 11px;
+  font-weight: 550;
+  padding: 4px 10px;
+  border-radius: var(--r-full, 9999px);
+  border: 1px solid var(--stroke-1);
+  background: var(--canvas-1);
+  color: var(--ink-2);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.14s ease;
+}
+.rule-template-chip:hover {
+  border-color: var(--stroke-2);
+  background: var(--canvas-2);
+  color: var(--ink-1);
+}
+.rule-template-chip.active {
+  border-color: var(--accent, oklch(0.65 0.20 250));
+  background: color-mix(in oklch, var(--accent, oklch(0.65 0.20 250)) 12%, var(--canvas-1));
+  color: var(--accent, oklch(0.65 0.20 250));
+}
+.rule-template-clear-btn {
+  font-size: 11px;
+  font-weight: 500;
+  padding: 3px 8px;
+  border-radius: var(--r-sm, 6px);
+  border: 1px dashed var(--stroke-2);
+  background: transparent;
+  color: var(--ink-4);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.14s ease;
+}
+.rule-template-clear-btn:hover {
+  border-color: var(--coral-2, oklch(0.62 0.19 25));
+  color: var(--coral-2, oklch(0.62 0.19 25));
+}
+.rule-field-group {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.rule-field-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--ink-2);
+}
+.rule-field-label.warning {
+  color: var(--amber-2, oklch(0.75 0.16 65));
+}
+.rule-field-input {
+  width: 100%;
+  padding: 7px 11px;
+  font-size: 12px;
+  border-radius: var(--r-sm, 6px);
+  border: 1px solid var(--stroke-1);
+  background: var(--canvas-0);
+  color: var(--ink-1);
+  outline: none;
+  transition: border-color 0.14s ease, box-shadow 0.14s ease;
+}
+.rule-field-input:focus {
+  border-color: var(--accent, oklch(0.65 0.20 250));
+  box-shadow: 0 0 0 2px color-mix(in oklch, var(--accent, oklch(0.65 0.20 250)) 20%, transparent);
+}
+.rule-field-input.warning {
+  border-color: color-mix(in oklch, var(--amber-2, oklch(0.75 0.16 65)) 35%, var(--stroke-1));
+}
+.rule-field-input.warning:focus {
+  border-color: var(--amber-2, oklch(0.75 0.16 65));
+  box-shadow: 0 0 0 2px color-mix(in oklch, var(--amber-2, oklch(0.75 0.16 65)) 20%, transparent);
+}
+.rule-field-textarea {
+  width: 100%;
+  padding: 8px 11px;
+  font-size: 12px;
+  border-radius: var(--r-sm, 6px);
+  border: 1px solid var(--stroke-1);
+  background: var(--canvas-0);
+  color: var(--ink-1);
+  outline: none;
+  font-family: inherit;
+  resize: vertical;
+  line-height: 1.45;
+  transition: border-color 0.14s ease, box-shadow 0.14s ease;
+}
+.rule-field-textarea:focus {
+  border-color: var(--accent, oklch(0.65 0.20 250));
+  box-shadow: 0 0 0 2px color-mix(in oklch, var(--accent, oklch(0.65 0.20 250)) 20%, transparent);
+}

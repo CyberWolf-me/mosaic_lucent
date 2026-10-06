@@ -125,10 +125,17 @@ export async function saveBoardDetailed(
   name: string,
   workspace: Workspace,
   id?: string,
+  rules?: string | null,
 ): Promise<SaveBoardResult> {
   const res = await authed("/api/boards", {
     method: "POST",
-    body: JSON.stringify({ ...(id ? { id } : {}), orgId, name, workspace }),
+    body: JSON.stringify({
+      ...(id ? { id } : {}),
+      orgId,
+      name,
+      workspace,
+      ...(rules !== undefined ? { rules } : {}),
+    }),
   });
   if (!res) {
     return { ok: false, error: "Please sign in to save or connect this board." };
@@ -150,8 +157,9 @@ export async function saveBoard(
   name: string,
   workspace: Workspace,
   id?: string,
+  rules?: string | null,
 ): Promise<BoardSummary | null> {
-  const result = await saveBoardDetailed(orgId, name, workspace, id);
+  const result = await saveBoardDetailed(orgId, name, workspace, id, rules);
   return result.ok ? result.board ?? null : null;
 }
 
@@ -190,6 +198,7 @@ export async function fetchBoard(id: string): Promise<{
   role: BoardRole;
   classification: BoardTier;
   publicToken: string | null;
+  rules?: string | null;
 } | null> {
   const res = await authed(`/api/boards/${encodeURIComponent(id)}`);
   if (!res || !res.ok) return null;
@@ -200,6 +209,7 @@ export async function fetchBoard(id: string): Promise<{
     role: BoardRole;
     classification?: unknown;
     publicToken?: string | null;
+    rules?: unknown;
   };
   return {
     id: body.id,
@@ -208,6 +218,7 @@ export async function fetchBoard(id: string): Promise<{
     role: body.role,
     classification: isBoardTier(body.classification) ? body.classification : "internal",
     publicToken: typeof body.publicToken === "string" ? body.publicToken : null,
+    rules: typeof body.rules === "string" ? body.rules : null,
   };
 }
 

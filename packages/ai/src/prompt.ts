@@ -6,7 +6,11 @@ import { capChartSummary, capTableSummary, REQUEST_LIMITS } from "./provider.js"
 import type { ChartSummary, GenerateRequest, TableSummary } from "./provider.js";
 import type { AnswerRequest } from "./answer.js";
 import type { ExternalPlanRequest } from "./externalPlan.js";
-import { parseSlashCommand, expandSlashCommandPrompt } from "@lucent/core";
+import {
+  parseSlashCommand,
+  expandSlashCommandPrompt,
+  formatWorkspaceRulesPrompt,
+} from "@lucent/core";
 
 /**
  * The prompt harness is the model-independent asset (docs/09 section 0). It
@@ -116,7 +120,7 @@ export const NOTES_SYSTEM_PROMPT_VERSION: number = MEETING_NOTES.version;
  * form, so a strict match would be a hole rather than a rule.
  */
 const HARNESS_TAG_PATTERN =
-  /<\s*\/?\s*(?:untrusted-[a-z-]*|board-context|workspace-memory|retrieved-hit)/gi;
+  /<\s*\/?\s*(?:untrusted-[a-z-]*|board-context|workspace-memory|workspace-rules|retrieved-hit)/gi;
 
 /**
  * Neutralise envelope boundaries inside untrusted text.
@@ -196,6 +200,7 @@ const PAYLOAD_LIMITS = {
   comments: REQUEST_LIMITS.comments,
   turn: REQUEST_LIMITS.historyChars,
   turns: REQUEST_LIMITS.historyTurns,
+  rules: REQUEST_LIMITS.rulesChars,
   message: REQUEST_LIMITS.messageChars,
 } as const;
 
@@ -627,6 +632,19 @@ export function buildUserPrompt(request: GenerateRequest): string {
   // already settled" before the recent turns and the request itself.
   if (request.memory) {
     sections.push(`<workspace-memory>\n${escapeHarnessTags(request.memory)}\n</workspace-memory>`);
+  }
+
+  // Workspace architectural rules & durable context (Initiative 2): persistent tech
+  // stack, architectural constraints, naming conventions, and prohibited patterns.
+  // Escaped once as defence in depth, formatted into clear markdown sections.
+  // Placed right alongside workspace memory before conversation turns so the model
+  // always respects the user's architectural constraints when designing diagrams.
+  if (request.rules?.trim()) {
+    const formatted = formatWorkspaceRulesPrompt(request.rules);
+    if (formatted.trim()) {
+      const clampedRules = clamp(formatted.trim(), PAYLOAD_LIMITS.rules);
+      sections.push(`<workspace-rules>\n${escapeHarnessTags(clampedRules.text)}\n</workspace-rules>`);
+    }
   }
 
   if (history?.length) {

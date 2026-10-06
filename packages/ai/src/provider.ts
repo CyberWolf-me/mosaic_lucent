@@ -202,6 +202,12 @@ export interface GenerateRequest {
    */
   memory?: string;
   /**
+   * Workspace architectural rules & durable context: persistent tech stack,
+   * architectural constraints, naming conventions, and prohibited patterns that
+   * steer generations without users needing to repeat them on every prompt.
+   */
+  rules?: string;
+  /**
    * The requester's local calendar date, YYYY-MM-DD. The prompt tells the
    * model to resolve "by Friday" to a dueDate "against the conversation's
    * date" — without this it had no date to resolve against and guessed from
@@ -425,6 +431,8 @@ export const REQUEST_LIMITS = {
    * holds a real batch and still bounds the prompt (~3k tokens).
    */
   messageChars: 12_000,
+  /** Workspace architectural rules & durable context: persistent tech stack and constraints. */
+  rulesChars: 8_000,
   /** Attachments: the browser extracts document text, so no parser sees bytes. */
   documents: 4,
   documentNameChars: 200,

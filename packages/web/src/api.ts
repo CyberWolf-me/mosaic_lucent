@@ -392,6 +392,7 @@ export async function generate(
   history?: ChatEntry[],
   attachments?: { images?: ImageAttachment[]; documents?: DocumentAttachment[] },
   run?: RunContext,
+  rules?: string,
 ): Promise<GenerateResponse> {
   const turns = history ? recentHistory(history) : [];
 
@@ -407,6 +408,7 @@ export async function generate(
         ...(attachments?.images?.length ? { images: attachments.images } : {}),
         ...(attachments?.documents?.length ? { documents: attachments.documents } : {}),
         ...(run ? { run } : {}),
+        ...(rules ? { rules } : {}),
       }),
     });
   } catch (err) {
@@ -455,6 +457,7 @@ export async function streamGenerate(
     message?: string,
   ) => void,
   run?: RunContext,
+  rules?: string,
 ): Promise<GenerateResponse> {
   const controller = new AbortController();
   // UX-2: Cancel aborts the request. The flag tells a cancel apart from
@@ -483,6 +486,7 @@ export async function streamGenerate(
         ...(attachments?.images?.length ? { images: attachments.images } : {}),
         ...(attachments?.documents?.length ? { documents: attachments.documents } : {}),
         ...(run ? { run } : {}),
+        ...(rules ? { rules } : {}),
       }),
       signal: controller.signal,
     });

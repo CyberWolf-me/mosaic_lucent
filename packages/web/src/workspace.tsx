@@ -321,6 +321,9 @@ export interface WorkspaceState {
 
   workspace: Workspace;
   chat: ChatEntry[];
+  /** Workspace architectural rules & durable context (Initiative 2). */
+  rules: string;
+  setRules: (rules: string) => void;
 
   busy: boolean;
   /** M5/E1: streamed-payload characters received so far while busy; 0 otherwise. */
@@ -829,11 +832,14 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
    */
   const [lensKind, setLensKind] = useState<DiagramKind>(workspace.diagramKind);
   if (lensKind !== workspace.diagramKind) {
-    setLensKind(workspace.diagramKind);
-    setLens((current) => lensForKindChange(lensKind, workspace.diagramKind, current));
-  }
-  boardKindRef.current = workspace.diagramKind;
-  const [chat, setChat] = useState<ChatEntry[]>(restored?.chat ?? []);
+  setLensKind(workspace.diagramKind);
+  setLens((current) => lensForKindChange(lensKind, workspace.diagramKind, current));
+}
+boardKindRef.current = workspace.diagramKind;
+const [chat, setChat] = useState<ChatEntry[]>(restored?.chat ?? []);
+  const [rules, setRulesState] = useState<string>(restored?.rules ?? "");
+  const rulesRef = useRef<string>(rules);
+  rulesRef.current = rules;
   const [busy, setBusy] = useState(false);
   /** M5/E1: characters of the streamed payload received so far (display only). */
   const [streamChars, setStreamChars] = useState(0);
@@ -1090,7 +1096,13 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
    * that the server then rejects).
    */
   const adoptBoard = useCallback(
-    (board: { id: string; name: string; workspace: Workspace; role: BoardRole }): void => {
+    (board: {
+      id: string;
+      name: string;
+      workspace: Workspace;
+      role: BoardRole;
+      rules?: string | null;
+    }): void => {
       setSharedBoardId(board.id);
       setBoardId(board.id);
       // Autosave writes under whichever `projectId` is current, so a server board
@@ -1101,6 +1113,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       // leaving a new local project behind on every visit.
       setProjectId(mirrorProjectId(board.id));
       setProjectName(board.name);
+      rulesRef.current = board.rules ?? "";
+      setRulesState(board.rules ?? "");
       // A different project's proposal record must not leak into this
       // board's autosave slot (same class of cross-project bug as above).
       proposalRecordRef.current = undefined;
@@ -1195,6 +1209,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         name,
         workspace: ws,
         chat: conversation,
+        ...(rulesRef.current ? { rules: rulesRef.current } : {}),
         // The durable proposal record (2026-09 reliability fix): whatever is
         // in the ref is what gets saved — open, decided, or absent. Terminal
         // records persist as the audit trail even though only pending ones
@@ -1207,6 +1222,18 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       setLastOpenProject(projectId);
     },
     [projectId],
+  );
+
+  const setRules = useCallback(
+    (nextRules: string) => {
+      setRulesState(nextRules);
+      rulesRef.current = nextRules;
+      persist(workspace, chat, projectName);
+      if (boardId && syncRole && syncRole !== "viewer" && syncRole !== "commenter") {
+        void saveBoardDetailed("", projectName, workspace, boardId, nextRules);
+      }
+    },
+    [workspace, chat, projectName, boardId, syncRole, persist],
   );
 
   /**
@@ -1650,6 +1677,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
                 ? "voice"
                 : "canvas",
           },
+          rulesRef.current.trim() || undefined,
         );
         setStreamChars(0);
         setStreamNodes([]);
@@ -2468,6 +2496,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     setProjectName(name);
     setWorkspace(fresh.current());
     setChat([]);
+    rulesRef.current = "";
+    setRulesState("");
     // The new project has no proposal record; leaving the old one in the
     // refs would write the previous board's proposal into this slot's first
     // autosave (cross-project leak).
@@ -2521,6 +2551,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       setProjectName(name);
       setWorkspace(fresh);
       setChat([]);
+      rulesRef.current = "";
+      setRulesState("");
       // Fresh project: no proposal record carries over.
       proposalRecordRef.current = undefined;
       proposalHistoryRef.current = [];
@@ -2576,6 +2608,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       setProjectName(name);
       setWorkspace(safe);
       setChat([]);
+      rulesRef.current = "";
+      setRulesState("");
       // Imported boards carry no proposal state of their own.
       proposalRecordRef.current = undefined;
       proposalHistoryRef.current = [];
@@ -2613,6 +2647,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       setChat(
         review.error ? [...conversation, { role: "error", text: review.error }] : conversation,
       );
+      rulesRef.current = data.rules ?? "";
+      setRulesState(data.rules ?? "");
       // Open THIS project's proposal state: a pending record reopens the panel;
       // a decided one keeps its place in the slot but stays inert, and its
       // history rides along.
@@ -2699,6 +2735,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     setProjectName,
     workspace,
     chat,
+    rules,
+    setRules,
     busy,
     streamChars,
     streamNodes,

@@ -242,6 +242,11 @@ export const generateRequestSchema = z.object({
     )
     .max(REQUEST_LIMITS.documents)
     .optional(),
+  /**
+   * Workspace architectural rules & durable context: persistent tech stack,
+   * architectural constraints, naming conventions, and prohibited patterns.
+   */
+  rules: z.string().max(REQUEST_LIMITS.rulesChars).optional(),
 });
 
 export type GenerateRequestBody = z.infer<typeof generateRequestSchema>;
@@ -603,6 +608,7 @@ async function requestRicher(
   workspace: Workspace,
   message: string,
   memory?: string | null,
+  rules?: string,
 ): Promise<GenerateResult | null> {
   const nudge = [
     "Your previous attempt produced almost nothing — a single node or one sticky note — but the request below asks for a structured diagram.",
@@ -617,6 +623,7 @@ async function requestRicher(
       summary: summarizeWorkspace(workspace),
       ...(today ? { today } : {}),
       ...(memory ? { memory } : {}),
+      ...(rules ? { rules } : {}),
     });
   } catch {
     return null;
@@ -780,10 +787,16 @@ async function runGeneratePipeline(
   const authoritativeBoard =
     candidateBoard && userId === candidateBoard.ownerId ? candidateBoard : undefined;
 
-  // Workspace memory (docs/23) rides the FIRST model call only — not the bounded
-  // repair round below, which fixes validator complaints that memory can't help
-  // with and whose re-send would double the context cost of a failure.
-  const modelRequest = memory ? { ...parsed.data, memory } : parsed.data;
+  // Workspace memory (docs/23) and architectural rules (Initiative 2) ride the
+  // FIRST model call only — not the bounded repair round below, which fixes
+  // validator complaints that context can't help with and whose re-send would
+  // double the context cost of a failure.
+  const effectiveRules = parsed.data.rules ?? authoritativeBoard?.rules ?? undefined;
+  const modelRequest = {
+    ...parsed.data,
+    ...(memory ? { memory } : {}),
+    ...(effectiveRules ? { rules: effectiveRules } : {}),
+  };
 
   let result;
   try {
@@ -922,6 +935,7 @@ async function runGeneratePipeline(
         workspace,
         parsed.data.message,
         memory,
+        effectiveRules,
       );
       if (richer) {
         const richerOps = foldStatementTopics(
