@@ -8,6 +8,7 @@ import { getSessionUser } from "../session.js";
 import { Dialog } from "./primitives.js";
 import { useWorkspace, type CanvasLens, type View } from "../workspace.js";
 import { WorkspaceRulesModal } from "./WorkspaceRulesModal.js";
+import { SpecImportModal } from "./SpecImportModal.js";
 import {
   classifyBoard,
   createShareLink,
@@ -60,6 +61,7 @@ export function TopBar({
   const { view, setView, readOnly, projectName, setProjectName } = useWorkspace();
   const [share, setShare] = useState(false);
   const [showRules, setShowRules] = useState(false);
+  const [showSpecImport, setShowSpecImport] = useState(false);
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState(projectName);
 
@@ -150,6 +152,16 @@ export function TopBar({
           {boardActions && (
             <button
               className="icon-btn"
+              onClick={() => setShowSpecImport(true)}
+              aria-label="Import code or specification"
+              title="Import OpenAPI, SQL DDL, Prisma schema, or Docker Compose"
+            >
+              <Ico.Code /> Import
+            </button>
+          )}
+          {boardActions && (
+            <button
+              className="icon-btn"
               onClick={() => setShowRules(true)}
               aria-label="Workspace architectural rules"
               title="Workspace architectural rules & durable context"
@@ -175,6 +187,7 @@ export function TopBar({
           <ProfileMenu onOpenSettings={onOpenSettings} onNavigate={setView} />
         </>
       </div>
+      {showSpecImport && <SpecImportModal onClose={() => setShowSpecImport(false)} />}
       {showRules && <WorkspaceRulesModal onClose={() => setShowRules(false)} />}
       {share && <ShareDialog onClose={() => setShare(false)} />}
     </div>

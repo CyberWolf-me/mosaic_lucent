@@ -99,7 +99,13 @@ import {
 import { cloneShapeOp, nextZ, normalizeZ, shapeId, zOrderOps, type ZMove } from "../shapes.js";
 import { resolveEmbed } from "../embed.js";
 import { boardToMarkdown, boardToCsv } from "../board/serialize.js";
-import { boardToMermaid, detectMermaid, generateBoardDigest } from "@lucent/core";
+import {
+  boardToMermaid,
+  detectMermaid,
+  generateBoardDigest,
+  classifySpec,
+  specToOps,
+} from "@lucent/core";
 import type { Shape, Node } from "@lucent/core";
 import { planMermaidImport } from "../board/mermaidImport.js";
 import {
@@ -2211,6 +2217,32 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
             setSelectedShapes(new Set());
             setSelectedNodes(new Set(plan.nodeIds));
             notify(plan.message);
+          }
+          return;
+        }
+      }
+
+      // Engineering specification or architecture (ADR 0051 / Initiative 4):
+      // OpenAPI, SQL DDL, Prisma schema, or Docker Compose pasted onto canvas.
+      const specFmt = classifySpec(plain);
+      if (specFmt) {
+        const specResult = specToOps(plain);
+        if (specResult.ops.length > 0) {
+          e.preventDefault();
+          const nodeIds = specResult.ops
+            .filter((o): o is Extract<typeof o, { op: "CREATE_NODE" }> => o.op === "CREATE_NODE")
+            .map((o) => o.id);
+          if (
+            applyManual(
+              specResult.ops,
+              `Import ${specResult.format.toUpperCase()} (${specResult.summary})`,
+            )
+          ) {
+            setSelectedShapes(new Set());
+            setSelectedNodes(new Set(nodeIds));
+            notify(
+              `Imported ${specResult.format.toUpperCase()} specification (${specResult.summary}).`,
+            );
           }
           return;
         }
