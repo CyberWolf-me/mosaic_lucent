@@ -18,24 +18,30 @@ Lucent's core architecture delivers a deterministic semantic canvas, multi-lens 
 
 ## Detailed Specifications
 
-### Initiative 1: Slash Commands (`/`) in AIPill
+### Initiative 1: Slash Commands (`/`) in AIPill — `[COMPLETED]`
 
 #### Problem
 Users experience "blank canvas paralysis" when asked to type natural language descriptions without guidance.
 
-#### Specification
-- Trigger: Pressing `/` at the start of input or on an empty line in `AIPill.tsx` opens an autocomplete popover.
-- Supported Commands:
-  - `/decompose [node?]` — Expands a high-level component into 3–5 sub-process nodes with directed connectors.
-  - `/threat-model` — Conducts a security audit identifying unauthenticated edges, single points of failure, and missing rate-limits.
-  - `/edge-cases` — Discovers error states and timeouts, adding decision diamonds and retry branches.
-  - `/sequence` — Converts current flowchart into an actor-to-actor sequence diagram.
-  - `/simplify` — Consolidates redundant nodes into higher-level abstractions.
-  - `/translate [language]` — Translates all node labels and notes into the target language while preserving graph topology.
-- Files:
-  - `packages/web/src/ui/AIPill.tsx`
-  - `packages/ai/src/prompt.ts`
-  - `packages/web/src/workspace.tsx`
+#### Specification & Implementation
+- **Trigger**: Pressing `/` at the start of input or clicking the `/` trigger button in `AIPill.tsx` opens an autocomplete popover.
+- **Commands Catalog**:
+  - `/decompose [node?]` — Expands a high-level component into 3–5 sub-process nodes with directed connectors (`architecture`).
+  - `/threat-model [focus?]` — Conducts a security audit identifying unauthenticated edges, single points of failure, and missing rate-limits (`security`).
+  - `/edge-cases [flow?]` — Discovers error states and timeouts, adding decision diamonds and retry branches (`refine`).
+  - `/sequence [flow?]` — Converts current flowchart into an actor-to-actor sequence diagram (`transform`).
+  - `/simplify [scope?]` — Consolidates redundant nodes into higher-level abstractions (`refine`).
+  - `/translate [language]` — Translates all node labels and notes into the target language while preserving graph topology (`transform`).
+- **Files Implemented**:
+  - `packages/core/src/slashCommands.ts`: Catalog definition, prefix & full-text query filtering, command parser, and prompt expansion.
+  - `packages/core/test/slashCommands.test.ts`: 15 unit tests covering parsing, filtering, and prompt expansion.
+  - `packages/ai/src/prompt.ts`: Integration in `buildUserPrompt` expanding slash commands into precise architectural instructions.
+  - `packages/ai/test/prompt-limits.test.ts`: Unit tests verifying prompt expansion across all commands.
+  - `packages/web/src/ui/GrowTextarea.tsx`: Intercepts `onKeyDown` allowing `AIPill` to capture `ArrowUp`, `ArrowDown`, `Enter`, `Tab`, and `Escape`.
+  - `packages/web/src/ui/AIPill.tsx`: Autocomplete menu, keyboard navigation, slash command badge, trigger button.
+  - `packages/web/src/styles.css`: High-end typography, glassmorphism, category color tags, hover/selection states.
+  - `packages/web/e2e/workflows/slash-commands.spec.ts`: End-to-end Playwright workflow test verifying catalog opening, filtering, keyboard navigation, dismissal, badge feedback, and visual canvas generation.
+- **Verification**: 100% clean typecheck across all 7 packages, unit tests passing in `@lucent/core` and `@lucent/ai`, and Playwright E2E passing.
 
 ---
 
