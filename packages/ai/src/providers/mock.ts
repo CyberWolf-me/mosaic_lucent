@@ -1365,8 +1365,30 @@ export class MockProvider implements LLMProvider {
   }
 
   async generateOperations(request: GenerateRequest): Promise<GenerateResult> {
-    const result = await this.scripted(request);
-    return result.reply ? result : { ...result, reply: mockReply(result) };
+    const raw = await this.scripted(request);
+    const result = raw.reply ? raw : { ...raw, reply: mockReply(raw) };
+    const tier = request.tier ?? "balanced";
+    if (tier === "reasoning") {
+      const thinking = `1. Deconstructing user request: "${request.message.slice(0, 50)}"\n2. Evaluating node constraints and semantic relationships.\n3. Emitting verified graph operations.`;
+      return {
+        ...result,
+        thinking,
+        model: "mock-reasoning",
+        usage: { inputTokens: 45, outputTokens: 90, reasoningTokens: 60 },
+      };
+    }
+    if (tier === "fast") {
+      return {
+        ...result,
+        model: "mock-fast",
+        usage: { inputTokens: 25, outputTokens: 50 },
+      };
+    }
+    return {
+      ...result,
+      model: "mock-balanced",
+      usage: { inputTokens: 40, outputTokens: 80 },
+    };
   }
 
   private async scripted(request: GenerateRequest): Promise<GenerateResult> {
@@ -1418,6 +1440,10 @@ export class MockProvider implements LLMProvider {
     callbacks: StreamCallbacks,
   ): Promise<GenerateResult> {
     const result = await this.generateOperations(request);
+    if (result.thinking && callbacks.onThinkingDelta) {
+      callbacks.onThinkingDelta(result.thinking);
+      await new Promise<void>((resolve) => setTimeout(resolve, 0).unref?.());
+    }
     const payload = JSON.stringify({
       operations: result.operations,
       explanation: result.explanation ?? null,

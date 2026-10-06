@@ -204,4 +204,59 @@ data: ${JSON.stringify(d)}
     setTimeout(() => cancel.abort(), 10);
     await expect(pending).rejects.toThrow(/Cancelled/);
   });
+
+  it("delivers thinking deltas and attaches telemetry in done frame", async () => {
+    mockFetchSse([
+      ["start", { provider: "mock" }],
+      ["thinking", { text: "Analyzing query... " }],
+      ["thinking", { text: "Synthesizing graph..." }],
+      ["delta", { text: '{"operations":[]}' }],
+      [
+        "done",
+        {
+          operations: [{ op: "CREATE_NODE", id: "t1", nodeType: "step", label: "Thinking Node" }],
+          explanation: "done thinking",
+          provider: "anthropic",
+          thinking: "Analyzing query... Synthesizing graph...",
+          telemetry: {
+            provider: "anthropic",
+            model: "claude-3-7-sonnet",
+            latencyMs: 1420,
+            promptTokens: 120,
+            completionTokens: 85,
+            reasoningTokens: 64,
+          },
+        },
+      ],
+    ]);
+
+    const thoughts: string[] = [];
+    const deltas: string[] = [];
+    const result = await streamGenerate(
+      "design cloud architecture",
+      emptyWorkspace,
+      (d) => deltas.push(d),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      (t) => thoughts.push(t),
+      "reasoning",
+    );
+
+    expect(thoughts).toEqual(["Analyzing query... ", "Synthesizing graph..."]);
+    expect(result.operations).toHaveLength(1);
+    expect(result.thinking).toBe("Analyzing query... Synthesizing graph...");
+    expect(result.telemetry).toEqual({
+      provider: "anthropic",
+      model: "claude-3-7-sonnet",
+      latencyMs: 1420,
+      promptTokens: 120,
+      completionTokens: 85,
+      reasoningTokens: 64,
+    });
+  });
 });

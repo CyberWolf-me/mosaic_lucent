@@ -141,6 +141,10 @@ export interface ChatEntry {
    * so older saved conversations keep parsing.
    */
   effect?: import("./turnEffect.js").TurnEffect;
+  /** Chain-of-thought or reasoning output from the model. */
+  thinking?: string;
+  /** Generation telemetry (latency, token counts, model name). */
+  telemetry?: import("./api.js").GenerateTelemetry;
   /**
    * True when the AI judged this request to be about a different system than
    * the board shows (the prompt's parallel-diagram rule) and described what it

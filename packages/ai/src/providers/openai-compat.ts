@@ -68,6 +68,10 @@ export interface OpenAICompatOptions {
   model: string;
   /** Optional fallback model to use if the primary model fails. */
   fallbackModel?: string;
+  /** Optional fast tier model (e.g. gpt-4o-mini). */
+  fastModel?: string;
+  /** Optional reasoning tier model (e.g. o3-mini or deepseek-reasoner). */
+  reasoningModel?: string;
   fetchImpl?: typeof fetch;
   /** Optional friendly name shown in /health. */
   name?: string;
@@ -83,12 +87,21 @@ interface ToolCall {
 
 interface ChatResponse {
   choices?: Array<{
-    message?: { content?: string; tool_calls?: ToolCall[] };
+    message?: {
+      content?: string;
+      reasoning_content?: string;
+      reasoning?: string;
+      tool_calls?: ToolCall[];
+    };
   }>;
   /** What the gateway actually routed to, which need not be `this.model`. */
   model?: string;
   /** Standard chat-completions token accounting. */
-  usage?: { prompt_tokens?: number; completion_tokens?: number };
+  usage?: {
+    prompt_tokens?: number;
+    completion_tokens?: number;
+    completion_tokens_details?: { reasoning_tokens?: number };
+  };
 }
 
 /**
@@ -196,6 +209,8 @@ export class OpenAICompatibleProvider implements LLMProvider {
   private readonly baseUrl: string;
   private readonly model: string;
   private readonly fallbackModel?: string;
+  private readonly fastModel?: string;
+  private readonly reasoningModel?: string;
   private readonly fetchImpl: typeof fetch;
   private readonly maxRetries: number;
   private readonly timeoutMs: number;
@@ -216,21 +231,29 @@ export class OpenAICompatibleProvider implements LLMProvider {
     this.baseUrl = options.baseUrl;
     this.model = options.model;
     this.fallbackModel = options.fallbackModel;
+    this.fastModel = options.fastModel ?? process.env.LUCENT_AI_MODEL_FAST;
+    this.reasoningModel = options.reasoningModel ?? process.env.LUCENT_AI_MODEL_REASONING;
     this.fetchImpl = options.fetchImpl ?? fetch;
     this.name = options.name ?? "openai-compat";
     this.maxRetries = Math.max(1, options.maxRetries ?? 4);
     this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   }
 
-  private candidateModels(): string[] {
+  private candidateModels(tier?: import("../provider.js").ModelTier): string[] {
+    let primary = this.model;
+    if (tier === "fast" && this.fastModel) {
+      primary = this.fastModel;
+    } else if (tier === "reasoning" && this.reasoningModel) {
+      primary = this.reasoningModel;
+    }
     return [
-      this.model,
-      ...(this.fallbackModel && this.fallbackModel !== this.model ? [this.fallbackModel] : []),
+      primary,
+      ...(this.fallbackModel && this.fallbackModel !== primary ? [this.fallbackModel] : []),
     ];
   }
 
   async generateOperations(request: GenerateRequest): Promise<GenerateResult> {
-    const models = this.candidateModels();
+    const models = this.candidateModels(request.tier);
     let lastError: Error | null = null;
     for (const modelToUse of models) {
       try {
@@ -361,10 +384,13 @@ export class OpenAICompatibleProvider implements LLMProvider {
       // A gateway may reroute, so the echoed model is preferred over the
       // configured one; both response paths carry it so a prose fallback is
       // billed the same as a tool call.
+      const rawThinking = message?.reasoning_content ?? message?.reasoning;
       const meta = completionMeta(
         data.model ?? this.model,
         data.usage?.prompt_tokens,
         data.usage?.completion_tokens,
+        data.usage?.completion_tokens_details?.reasoning_tokens,
+        typeof rawThinking === "string" ? rawThinking : undefined,
       );
 
       const call =
@@ -743,7 +769,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
     request: GenerateRequest,
     callbacks: StreamCallbacks,
   ): Promise<GenerateResult> {
-    const models = this.candidateModels();
+    const models = this.candidateModels(request.tier);
     let lastError: Error | null = null;
     for (const modelToUse of models) {
       let emittedDelta = false;
@@ -751,6 +777,10 @@ export class OpenAICompatibleProvider implements LLMProvider {
         onDelta: (delta) => {
           emittedDelta = true;
           callbacks.onDelta(delta);
+        },
+        onThinkingDelta: (delta) => {
+          emittedDelta = true;
+          callbacks.onThinkingDelta?.(delta);
         },
       };
       try {
@@ -853,8 +883,10 @@ export class OpenAICompatibleProvider implements LLMProvider {
 
     let argumentsText = "";
     let proseText = "";
+    let thinkingText = "";
+    let inThinkTag = false;
     let streamedModel: string | undefined;
-    let usage: { prompt_tokens?: number; completion_tokens?: number } | undefined;
+    let usage: ChatStreamChunk["usage"];
 
     for await (const event of sseEvents(response.body)) {
       if (event === "[DONE]") break;
@@ -868,13 +900,66 @@ export class OpenAICompatibleProvider implements LLMProvider {
       if (chunk.usage) usage = chunk.usage;
       const delta = chunk.choices?.[0]?.delta;
       if (!delta) continue;
+
+      // Handle reasoning_content from gateways like DeepSeek, OpenRouter, Groq
+      const reasoning = delta.reasoning_content ?? delta.reasoning;
+      if (typeof reasoning === "string" && reasoning !== "") {
+        thinkingText += reasoning;
+        callbacks.onThinkingDelta?.(reasoning);
+      }
+
       const args = delta.tool_calls?.[0]?.function?.arguments;
       if (typeof args === "string" && args !== "") {
         argumentsText += args;
         callbacks.onDelta(args);
       } else if (typeof delta.content === "string" && delta.content !== "") {
-        proseText += delta.content;
-        callbacks.onDelta(delta.content);
+        const content = delta.content;
+        // Parse streamed <think> blocks in prose content
+        if (content.includes("<think>")) {
+          inThinkTag = true;
+          const parts = content.split("<think>");
+          if (parts[0]) {
+            proseText += parts[0];
+            callbacks.onDelta(parts[0]);
+          }
+          const remainder = parts.slice(1).join("<think>");
+          if (remainder.includes("</think>")) {
+            const endParts = remainder.split("</think>");
+            if (endParts[0]) {
+              thinkingText += endParts[0];
+              callbacks.onThinkingDelta?.(endParts[0]);
+            }
+            inThinkTag = false;
+            const after = endParts.slice(1).join("</think>");
+            if (after) {
+              proseText += after;
+              callbacks.onDelta(after);
+            }
+          } else {
+            thinkingText += remainder;
+            callbacks.onThinkingDelta?.(remainder);
+          }
+        } else if (inThinkTag) {
+          if (content.includes("</think>")) {
+            const parts = content.split("</think>");
+            if (parts[0]) {
+              thinkingText += parts[0];
+              callbacks.onThinkingDelta?.(parts[0]);
+            }
+            inThinkTag = false;
+            const after = parts.slice(1).join("</think>");
+            if (after) {
+              proseText += after;
+              callbacks.onDelta(after);
+            }
+          } else {
+            thinkingText += content;
+            callbacks.onThinkingDelta?.(content);
+          }
+        } else {
+          proseText += content;
+          callbacks.onDelta(content);
+        }
       }
     }
 
@@ -882,6 +967,8 @@ export class OpenAICompatibleProvider implements LLMProvider {
       streamedModel ?? modelToUse,
       usage?.prompt_tokens,
       usage?.completion_tokens,
+      usage?.completion_tokens_details?.reasoning_tokens,
+      thinkingText || undefined,
     );
     if (argumentsText !== "") {
       try {
@@ -906,8 +993,17 @@ export class OpenAICompatibleProvider implements LLMProvider {
 
 interface ChatStreamChunk {
   model?: string;
-  usage?: { prompt_tokens?: number; completion_tokens?: number };
+  usage?: {
+    prompt_tokens?: number;
+    completion_tokens?: number;
+    completion_tokens_details?: { reasoning_tokens?: number };
+  };
   choices?: Array<{
-    delta?: { content?: string | null; tool_calls?: Array<{ function?: { arguments?: string } }> };
+    delta?: {
+      content?: string | null;
+      reasoning_content?: string | null;
+      reasoning?: string | null;
+      tool_calls?: Array<{ function?: { arguments?: string } }>;
+    };
   }>;
 }

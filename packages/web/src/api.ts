@@ -15,6 +15,15 @@ import { apiFetch } from "./http.js";
  * generation loop 403d for every cookie-authenticated user.
  */
 
+export interface GenerateTelemetry {
+  provider: string;
+  model: string;
+  latencyMs: number;
+  promptTokens?: number;
+  completionTokens?: number;
+  reasoningTokens?: number;
+}
+
 export interface GenerateResponse {
   operations: Operation[];
   explanation: string | null;
@@ -39,6 +48,10 @@ export interface GenerateResponse {
    * from older servers and from anonymous use.
    */
   runId?: string;
+  /** Chain-of-thought or reasoning stream output from reasoning models. */
+  thinking?: string | null;
+  /** Telemetry metrics: provider, model name, latency, token breakdown. */
+  telemetry?: GenerateTelemetry | null;
 }
 
 /** What an AI run is for: the board the person is on, and where they asked. */
@@ -393,6 +406,7 @@ export async function generate(
   attachments?: { images?: ImageAttachment[]; documents?: DocumentAttachment[] },
   run?: RunContext,
   rules?: string,
+  tier?: "fast" | "balanced" | "reasoning",
 ): Promise<GenerateResponse> {
   const turns = history ? recentHistory(history) : [];
 
@@ -409,6 +423,7 @@ export async function generate(
         ...(attachments?.documents?.length ? { documents: attachments.documents } : {}),
         ...(run ? { run } : {}),
         ...(rules ? { rules } : {}),
+        ...(tier ? { tier } : {}),
       }),
     });
   } catch (err) {
@@ -426,7 +441,26 @@ export async function generate(
   if (!res.ok) {
     throw await describeFailure(res);
   }
-  const body = (await res.json()) as GenerateResponse;
+  const rawBody = (await res.json()) as Record<string, unknown>;
+  const rawTelemetry =
+    rawBody.telemetry && typeof rawBody.telemetry === "object"
+      ? (rawBody.telemetry as Record<string, unknown>)
+      : undefined;
+  const telemetry: GenerateTelemetry | null = rawTelemetry
+    ? {
+        provider: typeof rawTelemetry.provider === "string" ? rawTelemetry.provider : "unknown",
+        model: typeof rawTelemetry.model === "string" ? rawTelemetry.model : "unknown",
+        latencyMs: typeof rawTelemetry.latencyMs === "number" ? rawTelemetry.latencyMs : 0,
+        promptTokens: typeof rawTelemetry.promptTokens === "number" ? rawTelemetry.promptTokens : undefined,
+        completionTokens: typeof rawTelemetry.completionTokens === "number" ? rawTelemetry.completionTokens : undefined,
+        reasoningTokens: typeof rawTelemetry.reasoningTokens === "number" ? rawTelemetry.reasoningTokens : undefined,
+      }
+    : null;
+  const body: GenerateResponse = {
+    ...(rawBody as unknown as GenerateResponse),
+    thinking: typeof rawBody.thinking === "string" ? rawBody.thinking : null,
+    telemetry,
+  };
   // Re-parsed rather than trusted as typed: the cast above is a claim about the
   // wire, and this is the one field a caller renders straight to a customer.
   const allowance = parseAllowance(body.allowance);
@@ -458,6 +492,8 @@ export async function streamGenerate(
   ) => void,
   run?: RunContext,
   rules?: string,
+  onThinking?: (delta: string) => void,
+  tier?: "fast" | "balanced" | "reasoning",
 ): Promise<GenerateResponse> {
   const controller = new AbortController();
   // UX-2: Cancel aborts the request. The flag tells a cancel apart from
@@ -487,6 +523,7 @@ export async function streamGenerate(
         ...(attachments?.documents?.length ? { documents: attachments.documents } : {}),
         ...(run ? { run } : {}),
         ...(rules ? { rules } : {}),
+        ...(tier ? { tier } : {}),
       }),
       signal: controller.signal,
     });
@@ -525,6 +562,11 @@ export async function streamGenerate(
       }
       return;
     }
+    if (event === "thinking") {
+      const text = (data as { text?: unknown }).text;
+      if (typeof text === "string") onThinking?.(text);
+      return;
+    }
     if (event === "delta") {
       const text = (data as { text?: unknown }).text;
       if (typeof text === "string") onDelta(text);
@@ -539,7 +581,23 @@ export async function streamGenerate(
         provider?: string;
         warnings?: Array<{ op: string; reason: string }>;
         runId?: unknown;
+        thinking?: unknown;
+        telemetry?: unknown;
       };
+      const rawTelemetry =
+        body.telemetry && typeof body.telemetry === "object"
+          ? (body.telemetry as Record<string, unknown>)
+          : undefined;
+      const telemetry: GenerateTelemetry | null = rawTelemetry
+        ? {
+            provider: typeof rawTelemetry.provider === "string" ? rawTelemetry.provider : "unknown",
+            model: typeof rawTelemetry.model === "string" ? rawTelemetry.model : "unknown",
+            latencyMs: typeof rawTelemetry.latencyMs === "number" ? rawTelemetry.latencyMs : 0,
+            promptTokens: typeof rawTelemetry.promptTokens === "number" ? rawTelemetry.promptTokens : undefined,
+            completionTokens: typeof rawTelemetry.completionTokens === "number" ? rawTelemetry.completionTokens : undefined,
+            reasoningTokens: typeof rawTelemetry.reasoningTokens === "number" ? rawTelemetry.reasoningTokens : undefined,
+          }
+        : null;
       done = {
         ...(typeof body.runId === "string" ? { runId: body.runId } : {}),
         operations: Array.isArray(body.operations) ? body.operations : [],
@@ -555,6 +613,8 @@ export async function streamGenerate(
         provider: body.provider ?? "unknown",
         allowance: null,
         warnings: Array.isArray(body.warnings) ? body.warnings : undefined,
+        thinking: typeof body.thinking === "string" ? body.thinking : null,
+        telemetry,
       };
       return;
     }

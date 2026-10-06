@@ -247,6 +247,8 @@ export const generateRequestSchema = z.object({
    * architectural constraints, naming conventions, and prohibited patterns.
    */
   rules: z.string().max(REQUEST_LIMITS.rulesChars).optional(),
+  /** Model tier selection: fast, balanced, or reasoning */
+  tier: z.enum(["fast", "balanced", "reasoning"]).optional(),
 });
 
 export type GenerateRequestBody = z.infer<typeof generateRequestSchema>;
@@ -636,6 +638,7 @@ function usageFor(last: GenerateResult, first: GenerateResult | undefined): Toke
   return {
     inputTokens: sum(first.usage.inputTokens, last.usage.inputTokens),
     outputTokens: sum(first.usage.outputTokens, last.usage.outputTokens),
+    reasoningTokens: sum(first.usage.reasoningTokens, last.usage.reasoningTokens),
   };
 }
 
@@ -687,6 +690,15 @@ export async function handleGenerate(
       ...(outcome.boardVersion > 0 ? { boardVersion: outcome.boardVersion } : {}),
       // Partial-application skips (M1), same as the SSE done frame.
       ...(outcome.warnings ? { warnings: outcome.warnings } : {}),
+      ...(outcome.thinking ? { thinking: outcome.thinking } : {}),
+      telemetry: {
+        provider: outcome.provider,
+        model: outcome.completion.model ?? "unknown",
+        latencyMs: outcome.latencyMs,
+        promptTokens: outcome.completion.usage?.inputTokens,
+        completionTokens: outcome.completion.usage?.outputTokens,
+        reasoningTokens: outcome.completion.usage?.reasoningTokens,
+      },
     },
     completion: outcome.completion,
   };
@@ -715,6 +727,10 @@ export type PipelineOutcome =
       outcome: GenerateOutcome;
       /** Whether the bounded repair round ran, success or not. */
       repaired: boolean;
+      /** Model chain-of-thought or reasoning output. */
+      thinking?: string | null;
+      /** Latency in milliseconds. */
+      latencyMs: number;
       /**
        * Operations that failed validation and were skipped rather than applied
        * (partial application, M1). Empty on a clean batch. Each carries the
@@ -764,6 +780,7 @@ async function runGeneratePipeline(
   stream?: StreamCallbacks,
   memory?: string | null,
 ): Promise<PipelineOutcome> {
+  const startTime = Date.now();
   const parsed = generateRequestSchema.safeParse(rawBody);
   if (!parsed.success) {
     return {
@@ -976,6 +993,7 @@ async function runGeneratePipeline(
             usage: {
               inputTokens: sum(completion.usage?.inputTokens, richer.usage.inputTokens),
               outputTokens: sum(completion.usage?.outputTokens, richer.usage.outputTokens),
+              reasoningTokens: sum(completion.usage?.reasoningTokens, richer.usage.reasoningTokens),
             },
           };
         }
@@ -1018,6 +1036,7 @@ async function runGeneratePipeline(
             usage: {
               inputTokens: sum(completion.usage?.inputTokens, connect.usage.inputTokens),
               outputTokens: sum(completion.usage?.outputTokens, connect.usage.outputTokens),
+              reasoningTokens: sum(completion.usage?.reasoningTokens, connect.usage.reasoningTokens),
             },
           };
         }
@@ -1037,6 +1056,7 @@ async function runGeneratePipeline(
       workspace: updated,
       updatedAt: Date.now(),
     });
+    const latencyMs = Date.now() - startTime;
     return {
       ok: true,
       operations: appliedOps,
@@ -1050,9 +1070,12 @@ async function runGeneratePipeline(
       warnings,
       outcome: "success",
       repaired,
+      thinking: result.thinking ?? null,
+      latencyMs,
     };
   }
 
+  const latencyMs = Date.now() - startTime;
   return {
     ok: true,
     operations: appliedOps,
@@ -1066,6 +1089,8 @@ async function runGeneratePipeline(
     warnings,
     outcome: "success",
     repaired,
+    thinking: result.thinking ?? null,
+    latencyMs,
   };
 }
 
@@ -1083,7 +1108,7 @@ export async function handleGenerateStream(
   rawBody: unknown,
   userId?: string,
   authoritative?: AuthoritativeContext,
-  send?: (event: "start" | "delta" | "done" | "error" | "phase", data: unknown) => void,
+  send?: (event: "start" | "delta" | "done" | "error" | "phase" | "thinking", data: unknown) => void,
   /**
    * Runs after validation, before the done frame: its fields ride the frame.
    * The route records the AI run here (ADR 0047), so the client gets its run
@@ -1123,6 +1148,9 @@ export async function handleGenerateStream(
         }
         emit("delta", { text: delta });
       },
+      onThinkingDelta: (delta) => {
+        emit("thinking", { text: delta });
+      },
     },
     memory,
   );
@@ -1157,6 +1185,15 @@ export async function handleGenerateStream(
     // Partial-application skips (M1): the client shows what didn't land and
     // can offer to fix just those. Omitted on a clean batch.
     ...(outcome.warnings ? { warnings: outcome.warnings } : {}),
+    ...(outcome.thinking ? { thinking: outcome.thinking } : {}),
+    telemetry: {
+      provider: outcome.provider,
+      model: outcome.completion.model ?? "unknown",
+      latencyMs: outcome.latencyMs,
+      promptTokens: outcome.completion.usage?.inputTokens,
+      completionTokens: outcome.completion.usage?.outputTokens,
+      reasoningTokens: outcome.completion.usage?.reasoningTokens,
+    },
   });
   return {
     status: 200,

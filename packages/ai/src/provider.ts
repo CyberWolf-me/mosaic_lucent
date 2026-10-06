@@ -175,11 +175,15 @@ export interface DocumentAttachment {
   text: string;
 }
 
+export type ModelTier = "fast" | "balanced" | "reasoning";
+
 export interface GenerateRequest {
   /** The user's natural-language message (from text or transcribed voice). */
   message: string;
   /** Current workspace state so follow-ups resolve references. */
   summary: WorkspaceSummary;
+  /** Model tier selection: fast (low latency), balanced (default), reasoning (deep CoT). */
+  tier?: ModelTier;
   /**
    * Recent conversation turns, oldest first, excluding the current message.
    * Without this each request was stateless, so "make it simpler" or "add three
@@ -228,6 +232,7 @@ export interface GenerateRequest {
 export interface TokenUsage {
   inputTokens?: number;
   outputTokens?: number;
+  reasoningTokens?: number;
 }
 
 export interface GenerateResult {
@@ -241,6 +246,11 @@ export interface GenerateResult {
    * explanation when a model leaves it out.
    */
   reply?: string;
+  /**
+   * Chain-of-thought or reasoning trace emitted by reasoning-capable models
+   * (e.g. DeepSeek-R1, o1, o3-mini, Claude 3.7 with thinking).
+   */
+  thinking?: string;
   /**
    * The model that actually answered, as the provider named it in its response
    * — not the one that was requested. Gateways silently reroute, and the meter
@@ -262,6 +272,8 @@ export interface GenerateResult {
  */
 export interface StreamCallbacks {
   onDelta(delta: string): void;
+  /** Streamed chain-of-thought reasoning tokens as they are produced. */
+  onThinkingDelta?(delta: string): void;
 }
 
 export interface LLMProvider {
@@ -324,6 +336,9 @@ export function streamViaGenerate(
 ): Promise<GenerateResult> {
   const generate = provider.generateOperations.bind(provider);
   return generate(request).then((result) => {
+    if (result.thinking && callbacks.onThinkingDelta) {
+      callbacks.onThinkingDelta(result.thinking);
+    }
     callbacks.onDelta(
       JSON.stringify({ operations: result.operations, explanation: result.explanation ?? null }),
     );

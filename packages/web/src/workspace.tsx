@@ -510,6 +510,8 @@ export interface WorkspaceState {
   /** Clarification question and options when intent is ambiguous. */
   clarification: import("@lucent/core").ClarificationChoice | null;
   clearClarification: () => void;
+  /** Live streaming chain-of-thought / reasoning output while AI generates. */
+  streamThinking: string;
 }
 
 const Ctx = createContext<WorkspaceState | null>(null);
@@ -847,6 +849,8 @@ const [chat, setChat] = useState<ChatEntry[]>(restored?.chat ?? []);
    * preview of the diagram taking shape (display only; the validated batch at
    * `done` is still authoritative). */
   const [streamNodes, setStreamNodes] = useState<string[]>([]);
+  /** Live streaming chain-of-thought tokens while AI is reasoning. */
+  const [streamThinking, setStreamThinking] = useState("");
   /** Google-Stitch-style reveal: nodeId → its position in the just-generated
    * batch's flow sequence, so the canvas sketches the diagram in node-by-node
    * (connectors drawing after each). Null when idle; cleared once the sequence
@@ -1642,6 +1646,8 @@ const [chat, setChat] = useState<ChatEntry[]>(restored?.chat ?? []);
         let deltaBuffer = "";
         let sawDelta = false;
         setStreamNodes([]);
+        setStreamThinking("");
+        const currentTier = settingsStore.get().modelTier;
         const result = await streamGenerate(
           text,
           workspace,
@@ -1678,9 +1684,14 @@ const [chat, setChat] = useState<ChatEntry[]>(restored?.chat ?? []);
                 : "canvas",
           },
           rulesRef.current.trim() || undefined,
+          (thoughtDelta) => {
+            setStreamThinking((prev) => prev + thoughtDelta);
+          },
+          currentTier,
         );
         setStreamChars(0);
         setStreamNodes([]);
+        setStreamThinking("");
         setGenPhase("validating");
         if (result.clarification) {
           setClarification(result.clarification);
@@ -1714,6 +1725,8 @@ const [chat, setChat] = useState<ChatEntry[]>(restored?.chat ?? []);
               reply,
               ...(suggestsBoard ? { suggestNewBoard: true, originPrompt: text } : {}),
               drewNothing: true,
+              ...(result.thinking ? { thinking: result.thinking } : {}),
+              ...(result.telemetry ? { telemetry: result.telemetry } : {}),
             },
           ];
           setChat(conversation);
@@ -1858,6 +1871,8 @@ const [chat, setChat] = useState<ChatEntry[]>(restored?.chat ?? []);
               text: `${explanation} — review ${result.operations.length} proposed changes.`,
               reply: `${reply} It's waiting for your review.`,
               ...skippedNote,
+              ...(result.thinking ? { thinking: result.thinking } : {}),
+              ...(result.telemetry ? { telemetry: result.telemetry } : {}),
             },
           ];
           setChat(conversation);
@@ -1898,7 +1913,15 @@ const [chat, setChat] = useState<ChatEntry[]>(restored?.chat ?? []);
           // no room broadcast, no canvas change.
           const conversation: ChatEntry[] = [
             ...withUser,
-            { role: "ai", text: explanation, reply, ...skippedNote, drewNothing: true },
+            {
+              role: "ai",
+              text: explanation,
+              reply,
+              ...skippedNote,
+              drewNothing: true,
+              ...(result.thinking ? { thinking: result.thinking } : {}),
+              ...(result.telemetry ? { telemetry: result.telemetry } : {}),
+            },
           ];
           setChat(conversation);
           persist(workspace, conversation, projectName);
@@ -1929,6 +1952,8 @@ const [chat, setChat] = useState<ChatEntry[]>(restored?.chat ?? []);
               reply,
               ...skippedNote,
               effect: turnEffect(foldedOps),
+              ...(result.thinking ? { thinking: result.thinking } : {}),
+              ...(result.telemetry ? { telemetry: result.telemetry } : {}),
             },
           ];
           setChat(conversation);
@@ -1939,6 +1964,7 @@ const [chat, setChat] = useState<ChatEntry[]>(restored?.chat ?? []);
           return { outcome: "applied", ops: foldedOps.length, reply };
         }
       } catch (err) {
+        setStreamThinking("");
         // Retriable-failure affordance (found live, 2026-09-10): a transient
         // provider 502 left an empty board behind a transient toast; the
         // error persisted in chat, but re-running meant retyping the whole
@@ -2790,6 +2816,7 @@ const [chat, setChat] = useState<ChatEntry[]>(restored?.chat ?? []);
     importWorkspace,
     clarification,
     clearClarification,
+    streamThinking,
   };
   // reference tick so lint keeps the dependency; forces context identity refresh
   void tick;

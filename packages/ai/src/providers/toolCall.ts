@@ -24,6 +24,7 @@ interface ToolArgs {
   explanation?: unknown;
   reply?: unknown;
   clarification?: unknown;
+  thinking?: unknown;
 }
 
 /**
@@ -35,6 +36,7 @@ interface ToolArgs {
 export interface CompletionMeta {
   model?: string;
   usage?: TokenUsage;
+  thinking?: string;
 }
 
 function tokenCount(value: unknown): number | undefined {
@@ -50,16 +52,21 @@ export function completionMeta(
   model: unknown,
   inputTokens: unknown,
   outputTokens: unknown,
+  reasoningTokens?: unknown,
+  thinking?: unknown,
 ): CompletionMeta {
   const input = tokenCount(inputTokens);
   const output = tokenCount(outputTokens);
+  const reasoning = tokenCount(reasoningTokens);
   const usage: TokenUsage = {
     ...(input !== undefined ? { inputTokens: input } : {}),
     ...(output !== undefined ? { outputTokens: output } : {}),
+    ...(reasoning !== undefined ? { reasoningTokens: reasoning } : {}),
   };
   return {
     ...(typeof model === "string" && model ? { model } : {}),
     ...(Object.keys(usage).length ? { usage } : {}),
+    ...(typeof thinking === "string" && thinking ? { thinking } : {}),
   };
 }
 
@@ -108,12 +115,18 @@ function toResult(parsed: ToolArgs, source: string, meta?: CompletionMeta): Gene
     }
   }
 
+  const thinking =
+    typeof parsed.thinking === "string" && parsed.thinking.trim()
+      ? parsed.thinking.trim()
+      : meta?.thinking;
+
   return {
     operations,
     ...(typeof parsed.explanation === "string" ? { explanation: parsed.explanation } : {}),
     ...(typeof parsed.reply === "string" && parsed.reply.trim()
       ? { reply: parsed.reply.trim() }
       : {}),
+    ...(thinking ? { thinking } : {}),
     ...(clarification ? { clarification } : {}),
     ...(meta?.model ? { model: meta.model } : {}),
     ...(meta?.usage ? { usage: meta.usage } : {}),
@@ -141,18 +154,29 @@ export function parseToolArguments(raw: string | object, meta?: CompletionMeta):
  * imperfect gateway degrades instead of failing outright, not as the main path.
  */
 export function parseModelJson(text: string, meta?: CompletionMeta): GenerateResult {
-  const start = text.indexOf("{");
-  const end = text.lastIndexOf("}");
+  let thinkText: string | undefined;
+  const thinkMatch = text.match(/<think>([\s\S]*?)<\/think>/i);
+  if (thinkMatch && thinkMatch[1]) {
+    thinkText = thinkMatch[1].trim();
+  }
+  const clean = text.replace(/<think>[\s\S]*?<\/think>/gi, "");
+
+  const start = clean.indexOf("{");
+  const end = clean.lastIndexOf("}");
   if (start === -1 || end === -1 || end < start) {
     throw new Error("No JSON object found in model response");
   }
   let parsed: ToolArgs;
   try {
-    parsed = JSON.parse(text.slice(start, end + 1)) as ToolArgs;
+    parsed = JSON.parse(clean.slice(start, end + 1)) as ToolArgs;
   } catch (err) {
     throw new Error(`Model response was not valid JSON: ${(err as Error).message}`);
   }
-  return toResult(parsed, "text fallback", meta);
+  const effectiveMeta: CompletionMeta = {
+    ...meta,
+    ...(thinkText ? { thinking: thinkText } : {}),
+  };
+  return toResult(parsed, "text fallback", effectiveMeta);
 }
 
 /* -------------------------------------------------------------------------- */

@@ -23,6 +23,7 @@ export type GridStyle = "dots" | "lines" | "off";
 export type Motion = "full" | "reduced";
 export type BoardStyle = "clean" | "sketch";
 export type ApprovalThreshold = "always" | "large" | "never";
+export type ModelTier = "fast" | "balanced" | "reasoning";
 
 export interface Settings {
   theme: Theme;
@@ -51,6 +52,8 @@ export interface Settings {
   approvalThreshold: ApprovalThreshold;
   /** Opt-in experimental ELK layout engine for orthogonal layered graphs. Default false. */
   elkLayout: boolean;
+  /** AI model performance / reasoning tier: fast (flash), balanced, or reasoning (deep thinking). */
+  modelTier: ModelTier;
 }
 
 const LS_KEY = "lucent.settings";
@@ -75,6 +78,7 @@ export const DEFAULT_SETTINGS: Settings = {
   boardStyle: "clean",
   approvalThreshold: "large",
   elkLayout: false,
+  modelTier: "balanced",
 };
 
 type Listener = (s: Settings) => void;

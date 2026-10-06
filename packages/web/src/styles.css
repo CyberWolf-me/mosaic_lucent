@@ -7865,3 +7865,171 @@ textarea:focus-visible {
   color: var(--ink-0) !important;
 }
 
+/* ================= Model Tier, Thinking & Telemetry ================= */
+
+/* Model Tier Selector in AIPill */
+.model-tier-selector {
+  border-radius: 999px;
+  background: var(--canvas-2);
+  border: 1px solid var(--stroke-2);
+  padding: 2px;
+  gap: 2px;
+}
+.model-tier-selector button {
+  font-size: 11px;
+  font-weight: 500;
+  padding: 3px 8px;
+  border-radius: 999px;
+  color: var(--ink-2);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: all 0.15s var(--e-out);
+  white-space: nowrap;
+}
+.model-tier-selector button:hover {
+  color: var(--ink-0);
+  background: var(--canvas-3);
+}
+.model-tier-selector button.active {
+  background: var(--paper-0);
+  color: var(--ink-0);
+  box-shadow: 0 1px 3px oklch(0 0 0 / 0.1);
+  font-weight: 600;
+}
+
+/* Live Thinking Stream in AIPill */
+.live-thinking-accordion {
+  width: min(620px, calc(100vw - 32px));
+  background: oklch(from var(--paper-0) l c h / 0.92);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid var(--amber-2);
+  border-radius: 14px;
+  padding: 8px 12px;
+  box-shadow: var(--elev-2), 0 0 16px -4px var(--amber-glow);
+  animation: pill-in 0.2s var(--e-out) both;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.live-thinking-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--amber-1);
+  font-family: var(--font-mono);
+  letter-spacing: 0.02em;
+}
+.live-thinking-pulse {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--amber-1);
+  box-shadow: 0 0 8px var(--amber-1);
+  animation: pulse-amber 1.2s ease-in-out infinite;
+}
+.live-thinking-body {
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--ink-2);
+  font-family: var(--font-mono);
+  white-space: pre-wrap;
+  max-height: 120px;
+  overflow-y: auto;
+  padding-left: 13px;
+  border-left: 2px solid oklch(from var(--amber-1) l c h / 0.35);
+}
+
+/* Thinking Chain-of-Thought Collapsible Accordion in ConvoTurn */
+.thinking-accordion {
+  margin-top: 6px;
+  border: 1px solid var(--stroke-1);
+  border-radius: 8px;
+  background: oklch(from var(--canvas-2) l c h / 0.65);
+  overflow: hidden;
+  font-size: 11px;
+  transition: border-color 0.15s ease;
+}
+.thinking-accordion[open] {
+  border-color: var(--stroke-2);
+  background: oklch(from var(--canvas-2) l c h / 0.85);
+}
+.thinking-summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  cursor: pointer;
+  user-select: none;
+  font-family: var(--font-mono);
+  color: var(--ink-2);
+  font-size: 10.5px;
+  list-style: none;
+  transition: color 0.15s ease;
+}
+.thinking-summary::-webkit-details-marker {
+  display: none;
+}
+.thinking-summary:hover {
+  color: var(--ink-0);
+}
+.thinking-summary-icon {
+  font-size: 12px;
+}
+.thinking-summary-label {
+  flex: 1;
+}
+.thinking-summary-chevron {
+  font-size: 10px;
+  transition: transform 0.2s var(--e-out);
+}
+.thinking-accordion[open] .thinking-summary-chevron {
+  transform: rotate(180deg);
+}
+.thinking-content {
+  padding: 6px 10px 8px 10px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--ink-2);
+  border-top: 1px solid var(--stroke-1);
+  white-space: pre-wrap;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+/* Generation Telemetry Badge */
+.telemetry-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 6px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: oklch(from var(--canvas-2) l c h / 0.8);
+  border: 1px solid var(--stroke-1);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink-3);
+  letter-spacing: 0.02em;
+  user-select: none;
+  width: fit-content;
+}
+.telemetry-model {
+  color: var(--ink-1);
+  font-weight: 500;
+}
+.telemetry-sep {
+  opacity: 0.4;
+}
+.telemetry-stat {
+  color: var(--ink-2);
+}
+.telemetry-stat.reasoning-tok {
+  color: var(--amber-1);
+  font-weight: 500;
+}
+

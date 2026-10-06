@@ -536,6 +536,7 @@ export class AnthropicProvider implements LLMProvider {
       // attempt — nothing here outlives a retry.
       const argumentsByIndex = new Map<number, string>();
       let proseText = "";
+      let thinkingText = "";
       let streamedModel: string | undefined;
       let inputTokens: number | undefined;
       let outputTokens: number | undefined;
@@ -585,6 +586,9 @@ export class AnthropicProvider implements LLMProvider {
         } else if (parsed.delta?.type === "text_delta" && typeof parsed.delta.text === "string") {
           proseText += parsed.delta.text;
           callbacks.onDelta(parsed.delta.text);
+        } else if (parsed.delta?.type === "thinking_delta" && typeof parsed.delta.thinking === "string") {
+          thinkingText += parsed.delta.thinking;
+          callbacks.onThinkingDelta?.(parsed.delta.thinking);
         }
       }
 
@@ -594,7 +598,13 @@ export class AnthropicProvider implements LLMProvider {
         throw new Error("Anthropic stream terminated before completion");
       }
 
-      const meta = completionMeta(streamedModel ?? this.model, inputTokens, outputTokens);
+      const meta = completionMeta(
+        streamedModel ?? this.model,
+        inputTokens,
+        outputTokens,
+        undefined,
+        thinkingText || undefined,
+      );
       const argumentsText = [...argumentsByIndex.values()].find((v) => v !== "");
       if (argumentsText) return parseToolArguments(argumentsText, meta);
       if (proseText !== "") return parseModelJson(proseText, meta);
@@ -637,7 +647,7 @@ interface AnthropicStreamEvent {
   message?: { model?: string; usage?: { input_tokens?: number } };
   usage?: { output_tokens?: number };
   content_block?: { type?: string };
-  delta?: { type?: string; text?: string; partial_json?: string };
+  delta?: { type?: string; text?: string; partial_json?: string; thinking?: string };
 }
 
 // Re-exported so existing imports of the extractor from this module keep working.

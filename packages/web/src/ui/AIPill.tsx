@@ -5,7 +5,8 @@ import { GrowTextarea } from "./GrowTextarea.js";
 import { AllowanceNote } from "./Paywall.js";
 import type { ChatEntry } from "../persistence.js";
 import type { AskCitation } from "../boards.js";
-import { useWorkspace } from "../workspace.js";
+import { useWorkspace, useWorkspaceOptional } from "../workspace.js";
+import { useSettings } from "../settings.js";
 import { StatementGlyph } from "./StatementGlyph.js";
 import { KIND_LABEL } from "../statementUi.js";
 import { isEmptyEffect, type TurnEffect } from "../turnEffect.js";
@@ -108,6 +109,7 @@ export function AIPill({
   voicePhase = "idle",
   clarification = null,
   onSelectClarification,
+  streamThinking,
 }: {
   /** Mode-aware callers pass one; the default stays the Build wording. */
   placeholder?: string;
@@ -156,7 +158,12 @@ export function AIPill({
   clarification?: import("@lucent/core").ClarificationChoice | null;
   /** Callback when user selects a clarification option. */
   onSelectClarification?: (choice: string) => void;
+  /** Live streaming chain-of-thought tokens while AI is reasoning. */
+  streamThinking?: string;
 }) {
+  const [settings, updateSettings] = useSettings();
+  const ws = useWorkspaceOptional();
+  const liveThinking = streamThinking ?? ws?.streamThinking ?? "";
   const [expanded, setExpanded] = useState(false);
   // The prompt field grows with its text; when it passes one line the pill
   // relaxes its fully-round corners so a tall box doesn't look like a capsule.
@@ -248,6 +255,18 @@ export function AIPill({
               Cancel
             </button>
           )}
+        </div>
+      )}
+
+      {busy && liveThinking && (
+        <div className="live-thinking-accordion" role="status" aria-live="polite">
+          <div className="live-thinking-header">
+            <span className="live-thinking-pulse" />
+            <span className="live-thinking-title">🧠 Thinking…</span>
+          </div>
+          <div className="live-thinking-body">
+            {liveThinking}
+          </div>
         </div>
       )}
 
@@ -469,6 +488,45 @@ export function AIPill({
             </button>
           </div>
         )}
+        {!readOnly && (
+          <div
+            className="segmented model-tier-selector"
+            style={{ flexShrink: 0 }}
+            role="radiogroup"
+            aria-label="Model tier"
+          >
+            <button
+              type="button"
+              className={settings.modelTier === "fast" ? "active" : ""}
+              onClick={() => updateSettings({ modelTier: "fast" })}
+              title="⚡ Fast — low latency, instant streaming"
+              aria-pressed={settings.modelTier === "fast"}
+              aria-label="Fast tier"
+            >
+              ⚡ Fast
+            </button>
+            <button
+              type="button"
+              className={settings.modelTier === "balanced" ? "active" : ""}
+              onClick={() => updateSettings({ modelTier: "balanced" })}
+              title="⚖️ Balanced — optimal balance between intelligence & speed"
+              aria-pressed={settings.modelTier === "balanced"}
+              aria-label="Balanced tier"
+            >
+              ⚖️ Balanced
+            </button>
+            <button
+              type="button"
+              className={settings.modelTier === "reasoning" ? "active" : ""}
+              onClick={() => updateSettings({ modelTier: "reasoning" })}
+              title="🧠 Reasoning — multi-step deep chain-of-thought analysis"
+              aria-pressed={settings.modelTier === "reasoning"}
+              aria-label="Reasoning tier"
+            >
+              🧠 Think
+            </button>
+          </div>
+        )}
         {readOnly ? (
           <span className="pill-notice">
             You're viewing this board. Ask the owner for edit access to change it.
@@ -665,6 +723,21 @@ function ConvoTurn({
         >
           {entry.text}
         </div>
+        {!isUser && entry.thinking && (
+          <details className="thinking-accordion">
+            <summary className="thinking-summary">
+              <span className="thinking-summary-icon">🧠</span>
+              <span className="thinking-summary-label">
+                Thought {entry.telemetry?.latencyMs ? `for ${(entry.telemetry.latencyMs / 1000).toFixed(1)}s` : "trace"}
+                {entry.telemetry?.reasoningTokens ? ` (${entry.telemetry.reasoningTokens} tokens)` : ""}
+              </span>
+              <span className="thinking-summary-chevron">▾</span>
+            </summary>
+            <div className="thinking-content">
+              {entry.thinking}
+            </div>
+          </details>
+        )}
         {!isUser && entry.effect && !isEmptyEffect(entry.effect) && (
           <EffectLine effect={entry.effect} />
         )}
@@ -695,6 +768,28 @@ function ConvoTurn({
             {entry.confidence.level === "none"
               ? "No evidence — nothing on this board supports this answer."
               : entry.confidence.reason}
+          </div>
+        )}
+        {!isUser && entry.telemetry && (
+          <div
+            className="telemetry-badge"
+            title={`Provider: ${entry.telemetry.provider}\nModel: ${entry.telemetry.model}\nLatency: ${entry.telemetry.latencyMs}ms\nPrompt Tokens: ${entry.telemetry.promptTokens ?? "—"}\nCompletion Tokens: ${entry.telemetry.completionTokens ?? "—"}${entry.telemetry.reasoningTokens ? `\nReasoning Tokens: ${entry.telemetry.reasoningTokens}` : ""}`}
+          >
+            <span className="telemetry-model">⚡ {entry.telemetry.model}</span>
+            <span className="telemetry-sep">·</span>
+            <span className="telemetry-stat">{(entry.telemetry.latencyMs / 1000).toFixed(1)}s</span>
+            {entry.telemetry.completionTokens !== undefined && (
+              <>
+                <span className="telemetry-sep">·</span>
+                <span className="telemetry-stat">{entry.telemetry.completionTokens} tok</span>
+              </>
+            )}
+            {Boolean(entry.telemetry.reasoningTokens) && (
+              <>
+                <span className="telemetry-sep">·</span>
+                <span className="telemetry-stat reasoning-tok">{entry.telemetry.reasoningTokens} think</span>
+              </>
+            )}
           </div>
         )}
       </div>

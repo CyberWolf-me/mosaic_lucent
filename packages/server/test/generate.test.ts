@@ -650,3 +650,112 @@ describe("connectivity guard (no floating nodes)", () => {
     expect(calls()).toBe(1); // <2 created nodes: nothing to connect
   });
 });
+
+describe("model selection, thinking, and telemetry", () => {
+  it("includes telemetry and thinking in handleGenerate response", async () => {
+    const reasoningProvider = {
+      name: "reasoning-mock",
+      async generateOperations(req: GenerateRequest) {
+        return {
+          operations: [
+            { op: "CREATE_NODE" as const, id: "n1", nodeType: "step", label: "Step 1" },
+            { op: "CREATE_NODE" as const, id: "n2", nodeType: "step", label: "Step 2" },
+            { op: "CONNECT_NODES" as const, source: "n1", target: "n2", relationship: "next" },
+          ],
+          model: req.tier === "reasoning" ? "mock-reasoning" : "mock-default",
+          thinking: "1. Clarify requirements\n2. Create step node",
+          usage: {
+            inputTokens: 120,
+            outputTokens: 45,
+            reasoningTokens: 30,
+          },
+        };
+      },
+      async generateAnswer() {
+        throw new Error("unsupported");
+      },
+      async generateExternalPlan() {
+        throw new Error("unsupported");
+      },
+    };
+
+    const result = await handleGenerate(reasoningProvider, {
+      message: "build architecture",
+      summary: emptySummary,
+      tier: "reasoning",
+    });
+
+    expect(result.status).toBe(200);
+    const body = result.body as {
+      operations: Operation[];
+      thinking?: string;
+      telemetry?: {
+        provider: string;
+        model: string;
+        latencyMs: number;
+        promptTokens?: number;
+        completionTokens?: number;
+        reasoningTokens?: number;
+      };
+    };
+    expect(body.thinking).toBe("1. Clarify requirements\n2. Create step node");
+    expect(body.telemetry).toBeDefined();
+    expect(body.telemetry?.model).toBe("mock-reasoning");
+    expect(body.telemetry?.provider).toBe("reasoning-mock");
+    expect(body.telemetry?.reasoningTokens).toBe(30);
+    expect(body.telemetry?.latencyMs).toBeGreaterThanOrEqual(0);
+  });
+
+  it("streams thinking deltas in handleGenerateStream", async () => {
+    const events: Array<{ event: string; data: unknown }> = [];
+    const streamingThinkingProvider = {
+      name: "thinking-streamer",
+      async generateOperations() {
+        return {
+          operations: [{ op: "CREATE_NODE" as const, id: "n1", nodeType: "step", label: "Node 1" }],
+        };
+      },
+      async streamOperations(req: GenerateRequest, callbacks: { onDelta?(d: string): void; onThinkingDelta?(t: string): void }) {
+        callbacks.onThinkingDelta?.("Thinking part 1... ");
+        callbacks.onThinkingDelta?.("Thinking part 2 finished.");
+        callbacks.onDelta?.('{"operations":[{"op":"CREATE_NODE","id":"n1","nodeType":"step","label":"Node 1"}]}');
+        return {
+          operations: [{ op: "CREATE_NODE" as const, id: "n1", nodeType: "step", label: "Node 1" }],
+          model: "stream-model",
+          thinking: "Thinking part 1... Thinking part 2 finished.",
+          usage: { inputTokens: 50, outputTokens: 25, reasoningTokens: 15 },
+        };
+      },
+      async generateAnswer() {
+        throw new Error("unsupported");
+      },
+      async generateExternalPlan() {
+        throw new Error("unsupported");
+      },
+    };
+
+    const res = await (await import("../src/generate.js")).handleGenerateStream(
+      streamingThinkingProvider,
+      { message: "stream test", summary: emptySummary, tier: "reasoning" },
+      undefined,
+      undefined,
+      (event, data) => events.push({ event, data }),
+    );
+
+    expect(res.status).toBe(200);
+    const thinkingEvents = events.filter((e) => e.event === "thinking");
+    expect(thinkingEvents).toHaveLength(2);
+    expect(thinkingEvents[0]?.data).toEqual({ text: "Thinking part 1... " });
+    expect(thinkingEvents[1]?.data).toEqual({ text: "Thinking part 2 finished." });
+
+    const doneEvent = events.find((e) => e.event === "done");
+    expect(doneEvent).toBeDefined();
+    const doneData = doneEvent?.data as {
+      thinking?: string;
+      telemetry?: { model: string; reasoningTokens?: number };
+    };
+    expect(doneData.thinking).toBe("Thinking part 1... Thinking part 2 finished.");
+    expect(doneData.telemetry?.model).toBe("stream-model");
+    expect(doneData.telemetry?.reasoningTokens).toBe(15);
+  });
+});
