@@ -43,4 +43,26 @@ describe("voiceMacroState", () => {
       voiceMacroState({ ...base, recording: true, ttsSpeaking: true, conversation: "invoked" }),
     ).toBe("SPEAKING");
   });
+
+  it("accurately reflects full diagnostics snapshot: MIC, VAD, Echo, and snippet", () => {
+    const fullSnapshot: VoiceHudSnapshot = {
+      recording: true,
+      sttStatus: "transcribing",
+      ttsSpeaking: false,
+      conversation: "waiting_for_followup",
+      leaseRemainingSec: 12,
+      leaseSpeaker: "Alice",
+      turnCount: 3,
+      micStatus: "ACTIVE",
+      vadStatus: "SPEECH",
+      echoSuppressionActive: false,
+      lastTranscript: "Lucent, connect API to database",
+    };
+
+    expect(voiceMacroState(fullSnapshot)).toBe("LISTENING");
+    expect(fullSnapshot.micStatus).toBe("ACTIVE");
+    expect(fullSnapshot.vadStatus).toBe("SPEECH");
+    expect(fullSnapshot.echoSuppressionActive).toBe(false);
+    expect(fullSnapshot.lastTranscript).toContain("connect API");
+  });
 });

@@ -26,6 +26,14 @@ export interface VoiceHudSnapshot {
   /** The most recent transcribed speaker. */
   lastSpeaker?: string;
   turnCount: number;
+  /** Microphone hardware state. */
+  micStatus?: "ACTIVE" | "MUTED" | "STANDBY";
+  /** Voice Activity Detection (VAD) speech presence verdict. */
+  vadStatus?: "SPEECH" | "SILENCE" | "DETECTING" | "OFF";
+  /** Recent transcribed text snippet. */
+  lastTranscript?: string;
+  /** Echo suppression status (protects mic against hearing Lucent's own speaker audio). */
+  echoSuppressionActive?: boolean;
 }
 
 /** A coarse, human label for what the loop is doing right now. */
@@ -101,8 +109,14 @@ export function VoiceStateHud({ snapshot }: { snapshot: VoiceHudSnapshot }) {
           gap: 2,
         }}
       >
+        <Row label="MIC" value={snapshot.micStatus ?? (snapshot.recording ? "ACTIVE" : "STANDBY")} />
+        <Row label="VAD" value={snapshot.vadStatus ?? (snapshot.recording ? "DETECTING" : "OFF")} />
         <Row label="STT" value={snapshot.recording ? snapshot.sttStatus.toUpperCase() : "OFF"} />
         <Row label="TTS" value={snapshot.ttsSpeaking ? "SPEAKING" : "IDLE"} />
+        <Row
+          label="Echo"
+          value={(snapshot.echoSuppressionActive ?? snapshot.ttsSpeaking) ? "SUPPRESSED" : "PASS"}
+        />
         <Row label="Lease" value={snapshot.conversation.toUpperCase()} />
         <Row
           label="Window"
@@ -110,6 +124,16 @@ export function VoiceStateHud({ snapshot }: { snapshot: VoiceHudSnapshot }) {
         />
         <Row label="Speaker" value={snapshot.leaseSpeaker ?? snapshot.lastSpeaker ?? "—"} />
         <Row label="Turn" value={String(snapshot.turnCount)} />
+        {snapshot.lastTranscript && (
+          <Row
+            label="Snippet"
+            value={
+              snapshot.lastTranscript.length > 20
+                ? snapshot.lastTranscript.slice(0, 18) + "…"
+                : snapshot.lastTranscript
+            }
+          />
+        )}
       </div>
     </aside>
   );
