@@ -9,6 +9,7 @@ import { DashboardView } from "./views/DashboardView.js";
 import { HistoryView } from "./views/HistoryView.js";
 import { AdminView } from "./views/AdminView.js";
 import { AnalyticsView } from "./views/AnalyticsView.js";
+import { pageview } from "./analytics/posthog.js";
 import { MobileGate } from "./views/MobileBoardView.js";
 import { MeetingView } from "./views/MeetingView.js";
 import { MeetingsView } from "./views/MeetingsView.js";
@@ -82,6 +83,7 @@ function Router({ onOpenSettings }: { onOpenSettings: (section?: string) => void
   // views, while reusing replaceState on initial mount or no-op when URL already matches.
   useEffect(() => {
     setViewQuery(view, view === "canvas" ? lens : undefined, true);
+    pageview(view, { lens: view === "canvas" ? lens : undefined });
   }, [view, lens]);
   // Org pages sit *on top of* the board, so their Back returns to the canvas
   // — the surface the user came from. It deliberately does NOT touch the
