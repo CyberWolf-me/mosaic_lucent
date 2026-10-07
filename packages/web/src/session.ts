@@ -1,5 +1,6 @@
 import { apiFetch, invalidateCsrfToken, primeCsrfToken } from "./http.js";
 import { setPersistenceScope } from "./persistence.js";
+import { identify, resetUser } from "./analytics/posthog.js";
 
 /**
  * Client-side session (M1): where the browser's idea of "who am I" lives, plus
@@ -61,6 +62,7 @@ export function saveSession(token: string | null, user: SessionUser): void {
   // shared-board pointer) hangs off the signed-in user. This is the one seam
   // every auth success flows through.
   setPersistenceScope(user.id);
+  identify(user.id, { email: user.email, name: user.name });
 }
 
 export function getToken(): string | null {
@@ -104,6 +106,7 @@ function forgetLocalSession(): void {
   // Back to the legacy/global namespace: the signed-out view sees only what
   // was never account-scoped, never another account's boards.
   setPersistenceScope(null);
+  resetUser();
 }
 
 /**

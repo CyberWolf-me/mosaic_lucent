@@ -82,11 +82,20 @@ export function detectAddress(text: string): AddressedQuery {
  * Examples: "Thanks", "Thank you Lucent", "Got it", "That's all", "Back to the team", "Stay quiet".
  */
 export function detectDismissal(text: string): boolean {
-  const DISMISSAL_PATTERN = new RegExp(
-    `^\\s*(?:(?:okay|ok|well|yeah)?[,\\s]*)?(?:thank\\s+you(?:\\s+${LUCENT_NAME_PATTERN})?|thanks(?:\\s+${LUCENT_NAME_PATTERN})?|got\\s+it|that(?:'s|\\s+is)?\\s+(?:all|clear|enough|makes\\s+sense)|never\\s+mind|back\\s+to\\s+the\\s+team|let(?:'s|\\s+us)\\s+continue|stay\\s+quiet(?:\\s+for\\s+now)?|all\\s+good|we(?:'re|\\s+are)\\s+good)(?:[,\\s]+${LUCENT_NAME_PATTERN})?[.!]?\\s*$`,
-    "i",
+  const t = text
+    .toLowerCase()
+    .replace(/[.!?,]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return (
+    /^(?:ok(?:ay)? )?(?:thanks?(?: you)?(?: lucent)? )?(?:that'?s (?:all|it|enough|clear)|stop(?: listening)?|bye|goodbye|we'?re done|i'?m done|got it|back to the team|never mind|all good|nothing else|stay quiet)(?: for now)?(?: thanks?(?: you)?)?$/.test(
+      t,
+    ) ||
+    /^\s*(?:thanks?(?:\s+you)?|got\s+it|all\s+good|back\s+to\s+the\s+team)(?:\s+lucent)?[.!]?\s*$/i.test(
+      text.trim(),
+    )
   );
-  return DISMISSAL_PATTERN.test(text.trim());
 }
 
 /**
@@ -123,9 +132,9 @@ export function addressesOtherPerson(text: string, knownTeammates: string[] = []
 export function isMutationUtterance(text: string): boolean {
   const t = text.trim();
   const MUTATION_VERBS =
-    /^\s*(?:and\s+)?(?:can\s+you\s+|could\s+you\s+|please\s+)?(move|put|place|draw|create|build|add|make|design|generate|show|render|delete|remove|change|color|connect|link|rearrange|align|group|ungroup)\b/i;
+    /^\s*(?:(?:actually|so|now|and|then|also|okay|ok)\s+)?(?:can\s+you\s+|could\s+you\s+|please\s+)?(move|put|place|draw|create|build|add|make|design|generate|show|render|delete|remove|change|color|connect|link|rearrange|align|group|ungroup)\b/i;
   const MUTATION_TARGETS =
-    /\b(diagram|flowchart|workflow|pipeline|architecture|wireframe|mindmap|mind\s+map|journey|system|process|flow|box|boxes|node|nodes|sticky|stickies|note|notes|arrow|arrows|shape|shapes|checkout|payments|stripe|database|cache|service|services|api|backend|frontend|underneath|below|above|next\s+to|beside)\b/i;
+    /\b(diagram|flowchart|workflow|pipeline|architecture|wireframe|mindmap|mind\s+map|journey|system|process|flow|box|boxes|node|nodes|sticky|stickies|note|notes|arrow|arrows|shape|shapes|checkout|payments|stripe|database|cache|service|services|api|backend|frontend|queue|queues|table|chart|component|components|card|cards|task|tasks|step|steps|underneath|below|above|next\s+to|beside)\b/i;
 
   if (MUTATION_VERBS.test(t)) {
     return (

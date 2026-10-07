@@ -36,3 +36,4 @@ export * from "./slashCommands.js";
 export * from "./workspaceRules.js";
 export * from "./specImport.js";
 export * from "./codeExport.js";
+export * from "./voice.js";

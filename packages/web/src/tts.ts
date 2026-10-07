@@ -212,26 +212,30 @@ export interface SpeakOutcome {
  * silence otherwise. Never throws — not-speaking is a reason, not an
  * exception, and the meeting view renders the reason once.
  */
-export async function speakAnswer(text: string): Promise<SpeakOutcome> {
+export async function speakAnswer(
+  text: string,
+  hosted: TtsProvider = hostedTtsProvider,
+  browser: TtsProvider = browserTtsProvider,
+): Promise<SpeakOutcome> {
   if (essentials(text) === null) {
     return { provider: null, playback: null, reason: "nothing to speak" };
   }
-  if (hostedTtsProvider.isSupported()) {
+  if (hosted.isSupported()) {
     try {
-      const playback = await hostedTtsProvider.speak(text);
+      const playback = await hosted.speak(text);
       return { provider: "hosted", playback, reason: null };
     } catch (err) {
       const message = (err as Error).message;
       // "unconfigured" is the expected fallback trigger, not a failure:
       // the deployment simply has no server voice.
-      if (message !== "unconfigured") {
+      if (!message.includes("unconfigured")) {
         return { provider: null, playback: null, reason: message };
       }
     }
   }
-  if (browserTtsProvider.isSupported()) {
+  if (browser.isSupported()) {
     try {
-      const playback = await browserTtsProvider.speak(text);
+      const playback = await browser.speak(text);
       return { provider: "browser", playback, reason: null };
     } catch (err) {
       return { provider: null, playback: null, reason: (err as Error).message };
@@ -240,6 +244,6 @@ export async function speakAnswer(text: string): Promise<SpeakOutcome> {
   return {
     provider: null,
     playback: null,
-    reason: browserTtsProvider.unavailableReason() ?? "speech is unavailable",
+    reason: browser.unavailableReason() ?? "speech is unavailable",
   };
 }

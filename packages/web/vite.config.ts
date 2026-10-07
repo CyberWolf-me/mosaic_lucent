@@ -31,6 +31,16 @@ export default defineConfig({
     "import.meta.env.BUILD_ID": JSON.stringify(
       process.env.LUCENT_BUILD_ID ?? process.env.GITHUB_SHA ?? "unknown",
     ),
+    "import.meta.env.VITE_POSTHOG_KEY": JSON.stringify(
+      process.env.LUCENT_POSTHOG_KEY ??
+        process.env.POSTHOG_PROJECT_TOKEN ??
+        "phc_vBhxMqMXBu7coEaZK7BAwpXetqaogvmu6cEfHbdBsyVH",
+    ),
+    "import.meta.env.VITE_POSTHOG_HOST": JSON.stringify(
+      process.env.LUCENT_POSTHOG_HOST ??
+        process.env.POSTHOG_HOST ??
+        "https://us.i.posthog.com",
+    ),
   },
   server: {
     port: Number(process.env.LUCENT_WEB_PORT ?? 5173),
