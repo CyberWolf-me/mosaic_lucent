@@ -127,10 +127,62 @@ export function ShapeToolbar({
     </button>
   );
 
+  const [minimized, setMinimized] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem("lucent.toolbarMinimized") === "true";
+    } catch {
+      return false;
+    }
+  });
+
+  const toggleMinimized = () => {
+    setMinimized((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem("lucent.toolbarMinimized", String(next));
+      } catch {}
+      return next;
+    });
+  };
+
+  const renderExtraActiveTool = () => {
+    if (["select", "pen", "sticky", "frame"].includes(tool)) return null;
+    switch (tool) {
+      case "hand":
+        return <T id="hand" tip="Hand · H"><ToolIco.Hand /></T>;
+      case "rect":
+        return <T id="rect" tip="Rectangle · R"><ToolIco.Rect /></T>;
+      case "ellipse":
+        return <T id="ellipse" tip="Ellipse · O"><ToolIco.Ellipse /></T>;
+      case "diamond":
+        return <T id="diamond" tip="Diamond · D"><ToolIco.Diamond /></T>;
+      case "triangle":
+        return <T id="triangle" tip="Triangle"><ToolIco.Triangle /></T>;
+      case "star":
+        return <T id="star" tip="Star"><ToolIco.Star /></T>;
+      case "text":
+        return <T id="text" tip="Text · T"><ToolIco.Text /></T>;
+      case "arrow":
+        return <T id="arrow" tip="Connect · A"><ToolIco.Connect /></T>;
+      case "highlighter":
+        return <T id="highlighter" tip="Highlighter · I"><ToolIco.Highlighter /></T>;
+      case "eraser":
+        return <T id="eraser" tip="Eraser · E"><ToolIco.Eraser /></T>;
+      case "table":
+        return <T id="table" tip="Table"><ToolIco.Table /></T>;
+      case "chart":
+        return <T id="chart" tip="Chart"><ToolIco.Chart /></T>;
+      case "comment":
+        return <T id="comment" tip="Comment · C"><ToolIco.Comment /></T>;
+      default:
+        return null;
+    }
+  };
+
   return (
     <div
       ref={barRef}
-      className={`shape-toolbar ${orientation}${floating.pos ? " is-floating" : ""}${floating.dragging ? " is-dragging" : ""}${tipsAbove ? " tips-above" : ""}`}
+      className={`shape-toolbar ${orientation}${minimized ? " minimized" : ""}${floating.pos ? " is-floating" : ""}${floating.dragging ? " is-dragging" : ""}${tipsAbove ? " tips-above" : ""}`}
       style={floating.style}
     >
       <button
@@ -142,84 +194,125 @@ export function ShapeToolbar({
       >
         <ToolIco.Grip />
       </button>
-      <T id="select" tip="Select · V">
-        <ToolIco.Select />
-      </T>
-      <T id="hand" tip="Hand · H">
-        <ToolIco.Hand />
-      </T>
-      <div className="divider" />
-      <T id="rect" tip="Rectangle · R">
-        <ToolIco.Rect />
-      </T>
-      <T id="ellipse" tip="Ellipse · O">
-        <ToolIco.Ellipse />
-      </T>
-      <T id="diamond" tip="Diamond · D">
-        <ToolIco.Diamond />
-      </T>
-      <T id="triangle" tip="Triangle">
-        <ToolIco.Triangle />
-      </T>
-      <T id="star" tip="Star">
-        <ToolIco.Star />
-      </T>
-      <T id="sticky" tip="Sticky · S">
-        <ToolIco.Sticky />
-      </T>
-      <T id="text" tip="Text · T">
-        <ToolIco.Text />
-      </T>
-      <div className="divider" />
-      <T id="arrow" tip="Connect · A">
-        <ToolIco.Connect />
-      </T>
-      <T id="pen" tip="Pen · P">
-        <ToolIco.Pen />
-      </T>
-      <T id="highlighter" tip="Highlighter · I">
-        <ToolIco.Highlighter />
-      </T>
-      <T id="eraser" tip="Eraser · E">
-        <ToolIco.Eraser />
-      </T>
-      <div className="divider" />
-      <T id="frame" tip="Frame · F">
-        <ToolIco.Frame />
-      </T>
-      <T id="table" tip="Table">
-        <ToolIco.Table />
-      </T>
-      <T id="chart" tip="Chart">
-        <ToolIco.Chart />
-      </T>
-      <button
-        className="tool"
-        data-tip="Icons & vectors"
-        aria-label="Insert an icon or vector"
-        onClick={() => onVectors?.()}
-      >
-        <ToolIco.Vectors />
-      </button>
-      <button
-        className="tool"
-        data-tip="Embed GIF / video / link"
-        aria-label="Embed GIF, video, or link"
-        onClick={() => onEmbed?.()}
-      >
-        <ToolIco.Media />
-      </button>
-      <button
-        className="tool"
-        data-tip="Generate image with AI"
-        aria-label="Generate image with AI"
-        onClick={() => onGenImage?.()}
-      >
-        <ToolIco.Sparkle />
-      </button>
-      <T id="comment" tip="Comment · C">
-        <ToolIco.Comment />
-      </T>
+
+      {minimized ? (
+        <>
+          <T id="select" tip="Select · V">
+            <ToolIco.Select />
+          </T>
+          <T id="pen" tip="Pen · P">
+            <ToolIco.Pen />
+          </T>
+          <T id="sticky" tip="Sticky · S">
+            <ToolIco.Sticky />
+          </T>
+          <T id="frame" tip="Frame · F">
+            <ToolIco.Frame />
+          </T>
+          {renderExtraActiveTool()}
+          <div className="divider" />
+          <button
+            type="button"
+            className="tool toolbar-toggle-btn"
+            data-tip="Expand tools"
+            aria-label="Expand tools"
+            onClick={toggleMinimized}
+          >
+            <ToolIco.More />
+          </button>
+        </>
+      ) : (
+        <>
+          <T id="select" tip="Select · V">
+            <ToolIco.Select />
+          </T>
+          <T id="hand" tip="Hand · H">
+            <ToolIco.Hand />
+          </T>
+          <div className="divider" />
+          <T id="rect" tip="Rectangle · R">
+            <ToolIco.Rect />
+          </T>
+          <T id="ellipse" tip="Ellipse · O">
+            <ToolIco.Ellipse />
+          </T>
+          <T id="diamond" tip="Diamond · D">
+            <ToolIco.Diamond />
+          </T>
+          <T id="triangle" tip="Triangle">
+            <ToolIco.Triangle />
+          </T>
+          <T id="star" tip="Star">
+            <ToolIco.Star />
+          </T>
+          <T id="sticky" tip="Sticky · S">
+            <ToolIco.Sticky />
+          </T>
+          <T id="text" tip="Text · T">
+            <ToolIco.Text />
+          </T>
+          <div className="divider" />
+          <T id="arrow" tip="Connect · A">
+            <ToolIco.Connect />
+          </T>
+          <T id="pen" tip="Pen · P">
+            <ToolIco.Pen />
+          </T>
+          <T id="highlighter" tip="Highlighter · I">
+            <ToolIco.Highlighter />
+          </T>
+          <T id="eraser" tip="Eraser · E">
+            <ToolIco.Eraser />
+          </T>
+          <div className="divider" />
+          <T id="frame" tip="Frame · F">
+            <ToolIco.Frame />
+          </T>
+          <T id="table" tip="Table">
+            <ToolIco.Table />
+          </T>
+          <T id="chart" tip="Chart">
+            <ToolIco.Chart />
+          </T>
+          <button
+            className="tool"
+            data-tip="Icons & vectors"
+            aria-label="Insert an icon or vector"
+            onClick={() => onVectors?.()}
+          >
+            <ToolIco.Vectors />
+          </button>
+          <button
+            className="tool"
+            data-tip="Embed GIF / video / link"
+            aria-label="Embed GIF, video, or link"
+            onClick={() => onEmbed?.()}
+          >
+            <ToolIco.Media />
+          </button>
+          <button
+            className="tool"
+            data-tip="Generate image with AI"
+            aria-label="Generate image with AI"
+            onClick={() => onGenImage?.()}
+          >
+            <ToolIco.Sparkle />
+          </button>
+          <T id="comment" tip="Comment · C">
+            <ToolIco.Comment />
+          </T>
+          <div className="divider" />
+          <button
+            type="button"
+            className="tool toolbar-toggle-btn"
+            data-tip="Minimize tools"
+            aria-label="Minimize tools"
+            onClick={toggleMinimized}
+          >
+            {orientation === "bottom" ? <ToolIco.ChevronDown /> : <ToolIco.ChevronLeft />}
+          </button>
+        </>
+      )}
     </div>
   );
 }

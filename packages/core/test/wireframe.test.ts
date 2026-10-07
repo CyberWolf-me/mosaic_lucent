@@ -55,4 +55,57 @@ describe("wireframe operations", () => {
     const missing = validateOperations(createWorkspace(), [{ op: "DELETE_WIREFRAME", id: "nope" }]);
     expect(missing[0]?.message).toMatch(/does not exist/);
   });
+
+  it("tolerantly parses LLM variations in wireframe operations", () => {
+    const rawVariation = [
+      {
+        op: "CREATE_WIREFRAME",
+        id: "wf-home",
+        name: "Homepage",
+        viewport: "mobile-first",
+        root: {
+          kind: "screen",
+          direction: "vertical",
+          children: [
+            { kind: "header", text: "Welcome to our store" },
+            { kind: "button", text: "Shop Now", variant: "outline" },
+            { kind: "input", title: "Search", placeholder: "Search listings..." },
+          ],
+        },
+      },
+    ];
+    const parsed = safeParseOperations(rawVariation);
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      const wf = parsed.data[0] as Extract<Operation, { op: "CREATE_WIREFRAME" }>;
+      expect(wf.title).toBe("Homepage");
+      expect(wf.viewport).toBe("mobile");
+      expect(wf.root.direction).toBe("column");
+      expect(wf.root.children?.[0]?.label).toBe("Welcome to our store");
+      expect(wf.root.children?.[1]?.variant).toBe("secondary");
+      expect(wf.root.children?.[2]?.placeholder).toBe("Search listings...");
+    }
+  });
+
+  it("normalizes UPDATE_WIREFRAME and automatically wraps flat elements", () => {
+    const rawUpdate = [
+      {
+        op: "UPDATE_WIREFRAME",
+        id: "wf-home",
+        title: "Updated Homepage",
+        elements: [
+          { kind: "nav", text: "Top Nav" },
+          { kind: "section", text: "Product Grid" },
+        ],
+      },
+    ];
+    const parsed = safeParseOperations(rawUpdate);
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      const wf = parsed.data[0] as Extract<Operation, { op: "CREATE_WIREFRAME" }>;
+      expect(wf.op).toBe("CREATE_WIREFRAME");
+      expect(wf.root.kind).toBe("screen");
+      expect(wf.root.children).toHaveLength(2);
+    }
+  });
 });

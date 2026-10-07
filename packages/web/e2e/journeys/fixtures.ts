@@ -25,8 +25,7 @@ export type CanvasState = {
 };
 
 /** True while a generation is still streaming/revealing. */
-const isWorking = (t: string) =>
-  /Building the model|Working…|Thinking|generating/i.test(t);
+const isWorking = (t: string) => /Building the model|Working…|Thinking|generating/i.test(t);
 
 export class Journey {
   constructor(readonly page: Page) {}
@@ -56,7 +55,10 @@ export class Journey {
     for (let i = 0; i < 6; i++) {
       const b = this.page.getByRole("button", { name: /^(Skip|Got it|Done|Close|Finish)$/i });
       if (!(await b.count())) break;
-      await b.first().click({ force: true }).catch(() => {});
+      await b
+        .first()
+        .click({ force: true })
+        .catch(() => {});
       await this.page.waitForTimeout(300);
     }
     return { email, password };
@@ -129,7 +131,14 @@ export class Journey {
       );
       if (!el) return null;
       const r = el.getBoundingClientRect();
-      return { cx: r.x + r.width / 2, cy: r.y + r.height / 2, x: r.x, y: r.y, w: r.width, h: r.height };
+      return {
+        cx: r.x + r.width / 2,
+        cy: r.y + r.height / 2,
+        x: r.x,
+        y: r.y,
+        w: r.width,
+        h: r.height,
+      };
     });
     return box;
   }

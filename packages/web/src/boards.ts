@@ -160,7 +160,7 @@ export async function saveBoard(
   rules?: string | null,
 ): Promise<BoardSummary | null> {
   const result = await saveBoardDetailed(orgId, name, workspace, id, rules);
-  return result.ok ? result.board ?? null : null;
+  return result.ok ? (result.board ?? null) : null;
 }
 
 /**

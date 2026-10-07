@@ -21,7 +21,7 @@ export function SequenceView({
   onSelectPrompt?: (text: string) => void;
   onSendPrompt?: (text: string) => void;
 }) {
-  const { workspace, chat, send, setView, projectName } = useWorkspace();
+  const { workspace, chat, send, projectName } = useWorkspace();
   const [message, setMessage] = useState("");
   const [showSample, setShowSample] = useState(false);
   const submit = () => {
@@ -58,134 +58,152 @@ export function SequenceView({
   const byId = Object.fromEntries(actors.map((a) => [a.id, a]));
   const bottomY = Math.max(580, MSG_bottom(messages) + 60);
 
-  const seqBody = !usingReal && !showSample ? (
-    <div className="view-empty" style={embedded ? { top: 90, bottom: 96 } : undefined}>
-      <div className="view-empty-icon">
-        <Ico.Flow />
-      </div>
-      <h2>No sequence yet</h2>
-      <p>
-        Actors and messages are derived from your board's nodes and connections. Describe a flow
-        below and Lucent builds it, or look at a sample first.
-      </p>
-      <div style={{ display: "flex", gap: 8, alignItems: "center", justifyContent: "center", marginTop: 8 }}>
-        <button className="btn ghost" onClick={() => setShowSample(true)}>
-          Show a sample sequence
-        </button>
-        <button
-          className="btn ghost"
-          onClick={() => {
-            const p = "Create a checkout sequence diagram with User, API, Stripe, and Database";
-            if (onSendPrompt) onSendPrompt(p);
-            else if (onSelectPrompt) onSelectPrompt(p);
-            else void send(p);
+  const seqBody =
+    !usingReal && !showSample ? (
+      <div className="view-empty" style={embedded ? { top: 90, bottom: 96 } : undefined}>
+        <div className="view-empty-icon">
+          <Ico.Flow />
+        </div>
+        <h2>No sequence yet</h2>
+        <p>
+          Actors and messages are derived from your board's nodes and connections. Describe a flow
+          below and Lucent builds it, or look at a sample first.
+        </p>
+        <div
+          style={{
+            display: "flex",
+            gap: 8,
+            alignItems: "center",
+            justifyContent: "center",
+            marginTop: 8,
           }}
         >
-          Create checkout sequence
-        </button>
-      </div>
-    </div>
-  ) : (
-    <div style={{ position: "absolute", inset: 0, top: embedded ? 76 : 0, bottom: embedded ? 96 : 0, left: embedded ? 60 : 0, overflow: "auto" }}>
-      {showingSample && (
-        <div className="sample-banner">
-          Sample data — not your board.
-          <button onClick={() => setShowSample(false)}>Hide</button>
-        </div>
-      )}
-          <div
-            className="frame"
-            style={{
-              left: 80,
-              top: 90,
-              width: Math.max(900, (actors.at(-1)?.x ?? 900) + 120),
-              height: bottomY - 60,
+          <button className="btn ghost" onClick={() => setShowSample(true)}>
+            Show a sample sequence
+          </button>
+          <button
+            className="btn ghost"
+            onClick={() => {
+              const p = "Create a checkout sequence diagram with User, API, Stripe, and Database";
+              if (onSendPrompt) onSendPrompt(p);
+              else if (onSelectPrompt) onSelectPrompt(p);
+              else void send(p);
             }}
           >
-            <div className="frame-label" style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              <Ico.Flow /> {usingReal ? "Sequence · from board" : "Checkout · Sample"}
+            Create checkout sequence
+          </button>
+        </div>
+      </div>
+    ) : (
+      <div
+        style={{
+          position: "absolute",
+          inset: 0,
+          top: embedded ? 76 : 0,
+          bottom: embedded ? 96 : 0,
+          left: embedded ? 60 : 0,
+          overflow: "auto",
+        }}
+      >
+        {showingSample && (
+          <div className="sample-banner">
+            Sample data — not your board.
+            <button onClick={() => setShowSample(false)}>Hide</button>
+          </div>
+        )}
+        <div
+          className="frame"
+          style={{
+            left: 80,
+            top: 90,
+            width: Math.max(900, (actors.at(-1)?.x ?? 900) + 120),
+            height: bottomY - 60,
+          }}
+        >
+          <div className="frame-label" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <Ico.Flow /> {usingReal ? "Sequence · from board" : "Checkout · Sample"}
+          </div>
+        </div>
+
+        {actors.map((a) => (
+          <div key={a.id} style={{ position: "absolute", left: a.x - 60, top: 110, width: 120 }}>
+            <div
+              className="node"
+              style={{ width: "100%", textAlign: "center", padding: "10px 14px" }}
+            >
+              <div className="node-meta" style={{ justifyContent: "center" }}>
+                <span className="node-dot violet" /> ACTOR
+              </div>
+              <div className="node-title">{a.label}</div>
             </div>
           </div>
+        ))}
 
+        <svg style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
+          <ConnectorDefs />
           {actors.map((a) => (
-            <div key={a.id} style={{ position: "absolute", left: a.x - 60, top: 110, width: 120 }}>
-              <div
-                className="node"
-                style={{ width: "100%", textAlign: "center", padding: "10px 14px" }}
-              >
-                <div className="node-meta" style={{ justifyContent: "center" }}>
-                  <span className="node-dot violet" /> ACTOR
-                </div>
-                <div className="node-title">{a.label}</div>
-              </div>
-            </div>
+            <line
+              key={a.id}
+              x1={a.x}
+              y1={168}
+              x2={a.x}
+              y2={bottomY}
+              stroke="var(--stroke-1)"
+              strokeWidth="1"
+              strokeDasharray="3 4"
+            />
           ))}
-
-          <svg style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
-            <ConnectorDefs />
-            {actors.map((a) => (
-              <line
-                key={a.id}
-                x1={a.x}
-                y1={168}
-                x2={a.x}
-                y2={bottomY}
-                stroke="var(--stroke-1)"
-                strokeWidth="1"
-                strokeDasharray="3 4"
-              />
-            ))}
-            {messages.map((m, i) => {
-              const from = byId[m.from];
-              const to = byId[m.to];
-              if (!from || !to) return null;
-              const isReturn = m.kind === "return";
-              return (
-                <line
-                  key={i}
-                  x1={from.x}
-                  y1={m.y}
-                  x2={to.x}
-                  y2={m.y}
-                  stroke={isReturn ? "var(--ink-3)" : "var(--stroke-3)"}
-                  strokeWidth={isReturn ? 1 : 1.4}
-                  strokeDasharray={isReturn ? "4 3" : ""}
-                  markerEnd="url(#arr)"
-                />
-              );
-            })}
-          </svg>
-
           {messages.map((m, i) => {
             const from = byId[m.from];
             const to = byId[m.to];
             if (!from || !to) return null;
             const isReturn = m.kind === "return";
-            const cx = (from.x + to.x) / 2;
             return (
-              <div
+              <line
                 key={i}
-                style={{
-                  position: "absolute",
-                  left: cx,
-                  top: m.y - 22,
-                  transform: "translateX(-50%)",
-                  padding: "3px 10px",
-                  background: "var(--canvas-1)",
-                  border: `1px solid ${isReturn ? "var(--stroke-1)" : "var(--stroke-2)"}`,
-                  borderRadius: "var(--r-sm)",
-                  fontFamily: "var(--font-mono)",
-                  fontSize: 10.5,
-                  color: isReturn ? "var(--ink-2)" : "var(--ink-1)",
-                  whiteSpace: "nowrap",
-                }}
-              >
-                {m.label}
-              </div>
+                x1={from.x}
+                y1={m.y}
+                x2={to.x}
+                y2={m.y}
+                stroke={isReturn ? "var(--ink-3)" : "var(--stroke-3)"}
+                strokeWidth={isReturn ? 1 : 1.4}
+                strokeDasharray={isReturn ? "4 3" : ""}
+                markerEnd="url(#arr)"
+              />
             );
           })}
-        </div>
-      );
+        </svg>
+
+        {messages.map((m, i) => {
+          const from = byId[m.from];
+          const to = byId[m.to];
+          if (!from || !to) return null;
+          const isReturn = m.kind === "return";
+          const cx = (from.x + to.x) / 2;
+          return (
+            <div
+              key={i}
+              style={{
+                position: "absolute",
+                left: cx,
+                top: m.y - 22,
+                transform: "translateX(-50%)",
+                padding: "3px 10px",
+                background: "var(--canvas-1)",
+                border: `1px solid ${isReturn ? "var(--stroke-1)" : "var(--stroke-2)"}`,
+                borderRadius: "var(--r-sm)",
+                fontFamily: "var(--font-mono)",
+                fontSize: 10.5,
+                color: isReturn ? "var(--ink-2)" : "var(--ink-1)",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {m.label}
+            </div>
+          );
+        })}
+      </div>
+    );
 
   if (embedded) {
     return (

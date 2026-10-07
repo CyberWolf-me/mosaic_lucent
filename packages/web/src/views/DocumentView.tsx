@@ -19,7 +19,7 @@ export function DocumentView({
   onSelectPrompt?: (text: string) => void;
   onSendPrompt?: (text: string) => void;
 }) {
-  const { workspace, chat, send, setView, projectName } = useWorkspace();
+  const { workspace, chat, send, projectName } = useWorkspace();
   const [message, setMessage] = useState("");
   const submit = () => {
     const text = message.trim();
@@ -40,11 +40,22 @@ export function DocumentView({
       </div>
       <h2>Nothing to write up yet</h2>
       <p>
-        This document is generated from your board — sections come from nodes and groups.
-        Describe something below and it will appear here.
+        This document is generated from your board — sections come from nodes and groups. Describe
+        something below and it will appear here.
       </p>
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center", marginTop: 12 }}>
-        {["Create an executive summary document", "Write up system requirements from this diagram"].map((s) => (
+      <div
+        style={{
+          display: "flex",
+          gap: 8,
+          flexWrap: "wrap",
+          justifyContent: "center",
+          marginTop: 12,
+        }}
+      >
+        {[
+          "Create an executive summary document",
+          "Write up system requirements from this diagram",
+        ].map((s) => (
           <button
             key={s}
             onClick={() => {

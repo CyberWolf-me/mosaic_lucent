@@ -360,12 +360,13 @@ export class PostgresJobQueue implements JobQueue {
    * the same belt-and-braces shape the ledger's re-claim uses.
    */
   async claim(families: JobFamily[], workerId: string, limit: number): Promise<Job[]> {
+    if (families.length === 0) return [];
     const now = Date.now();
     const staleBefore = now - this.staleMs;
     const rows = await this.db.db.execute(sql`
       with ready as (
         select "id" from ${jobs}
-         where "family" = any(${sql.raw(`ARRAY[${families.map((f) => `'${f}'`).join(",")}]::text[]`)})
+         where ${inArray(jobs.family, families)}
            and "attempts" < ${this.maxAttempts}
            and "run_after" <= ${now}::bigint
            and (

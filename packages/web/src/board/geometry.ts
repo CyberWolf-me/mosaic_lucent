@@ -791,6 +791,65 @@ export function shapesInFrame(frame: Shape, shapes: Shape[]): string[] {
     .map((s) => s.id);
 }
 
+/** Node ids contained within or largely intersecting a frame's box (for frame drag-together). */
+export function nodesInFrame(
+  frame: Shape,
+  nodes: Array<{ id: string; position?: { x: number; y: number }; size?: { width: number; height: number } }>,
+): string[] {
+  const fx = frame.position.x;
+  const fy = frame.position.y;
+  const fr = fx + frame.size.width;
+  const fb = fy + frame.size.height;
+  return nodes
+    .filter((n) => n.position != null)
+    .filter((n) => {
+      const nx = n.position!.x;
+      const ny = n.position!.y;
+      const nw = n.size?.width ?? 160;
+      const nh = n.size?.height ?? 64;
+      const cx = nx + nw / 2;
+      const cy = ny + nh / 2;
+      const centerIn = cx >= fx && cx <= fr && cy >= fy && cy <= fb;
+      const boxIn = nx >= fx && ny >= fy && nx + nw <= fr && ny + nh <= fb;
+      return centerIn || boxIn;
+    })
+    .map((n) => n.id);
+}
+
+/**
+ * Create a sub-workspace containing only the selected nodes and/or shapes,
+ * along with all interconnecting edges between the selected nodes.
+ */
+export function subWorkspaceFromSelection(
+  workspace: Workspace,
+  nodeIds: Set<string>,
+  shapeIds?: Set<string>,
+): Workspace {
+  if (nodeIds.size === 0 && (!shapeIds || shapeIds.size === 0)) return workspace;
+  const nodes: Record<string, Node> = {};
+  for (const id of nodeIds) {
+    if (workspace.nodes[id]) nodes[id] = workspace.nodes[id]!;
+  }
+  const edges: Record<string, import("@lucent/core").Edge> = {};
+  for (const [eid, edge] of Object.entries(workspace.edges)) {
+    if (nodeIds.has(edge.source) && nodeIds.has(edge.target)) {
+      edges[eid] = edge;
+    }
+  }
+  const shapes: Record<string, Shape> = {};
+  if (shapeIds) {
+    for (const id of shapeIds) {
+      if (workspace.shapes[id]) shapes[id] = workspace.shapes[id]!;
+    }
+  }
+  return {
+    ...workspace,
+    nodes,
+    edges,
+    shapes,
+  };
+}
+
 /**
  * Apple-design motion physics (skill §4–6, §9). Pure math, no DOM: gesture
  * handlers feed pointer samples in, and drive the returned targets with

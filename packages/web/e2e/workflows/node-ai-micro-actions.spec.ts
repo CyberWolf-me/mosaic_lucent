@@ -22,10 +22,17 @@ test.describe("Workflow: In-Canvas AI Floating Micro-Actions", () => {
 
     // 1. Intercept /api/generate streaming requests
     await page.route(/\/api\/generate/, async (route) => {
-      let postData: any = null;
+      let postData: {
+        message?: string;
+        prompt?: string;
+        summary?: { selection?: string[] };
+        selection?: string[];
+      } | null = null;
       try {
         postData = route.request().postDataJSON();
-      } catch {}
+      } catch {
+        // ignore JSON parse error
+      }
 
       capturedPrompt = postData?.message ?? postData?.prompt ?? null;
       capturedSelection = postData?.summary?.selection ?? postData?.selection ?? null;
@@ -80,7 +87,10 @@ test.describe("Workflow: In-Canvas AI Floating Micro-Actions", () => {
     for (let i = 0; i < 5; i++) {
       const btn = page.getByRole("button", { name: /^(Skip|Got it|Done|Close|Finish)$/i });
       if ((await btn.count()) === 0) break;
-      await btn.first().click({ force: true }).catch(() => {});
+      await btn
+        .first()
+        .click({ force: true })
+        .catch(() => {});
       await page.waitForTimeout(300);
     }
     await page.evaluate(() => localStorage.setItem("lucent.tour.seen.v1", "1"));

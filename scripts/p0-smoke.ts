@@ -159,6 +159,7 @@ async function main() {
 
   console.log(exitCode === 0 ? "\nP0 SMOKE: ALL PASS" : "\nP0 SMOKE: FAILURES");
   await close();
+  await new Promise((r) => setTimeout(r, 100));
   process.exit(exitCode);
 }
 

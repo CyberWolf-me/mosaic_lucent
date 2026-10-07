@@ -22,13 +22,19 @@ test.describe("Workflow: Meeting Mode Lifecycle & View Persistence", () => {
     await page.locator('input[type="text"]').first().fill("Meeting User");
     await page.locator('input[type="email"]').first().fill(`meet-${Date.now()}@lucent.test`);
     await page.locator('input[type="password"]').first().fill("password-123456");
-    await page.getByRole("button", { name: /create account|sign up/i }).first().click();
+    await page
+      .getByRole("button", { name: /create account|sign up/i })
+      .first()
+      .click();
 
     // Dismiss any onboarding modals
     for (let i = 0; i < 5; i++) {
       const btn = page.getByRole("button", { name: /^(Skip|Got it|Done|Close|Finish)$/i });
       if ((await btn.count()) === 0) break;
-      await btn.first().click({ force: true }).catch(() => {});
+      await btn
+        .first()
+        .click({ force: true })
+        .catch(() => {});
       await page.waitForTimeout(300);
     }
 
@@ -74,7 +80,14 @@ test.describe("Workflow: Meeting Mode Lifecycle & View Persistence", () => {
 
     // Start capture via debug hook (resilient in headless mode without microphone hardware)
     await page.evaluate(() => {
-      const dbg = (window as any).__lucentVoiceDebug;
+      const dbg = (
+        window as unknown as {
+          __lucentVoiceDebug?: {
+            startCapture: () => void;
+            evaluate: (s: string, t: string) => void;
+          };
+        }
+      ).__lucentVoiceDebug;
       if (dbg) {
         dbg.startCapture();
       }
@@ -86,7 +99,14 @@ test.describe("Workflow: Meeting Mode Lifecycle & View Persistence", () => {
 
     // 6. Inject simulated speech turns using the real conversational debug hook
     await page.evaluate(() => {
-      const dbg = (window as any).__lucentVoiceDebug;
+      const dbg = (
+        window as unknown as {
+          __lucentVoiceDebug?: {
+            startCapture: () => void;
+            evaluate: (s: string, t: string) => void;
+          };
+        }
+      ).__lucentVoiceDebug;
       if (dbg) {
         dbg.evaluate("Alice", "We decided to migrate our infrastructure to Oracle Cloud.");
         dbg.evaluate("Bob", "I will handle the Nginx reverse proxy configuration by Friday.");
@@ -94,7 +114,9 @@ test.describe("Workflow: Meeting Mode Lifecycle & View Persistence", () => {
     });
 
     // Verify turns appear in the transcript panel
-    await expect(page.getByText("We decided to migrate our infrastructure to Oracle Cloud.")).toBeVisible({
+    await expect(
+      page.getByText("We decided to migrate our infrastructure to Oracle Cloud."),
+    ).toBeVisible({
       timeout: 10_000,
     });
     await expect(
@@ -109,7 +131,9 @@ test.describe("Workflow: Meeting Mode Lifecycle & View Persistence", () => {
     await expect(page.getByRole("button", { name: /new meeting/i })).toBeVisible();
 
     // Verify the transcript turns are retained in the saved document
-    await expect(page.getByText("We decided to migrate our infrastructure to Oracle Cloud.")).toBeVisible();
+    await expect(
+      page.getByText("We decided to migrate our infrastructure to Oracle Cloud."),
+    ).toBeVisible();
 
     // 8. THE CRITICAL VIEW-SWITCH TEST:
     // Navigate away to Canvas view
@@ -119,7 +143,10 @@ test.describe("Workflow: Meeting Mode Lifecycle & View Persistence", () => {
 
     const skipBtn = page.getByRole("button", { name: /^(Skip|Got it|Done|Close)$/i });
     if ((await skipBtn.count()) > 0) {
-      await skipBtn.first().click().catch(() => {});
+      await skipBtn
+        .first()
+        .click()
+        .catch(() => {});
     }
 
     // Navigate to Projects view
@@ -147,7 +174,9 @@ test.describe("Workflow: Meeting Mode Lifecycle & View Persistence", () => {
 
     // ASSERTION: Meeting data is still intact!
     await expect(page.getByText(/Saved meeting/i).first()).toBeVisible({ timeout: 15_000 });
-    await expect(page.getByText("We decided to migrate our infrastructure to Oracle Cloud.")).toBeVisible();
+    await expect(
+      page.getByText("We decided to migrate our infrastructure to Oracle Cloud."),
+    ).toBeVisible();
     await expect(
       page.getByText("I will handle the Nginx reverse proxy configuration by Friday."),
     ).toBeVisible();
@@ -160,7 +189,9 @@ test.describe("Workflow: Meeting Mode Lifecycle & View Persistence", () => {
     await newMeetingBtn.click();
 
     // Verify empty state is now displayed, ready for a new recording
-    await expect(page.getByRole("button", { name: /start recording|new recording/i }).first()).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: /start recording|new recording/i }).first(),
+    ).toBeVisible();
 
     // Verify the previous meeting is listed under "Past meetings"
     await expect(page.getByText(/Past meetings/i)).toBeVisible();
@@ -170,6 +201,8 @@ test.describe("Workflow: Meeting Mode Lifecycle & View Persistence", () => {
     // Clicking the past meeting restores it!
     await pastMeetingItem.click();
     await expect(page.getByText(/Saved meeting/i).first()).toBeVisible({ timeout: 10_000 });
-    await expect(page.getByText("We decided to migrate our infrastructure to Oracle Cloud.")).toBeVisible();
+    await expect(
+      page.getByText("We decided to migrate our infrastructure to Oracle Cloud."),
+    ).toBeVisible();
   });
 });

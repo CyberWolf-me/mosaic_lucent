@@ -715,10 +715,15 @@ describe("model selection, thinking, and telemetry", () => {
           operations: [{ op: "CREATE_NODE" as const, id: "n1", nodeType: "step", label: "Node 1" }],
         };
       },
-      async streamOperations(req: GenerateRequest, callbacks: { onDelta?(d: string): void; onThinkingDelta?(t: string): void }) {
+      async streamOperations(
+        req: GenerateRequest,
+        callbacks: { onDelta?(d: string): void; onThinkingDelta?(t: string): void },
+      ) {
         callbacks.onThinkingDelta?.("Thinking part 1... ");
         callbacks.onThinkingDelta?.("Thinking part 2 finished.");
-        callbacks.onDelta?.('{"operations":[{"op":"CREATE_NODE","id":"n1","nodeType":"step","label":"Node 1"}]}');
+        callbacks.onDelta?.(
+          '{"operations":[{"op":"CREATE_NODE","id":"n1","nodeType":"step","label":"Node 1"}]}',
+        );
         return {
           operations: [{ op: "CREATE_NODE" as const, id: "n1", nodeType: "step", label: "Node 1" }],
           model: "stream-model",
@@ -734,7 +739,9 @@ describe("model selection, thinking, and telemetry", () => {
       },
     };
 
-    const res = await (await import("../src/generate.js")).handleGenerateStream(
+    const res = await (
+      await import("../src/generate.js")
+    ).handleGenerateStream(
       streamingThinkingProvider,
       { message: "stream test", summary: emptySummary, tier: "reasoning" },
       undefined,

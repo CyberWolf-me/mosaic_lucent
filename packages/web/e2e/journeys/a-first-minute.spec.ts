@@ -1,4 +1,4 @@
-import { expect, test, BASE } from "./fixtures";
+import { expect, test } from "./fixtures";
 
 /**
  * Scenario A — The first minute.
@@ -72,8 +72,14 @@ test.describe("A · the first minute", () => {
       roles.length,
       `no semantic roles found — the diagram is a picture, not a model: ${JSON.stringify(after.labels)}`,
     ).toBeGreaterThanOrEqual(3);
-    expect(roles.some((r) => r === "START"), `no START step in: ${roles.join(",")}`).toBe(true);
-    expect(roles.some((r) => r === "END"), `no END step in: ${roles.join(",")}`).toBe(true);
+    expect(
+      roles.some((r) => r === "START"),
+      `no START step in: ${roles.join(",")}`,
+    ).toBe(true);
+    expect(
+      roles.some((r) => r === "END"),
+      `no END step in: ${roles.join(",")}`,
+    ).toBe(true);
 
     // 4. THE ARCHITECTURAL NON-NEGOTIABLE. The LLM must not author geometry;
     //    the layout engine owns coordinates. Measured on the wire.

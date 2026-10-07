@@ -34,9 +34,11 @@ export class PostgresFanout implements Fanout {
   /** boardId → listeners. A board with no listeners holds no entry. */
   private readonly listeners = new Map<string, Set<FanoutListener>>();
   private closed = false;
-  /** The connection holding `LISTEN FANOUT_CHANNEL`. */
-  private readonly listenClient: Client;
-  /** Connection URL — captured at construction so close() can release it. */
+  /** The connection holding `LISTEN FANOUT_CHANNEL`. Null during reconnect. */
+  private listenClient: Client | null = null;
+  /** Db handle holding the connection pool used for publish. */
+  private readonly target: Db;
+  /** Connection URL — captured at construction so reconnection can use it. */
   private readonly url: string;
   /**
    * Hook called when a listener throws. The publisher on a real bus is a
@@ -46,14 +48,38 @@ export class PostgresFanout implements Fanout {
    */
   private readonly onListenerError: (error: unknown, message: FanoutMessage) => void;
 
+  /** Reconnect management */
+  private reconnectTimer: NodeJS.Timeout | null = null;
+  private reconnectAttempt = 0;
+  private isConnecting = false;
+
   private constructor(
+    target: Db,
     listenClient: Client,
     url: string,
     onListenerError: (error: unknown, message: FanoutMessage) => void,
   ) {
+    this.target = target;
     this.listenClient = listenClient;
     this.url = url;
     this.onListenerError = onListenerError;
+    this.bindClientEvents(listenClient);
+  }
+
+  private bindClientEvents(client: Client): void {
+    client.on("notification", (msg) => {
+      if (msg.channel !== FANOUT_CHANNEL) return;
+      const message = decodeFanoutMessage(msg.payload ?? "");
+      if (!message) return;
+      this.deliver(message);
+    });
+    client.on("error", (err) => {
+      console.error("[lucent] fanout LISTEN client error:", err);
+      this.scheduleReconnect();
+    });
+    client.on("end", () => {
+      this.scheduleReconnect();
+    });
   }
 
   /**
@@ -66,49 +92,72 @@ export class PostgresFanout implements Fanout {
     target: Db,
     onListenerError: (error: unknown, message: FanoutMessage) => void = () => {},
   ): Promise<PostgresFanout> {
-    // A second client outside the pool, because LISTEN is session-level. The
-    // connection URL is read from the pool's options; this keeps the test
-    // harness and production wired the same way — `createDb(url)` is the
-    // only place the URL is held.
     const url = target.url;
     const client = new Client(pgConfigFromUrl(url));
     await client.connect();
     await client.query(`LISTEN ${FANOUT_CHANNEL}`);
-    const fanout = new PostgresFanout(client, url, onListenerError);
-    client.on("notification", (msg) => {
-      if (msg.channel !== FANOUT_CHANNEL) return;
-      const message = decodeFanoutMessage(msg.payload ?? "");
-      if (!message) return;
-      fanout.deliver(message);
-    });
-    client.on("error", (err) => {
-      // A connection error takes the LISTEN down. The reconnect path will
-      // re-establish it; meanwhile publish() still resolves (the pool keeps
-      // working), subscribers just miss notifications until the connection
-      // is back. Log rather than throw: the bus is best-effort by design.
-      console.error("[lucent] fanout LISTEN client error:", err);
-    });
-    return fanout;
+    return new PostgresFanout(target, client, url, onListenerError);
+  }
+
+  /**
+   * Schedule reconnection with jittered exponential backoff.
+   */
+  scheduleReconnect(delayMs?: number): void {
+    if (this.closed || this.reconnectTimer) return;
+
+    if (this.listenClient) {
+      this.listenClient.removeAllListeners();
+      this.listenClient.end().catch(() => {});
+      this.listenClient = null;
+    }
+
+    const backoff =
+      delayMs !== undefined
+        ? delayMs
+        : Math.min(5000, 100 * Math.pow(2, Math.min(this.reconnectAttempt, 6))) +
+          Math.floor(Math.random() * 200);
+
+    this.reconnectAttempt++;
+    this.reconnectTimer = setTimeout(async () => {
+      this.reconnectTimer = null;
+      await this.reconnect();
+    }, backoff);
+  }
+
+  /**
+   * Attempt to reconnect the LISTEN client.
+   * On success: re-issues LISTEN and replays resync notifications to every active subscriber.
+   * On failure: schedules another reconnection attempt.
+   */
+  async reconnect(): Promise<void> {
+    if (this.closed || this.isConnecting) return;
+    this.isConnecting = true;
+    try {
+      const client = new Client(pgConfigFromUrl(this.url));
+      await client.connect();
+      await client.query(`LISTEN ${FANOUT_CHANNEL}`);
+      this.listenClient = client;
+      this.bindClientEvents(client);
+      this.reconnectAttempt = 0;
+      this.isConnecting = false;
+      // Re-delivery of resync per the ADR contract: before newer notifications
+      this.replayResyncs();
+    } catch (err) {
+      this.isConnecting = false;
+      console.error("[lucent] fanout reconnect attempt failed:", err);
+      this.scheduleReconnect();
+    }
   }
 
   async publish(message: FanoutMessage): Promise<void> {
-    // Encode first so an oversized message fails whether or not anyone is
-    // listening (a guard that only fires with subscribers passes in unit tests
-    // and throws in production — fanout.ts:247).
     const encoded = encodeFanoutMessage(message);
     if (this.closed) return;
-    // NOTIFY over a fresh pool client. The cost is the round trip; the
-    // benefit is no second dedicated connection. The pool's error event
-    // surfaces a failure to the process log.
-    await this.listenClient.query("SELECT pg_notify($1, $2)", [FANOUT_CHANNEL, encoded]);
+    // NOTIFY over the connection pool. Decoupled from the dedicated LISTEN client.
+    await this.target.pool.query("SELECT pg_notify($1, $2)", [FANOUT_CHANNEL, encoded]);
   }
 
   subscribe(boardId: string, listener: FanoutListener): Unsubscribe {
-    // A closed bus registers nothing — a late subscribe cannot leak a
-    // listener that will never be delivered to.
     if (this.closed) return () => {};
-    // A Set so the same function subscribed twice for one board is one
-    // subscription. realtime.ts passes a fresh closure per room.
     const set = this.listeners.get(boardId) ?? new Set<FanoutListener>();
     set.add(listener);
     this.listeners.set(boardId, set);
@@ -123,11 +172,6 @@ export class PostgresFanout implements Fanout {
     };
   }
 
-  /**
-   * Dispatch one notification to the listeners of its board. Public so the
-   * LISTEN callback can use it; not part of the `Fanout` interface, which is
-   * publisher-facing only.
-   */
   deliver(message: FanoutMessage): void {
     const set = this.listeners.get(message.boardId);
     if (!set || set.size === 0) return;
@@ -141,12 +185,6 @@ export class PostgresFanout implements Fanout {
     }
   }
 
-  /**
-   * Replay the `resync` to every live subscriber — the "before any newer
-   * notification, emit exactly one `{kind: 'resync'}` per board that has
-   * live subscriptions" rule from the ADR. Called by the bus after a
-   * reconnect; on first construction there is nothing to replay.
-   */
   replayResyncs(): void {
     for (const boardId of [...this.listeners.keys()]) {
       this.deliver(resyncMessage(boardId));
@@ -156,15 +194,24 @@ export class PostgresFanout implements Fanout {
   async close(): Promise<void> {
     if (this.closed) return;
     this.closed = true;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
     this.listeners.clear();
-    await this.listenClient.end().catch(() => {
-      // `end()` is idempotent in pg; ignore a duplicate-close rather than
-      // mask a real failure that already surfaced through `client.on("error")`.
-    });
+    if (this.listenClient) {
+      this.listenClient.removeAllListeners();
+      await this.listenClient.end().catch(() => {});
+      this.listenClient = null;
+    }
   }
 
-  /** Diagnostics — boards with at least one live subscription. */
   subscribedBoards(): string[] {
     return [...this.listeners.keys()].sort();
+  }
+
+  /** Visible for testing */
+  getListenClient(): Client | null {
+    return this.listenClient;
   }
 }

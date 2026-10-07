@@ -22,10 +22,12 @@ test.describe("Workflow: Workspace Architectural Rules & Durable Context", () =>
 
     // 1. Intercept /api/generate streaming requests to verify rules payload delivery
     await page.route(/\/api\/generate/, async (route) => {
-      let postData: any = null;
+      let postData: { rules?: string } | null = null;
       try {
         postData = route.request().postDataJSON();
-      } catch {}
+      } catch {
+        // ignore JSON parse error
+      }
 
       if (postData?.rules) {
         capturedRules = postData.rules;
@@ -53,8 +55,10 @@ test.describe("Workflow: Workspace Architectural Rules & Durable Context", () =>
             relationship: "reads/writes",
           },
         ],
-        explanation: "Constructed GCP Cloud-Native microservices honoring workspace architectural rules.",
-        reply: "I've created the Cloud Run Auth Service connected to Cloud Spanner following your GCP rules.",
+        explanation:
+          "Constructed GCP Cloud-Native microservices honoring workspace architectural rules.",
+        reply:
+          "I've created the Cloud Run Auth Service connected to Cloud Spanner following your GCP rules.",
         provider: "mock",
       });
 
@@ -81,7 +85,10 @@ test.describe("Workflow: Workspace Architectural Rules & Durable Context", () =>
     for (let i = 0; i < 5; i++) {
       const btn = page.getByRole("button", { name: /^(Skip|Got it|Done|Close|Finish)$/i });
       if ((await btn.count()) === 0) break;
-      await btn.first().click({ force: true }).catch(() => {});
+      await btn
+        .first()
+        .click({ force: true })
+        .catch(() => {});
       await page.waitForTimeout(300);
     }
     await page.evaluate(() => localStorage.setItem("lucent.tour.seen.v1", "1"));

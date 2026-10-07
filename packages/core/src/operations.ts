@@ -767,7 +767,93 @@ const OP_ALIASES: Record<string, string> = {
   SET_LABEL: "CHANGE_TEXT",
   UPDATE_TEXT: "CHANGE_TEXT",
   UPDATE_LABEL: "CHANGE_TEXT",
+  UPDATE_WIREFRAME: "CREATE_WIREFRAME",
+  MODIFY_WIREFRAME: "CREATE_WIREFRAME",
+  EDIT_WIREFRAME: "CREATE_WIREFRAME",
+  SET_WIREFRAME: "CREATE_WIREFRAME",
+  ADD_WIREFRAME: "CREATE_WIREFRAME",
+  REMOVE_WIREFRAME: "DELETE_WIREFRAME",
 };
+
+/**
+ * Tolerant normalization for wireframe element trees emitted by LLMs.
+ * Maps common variations (text/title/name -> label, horizontal/vertical -> row/column,
+ * outline/solid/default -> secondary/primary) into valid WireframeElement structures.
+ */
+function sanitizeWireframeElement(raw: unknown): Record<string, unknown> {
+  if (!raw || typeof raw !== "object") {
+    return { kind: "text", label: String(raw ?? "") };
+  }
+  const el = { ...(raw as Record<string, unknown>) };
+
+  if (typeof el.kind !== "string" || !el.kind.trim()) {
+    el.kind = typeof el.type === "string" && el.type.trim() ? el.type.trim() : "card";
+  } else {
+    el.kind = el.kind.trim();
+  }
+
+  if (typeof el.label !== "string") {
+    const candidate = el.text ?? el.title ?? el.name ?? el.value ?? el.heading ?? el.caption;
+    if (candidate !== undefined && candidate !== null) {
+      el.label = String(candidate);
+    }
+  }
+
+  if (el.placeholder !== undefined && el.placeholder !== null && typeof el.placeholder !== "string") {
+    el.placeholder = String(el.placeholder);
+  }
+
+  if (el.variant !== undefined && el.variant !== null) {
+    const v = String(el.variant).toLowerCase().trim();
+    if (v === "primary" || v === "secondary" || v === "ghost") {
+      el.variant = v;
+    } else if (v === "outline" || v === "muted" || v === "subtle") {
+      el.variant = "secondary";
+    } else if (v === "solid" || v === "default" || v === "accent" || v === "brand") {
+      el.variant = "primary";
+    } else if (v === "text" || v === "link") {
+      el.variant = "ghost";
+    } else {
+      delete el.variant;
+    }
+  }
+
+  if (el.direction !== undefined && el.direction !== null) {
+    const d = String(el.direction).toLowerCase().trim();
+    if (d === "row" || d === "horizontal" || d === "inline") {
+      el.direction = "row";
+    } else if (d === "column" || d === "vertical" || d === "stack") {
+      el.direction = "column";
+    } else {
+      delete el.direction;
+    }
+  }
+
+  if (el.weight !== undefined && el.weight !== null) {
+    const num = typeof el.weight === "number" ? el.weight : parseFloat(String(el.weight));
+    if (Number.isFinite(num) && num > 0) {
+      el.weight = num;
+    } else {
+      delete el.weight;
+    }
+  }
+
+  const rawChildren = Array.isArray(el.children)
+    ? el.children
+    : Array.isArray(el.elements)
+      ? el.elements
+      : Array.isArray(el.items)
+        ? el.items
+        : undefined;
+
+  if (rawChildren) {
+    el.children = rawChildren.map((c) => sanitizeWireframeElement(c));
+  } else {
+    delete el.children;
+  }
+
+  return el;
+}
 
 /**
  * Models write "id PK\nemail\nuser_id FK" as one item as often as three. A
@@ -858,7 +944,9 @@ export function sanitizeRawOperations(raw: unknown): unknown {
     }
     if (copy.op === "CHANGE_TEXT") {
       if (typeof copy.text !== "string") {
-        copy.text = String(copy.text ?? copy.label ?? copy.newText ?? copy.title ?? copy.name ?? "");
+        copy.text = String(
+          copy.text ?? copy.label ?? copy.newText ?? copy.title ?? copy.name ?? "",
+        );
       }
     }
     if (copy.op === "MOVE_NODE") {
@@ -878,6 +966,44 @@ export function sanitizeRawOperations(raw: unknown): unknown {
       if (!copy.target && typeof copy.to === "string") copy.target = copy.to;
       if (copy.relationship === null || copy.relationship === undefined) {
         copy.relationship = "";
+      }
+    }
+    if (copy.op === "CREATE_WIREFRAME") {
+      if (!copy.id || typeof copy.id !== "string" || !copy.id.trim()) {
+        copy.id = `wf_${Math.random().toString(36).slice(2, 9)}`;
+      } else {
+        copy.id = copy.id.trim();
+      }
+      if (typeof copy.title !== "string" || !copy.title.trim()) {
+        const candidate = copy.name ?? copy.label ?? copy.title ?? "Wireframe";
+        copy.title = String(candidate).trim() || "Wireframe";
+      } else {
+        copy.title = copy.title.trim();
+      }
+      if (copy.viewport !== "desktop" && copy.viewport !== "tablet" && copy.viewport !== "mobile") {
+        const vp = String(copy.viewport ?? "").toLowerCase().trim();
+        if (vp === "mobile" || vp === "phone" || vp === "mobile-first" || vp === "smartphone") {
+          copy.viewport = "mobile";
+        } else if (vp === "tablet" || vp === "ipad") {
+          copy.viewport = "tablet";
+        } else {
+          copy.viewport = "desktop";
+        }
+      }
+      if (!copy.root || typeof copy.root !== "object") {
+        const rawChildren = Array.isArray(copy.children)
+          ? copy.children
+          : Array.isArray(copy.elements)
+            ? copy.elements
+            : Array.isArray(copy.items)
+              ? copy.items
+              : [];
+        copy.root = {
+          kind: "screen",
+          children: rawChildren.map(sanitizeWireframeElement),
+        };
+      } else {
+        copy.root = sanitizeWireframeElement(copy.root);
       }
     }
     normalized.push(copy);

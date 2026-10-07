@@ -138,6 +138,7 @@ import { registerGuestRoutes } from "./routes/guests.js";
 import { registerTeamRoutes } from "./routes/teams.js";
 import { registerTrashRoutes } from "./routes/trash.js";
 import { registerMeRoutes } from "./routes/me.js";
+import { registerTemplateRoutes } from "./routes/templates.js";
 import { InMemoryFavoriteStore } from "./favorites.js";
 import { InMemoryTrashStore, withMeetingTrash, withProjectTrash } from "./trash.js";
 import { InMemoryTeamStore, withTeamGrants } from "./teams.js";
@@ -178,7 +179,6 @@ import {
 } from "./agentGrant.js";
 import { registerAssetRoutes } from "./routes/assets.js";
 import { registerScimRoutes } from "./routes/scim.js";
-import { PUBLIC_TEMPLATES } from "./publicTemplates.js";
 import type { ScimUserAccess } from "./scim.js";
 import { createStripeWebhookReceiver, type StripeWebhookReceiver } from "./billing/webhook.js";
 import {
@@ -2736,6 +2736,7 @@ export function createApp(deps: AppDeps): App {
   registerSttRoutes(router, services);
   registerCallRoutes(router, services);
   registerTtsRoutes(router, services);
+  registerTemplateRoutes(router, services);
   /**
    * Asset gateway (M7 / M4 storage): `/api/assets/*`. The handler is built
    * here, not registered through the router, because it consumes a body-cap
@@ -3571,16 +3572,6 @@ export function createApp(deps: AppDeps): App {
       return;
     }
 
-    // G1: the public template catalog. Anonymous by design — it is the one
-    // API surface the marketing site and the MCP server may render, and
-    // metadata-only by design (the ops are minted client-side with per-insert
-    // ids; see publicTemplates.ts). No auth, no CSRF, no rate limit beyond
-    // the global one: an anonymous list of template names leaks nothing.
-    if (req.method === "GET" && (req.url === "/api/templates" || req.url === "/api/templates/")) {
-      send(res, 200, { templates: PUBLIC_TEMPLATES });
-      return;
-    }
-
     // M7: Analytics trend. Owner-visible, mirrors the entitlement numbers
     // the dashboard renders so the chart cannot disagree with the paywall.
     // Fails open with `{ rows: [] }` when there is no usage store — older
@@ -4342,7 +4333,7 @@ export function createApp(deps: AppDeps): App {
               ? { classification: existing.classification }
               : {}),
           ...(body.rules !== undefined
-            ? { rules: body.rules === null ? null : (body.rules as string).slice(0, 8000) }
+            ? { rules: body.rules === null ? null : body.rules.slice(0, 8000) }
             : existing?.rules !== undefined
               ? { rules: existing.rules }
               : {}),

@@ -39,7 +39,8 @@ export function BoardView({
   onSelectPrompt?: (text: string) => void;
   onSendPrompt?: (text: string) => void;
 }) {
-  const { workspace, chat, send, clarification, setView, applyManual, boardId, projectName } = useWorkspace();
+  const { workspace, chat, send, clarification, applyManual, boardId, projectName } =
+    useWorkspace();
   const [message, setMessage] = useState("");
   const [activeDrag, setActiveDrag] = useState<ActiveDrag | null>(null);
   const [overCol, setOverCol] = useState<IssueStatusCategory | null>(null);
@@ -180,10 +181,19 @@ export function BoardView({
           <>
             <h2>Convert Diagram to Kanban</h2>
             <p>
-              This board has {diagramNodes.length} diagram node{diagramNodes.length === 1 ? "" : "s"}.
-              You can convert them directly into Kanban cards or ask AI to break them into sprint backlog stories.
+              This board has {diagramNodes.length} diagram node
+              {diagramNodes.length === 1 ? "" : "s"}. You can convert them directly into Kanban
+              cards or ask AI to break them into sprint backlog stories.
             </p>
-            <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "center", marginTop: 14 }}>
+            <div
+              style={{
+                display: "flex",
+                gap: 10,
+                flexWrap: "wrap",
+                justifyContent: "center",
+                marginTop: 14,
+              }}
+            >
               <button
                 onClick={() => convertNodesToIssues(diagramNodes)}
                 style={{
@@ -200,7 +210,11 @@ export function BoardView({
                 Convert all {diagramNodes.length} nodes to cards
               </button>
               <button
-                onClick={() => triggerPrompt("Break the current diagram nodes into sprint backlog stories with priorities")}
+                onClick={() =>
+                  triggerPrompt(
+                    "Break the current diagram nodes into sprint backlog stories with priorities",
+                  )
+                }
                 style={{
                   fontSize: 13,
                   fontWeight: 500,
@@ -221,10 +235,18 @@ export function BoardView({
             <h2>No work items yet</h2>
             <p>
               Cards come from nodes with issue fields. Ask Lucent to "break the checkout epic into
-              stories" or "make a sprint backlog", or add issue details to a node, and they'll appear
-              here as a Kanban board.
+              stories" or "make a sprint backlog", or add issue details to a node, and they'll
+              appear here as a Kanban board.
             </p>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center", marginTop: 12 }}>
+            <div
+              style={{
+                display: "flex",
+                gap: 8,
+                flexWrap: "wrap",
+                justifyContent: "center",
+                marginTop: 12,
+              }}
+            >
               {[
                 "Break the current flow into sprint backlog stories",
                 "Add a task for backend authentication",
@@ -273,7 +295,8 @@ export function BoardView({
             }}
           >
             <span>
-              💡 {unassignedNodes.length} diagram node{unassignedNodes.length === 1 ? "" : "s"} not yet in Kanban.
+              💡 {unassignedNodes.length} diagram node{unassignedNodes.length === 1 ? "" : "s"} not
+              yet in Kanban.
             </span>
             <button
               onClick={() => convertNodesToIssues(unassignedNodes)}
@@ -304,49 +327,49 @@ export function BoardView({
                 : undefined
           }
         >
-        {BOARD_COLUMNS.map((col) => {
-          const cards = columns[col.category];
-          return (
-            <div
-              key={col.category}
-              data-column-category={col.category}
-              className={`board-column ${overCol === col.category ? "over" : ""}`}
-              role="listitem"
-              aria-label={`${col.label}, ${cards.length} item${cards.length === 1 ? "" : "s"}`}
-            >
-              <div className="board-column-head">
-                <h2 className="board-column-title">{col.label}</h2>
-                <span className="mono board-column-count">
-                  {cards.length}
-                  {points[col.category] > 0 ? ` · ${points[col.category]}pt` : ""}
-                </span>
+          {BOARD_COLUMNS.map((col) => {
+            const cards = columns[col.category];
+            return (
+              <div
+                key={col.category}
+                data-column-category={col.category}
+                className={`board-column ${overCol === col.category ? "over" : ""}`}
+                role="listitem"
+                aria-label={`${col.label}, ${cards.length} item${cards.length === 1 ? "" : "s"}`}
+              >
+                <div className="board-column-head">
+                  <h2 className="board-column-title">{col.label}</h2>
+                  <span className="mono board-column-count">
+                    {cards.length}
+                    {points[col.category] > 0 ? ` · ${points[col.category]}pt` : ""}
+                  </span>
+                </div>
+                <div className="board-column-body">
+                  {cards.map((n) => (
+                    <IssueCard
+                      key={n.id}
+                      node={n}
+                      derived={derived.get(n.id)}
+                      decisions={decisionsByNode.get(n.id)}
+                      link={linksByNode.get(n.id)}
+                      isDragging={activeDrag?.id === n.id}
+                      dragOffset={
+                        activeDrag?.id === n.id
+                          ? { dx: activeDrag.dx, dy: activeDrag.dy }
+                          : undefined
+                      }
+                      onDragMove={(dx, dy, cx, cy) =>
+                        handleDragMove(n.id, col.category, dx, dy, cx, cy)
+                      }
+                      onDragEnd={(targetCat) => handleDragEnd(n.id, targetCat)}
+                      onNudge={(dir) => nudgeCard(n.id, dir)}
+                    />
+                  ))}
+                  {cards.length === 0 && <div className="board-column-empty">Nothing here</div>}
+                </div>
               </div>
-              <div className="board-column-body">
-                {cards.map((n) => (
-                  <IssueCard
-                    key={n.id}
-                    node={n}
-                    derived={derived.get(n.id)}
-                    decisions={decisionsByNode.get(n.id)}
-                    link={linksByNode.get(n.id)}
-                    isDragging={activeDrag?.id === n.id}
-                    dragOffset={
-                      activeDrag?.id === n.id
-                        ? { dx: activeDrag.dx, dy: activeDrag.dy }
-                        : undefined
-                    }
-                    onDragMove={(dx, dy, cx, cy) =>
-                      handleDragMove(n.id, col.category, dx, dy, cx, cy)
-                    }
-                    onDragEnd={(targetCat) => handleDragEnd(n.id, targetCat)}
-                    onNudge={(dir) => nudgeCard(n.id, dir)}
-                  />
-                ))}
-                {cards.length === 0 && <div className="board-column-empty">Nothing here</div>}
-              </div>
-            </div>
-          );
-        })}
+            );
+          })}
         </div>
       </>
     );

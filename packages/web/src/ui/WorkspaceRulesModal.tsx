@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { createPortal } from "react-dom";
 import {
   parseWorkspaceRules,
@@ -19,11 +19,11 @@ export function WorkspaceRulesModal({ onClose }: { onClose: () => void }) {
 
   const [form, setForm] = useState<WorkspaceRules>(() => parseWorkspaceRules(rules));
 
-  const requestClose = () => {
+  const requestClose = useCallback(() => {
     if (closing) return;
     setClosing(true);
     setTimeout(onClose, 140);
-  };
+  }, [closing, onClose]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -34,7 +34,7 @@ export function WorkspaceRulesModal({ onClose }: { onClose: () => void }) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [closing]);
+  }, [requestClose]);
 
   const applyTemplate = (templateId: string) => {
     const tmpl = WORKSPACE_RULE_TEMPLATES.find((t) => t.id === templateId);
@@ -266,9 +266,7 @@ export function WorkspaceRulesModal({ onClose }: { onClose: () => void }) {
                   &lt;workspace-rules&gt;
                 </div>
                 {formattedPrompt}
-                <div style={{ color: "var(--ink-4)", marginTop: 4 }}>
-                  &lt;/workspace-rules&gt;
-                </div>
+                <div style={{ color: "var(--ink-4)", marginTop: 4 }}>&lt;/workspace-rules&gt;</div>
               </>
             ) : (
               <span style={{ color: "var(--ink-4)", fontStyle: "italic" }}>

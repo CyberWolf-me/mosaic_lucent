@@ -26,7 +26,7 @@ export function WireframeView({
   onSelectPrompt?: (text: string) => void;
   onSendPrompt?: (text: string) => void;
 }) {
-  const { workspace, chat, send, setView, projectName } = useWorkspace();
+  const { workspace, chat, send, projectName } = useWorkspace();
   const [message, setMessage] = useState("");
 
   const submit = () => {
@@ -133,8 +133,8 @@ export function WireframeView({
           lineHeight: 1.55,
         }}
       >
-        Describe a screen and Lucent builds an editable wireframe from your workspace — try
-        "design a checkout wireframe".
+        Describe a screen and Lucent builds an editable wireframe from your workspace — try "design
+        a checkout wireframe".
       </p>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center" }}>
         {Object.keys(workspace.nodes).length > 0 && (

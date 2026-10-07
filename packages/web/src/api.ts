@@ -451,9 +451,16 @@ export async function generate(
         provider: typeof rawTelemetry.provider === "string" ? rawTelemetry.provider : "unknown",
         model: typeof rawTelemetry.model === "string" ? rawTelemetry.model : "unknown",
         latencyMs: typeof rawTelemetry.latencyMs === "number" ? rawTelemetry.latencyMs : 0,
-        promptTokens: typeof rawTelemetry.promptTokens === "number" ? rawTelemetry.promptTokens : undefined,
-        completionTokens: typeof rawTelemetry.completionTokens === "number" ? rawTelemetry.completionTokens : undefined,
-        reasoningTokens: typeof rawTelemetry.reasoningTokens === "number" ? rawTelemetry.reasoningTokens : undefined,
+        promptTokens:
+          typeof rawTelemetry.promptTokens === "number" ? rawTelemetry.promptTokens : undefined,
+        completionTokens:
+          typeof rawTelemetry.completionTokens === "number"
+            ? rawTelemetry.completionTokens
+            : undefined,
+        reasoningTokens:
+          typeof rawTelemetry.reasoningTokens === "number"
+            ? rawTelemetry.reasoningTokens
+            : undefined,
       }
     : null;
   const body: GenerateResponse = {
@@ -593,9 +600,16 @@ export async function streamGenerate(
             provider: typeof rawTelemetry.provider === "string" ? rawTelemetry.provider : "unknown",
             model: typeof rawTelemetry.model === "string" ? rawTelemetry.model : "unknown",
             latencyMs: typeof rawTelemetry.latencyMs === "number" ? rawTelemetry.latencyMs : 0,
-            promptTokens: typeof rawTelemetry.promptTokens === "number" ? rawTelemetry.promptTokens : undefined,
-            completionTokens: typeof rawTelemetry.completionTokens === "number" ? rawTelemetry.completionTokens : undefined,
-            reasoningTokens: typeof rawTelemetry.reasoningTokens === "number" ? rawTelemetry.reasoningTokens : undefined,
+            promptTokens:
+              typeof rawTelemetry.promptTokens === "number" ? rawTelemetry.promptTokens : undefined,
+            completionTokens:
+              typeof rawTelemetry.completionTokens === "number"
+                ? rawTelemetry.completionTokens
+                : undefined,
+            reasoningTokens:
+              typeof rawTelemetry.reasoningTokens === "number"
+                ? rawTelemetry.reasoningTokens
+                : undefined,
           }
         : null;
       done = {

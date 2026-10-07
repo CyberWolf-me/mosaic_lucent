@@ -13,21 +13,25 @@ import { expect, test } from "@playwright/test";
  *    semantic graph and title without leaking nodes or state across boards.
  */
 test.describe("Workflow: Multi-Board Management & Workspace Isolation", () => {
-  test("create, rename, construct nodes, and switch between isolated boards", async ({
-    page,
-  }) => {
+  test("create, rename, construct nodes, and switch between isolated boards", async ({ page }) => {
     // 1. Sign up a fresh user
     await page.goto("/signup");
     await page.locator('input[type="text"]').first().fill("Board User");
     await page.locator('input[type="email"]').first().fill(`board-${Date.now()}@lucent.test`);
     await page.locator('input[type="password"]').first().fill("password-123456");
-    await page.getByRole("button", { name: /create account|sign up/i }).first().click();
+    await page
+      .getByRole("button", { name: /create account|sign up/i })
+      .first()
+      .click();
 
     // Dismiss any onboarding modals
     for (let i = 0; i < 5; i++) {
       const btn = page.getByRole("button", { name: /^(Skip|Got it|Done|Close|Finish)$/i });
       if ((await btn.count()) === 0) break;
-      await btn.first().click({ force: true }).catch(() => {});
+      await btn
+        .first()
+        .click({ force: true })
+        .catch(() => {});
       await page.waitForTimeout(300);
     }
 
@@ -88,7 +92,10 @@ test.describe("Workflow: Multi-Board Management & Workspace Isolation", () => {
     // Dismiss tour dialog if triggered
     const skipBtn = page.getByRole("button", { name: /^(Skip|Got it|Done|Close)$/i });
     if ((await skipBtn.count()) > 0) {
-      await skipBtn.first().click().catch(() => {});
+      await skipBtn
+        .first()
+        .click()
+        .catch(() => {});
     }
 
     // 6. Rename Board 2 to "Checkout Flow"
@@ -102,7 +109,9 @@ test.describe("Workflow: Multi-Board Management & Workspace Isolation", () => {
     // 7. Construct diagram on Board 2
     const board2PromptInput = page.getByLabel("Describe what you want to build");
     await expect(board2PromptInput).toBeVisible();
-    await board2PromptInput.fill("Build an e-commerce online store with shopping cart and checkout");
+    await board2PromptInput.fill(
+      "Build an e-commerce online store with shopping cart and checkout",
+    );
     await board2PromptInput.press("Enter");
 
     await page.waitForSelector(".node", { timeout: 60_000 });

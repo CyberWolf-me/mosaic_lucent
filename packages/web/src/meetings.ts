@@ -71,7 +71,9 @@ export function saveLocalMeeting(scopeId: string, meeting: MeetingTranscript): v
         ? existing.map((m) => (m.id === meeting.id ? meeting : m))
         : [meeting, ...existing];
     localStorage.setItem(`${LOCAL_MEETINGS_PREFIX}${scopeId}`, JSON.stringify(updated));
-  } catch {}
+  } catch {
+    // ignore storage errors
+  }
 }
 
 export function deleteLocalMeeting(scopeId: string, meetingId: string): void {
@@ -80,7 +82,9 @@ export function deleteLocalMeeting(scopeId: string, meetingId: string): void {
     const existing = getLocalMeetings(scopeId);
     const updated = existing.filter((m) => m.id !== meetingId);
     localStorage.setItem(`${LOCAL_MEETINGS_PREFIX}${scopeId}`, JSON.stringify(updated));
-  } catch {}
+  } catch {
+    // ignore storage errors
+  }
 }
 
 export function getLastActiveMeetingId(scopeId: string): string | null {
@@ -105,7 +109,9 @@ export function setLastActiveMeetingId(scopeId: string, meetingId: string | null
       sessionStorage.removeItem(`${ACTIVE_MEETING_PREFIX}${scopeId}`);
       localStorage.removeItem(`${ACTIVE_MEETING_PREFIX}${scopeId}`);
     }
-  } catch {}
+  } catch {
+    // ignore storage errors
+  }
 }
 
 /** A scheduled meeting's plan (docs/28 S2) — the server's MeetingSchedule. */
@@ -310,7 +316,9 @@ export async function correctTurn(
         if (scopeId) saveLocalMeeting(scopeId, row);
         return row;
       }
-    } catch {}
+    } catch {
+      // ignore network error, fall back to local storage
+    }
   }
   if (scopeId) {
     const list = getLocalMeetings(scopeId);
@@ -509,7 +517,9 @@ export async function renameMeeting(
         if (scopeId) saveLocalMeeting(scopeId, row);
         return row;
       }
-    } catch {}
+    } catch {
+      // ignore network error, fall back to local storage
+    }
   }
   if (scopeId) {
     const list = getLocalMeetings(scopeId);
@@ -558,7 +568,13 @@ export function promptFromTranscript(meeting: MeetingTranscript): string {
 /** Save the in-progress capture to the board. Returns the stored transcript or null. */
 export async function saveMeeting(
   boardId: string | null | undefined,
-  input: { turns: MeetingTurn[]; startedAt: number; endedAt?: number | null; mode?: string; title?: string },
+  input: {
+    turns: MeetingTurn[];
+    startedAt: number;
+    endedAt?: number | null;
+    mode?: string;
+    title?: string;
+  },
   scopeFallback?: string | null,
 ): Promise<MeetingTranscript | null> {
   const scopeId = boardId || scopeFallback || "default";
@@ -573,7 +589,9 @@ export async function saveMeeting(
         saveLocalMeeting(boardId, serverRecord);
         return serverRecord;
       }
-    } catch {}
+    } catch {
+      // ignore network error, fall back to local storage
+    }
   }
 
   // Fallback to local storage (for local boards, offline dev, or unshared workspaces)
@@ -617,7 +635,9 @@ export async function appendMeetingTurns(
         saveLocalMeeting(boardId, updated);
         return updated;
       }
-    } catch {}
+    } catch {
+      // ignore network error, fall back to local storage
+    }
   }
 
   const localList = getLocalMeetings(scopeId);
@@ -653,7 +673,9 @@ export async function endMeeting(
         saveLocalMeeting(boardId, ended);
         return ended;
       }
-    } catch {}
+    } catch {
+      // ignore network error, fall back to local storage
+    }
   }
 
   const localList = getLocalMeetings(scopeId);
@@ -684,7 +706,9 @@ export async function listMeetings(
         const merged = [...serverRows, ...localRows.filter((m) => !serverIds.has(m.id))];
         return merged;
       }
-    } catch {}
+    } catch {
+      // ignore network error, fall back to local storage
+    }
   }
 
   return localRows;

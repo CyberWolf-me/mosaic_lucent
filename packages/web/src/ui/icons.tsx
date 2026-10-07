@@ -1243,4 +1243,77 @@ export const ToolIco = {
     </svg>
   ),
   Team: (p: P) => Ico.Team(p),
+  ChevronLeft: (p: P) => (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      {...p}
+    >
+      <polyline points="15 18 9 12 15 6" />
+    </svg>
+  ),
+  ChevronRight: (p: P) => (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      {...p}
+    >
+      <polyline points="9 18 15 12 9 6" />
+    </svg>
+  ),
+  ChevronDown: (p: P) => (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      {...p}
+    >
+      <polyline points="6 9 12 15 18 9" />
+    </svg>
+  ),
+  ChevronUp: (p: P) => (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      {...p}
+    >
+      <polyline points="18 15 12 9 6 15" />
+    </svg>
+  ),
+  More: (p: P) => (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      {...p}
+    >
+      <circle cx="12" cy="12" r="2" />
+      <circle cx="19" cy="12" r="2" />
+      <circle cx="5" cy="12" r="2" />
+    </svg>
+  ),
 };

@@ -1,4 +1,5 @@
 import type { Operation } from "./operations.js";
+import type { Workspace } from "./model.js";
 
 /**
  * Best-effort repair of a raw AI operation batch so well-intentioned but
@@ -65,7 +66,27 @@ const isCreate = (op: Operation): boolean =>
   op.op === "CREATE_SHAPE" ||
   op.op === "CREATE_WIREFRAME";
 
-export function repairOperations(ops: Operation[]): Operation[] {
+export function repairOperations(rawOps: Operation[], workspace?: Workspace): Operation[] {
+  let ops = [...rawOps];
+
+  // If a CREATE_WIREFRAME targets an ID that already exists on the board (or is duplicated in the batch)
+  // without an explicit DELETE_WIREFRAME, prepend a DELETE_WIREFRAME so replacement succeeds without collision.
+  if (workspace?.wireframes && Object.keys(workspace.wireframes).length > 0) {
+    const existingWf = new Set(Object.keys(workspace.wireframes));
+    const alreadyDeleted = new Set(
+      ops.filter((o) => o.op === "DELETE_WIREFRAME").map((o) => (o as { id: string }).id),
+    );
+    const toPrepend: Operation[] = [];
+    for (const op of ops) {
+      if (op.op === "CREATE_WIREFRAME" && existingWf.has(op.id) && !alreadyDeleted.has(op.id)) {
+        toPrepend.push({ op: "DELETE_WIREFRAME", id: op.id });
+        alreadyDeleted.add(op.id);
+      }
+    }
+    if (toPrepend.length > 0) {
+      ops = [...toPrepend, ...ops];
+    }
+  }
   const bucket = (op: Operation): number => {
     switch (op.op) {
       case "CREATE_DIAGRAM":

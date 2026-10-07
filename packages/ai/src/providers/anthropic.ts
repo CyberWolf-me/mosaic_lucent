@@ -586,7 +586,10 @@ export class AnthropicProvider implements LLMProvider {
         } else if (parsed.delta?.type === "text_delta" && typeof parsed.delta.text === "string") {
           proseText += parsed.delta.text;
           callbacks.onDelta(parsed.delta.text);
-        } else if (parsed.delta?.type === "thinking_delta" && typeof parsed.delta.thinking === "string") {
+        } else if (
+          parsed.delta?.type === "thinking_delta" &&
+          typeof parsed.delta.thinking === "string"
+        ) {
           thinkingText += parsed.delta.thinking;
           callbacks.onThinkingDelta?.(parsed.delta.thinking);
         }

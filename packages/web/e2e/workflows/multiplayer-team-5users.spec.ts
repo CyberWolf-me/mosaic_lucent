@@ -52,7 +52,10 @@ test.describe("Workflow: 5-User Multiplayer Team Collaboration", () => {
     await page.locator('input[type="text"]').first().fill(name);
     await page.locator('input[type="email"]').first().fill(email);
     await page.locator('input[type="password"]').first().fill("password-123456");
-    await page.getByRole("button", { name: /create account|sign up/i }).first().click();
+    await page
+      .getByRole("button", { name: /create account|sign up/i })
+      .first()
+      .click();
 
     // Wait until registered and authenticated into the app
     await page.waitForURL((url) => !url.pathname.includes("/signup"), { timeout: 15_000 });
@@ -61,7 +64,10 @@ test.describe("Workflow: 5-User Multiplayer Team Collaboration", () => {
     for (let i = 0; i < 5; i++) {
       const btn = page.getByRole("button", { name: /^(Skip|Got it|Done|Close|Finish)$/i });
       if ((await btn.count()) === 0) break;
-      await btn.first().click({ force: true }).catch(() => {});
+      await btn
+        .first()
+        .click({ force: true })
+        .catch(() => {});
       await page.waitForTimeout(200);
     }
 
@@ -91,7 +97,9 @@ test.describe("Workflow: 5-User Multiplayer Team Collaboration", () => {
     // Alice prompts initial diagram creation
     const promptInput = page1.getByLabel("Describe what you want to build");
     await expect(promptInput).toBeVisible({ timeout: 30_000 });
-    await promptInput.fill("E-commerce Architecture: API Gateway, Auth Service, Database, Payment Gateway");
+    await promptInput.fill(
+      "E-commerce Architecture: API Gateway, Auth Service, Database, Payment Gateway",
+    );
     await promptInput.press("Enter");
 
     // Wait for nodes to appear on canvas
@@ -138,11 +146,20 @@ test.describe("Workflow: 5-User Multiplayer Team Collaboration", () => {
     await expect(page1.getByText(/Capture mode/i).first()).toBeVisible({ timeout: 15_000 });
 
     // Start recording via debug hook or UI button
-    const startRecBtn = page1.getByRole("button", { name: /start recording|new recording/i }).first();
+    const startRecBtn = page1
+      .getByRole("button", { name: /start recording|new recording/i })
+      .first();
     await expect(startRecBtn).toBeVisible();
 
     await page1.evaluate(() => {
-      const dbg = (window as any).__lucentVoiceDebug;
+      const dbg = (
+        window as unknown as {
+          __lucentVoiceDebug?: {
+            startCapture: () => void;
+            evaluate: (s: string, t: string) => void;
+          };
+        }
+      ).__lucentVoiceDebug;
       if (dbg) dbg.startCapture();
     });
 
@@ -154,17 +171,34 @@ test.describe("Workflow: 5-User Multiplayer Team Collaboration", () => {
 
     // Alice & team discuss decisions and action items
     await page1.evaluate(() => {
-      const dbg = (window as any).__lucentVoiceDebug;
+      const dbg = (
+        window as unknown as {
+          __lucentVoiceDebug?: {
+            startCapture: () => void;
+            evaluate: (s: string, t: string) => void;
+          };
+        }
+      ).__lucentVoiceDebug;
       if (dbg) {
-        dbg.evaluate("Alice", "We decided to deploy PostgreSQL with read replicas for high availability.");
+        dbg.evaluate(
+          "Alice",
+          "We decided to deploy PostgreSQL with read replicas for high availability.",
+        );
         dbg.evaluate("Bob", "Action: Bob to configure Redis Sentinel cluster by Friday.");
-        dbg.evaluate("Charlie", "Action: Charlie to implement checkout payment gateway integration.");
+        dbg.evaluate(
+          "Charlie",
+          "Action: Charlie to implement checkout payment gateway integration.",
+        );
       }
     });
 
     // Verify transcript turns appear
-    await expect(page1.getByText("We decided to deploy PostgreSQL with read replicas")).toBeVisible({ timeout: 10_000 });
-    await expect(page1.getByText("Bob to configure Redis Sentinel cluster by Friday.")).toBeVisible();
+    await expect(page1.getByText("We decided to deploy PostgreSQL with read replicas")).toBeVisible(
+      { timeout: 10_000 },
+    );
+    await expect(
+      page1.getByText("Bob to configure Redis Sentinel cluster by Friday."),
+    ).toBeVisible();
 
     // Alice stops recording
     await stopRecBtn.click();
@@ -187,10 +221,14 @@ test.describe("Workflow: 5-User Multiplayer Team Collaboration", () => {
     }
 
     // Verify the recap cards landed on Alice's canvas
-    await expect(page1.locator(".node").filter({ hasText: /PostgreSQL with read replicas/i })).toBeVisible({
+    await expect(
+      page1.locator(".node").filter({ hasText: /PostgreSQL with read replicas/i }),
+    ).toBeVisible({
       timeout: 15_000,
     });
-    await expect(page1.locator(".node").filter({ hasText: /Redis Sentinel cluster/i })).toBeVisible();
+    await expect(
+      page1.locator(".node").filter({ hasText: /Redis Sentinel cluster/i }),
+    ).toBeVisible();
 
     // -------------------------------------------------------------------------
     // USER 2: BOB (System Architect)
@@ -205,15 +243,21 @@ test.describe("Workflow: 5-User Multiplayer Team Collaboration", () => {
 
     // Bob immediately sees Alice's architecture diagram AND meeting recap cards via WebSocket sync
     await expect(page2.locator(".node").first()).toBeVisible({ timeout: 20_000 });
-    await expect(page2.locator(".node").filter({ hasText: /PostgreSQL with read replicas/i })).toBeVisible({
+    await expect(
+      page2.locator(".node").filter({ hasText: /PostgreSQL with read replicas/i }),
+    ).toBeVisible({
       timeout: 15_000,
     });
-    await expect(page2.locator(".node").filter({ hasText: /Redis Sentinel cluster/i })).toBeVisible();
+    await expect(
+      page2.locator(".node").filter({ hasText: /Redis Sentinel cluster/i }),
+    ).toBeVisible();
 
     // Bob navigates to Meeting view to verify persistence of Alice's meeting
     const bobMeetingBtn = page2.locator('.rail-btn[aria-label="Meetings"]:visible');
     await bobMeetingBtn.click();
-    await expect(page2.getByText(/Past meetings|Saved meeting|Meeting/i).first()).toBeVisible({ timeout: 15_000 });
+    await expect(page2.getByText(/Past meetings|Saved meeting|Meeting/i).first()).toBeVisible({
+      timeout: 15_000,
+    });
 
     // Bob returns to Canvas
     const bobCanvasBtn = page2.locator('.rail-btn[aria-label="Canvas"]:visible');
@@ -239,18 +283,30 @@ test.describe("Workflow: 5-User Multiplayer Team Collaboration", () => {
     await expect(page3.locator(".crumb.current")).toContainText("Kanban");
 
     // Charlie sees either the Action cards in Kanban columns or the "Convert/Add to To Do" button
-    const convertBtn = page3.locator("button:has-text('Convert all nodes to Kanban cards'), button:has-text('Add to To Do')");
-    if (await convertBtn.first().isVisible({ timeout: 3_000 }).catch(() => false)) {
+    const convertBtn = page3.locator(
+      "button:has-text('Convert all nodes to Kanban cards'), button:has-text('Add to To Do')",
+    );
+    if (
+      await convertBtn
+        .first()
+        .isVisible({ timeout: 3_000 })
+        .catch(() => false)
+    ) {
       await convertBtn.first().click();
     }
 
     // Verify Kanban work board columns are present
-    await expect(page3.locator(".board-column, .board-columns").first()).toBeVisible({ timeout: 10_000 });
+    await expect(page3.locator(".board-column, .board-columns").first()).toBeVisible({
+      timeout: 10_000,
+    });
 
     // Verify contextual AI Dock placeholder for Kanban
     const kanbanPillInput = page3.locator("textarea");
     await expect(kanbanPillInput).toBeVisible();
-    await expect(kanbanPillInput).toHaveAttribute("placeholder", /Add a story, move a card, assign someone/i);
+    await expect(kanbanPillInput).toHaveAttribute(
+      "placeholder",
+      /Add a story, move a card, assign someone/i,
+    );
 
     // -------------------------------------------------------------------------
     // USER 4: DANA (UX Designer - Wireframe Lens & Reactions)
@@ -271,7 +327,9 @@ test.describe("Workflow: 5-User Multiplayer Team Collaboration", () => {
     await expect(page4.locator(".crumb.current")).toContainText("Wireframe");
 
     // Dana sees the Wireframe suggestion buttons
-    await expect(page4.locator("button:has-text('Wireframe'), button:has-text('Design a checkout')").first()).toBeVisible({
+    await expect(
+      page4.locator("button:has-text('Wireframe'), button:has-text('Design a checkout')").first(),
+    ).toBeVisible({
       timeout: 10_000,
     });
 
@@ -281,7 +339,10 @@ test.describe("Workflow: 5-User Multiplayer Team Collaboration", () => {
     await expect(page4).toHaveURL(/view=canvas/);
 
     // Dana selects a visible node to view the Engagement Bar
-    const danaNode = page4.locator(".node").filter({ hasText: /Order|Shipping|Cart|PostgreSQL/i }).first();
+    const danaNode = page4
+      .locator(".node")
+      .filter({ hasText: /Order|Shipping|Cart|PostgreSQL/i })
+      .first();
     await danaNode.click({ force: true });
 
     // Dana casts a reaction on the selected node
@@ -320,7 +381,10 @@ test.describe("Workflow: 5-User Multiplayer Team Collaboration", () => {
     await expect(page5).toHaveURL(/view=canvas/);
 
     // Evan casts a vote on a node
-    const evanNode = page5.locator(".node").filter({ hasText: /Order|Shipping|Cart|PostgreSQL/i }).first();
+    const evanNode = page5
+      .locator(".node")
+      .filter({ hasText: /Order|Shipping|Cart|PostgreSQL/i })
+      .first();
     await evanNode.click({ force: true });
     const voteBtn = page5.locator(".eng-vote");
     if (await voteBtn.isVisible({ timeout: 5_000 }).catch(() => false)) {

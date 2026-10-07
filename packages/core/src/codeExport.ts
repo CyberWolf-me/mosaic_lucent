@@ -1,4 +1,4 @@
-import type { DiagramKind, Node, Edge, Workspace, NodeDetails } from "./model.js";
+import type { Edge, Workspace } from "./model.js";
 
 /**
  * Production Code Export Engine (Initiative 5 / ADR 0052).
@@ -137,8 +137,7 @@ export function boardToXState(workspace: Workspace): string {
     const outgoing = outgoingBySource.get(n.id) ?? [];
     const isTerminal =
       outgoing.length === 0 &&
-      (n.nodeType === "decision" ||
-        /done|finish|success|complete|fail|cancel|end/i.test(n.label));
+      (n.nodeType === "decision" || /done|finish|success|complete|fail|cancel|end/i.test(n.label));
 
     stateLines.push(`    ${sKey}: {`);
     if (n.label) {
@@ -234,7 +233,7 @@ export function boardToPrisma(workspace: Workspace): string {
     const sections = n.details?.sections ?? [];
     for (const sec of sections) {
       for (const item of sec.items) {
-        const clean = item.replace(/^[🔑\s*-]+/, "").trim();
+        const clean = item.replace(/^[🔑\s*-]+/u, "").trim();
         const m = clean.match(/^([a-zA-Z0-9_]+)\s*:\s*([a-zA-Z0-9_()]+)(.*)$/);
         if (m) {
           const rawCol = m[1]!;
@@ -353,7 +352,7 @@ export function boardToSqlDdl(workspace: Workspace): string {
     const sections = n.details?.sections ?? [];
     for (const sec of sections) {
       for (const item of sec.items) {
-        const clean = item.replace(/^[🔑\s*-]+/, "").trim();
+        const clean = item.replace(/^[🔑\s*-]+/u, "").trim();
         const m = clean.match(/^([a-zA-Z0-9_]+)\s*:\s*([a-zA-Z0-9_()]+)(.*)$/);
         if (m) {
           const colName = toSnakeCase(m[1]!);
@@ -387,7 +386,9 @@ export function boardToSqlDdl(workspace: Workspace): string {
       if (!targetTable) continue;
 
       const relMatch = edge.relationship?.match(/\(([\w]+)\)/);
-      const fkCol = relMatch ? toSnakeCase(relMatch[1]!) : `${toSnakeCase(singularize(targetTable))}_id`;
+      const fkCol = relMatch
+        ? toSnakeCase(relMatch[1]!)
+        : `${toSnakeCase(singularize(targetTable))}_id`;
 
       if (!declaredCols.has(fkCol)) {
         colLines.push(`  ${fkCol.padEnd(16)} UUID NOT NULL`);
@@ -453,11 +454,7 @@ export function boardToDockerCompose(workspace: Workspace): string {
     if (/postgres|pg|spanner/.test(hay) || n.nodeType === "database") {
       image = "postgres:16-alpine";
       defaultPort = "5432:5432";
-      envVars = [
-        "POSTGRES_DB: app_db",
-        "POSTGRES_USER: postgres",
-        "POSTGRES_PASSWORD: password",
-      ];
+      envVars = ["POSTGRES_DB: app_db", "POSTGRES_USER: postgres", "POSTGRES_PASSWORD: password"];
       volumes.add(`${sName}_data`);
     } else if (/redis|cache|memcached/.test(hay) || n.nodeType === "cache") {
       image = "redis:7-alpine";
@@ -561,7 +558,7 @@ export function boardToTypeScriptTypes(workspace: Workspace): string {
 
     for (const sec of n.details?.sections ?? []) {
       for (const item of sec.items) {
-        const clean = item.replace(/^[🔑\s*-]+/, "").trim();
+        const clean = item.replace(/^[🔑\s*-]+/u, "").trim();
         const m = clean.match(/^([a-zA-Z0-9_]+)\s*:\s*([a-zA-Z0-9_()]+)(.*)$/);
         if (m) {
           const fName = toCamelCase(m[1]!);

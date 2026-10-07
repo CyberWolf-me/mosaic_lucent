@@ -122,7 +122,11 @@ describe("Voice Agent Context and Tools", () => {
       const params = applyToolParameters();
       const json = JSON.stringify(params);
       const properties = params.properties as Record<string, unknown>;
-      expect(Object.keys(properties).sort()).toEqual(["clarification", "explanation", "operations"]);
+      expect(Object.keys(properties).sort()).toEqual([
+        "clarification",
+        "explanation",
+        "operations",
+      ]);
       // Real variants, with their real fields: an edge names its ends as the
       // contract does, which the old hand-written list got wrong (from/to).
       expect(json).toContain('"CONNECT_NODES"');
@@ -237,7 +241,15 @@ describe("Voice Agent Context and Tools", () => {
           },
         },
         groups: { g1: { id: "g1", label: "Backend Services" } },
-        shapes: { s1: { id: "s1", kind: "sticky", text: "Architecture note", position: { x: 400, y: 200 }, size: { width: 200, height: 160 } } },
+        shapes: {
+          s1: {
+            id: "s1",
+            kind: "sticky",
+            text: "Architecture note",
+            position: { x: 400, y: 200 },
+            size: { width: 200, height: 160 },
+          },
+        },
         wireframes: {
           w1: {
             id: "w1",

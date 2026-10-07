@@ -1,10 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  createWorkspace,
-  applyOperations,
-  exportBoardToCode,
-  type Operation,
-} from "@lucent/core";
+import { createWorkspace, applyOperations, exportBoardToCode, type Operation } from "@lucent/core";
 
 describe("Production Code Export Web Integration (Initiative 5)", () => {
   it("exports ER diagram to Prisma schema with models and relations", () => {
@@ -43,7 +38,9 @@ describe("Production Code Export Web Integration (Initiative 5)", () => {
     expect(res.language).toBe("prisma");
     expect(res.code).toContain("model User {");
     expect(res.code).toContain("model Order {");
-    expect(res.code).toContain("user             User @relation(fields: [userId], references: [id])");
+    expect(res.code).toContain(
+      "user             User @relation(fields: [userId], references: [id])",
+    );
     expect(res.code).toContain("orders           Order[]");
   });
 

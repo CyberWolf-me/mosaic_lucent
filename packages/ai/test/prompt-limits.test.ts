@@ -257,22 +257,30 @@ describe("untrusted content cannot widen the operation vocabulary", () => {
 
       const renderedThreat = prompt({ message: "/threat-model PaymentService" });
       expect(userRegion(renderedThreat)).toContain("[Mode: Threat Model & Security Audit]");
-      expect(userRegion(renderedThreat)).toContain('STRIDE and security architecture review with focus on "PaymentService"');
+      expect(userRegion(renderedThreat)).toContain(
+        'STRIDE and security architecture review with focus on "PaymentService"',
+      );
 
       const renderedEdgeCases = prompt({ message: "/edge-cases Checkout Flow" });
       expect(userRegion(renderedEdgeCases)).toContain("[Mode: Edge Cases & Error Handling]");
-      expect(userRegion(renderedEdgeCases)).toContain('Discover edge cases and error handling for "Checkout Flow"');
+      expect(userRegion(renderedEdgeCases)).toContain(
+        'Discover edge cases and error handling for "Checkout Flow"',
+      );
 
       const renderedSequence = prompt({ message: "/sequence User Registration" });
       expect(userRegion(renderedSequence)).toContain("[Mode: Sequence Diagram Generation]");
-      expect(userRegion(renderedSequence)).toContain('Transform this workflow for "User Registration"');
+      expect(userRegion(renderedSequence)).toContain(
+        'Transform this workflow for "User Registration"',
+      );
 
       const renderedSimplify = prompt({ message: "/simplify" });
       expect(userRegion(renderedSimplify)).toContain("[Mode: Architecture Simplification]");
 
       const renderedTranslate = prompt({ message: "/translate Spanish" });
       expect(userRegion(renderedTranslate)).toContain("[Mode: Diagram Translation]");
-      expect(userRegion(renderedTranslate)).toContain("Translate all diagram node labels, group titles, and text notes to Spanish");
+      expect(userRegion(renderedTranslate)).toContain(
+        "Translate all diagram node labels, group titles, and text notes to Spanish",
+      );
     });
 
     it("leaves standard prompt text untouched if not a slash command", () => {
@@ -281,4 +289,3 @@ describe("untrusted content cannot widen the operation vocabulary", () => {
     });
   });
 });
-

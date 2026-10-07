@@ -77,6 +77,7 @@ interface LiveKitParticipant {
 }
 
 interface LiveKitRoom {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   on(event: string, cb: (...args: any[]) => void): void;
   connect(url: string, token: string): Promise<void>;
   disconnect(): Promise<void>;

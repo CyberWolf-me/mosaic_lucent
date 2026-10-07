@@ -158,20 +158,26 @@ export const PLANS: Record<PlanCode, PlanDefinition> = {
       // product is impressive, not enough to run a team on.
       "ai.generationsPerMonth": process.env.LUCENT_FREE_AI_LIMIT
         ? parseInt(process.env.LUCENT_FREE_AI_LIMIT, 10)
-        : (process.env.VITEST || process.env.NODE_ENV === "test" ? 50 : 500),
+        : process.env.VITEST || process.env.NODE_ENV === "test"
+          ? 50
+          : 500,
       // ASSUMPTION: docs/08 says "Limited voice minutes". Voice is the headline
       // interaction, so Free gets a real taste rather than a demo: 30 minutes
       // is a couple of working sessions. Only *hosted* minutes count — the
       // on-device Whisper path costs us nothing and is metered at zero.
       "voice.minutes": process.env.LUCENT_FREE_VOICE_MINUTES
         ? parseInt(process.env.LUCENT_FREE_VOICE_MINUTES, 10)
-        : (process.env.VITEST || process.env.NODE_ENV === "test" ? 30 : 300),
+        : process.env.VITEST || process.env.NODE_ENV === "test"
+          ? 30
+          : 300,
       // ASSUMPTION: docs/08 says "Limited workspaces". Three boards lets
       // someone keep a real project, a scratch board and a template without
       // deleting to try something.
       boards: process.env.LUCENT_FREE_BOARDS_LIMIT
         ? parseInt(process.env.LUCENT_FREE_BOARDS_LIMIT, 10)
-        : (process.env.VITEST || process.env.NODE_ENV === "test" ? 3 : 50),
+        : process.env.VITEST || process.env.NODE_ENV === "test"
+          ? 3
+          : 50,
       // Doc-implied: collaboration, shared workspaces and permissions are Team
       // bullets, so Free is one person. ASSUMPTION: that this is expressed as a
       // hard 1-seat cap rather than a soft nag.

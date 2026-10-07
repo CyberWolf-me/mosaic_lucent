@@ -21,9 +21,11 @@ Lucent's core architecture delivers a deterministic semantic canvas, multi-lens 
 ### Initiative 1: Slash Commands (`/`) in AIPill — `[COMPLETED]`
 
 #### Problem
+
 Users experience "blank canvas paralysis" when asked to type natural language descriptions without guidance.
 
 #### Specification & Implementation
+
 - **Trigger**: Pressing `/` at the start of input or clicking the `/` trigger button in `AIPill.tsx` opens an autocomplete popover.
 - **Commands Catalog**:
   - `/decompose [node?]` — Expands a high-level component into 3–5 sub-process nodes with directed connectors (`architecture`).
@@ -48,9 +50,11 @@ Users experience "blank canvas paralysis" when asked to type natural language de
 ### Initiative 2: Workspace Architectural Rules & Durable Context
 
 #### Problem
+
 The AI lacks persistent knowledge of a team's specific tech stack and architectural conventions, forcing users to repeatedly type constraints.
 
 #### Specification
+
 - Project/Board metadata extended with `rules?: string`.
 - Standardized rule fields:
   - Tech Stack (e.g., GCP, Cloud Run, PostgreSQL, Redis, TypeScript).
@@ -68,9 +72,11 @@ The AI lacks persistent knowledge of a team's specific tech stack and architectu
 ### Initiative 3: In-Canvas AI Micro-Actions
 
 #### Problem
+
 All AI interactions require typing into the bottom dock. Tweaking a single node requires typing a full sentence.
 
 #### Specification
+
 - Selecting any node renders a floating sparkle action bar pinned above the node card.
 - Actions:
   - `✨ Elaborate` (decomposes the node into children).
@@ -89,9 +95,11 @@ All AI interactions require typing into the bottom dock. Tweaking a single node 
 ### Initiative 4: Code & Specification Ingestion
 
 #### Problem
+
 Engineers have existing specifications (OpenAPI, SQL DDL, Docker Compose) and cannot import them directly without manual re-drawing.
 
 #### Specification
+
 - Drag-and-drop or paste dialog in TopBar:
   - **OpenAPI 3.0 / Swagger**: Parses paths, methods, request/response bodies into service nodes and HTTP action edges.
   - **SQL DDL / Prisma**: Parses `CREATE TABLE` and foreign keys into ER diagram nodes with field attributes and relational edges.
@@ -107,9 +115,11 @@ Engineers have existing specifications (OpenAPI, SQL DDL, Docker Compose) and ca
 ### Initiative 5: Production Code Export
 
 #### Problem
+
 Visual diagrams do not compile into executable code, creating a dead end after design.
 
 #### Specification
+
 - Code generation modules:
   - **XState v5 TypeScript**: Compiles flowchart states, transitions, and guards into a runnable state machine.
   - **Docker Compose / Terraform**: Compiles service architecture into runnable deployment files.
@@ -126,12 +136,14 @@ Visual diagrams do not compile into executable code, creating a dead end after d
 ### Initiative 6: Model Selection, Thinking (CoT) Accordion & Generation Telemetry
 
 #### Problem
+
 Users cannot switch between fast and deep reasoning models, cannot see reasoning traces, and have no visibility into token costs.
 
 #### Specification
+
 - Model tier selector in UI:
-  - ⚡ *Fast Mode* (low-latency generation).
-  - 🧠 *Reasoning Mode* (deep thinking models like Claude 3.7 Sonnet / DeepSeek R1).
+  - ⚡ _Fast Mode_ (low-latency generation).
+  - 🧠 _Reasoning Mode_ (deep thinking models like Claude 3.7 Sonnet / DeepSeek R1).
 - Collapsible Thinking Accordion in the chat drawer displaying `<think>` / reasoning streams.
 - Telemetry badge per turn displaying latency, model name, and prompt/completion tokens.
 - Files:

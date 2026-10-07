@@ -19,13 +19,19 @@ test.describe("Workflow: Unified Canvas & Multi-Lens Transformation", () => {
     await page.locator('input[type="text"]').first().fill("Lens User");
     await page.locator('input[type="email"]').first().fill(`lens-${Date.now()}@lucent.test`);
     await page.locator('input[type="password"]').first().fill("password-123456");
-    await page.getByRole("button", { name: /create account|sign up/i }).first().click();
+    await page
+      .getByRole("button", { name: /create account|sign up/i })
+      .first()
+      .click();
 
     // 2. Dismiss onboarding modals if present
     for (let i = 0; i < 5; i++) {
       const btn = page.getByRole("button", { name: /^(Skip|Got it|Done|Close|Finish)$/i });
       if ((await btn.count()) === 0) break;
-      await btn.first().click({ force: true }).catch(() => {});
+      await btn
+        .first()
+        .click({ force: true })
+        .catch(() => {});
       await page.waitForTimeout(300);
     }
 

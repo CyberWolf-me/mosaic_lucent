@@ -208,7 +208,16 @@ export function MeetingsView({ onOpenSettings }: { onOpenSettings: (section?: st
           }}
         >
           <div>
-            <div style={{ fontSize: 13, fontWeight: 600, color: "var(--ink-0)", display: "flex", alignItems: "center", gap: 6 }}>
+            <div
+              style={{
+                fontSize: 13,
+                fontWeight: 600,
+                color: "var(--ink-0)",
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+              }}
+            >
               <Ico.Flow width={14} height={14} /> Active Board: {projectName || "Current board"}
             </div>
             <div style={{ fontSize: 12, color: "var(--ink-2)", marginTop: 2 }}>

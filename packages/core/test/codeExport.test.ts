@@ -37,8 +37,8 @@ describe("Production Code Export Engine (Initiative 5)", () => {
       expect(code).toContain('initial: "idleState"');
       expect(code).toContain("idleState: {");
       expect(code).toContain("authenticating: {");
-      expect(code).toContain("LOGIN_SUBMIT: { target: \"authenticating\" }");
-      expect(code).toContain("AUTH_OK: { target: \"dashboardSuccess\" }");
+      expect(code).toContain('LOGIN_SUBMIT: { target: "authenticating" }');
+      expect(code).toContain('AUTH_OK: { target: "dashboardSuccess" }');
     });
 
     it("handles empty boards cleanly", () => {
@@ -100,14 +100,16 @@ describe("Production Code Export Engine (Initiative 5)", () => {
       ws = applyOperations(ws, ops);
 
       const prisma = boardToPrisma(ws);
-      expect(prisma).toContain('datasource db {');
-      expect(prisma).toContain('generator client {');
+      expect(prisma).toContain("datasource db {");
+      expect(prisma).toContain("generator client {");
       expect(prisma).toContain("model User {");
       expect(prisma).toContain("model Order {");
       expect(prisma).toContain("id               String @id @default(uuid())");
       expect(prisma).toContain("email            String @unique");
       expect(prisma).toContain("totalCents       Int");
-      expect(prisma).toContain("user             User @relation(fields: [userId], references: [id])");
+      expect(prisma).toContain(
+        "user             User @relation(fields: [userId], references: [id])",
+      );
       expect(prisma).toContain("orders           Order[]");
     });
   });
@@ -158,7 +160,9 @@ describe("Production Code Export Engine (Initiative 5)", () => {
       expect(sql).toContain("CREATE TABLE members (");
       expect(sql).toContain("id               UUID PRIMARY KEY");
       expect(sql).toContain("slug             VARCHAR(64) NOT NULL UNIQUE");
-      expect(sql).toContain("CONSTRAINT fk_members_org_id FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE");
+      expect(sql).toContain(
+        "CONSTRAINT fk_members_org_id FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE",
+      );
     });
   });
 

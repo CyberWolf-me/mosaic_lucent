@@ -27,7 +27,8 @@ export const SLASH_COMMANDS: readonly SlashCommandDef[] = [
     id: "decompose",
     command: "/decompose",
     title: "Decompose Component",
-    description: "Break a high-level service or process into 3–5 granular sub-steps with connectors",
+    description:
+      "Break a high-level service or process into 3–5 granular sub-steps with connectors",
     placeholder: "/decompose [component or service name]",
     category: "architecture",
     icon: "layers",

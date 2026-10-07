@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { applyOperations, createWorkspace, generateBoardDigest, type Operation } from "../src/index.js";
+import {
+  applyOperations,
+  createWorkspace,
+  generateBoardDigest,
+  type Operation,
+} from "../src/index.js";
 
 describe("generateBoardDigest", () => {
   it("generates an executive markdown digest for an empty board", () => {
@@ -85,7 +90,9 @@ describe("generateBoardDigest", () => {
     expect(digest).toContain("| Adopt PostgreSQL | `database` | ✅ Decided | — |");
 
     expect(digest).toContain("## Action Backlog");
-    expect(digest).toContain("| Configure connection pooling | **@Alice** | 2026-10-15 | in_progress | — |");
+    expect(digest).toContain(
+      "| Configure connection pooling | **@Alice** | 2026-10-15 | in_progress | — |",
+    );
 
     expect(digest).toContain("## Risks & Questions");
     expect(digest).toContain("### Identified Risks");

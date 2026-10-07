@@ -856,7 +856,7 @@ async function runGeneratePipeline(
   // on the board's existing authored keys. Machine-ops-only BY PLACEMENT:
   // this pipeline is the model's; the web's manual path never calls it.
   const topics = existingTopics(workspace);
-  let operations = foldStatementTopics(repairOperations(permitted), topics);
+  let operations = foldStatementTopics(repairOperations(permitted, workspace), topics);
   let errors = validateOperations(workspace, operations);
 
   // M5: one bounded repair round. A batch that fails validation goes back to
@@ -879,7 +879,7 @@ async function runGeneratePipeline(
       );
       // The repaired re-emission folds too (Stage C5): a second chance at
       // the topics is not a second chance to split the group.
-      operations = foldStatementTopics(repairOperations(repairedPermitted), topics);
+      operations = foldStatementTopics(repairOperations(repairedPermitted, workspace), topics);
       errors = validateOperations(workspace, operations);
     }
   }
@@ -961,6 +961,7 @@ async function runGeneratePipeline(
               withoutTrust(richer.operations.filter((op) => !isHumanOnlyOperation(op.op))),
               userId ?? ASSISTANT_AUTHOR,
             ),
+            workspace,
           ),
           topics,
         );
@@ -1036,7 +1037,10 @@ async function runGeneratePipeline(
             usage: {
               inputTokens: sum(completion.usage?.inputTokens, connect.usage.inputTokens),
               outputTokens: sum(completion.usage?.outputTokens, connect.usage.outputTokens),
-              reasoningTokens: sum(completion.usage?.reasoningTokens, connect.usage.reasoningTokens),
+              reasoningTokens: sum(
+                completion.usage?.reasoningTokens,
+                connect.usage.reasoningTokens,
+              ),
             },
           };
         }
@@ -1108,7 +1112,10 @@ export async function handleGenerateStream(
   rawBody: unknown,
   userId?: string,
   authoritative?: AuthoritativeContext,
-  send?: (event: "start" | "delta" | "done" | "error" | "phase" | "thinking", data: unknown) => void,
+  send?: (
+    event: "start" | "delta" | "done" | "error" | "phase" | "thinking",
+    data: unknown,
+  ) => void,
   /**
    * Runs after validation, before the done frame: its fields ride the frame.
    * The route records the AI run here (ADR 0047), so the client gets its run

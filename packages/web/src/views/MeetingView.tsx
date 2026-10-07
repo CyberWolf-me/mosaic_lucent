@@ -58,7 +58,6 @@ import {
   saveMeeting,
   getLastActiveMeetingId,
   setLastActiveMeetingId,
-  saveLocalMeeting,
   deleteLocalMeeting,
   writeMeetingSummary,
   notifyMeetingOwners,
@@ -560,12 +559,7 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
             return;
           }
         }
-        if (
-          rows &&
-          rows.length > 0 &&
-          !recording &&
-          turnsRef.current.length === 0
-        ) {
+        if (rows && rows.length > 0 && !recording && turnsRef.current.length === 0) {
           setSelectedMeeting(rows[0] ?? null);
         }
       }
@@ -1104,6 +1098,7 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
     return () => {
       delete (window as unknown as { __lucentVoiceDebug?: typeof hook }).__lucentVoiceDebug;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [voiceHud]);
 
   // ---- The live extraction loop (M2), driven by the meeting engine -----
@@ -1466,9 +1461,17 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
         for (const it of s.items) {
           if (titleLower.includes("decision") || titleLower.includes("resolved")) {
             decisions.push(it.text);
-          } else if (titleLower.includes("action") || titleLower.includes("next step") || titleLower.includes("todo")) {
+          } else if (
+            titleLower.includes("action") ||
+            titleLower.includes("next step") ||
+            titleLower.includes("todo")
+          ) {
             actions.push({ label: it.text });
-          } else if (titleLower.includes("question") || titleLower.includes("risk") || titleLower.includes("open")) {
+          } else if (
+            titleLower.includes("question") ||
+            titleLower.includes("risk") ||
+            titleLower.includes("open")
+          ) {
             questions.push(it.text);
           }
         }
@@ -3088,7 +3091,9 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
                     <Ico.Mic />
                   </span>
                 }
-                title={saved.length > 0 ? "Start a new meeting" : "No meeting captured on this board yet"}
+                title={
+                  saved.length > 0 ? "Start a new meeting" : "No meeting captured on this board yet"
+                }
                 body={
                   <>
                     Start recording and the transcript fills in on the right. In Intelligence mode

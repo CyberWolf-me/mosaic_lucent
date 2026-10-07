@@ -256,7 +256,10 @@ const wireframeSchema = z.object({
 
 export const workspaceSchema = z.object({
   id: z.string().min(1),
-  name: z.string().transform((n) => n.trim() || "Untitled").default("Untitled"),
+  name: z
+    .string()
+    .transform((n) => n.trim() || "Untitled")
+    .default("Untitled"),
   diagramKind: z.enum(DIAGRAM_KINDS),
   // Layout intent (Phase 5): optional and additive — every pre-intent board
   // parses unchanged. Ids are validated only as strings here; the op-level

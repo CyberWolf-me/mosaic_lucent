@@ -223,12 +223,43 @@ describe("sanitizeRawOperations tolerance", () => {
       { op: "CONNECT_NODES", from: "n1", to: "n2" },
     ];
     const fixed = parseOperations(raw);
-    expect(fixed[0]).toMatchObject({ op: "CREATE_NODE", id: "n1", nodeType: "task", label: "Task 1" });
+    expect(fixed[0]).toMatchObject({
+      op: "CREATE_NODE",
+      id: "n1",
+      nodeType: "task",
+      label: "Task 1",
+    });
     expect(fixed[1]).toMatchObject({ op: "CHANGE_NODE_TYPE", id: "n1", nodeType: "in-progress" });
     expect(fixed[2]).toMatchObject({ op: "CHANGE_NODE_TYPE", id: "n1", nodeType: "done" });
     expect(fixed[3]).toMatchObject({ op: "CHANGE_NODE_TYPE", id: "n1", nodeType: "step" });
     expect(fixed[4]).toMatchObject({ op: "CHANGE_TEXT", id: "n1", text: "Renamed Task" });
     expect(fixed[5]).toMatchObject({ op: "MOVE_NODE", id: "n1", position: { x: 100, y: 200 } });
     expect(fixed[6]).toMatchObject({ op: "CONNECT_NODES", source: "n1", target: "n2" });
+  });
+
+  it("automatically prepends DELETE_WIREFRAME when CREATE_WIREFRAME targets an existing id in workspace", () => {
+    const existingWs = applyOperations(createWorkspace(), [
+      {
+        op: "CREATE_WIREFRAME",
+        id: "wf-main",
+        title: "Old Wireframe",
+        viewport: "desktop",
+        root: { kind: "screen", children: [] },
+      },
+    ]);
+    const updateOps: Operation[] = [
+      {
+        op: "CREATE_WIREFRAME",
+        id: "wf-main",
+        title: "New Wireframe",
+        viewport: "desktop",
+        root: { kind: "screen", children: [{ kind: "button", label: "Submit" }] },
+      },
+    ];
+    const repaired = repairOperations(updateOps, existingWs);
+    expect(repaired.map((o) => o.op)).toEqual(["DELETE_WIREFRAME", "CREATE_WIREFRAME"]);
+    expect(validateOperations(existingWs, repaired)).toEqual([]);
+    const updatedWs = applyOperations(existingWs, repaired);
+    expect(updatedWs.wireframes["wf-main"]?.title).toBe("New Wireframe");
   });
 });

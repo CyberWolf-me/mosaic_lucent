@@ -20,10 +20,12 @@ test.describe("Workflow: AI Slash Commands & Command Presets", () => {
     // 1. Intercept /api/generate streaming requests for /decompose
     let decomposedPromptReceived = false;
     await page.route(/\/api\/generate/, async (route) => {
-      let postData: any = null;
+      let postData: { message?: string; prompt?: string } | null = null;
       try {
         postData = route.request().postDataJSON();
-      } catch {}
+      } catch {
+        // ignore JSON parse error
+      }
       const msg = postData?.message ?? postData?.prompt;
       if (typeof msg === "string" && msg.toLowerCase().includes("decompose")) {
         decomposedPromptReceived = true;
@@ -49,7 +51,8 @@ test.describe("Workflow: AI Slash Commands & Command Presets", () => {
               relationship: "settles via",
             },
           ],
-          explanation: "Decomposed Payment Gateway into auth, fraud verification, and token vault settlement.",
+          explanation:
+            "Decomposed Payment Gateway into auth, fraud verification, and token vault settlement.",
           reply: "I've decomposed Payment Gateway into internal sub-processes.",
           provider: "mock",
         });
@@ -69,13 +72,19 @@ test.describe("Workflow: AI Slash Commands & Command Presets", () => {
     await page.locator('input[type="text"]').first().fill("Slash User");
     await page.locator('input[type="email"]').first().fill(`slash-${Date.now()}@lucent.test`);
     await page.locator('input[type="password"]').first().fill("password-123456");
-    await page.getByRole("button", { name: /create account|sign up/i }).first().click();
+    await page
+      .getByRole("button", { name: /create account|sign up/i })
+      .first()
+      .click();
 
     // Dismiss tour
     for (let i = 0; i < 5; i++) {
       const btn = page.getByRole("button", { name: /^(Skip|Got it|Done|Close|Finish)$/i });
       if ((await btn.count()) === 0) break;
-      await btn.first().click({ force: true }).catch(() => {});
+      await btn
+        .first()
+        .click({ force: true })
+        .catch(() => {});
       await page.waitForTimeout(300);
     }
     await page.evaluate(() => localStorage.setItem("lucent.tour.seen.v1", "1"));

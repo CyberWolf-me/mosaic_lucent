@@ -80,7 +80,11 @@ export function generateBoardDigest(
     for (const d of decisions) {
       const topic = d.topic ? `\`${d.topic}\`` : "—";
       const status =
-        d.status === "resolved" ? "✅ Decided" : d.status === "rejected" ? "❌ Rejected" : "🟡 Open";
+        d.status === "resolved"
+          ? "✅ Decided"
+          : d.status === "rejected"
+            ? "❌ Rejected"
+            : "🟡 Open";
       const supersedes = d.supersedes && d.supersedes.length > 0 ? d.supersedes.join(", ") : "—";
       lines.push(`| ${d.label.replace(/\|/g, "\\|")} | ${topic} | ${status} | ${supersedes} |`);
     }

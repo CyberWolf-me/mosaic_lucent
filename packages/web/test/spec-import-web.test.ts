@@ -2,21 +2,18 @@ import { describe, expect, it } from "vitest";
 import {
   classifySpec,
   specToOps,
-  sqlDdlToOps,
-  prismaToOps,
-  openApiToOps,
-  composeToOps,
   createWorkspace,
   validateOperations,
   applyOperations,
-  type Operation,
 } from "@lucent/core";
 
 describe("Specification & Code Ingestion Web Integration (Initiative 4)", () => {
   it("classifies file extensions correctly for drag-and-drop", () => {
     expect(classifySpec("", "schema.sql")).toBe("sqlddl");
     expect(classifySpec("", "schema.prisma")).toBe("prisma");
-    expect(classifySpec("services:\n  web:\n    image: nginx", "docker-compose.yml")).toBe("compose");
+    expect(classifySpec("services:\n  web:\n    image: nginx", "docker-compose.yml")).toBe(
+      "compose",
+    );
     expect(classifySpec('{"openapi": "3.0.0"}', "api-spec.json")).toBe("openapi");
   });
 
@@ -147,7 +144,9 @@ describe("Specification & Code Ingestion Web Integration (Initiative 4)", () => 
   });
 
   it("does not falsely classify generic conversational text as an engineering spec", () => {
-    expect(classifySpec("Can you build a simple flowchart for the signup process?")).toBe("unknown");
+    expect(classifySpec("Can you build a simple flowchart for the signup process?")).toBe(
+      "unknown",
+    );
     expect(classifySpec("Here is a list of features: 1. Auth 2. Profile")).toBe("unknown");
     expect(classifySpec("Hello world")).toBe("unknown");
   });

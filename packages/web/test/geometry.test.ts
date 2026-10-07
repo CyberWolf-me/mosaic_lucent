@@ -7,6 +7,8 @@ import {
   contentBounds,
   buildBoardSvg,
   shapesInFrame,
+  nodesInFrame,
+  subWorkspaceFromSelection,
   projectMomentum,
   rubberband,
   VelocityTracker,
@@ -274,6 +276,62 @@ describe("board geometry", () => {
       size: { width: 50, height: 50 },
     });
     expect(shapesInFrame(frame, [frame, inside, outside])).toEqual(["in"]);
+  });
+
+  it("identifies semantic nodes contained inside a frame", () => {
+    const frame = shape({
+      id: "f",
+      kind: "frame",
+      position: { x: 100, y: 100 },
+      size: { width: 400, height: 300 },
+    });
+    const insideNode = {
+      id: "n1",
+      position: { x: 150, y: 150 },
+      size: { width: 160, height: 64 },
+    };
+    const outsideNode = {
+      id: "n2",
+      position: { x: 600, y: 500 },
+      size: { width: 160, height: 64 },
+    };
+    const unplacedNode = {
+      id: "n3",
+    };
+    expect(nodesInFrame(frame, [insideNode, outsideNode, unplacedNode])).toEqual(["n1"]);
+  });
+
+  it("extracts a sub-workspace for selected nodes and shapes", () => {
+    const ws = applyOperations(createWorkspace(), [
+      { op: "CREATE_NODE", id: "n1", nodeType: "service", label: "Auth" },
+      { op: "CREATE_NODE", id: "n2", nodeType: "database", label: "DB" },
+      { op: "CREATE_NODE", id: "n3", nodeType: "service", label: "Other" },
+      { op: "CONNECT_NODES", source: "n1", target: "n2", relationship: "queries" },
+      { op: "CONNECT_NODES", source: "n2", target: "n3", relationship: "reports" },
+      {
+        op: "CREATE_SHAPE",
+        id: "s1",
+        kind: "sticky",
+        position: { x: 10, y: 10 },
+        size: { width: 100, height: 100 },
+        text: "Note 1",
+      },
+      {
+        op: "CREATE_SHAPE",
+        id: "s2",
+        kind: "sticky",
+        position: { x: 500, y: 500 },
+        size: { width: 100, height: 100 },
+        text: "Note 2",
+      },
+    ]);
+
+    const sub = subWorkspaceFromSelection(ws, new Set(["n1", "n2"]), new Set(["s1"]));
+    expect(Object.keys(sub.nodes)).toEqual(["n1", "n2"]);
+    expect(Object.keys(sub.edges).length).toBe(1);
+    expect(Object.values(sub.edges)[0]?.source).toBe("n1");
+    expect(Object.values(sub.edges)[0]?.target).toBe("n2");
+    expect(Object.keys(sub.shapes)).toEqual(["s1"]);
   });
 });
 

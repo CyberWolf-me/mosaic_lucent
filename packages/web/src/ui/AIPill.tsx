@@ -23,13 +23,31 @@ function SlashIcon({ icon }: { icon: SlashCommandDef["icon"] }) {
       return <Ico.Layers />;
     case "shield":
       return (
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.6"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
           <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
         </svg>
       );
     case "alert-triangle":
       return (
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.6"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
           <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" />
           <line x1="12" y1="9" x2="12" y2="13" />
           <line x1="12" y1="17" x2="12.01" y2="17" />
@@ -37,7 +55,16 @@ function SlashIcon({ icon }: { icon: SlashCommandDef["icon"] }) {
       );
     case "git-commit":
       return (
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.6"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
           <circle cx="12" cy="12" r="4" />
           <line x1="1.05" y1="12" x2="7" y2="12" />
           <line x1="17" y1="12" x2="22.95" y2="12" />
@@ -45,13 +72,31 @@ function SlashIcon({ icon }: { icon: SlashCommandDef["icon"] }) {
       );
     case "minimize":
       return (
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.6"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
           <path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3" />
         </svg>
       );
     case "globe":
       return (
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.6"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
           <circle cx="12" cy="12" r="10" />
           <line x1="2" y1="12" x2="22" y2="12" />
           <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
@@ -184,10 +229,7 @@ export function AIPill({
 
   // Slash commands popover logic
   const isSlashActive =
-    !readOnly &&
-    value.startsWith("/") &&
-    !value.includes(" ") &&
-    value !== dismissedQuery;
+    !readOnly && value.startsWith("/") && !value.includes(" ") && value !== dismissedQuery;
   const slashSuggestions = isSlashActive ? filterSlashCommands(value) : [];
   const showSlashMenu = slashSuggestions.length > 0;
   const activeIndex = showSlashMenu
@@ -264,9 +306,7 @@ export function AIPill({
             <span className="live-thinking-pulse" />
             <span className="live-thinking-title">🧠 Thinking…</span>
           </div>
-          <div className="live-thinking-body">
-            {liveThinking}
-          </div>
+          <div className="live-thinking-body">{liveThinking}</div>
         </div>
       )}
 
@@ -418,15 +458,11 @@ export function AIPill({
                   <div className="slash-item-body">
                     <div className="slash-item-header">
                       <span className="slash-item-cmd">{cmd.command}</span>
-                      <span className={`slash-item-cat cat-${cmd.category}`}>
-                        {cmd.category}
-                      </span>
+                      <span className={`slash-item-cat cat-${cmd.category}`}>{cmd.category}</span>
                     </div>
                     <span className="slash-item-desc">{cmd.description}</span>
                   </div>
-                  <span className="slash-item-action">
-                    {cmd.placeholder ? "Fill" : "Run"}
-                  </span>
+                  <span className="slash-item-action">{cmd.placeholder ? "Fill" : "Run"}</span>
                 </div>
               );
             })}
@@ -437,218 +473,238 @@ export function AIPill({
         <div className="slash-active-badge" role="status">
           <SlashIcon icon={activeSlashCmd.definition.icon} />
           <span className="badge-cmd">{activeSlashCmd.definition.command}</span>
-          <span className="badge-placeholder">
-            {activeSlashCmd.args
-              ? `Target: "${activeSlashCmd.args}"`
-              : activeSlashCmd.definition.placeholder}
-          </span>
+          <span className="badge-desc">{activeSlashCmd.definition.description}</span>
+          {!activeSlashCmd.args && activeSlashCmd.definition.placeholder && (
+            <span className="badge-placeholder">· {activeSlashCmd.definition.placeholder}</span>
+          )}
+          <button
+            type="button"
+            className="badge-clear-btn"
+            onClick={() => onChange?.(activeSlashCmd.args || "")}
+            title="Clear command"
+            aria-label="Clear slash command"
+          >
+            <Ico.X style={{ width: 12, height: 12 }} />
+          </button>
         </div>
       )}
       <div
         className={`ai-pill ${listening ? "listening" : ""}${readOnly ? " read-only" : ""}${multiline ? " multiline" : ""}`}
       >
-        <div className="pill-icon">
-          {readOnly ? (
-            <Ico.Eye />
-          ) : listening ? (
-            <Ico.Mic2 style={{ color: "var(--amber-1)" }} />
-          ) : askMode ? (
-            <Ico.History />
-          ) : (
-            <Ico.Sparkle />
-          )}
-        </div>
-        {/* Build/Ask: the one toggle the reviewer's model asked for — Build
-            mutates, Ask reads. Rendered as the app's established segmented
-            control, only for mounts that own a mode. */}
-        {hasMode && !readOnly && (
-          <div
-            className="segmented"
-            style={{ flexShrink: 0 }}
-            role="radiogroup"
-            aria-label="Build or Ask mode"
-          >
-            <button
-              className={mode === "build" ? "active" : ""}
-              onClick={() => onModeChange("build")}
-              title="Describe what to build — Lucent changes the board"
-              aria-pressed={mode === "build"}
-              aria-label="Build mode"
-            >
-              Build
-            </button>
-            <button
-              className={mode === "ask" ? "active" : ""}
-              onClick={() => onModeChange("ask")}
-              title="Ask about the board and its history — read-only, with citations"
-              aria-pressed={mode === "ask"}
-              aria-label="Ask mode"
-            >
-              Ask
-            </button>
-          </div>
-        )}
-        {!readOnly && (
-          <div
-            className="segmented model-tier-selector"
-            style={{ flexShrink: 0 }}
-            role="radiogroup"
-            aria-label="Model tier"
-          >
-            <button
-              type="button"
-              className={settings.modelTier === "fast" ? "active" : ""}
-              onClick={() => updateSettings({ modelTier: "fast" })}
-              title="⚡ Fast — low latency, instant streaming"
-              aria-pressed={settings.modelTier === "fast"}
-              aria-label="Fast tier"
-            >
-              ⚡ Fast
-            </button>
-            <button
-              type="button"
-              className={settings.modelTier === "balanced" ? "active" : ""}
-              onClick={() => updateSettings({ modelTier: "balanced" })}
-              title="⚖️ Balanced — optimal balance between intelligence & speed"
-              aria-pressed={settings.modelTier === "balanced"}
-              aria-label="Balanced tier"
-            >
-              ⚖️ Balanced
-            </button>
-            <button
-              type="button"
-              className={settings.modelTier === "reasoning" ? "active" : ""}
-              onClick={() => updateSettings({ modelTier: "reasoning" })}
-              title="🧠 Reasoning — multi-step deep chain-of-thought analysis"
-              aria-pressed={settings.modelTier === "reasoning"}
-              aria-label="Reasoning tier"
-            >
-              🧠 Think
-            </button>
-          </div>
-        )}
         {readOnly ? (
-          <span className="pill-notice">
-            You're viewing this board. Ask the owner for edit access to change it.
-          </span>
+          <div className="ai-pill-readonly-row">
+            <div className="pill-icon">
+              <Ico.Eye />
+            </div>
+            <span className="pill-notice">
+              You're viewing this board. Ask the owner for edit access to change it.
+            </span>
+          </div>
         ) : (
           <>
-            <label htmlFor={inputId} className="sr-only">
-              Ask Lucent
-            </label>
-            <GrowTextarea
-              id={inputId}
-              value={value}
-              onChange={(v) => onChange?.(v)}
-              onKeyDown={handleKeyDown}
-              onSubmit={() => onSubmit?.()}
-              onMultilineChange={setMultiline}
-              maxHeight={168}
-              placeholder={
-                listening
-                  ? "Listening… speak your idea (tap mic or ↵ when done)"
-                  : (placeholder ??
-                    (askMode
-                      ? "Ask about this board's history…"
-                      : "Type / for AI commands or describe what to build…"))
-              }
-            />
-            {listening && (
-              <div
-                className="waveform"
-                style={{
-                  height: 18,
-                  padding: "0 6px",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 3,
-                  flexShrink: 0,
-                }}
-                title="Microphone active — speaking…"
-              >
-                {bars.current.slice(0, 6).map((h, i) => (
-                  <span key={i} style={{ animationDelay: `${i * 60}ms`, height: `${h}%` }} />
-                ))}
+            {/* Top Prompt Input Zone — Full width hero input */}
+            <div className="ai-pill-input-row">
+              <div className="pill-icon">
+                {listening ? (
+                  <Ico.Mic2 style={{ color: "var(--amber-1)" }} />
+                ) : askMode ? (
+                  <Ico.History />
+                ) : (
+                  <Ico.Sparkle />
+                )}
               </div>
-            )}
-          </>
-        )}
-        {!readOnly && (
-          <button
-            type="button"
-            className="slash-trigger-btn"
-            title="Browse AI Slash Commands (/)"
-            onClick={() => {
-              setDismissedQuery(null);
-              onChange?.("/");
-            }}
-          >
-            /
-          </button>
-        )}
-        {!readOnly && <span className="kbd">⌘K</span>}
-        {!readOnly && (
-          <>
-            <button
-              className={`mic-btn ${listening || conversing ? "active" : ""}`}
-              onClick={onToggleMic}
-              title={
-                conversing
-                  ? listening && value.trim()
-                    ? "Send what you said"
-                    : "End the voice conversation"
-                  : voiceSupported
-                    ? "Talk with Lucent — it answers out loud and keeps listening"
-                    : "Voice not supported in this browser"
-              }
-              aria-label={
-                conversing
-                  ? listening && value.trim()
-                    ? "Send what you said"
-                    : "End the voice conversation"
-                  : "Talk with Lucent"
-              }
-              aria-pressed={conversing}
-              style={voiceSupported ? undefined : { opacity: 0.45 }}
-            >
-              <Ico.Mic />
-            </button>
-            {onToggleVoiceAgent && (
-              <button
-                className={`mic-btn voice-call-btn ${voiceAgentActive ? "active" : ""}`}
-                onClick={onToggleVoiceAgent}
-                title={
-                  voiceAgentActive
-                    ? "End live duplex voice call"
-                    : "Live Conversational Call (ChatGPT / Grok-style duplex voice agent)"
+              <label htmlFor={inputId} className="sr-only">
+                Ask Lucent
+              </label>
+              <GrowTextarea
+                id={inputId}
+                value={value}
+                onChange={(v) => onChange?.(v)}
+                onKeyDown={handleKeyDown}
+                onSubmit={() => onSubmit?.()}
+                onMultilineChange={setMultiline}
+                maxHeight={168}
+                placeholder={
+                  listening
+                    ? "Listening… speak your idea (tap mic or ↵ when done)"
+                    : (placeholder ??
+                      (askMode
+                        ? "Ask about this board's history…"
+                        : "Refine, add, or transform — type / for AI commands…"))
                 }
-                aria-label="Live Voice Call"
-                aria-pressed={voiceAgentActive}
-                style={
-                  voiceAgentActive
-                    ? {
-                        background: "var(--sig-violet)",
-                        color: "var(--canvas-0)",
-                        borderColor: "var(--sig-violet)",
-                        boxShadow: "0 0 14px oklch(from var(--sig-violet) l c h / 0.45)",
-                      }
-                    : {
-                        borderColor: "oklch(from var(--sig-violet) l c h / 0.4)",
-                      }
-                }
-              >
-                <Ico.Phone />
-              </button>
-            )}
-            <button
-              className="send-btn"
-              onClick={onSubmit}
-              disabled={busy}
-              title="Send"
-              aria-label="Send message"
-            >
-              <Ico.Send />
-            </button>
+              />
+            </div>
+
+            {/* Bottom Accessory Strip — Mode, Model tier, Commands, Voice, Send */}
+            <div className="ai-pill-toolbar">
+              <div className="ai-pill-toolbar-left">
+                {hasMode && (
+                  <div
+                    className="segmented ai-mode-toggle"
+                    role="radiogroup"
+                    aria-label="Build or Ask mode"
+                  >
+                    <button
+                      type="button"
+                      className={mode === "build" ? "active" : ""}
+                      onClick={() => onModeChange("build")}
+                      title="Describe what to build — Lucent changes the board"
+                      aria-pressed={mode === "build"}
+                      aria-label="Build mode"
+                    >
+                      Build
+                    </button>
+                    <button
+                      type="button"
+                      className={mode === "ask" ? "active" : ""}
+                      onClick={() => onModeChange("ask")}
+                      title="Ask about the board and its history — read-only, with citations"
+                      aria-pressed={mode === "ask"}
+                      aria-label="Ask mode"
+                    >
+                      Ask
+                    </button>
+                  </div>
+                )}
+
+                <div
+                  className="segmented model-tier-selector"
+                  role="radiogroup"
+                  aria-label="Model tier"
+                >
+                  <button
+                    type="button"
+                    className={settings.modelTier === "fast" ? "active" : ""}
+                    onClick={() => updateSettings({ modelTier: "fast" })}
+                    title="⚡ Fast — low latency, instant streaming"
+                    aria-pressed={settings.modelTier === "fast"}
+                    aria-label="Fast tier"
+                  >
+                    ⚡ Fast
+                  </button>
+                  <button
+                    type="button"
+                    className={settings.modelTier === "balanced" ? "active" : ""}
+                    onClick={() => updateSettings({ modelTier: "balanced" })}
+                    title="⚖️ Balanced — optimal balance between intelligence & speed"
+                    aria-pressed={settings.modelTier === "balanced"}
+                    aria-label="Balanced tier"
+                  >
+                    ⚖️ Balanced
+                  </button>
+                  <button
+                    type="button"
+                    className={settings.modelTier === "reasoning" ? "active" : ""}
+                    onClick={() => updateSettings({ modelTier: "reasoning" })}
+                    title="🧠 Reasoning — multi-step deep chain-of-thought analysis"
+                    aria-pressed={settings.modelTier === "reasoning"}
+                    aria-label="Reasoning tier"
+                  >
+                    🧠 Think
+                  </button>
+                </div>
+
+                {listening && (
+                  <div
+                    className="waveform"
+                    style={{
+                      height: 18,
+                      padding: "0 6px",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 3,
+                      flexShrink: 0,
+                    }}
+                    title="Microphone active — speaking…"
+                  >
+                    {bars.current.slice(0, 6).map((h, i) => (
+                      <span key={i} style={{ animationDelay: `${i * 60}ms`, height: `${h}%` }} />
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="ai-pill-toolbar-right">
+                <button
+                  type="button"
+                  className="slash-trigger-btn"
+                  title="Browse AI Slash Commands (/)"
+                  onClick={() => {
+                    setDismissedQuery(null);
+                    onChange?.("/");
+                  }}
+                >
+                  /
+                </button>
+                <span className="kbd">⌘K</span>
+
+                <button
+                  type="button"
+                  className={`mic-btn ${listening || conversing ? "active" : ""}`}
+                  onClick={onToggleMic}
+                  title={
+                    conversing
+                      ? listening && value.trim()
+                        ? "Send what you said"
+                        : "End the voice conversation"
+                      : voiceSupported
+                        ? "Talk with Lucent — it answers out loud and keeps listening"
+                        : "Voice not supported in this browser"
+                  }
+                  aria-label={
+                    conversing
+                      ? listening && value.trim()
+                        ? "Send what you said"
+                        : "End the voice conversation"
+                      : "Talk with Lucent"
+                  }
+                  aria-pressed={conversing}
+                  style={voiceSupported ? undefined : { opacity: 0.45 }}
+                >
+                  <Ico.Mic />
+                </button>
+
+                {onToggleVoiceAgent && (
+                  <button
+                    type="button"
+                    className={`mic-btn voice-call-btn ${voiceAgentActive ? "active" : ""}`}
+                    onClick={onToggleVoiceAgent}
+                    title={
+                      voiceAgentActive
+                        ? "End live duplex voice call"
+                        : "Live Duplex Call (requires @lucent/voice-agent worker & Deepgram key) — or use Mic button for instant browser voice"
+                    }
+                    aria-label="Live Voice Call"
+                    aria-pressed={voiceAgentActive}
+                    style={
+                      voiceAgentActive
+                        ? {
+                            background: "var(--sig-violet)",
+                            color: "var(--canvas-0)",
+                            borderColor: "var(--sig-violet)",
+                            boxShadow: "0 0 14px oklch(from var(--sig-violet) l c h / 0.45)",
+                          }
+                        : {
+                            borderColor: "oklch(from var(--sig-violet) l c h / 0.4)",
+                          }
+                    }
+                  >
+                    <Ico.Phone />
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  className="send-btn"
+                  onClick={onSubmit}
+                  disabled={busy}
+                  title="Send"
+                  aria-label="Send message"
+                >
+                  <Ico.Send />
+                </button>
+              </div>
+            </div>
           </>
         )}
       </div>
@@ -728,14 +784,17 @@ function ConvoTurn({
             <summary className="thinking-summary">
               <span className="thinking-summary-icon">🧠</span>
               <span className="thinking-summary-label">
-                Thought {entry.telemetry?.latencyMs ? `for ${(entry.telemetry.latencyMs / 1000).toFixed(1)}s` : "trace"}
-                {entry.telemetry?.reasoningTokens ? ` (${entry.telemetry.reasoningTokens} tokens)` : ""}
+                Thought{" "}
+                {entry.telemetry?.latencyMs
+                  ? `for ${(entry.telemetry.latencyMs / 1000).toFixed(1)}s`
+                  : "trace"}
+                {entry.telemetry?.reasoningTokens
+                  ? ` (${entry.telemetry.reasoningTokens} tokens)`
+                  : ""}
               </span>
               <span className="thinking-summary-chevron">▾</span>
             </summary>
-            <div className="thinking-content">
-              {entry.thinking}
-            </div>
+            <div className="thinking-content">{entry.thinking}</div>
           </details>
         )}
         {!isUser && entry.effect && !isEmptyEffect(entry.effect) && (
@@ -787,7 +846,9 @@ function ConvoTurn({
             {Boolean(entry.telemetry.reasoningTokens) && (
               <>
                 <span className="telemetry-sep">·</span>
-                <span className="telemetry-stat reasoning-tok">{entry.telemetry.reasoningTokens} think</span>
+                <span className="telemetry-stat reasoning-tok">
+                  {entry.telemetry.reasoningTokens} think
+                </span>
               </>
             )}
           </div>

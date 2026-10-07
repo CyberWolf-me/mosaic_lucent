@@ -1,7 +1,6 @@
-import React, { useState, useEffect, useMemo, useRef } from "react";
+import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
 import {
-  specToOps,
   classifySpec,
   sqlDdlToOps,
   prismaToOps,
@@ -220,11 +219,11 @@ export function SpecImportModal({ onClose }: { onClose: () => void }) {
   const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const requestClose = () => {
+  const requestClose = useCallback(() => {
     if (closing) return;
     setClosing(true);
     setTimeout(onClose, 140);
-  };
+  }, [closing, onClose]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -235,7 +234,7 @@ export function SpecImportModal({ onClose }: { onClose: () => void }) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [closing]);
+  }, [requestClose]);
 
   // Detected format
   const detectedFormat = useMemo<SpecFormat | null>(() => {
@@ -244,11 +243,7 @@ export function SpecImportModal({ onClose }: { onClose: () => void }) {
   }, [specText]);
 
   const effectiveFormat: SupportedSpecFormat | null =
-    forcedFormat === "auto"
-      ? detectedFormat === "unknown"
-        ? null
-        : detectedFormat
-      : forcedFormat;
+    forcedFormat === "auto" ? (detectedFormat === "unknown" ? null : detectedFormat) : forcedFormat;
 
   // Calculate operations based on format
   const preview = useMemo(() => {
@@ -268,13 +263,13 @@ export function SpecImportModal({ onClose }: { onClose: () => void }) {
       const groupCount = ops.filter((o) => o.op === "CREATE_GROUP").length;
 
       return { ops, nodeCount, edgeCount, groupCount, error: null };
-    } catch (err: any) {
+    } catch (err: unknown) {
       return {
         ops: [] as Operation[],
         nodeCount: 0,
         edgeCount: 0,
         groupCount: 0,
-        error: err?.message ?? "Failed to parse specification",
+        error: err instanceof Error ? err.message : "Failed to parse specification",
       };
     }
   }, [specText, effectiveFormat]);
@@ -404,8 +399,8 @@ export function SpecImportModal({ onClose }: { onClose: () => void }) {
                 lineHeight: 1.45,
               }}
             >
-              Parse OpenAPI 3.0 / Swagger, SQL DDL, Prisma schemas, or Docker Compose into
-              fully structured, editable visual canvas diagrams.
+              Parse OpenAPI 3.0 / Swagger, SQL DDL, Prisma schemas, or Docker Compose into fully
+              structured, editable visual canvas diagrams.
             </p>
           </div>
           <button
@@ -439,7 +434,13 @@ export function SpecImportModal({ onClose }: { onClose: () => void }) {
           }}
         >
           <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-            <span style={{ fontSize: 12, color: "var(--text-muted, oklch(0.65 0.01 255))", marginRight: 4 }}>
+            <span
+              style={{
+                fontSize: 12,
+                color: "var(--text-muted, oklch(0.65 0.01 255))",
+                marginRight: 4,
+              }}
+            >
               Format:
             </span>
             {(["auto", "sqlddl", "prisma", "openapi", "compose"] as const).map((fmt) => {
@@ -450,12 +451,12 @@ export function SpecImportModal({ onClose }: { onClose: () => void }) {
                     ? `Auto (${detectedFormat.toUpperCase()})`
                     : "Auto-detect"
                   : fmt === "openapi"
-                  ? "OpenAPI / Swagger"
-                  : fmt === "sqlddl"
-                  ? "SQL DDL"
-                  : fmt === "prisma"
-                  ? "Prisma"
-                  : "Docker Compose";
+                    ? "OpenAPI / Swagger"
+                    : fmt === "sqlddl"
+                      ? "SQL DDL"
+                      : fmt === "prisma"
+                        ? "Prisma"
+                        : "Docker Compose";
               return (
                 <button
                   key={fmt}
@@ -538,9 +539,7 @@ export function SpecImportModal({ onClose }: { onClose: () => void }) {
               border: dragOver
                 ? "2px dashed var(--accent-bright, oklch(0.75 0.14 250))"
                 : "1px solid var(--border-subtle, oklch(0.35 0.02 255 / 0.4))",
-              background: dragOver
-                ? "oklch(0.24 0.03 250 / 0.4)"
-                : "oklch(0.14 0.01 255 / 0.7)",
+              background: dragOver ? "oklch(0.24 0.03 250 / 0.4)" : "oklch(0.14 0.01 255 / 0.7)",
               transition: "border-color 0.15s, background-color 0.15s",
             }}
           >
@@ -577,7 +576,9 @@ export function SpecImportModal({ onClose }: { onClose: () => void }) {
                 color: "var(--text-muted, oklch(0.65 0.01 255))",
               }}
             >
-              <span>Tip: You can drag & drop .sql, .prisma, .json, or .yaml files directly here.</span>
+              <span>
+                Tip: You can drag & drop .sql, .prisma, .json, or .yaml files directly here.
+              </span>
               <button
                 onClick={() => fileInputRef.current?.click()}
                 style={{
@@ -620,13 +621,13 @@ export function SpecImportModal({ onClose }: { onClose: () => void }) {
                 background: preview.error
                   ? "oklch(0.25 0.06 25 / 0.4)"
                   : preview.nodeCount > 0
-                  ? "oklch(0.22 0.04 150 / 0.3)"
-                  : "oklch(0.20 0.015 255 / 0.5)",
+                    ? "oklch(0.22 0.04 150 / 0.3)"
+                    : "oklch(0.20 0.015 255 / 0.5)",
                 border: preview.error
                   ? "1px solid oklch(0.5 0.15 25 / 0.5)"
                   : preview.nodeCount > 0
-                  ? "1px solid oklch(0.45 0.1 150 / 0.4)"
-                  : "1px solid var(--border-subtle, oklch(0.35 0.02 255 / 0.3))",
+                    ? "1px solid oklch(0.45 0.1 150 / 0.4)"
+                    : "1px solid var(--border-subtle, oklch(0.35 0.02 255 / 0.3))",
                 fontSize: 12.5,
               }}
             >
@@ -692,7 +693,7 @@ export function SpecImportModal({ onClose }: { onClose: () => void }) {
           </button>
           <button
             onClick={handleImport}
-            disabled={preview.nodeCount === 0 || !!preview.error}
+            disabled={preview.nodeCount === 0 || Boolean(preview.error)}
             style={{
               padding: "7px 18px",
               borderRadius: 6,

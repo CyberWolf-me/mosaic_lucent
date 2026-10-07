@@ -1,10 +1,6 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { createPortal } from "react-dom";
-import {
-  exportBoardToCode,
-  type CodeExportFormat,
-  type CodeExportResult,
-} from "@lucent/core";
+import { exportBoardToCode, type CodeExportFormat, type CodeExportResult, type Workspace } from "@lucent/core";
 import { useWorkspace } from "../workspace.js";
 import { useToast } from "./Toast.js";
 import { Ico } from "./icons.js";
@@ -17,8 +13,22 @@ const FORMAT_OPTIONS: { id: CodeExportFormat; label: string; ext: string }[] = [
   { id: "typescript", label: "TypeScript Types", ext: ".types.ts" },
 ];
 
-export function CodeExportModal({ onClose }: { onClose: () => void }) {
-  const { workspace } = useWorkspace();
+export function CodeExportModal({
+  onClose,
+  sourceWorkspace,
+}: {
+  onClose: () => void;
+  sourceWorkspace?: Workspace;
+}) {
+  const { workspace: fullWorkspace } = useWorkspace();
+  const [useSelection, setUseSelection] = useState<boolean>(
+    Boolean(
+      sourceWorkspace &&
+        sourceWorkspace !== fullWorkspace &&
+        Object.keys(sourceWorkspace.nodes).length < Object.keys(fullWorkspace.nodes).length,
+    ),
+  );
+  const workspace = useSelection && sourceWorkspace ? sourceWorkspace : fullWorkspace;
   const { notify } = useToast();
   const [closing, setClosing] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -39,11 +49,11 @@ export function CodeExportModal({ onClose }: { onClose: () => void }) {
 
   const [selectedFormat, setSelectedFormat] = useState<CodeExportFormat>(recommendedFormat);
 
-  const requestClose = () => {
+  const requestClose = useCallback(() => {
     if (closing) return;
     setClosing(true);
     setTimeout(onClose, 140);
-  };
+  }, [closing, onClose]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -54,7 +64,7 @@ export function CodeExportModal({ onClose }: { onClose: () => void }) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [closing]);
+  }, [requestClose]);
 
   const exportResult = useMemo<CodeExportResult>(() => {
     return exportBoardToCode(workspace, selectedFormat);
@@ -194,8 +204,8 @@ export function CodeExportModal({ onClose }: { onClose: () => void }) {
                 lineHeight: 1.45,
               }}
             >
-              Compile visual canvas diagrams into production-grade TypeScript state machines,
-              ORM schemas, database DDL, or container definitions.
+              Compile visual canvas diagrams into production-grade TypeScript state machines, ORM
+              schemas, database DDL, or container definitions.
             </p>
           </div>
           <button
@@ -227,7 +237,13 @@ export function CodeExportModal({ onClose }: { onClose: () => void }) {
             background: "oklch(0.18 0.015 255 / 0.4)",
           }}
         >
-          <span style={{ fontSize: 12, color: "var(--text-muted, oklch(0.65 0.01 255))", marginRight: 4 }}>
+          <span
+            style={{
+              fontSize: 12,
+              color: "var(--text-muted, oklch(0.65 0.01 255))",
+              marginRight: 4,
+            }}
+          >
             Format:
           </span>
           {FORMAT_OPTIONS.map((opt) => {
@@ -248,9 +264,7 @@ export function CodeExportModal({ onClose }: { onClose: () => void }) {
                   border: active
                     ? "1px solid var(--accent-bright, oklch(0.7 0.12 250))"
                     : "1px solid var(--border-subtle, oklch(0.35 0.02 255 / 0.3))",
-                  background: active
-                    ? "var(--accent-subtle, oklch(0.3 0.06 250))"
-                    : "transparent",
+                  background: active ? "var(--accent-subtle, oklch(0.3 0.06 250))" : "transparent",
                   color: active ? "white" : "var(--text-muted, oklch(0.8 0.01 255))",
                   cursor: "pointer",
                   transition: "all 0.12s ease",
@@ -273,6 +287,53 @@ export function CodeExportModal({ onClose }: { onClose: () => void }) {
               </button>
             );
           })}
+          {sourceWorkspace && Object.keys(sourceWorkspace.nodes).length < Object.keys(fullWorkspace.nodes).length && (
+            <div style={{ display: "flex", alignItems: "center", gap: 6, marginLeft: "auto" }}>
+              <span style={{ fontSize: 12, color: "var(--text-muted, oklch(0.65 0.01 255))" }}>Scope:</span>
+              <button
+                type="button"
+                onClick={() => setUseSelection(true)}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 4,
+                  padding: "4px 8px",
+                  borderRadius: 6,
+                  fontSize: 11.5,
+                  cursor: "pointer",
+                  border: useSelection
+                    ? "1px solid var(--amber-2)"
+                    : "1px solid var(--border-subtle, oklch(0.35 0.02 255 / 0.3))",
+                  background: useSelection ? "var(--amber-2)" : "transparent",
+                  color: useSelection ? "var(--ink-0)" : "var(--text-muted, oklch(0.8 0.01 255))",
+                  fontWeight: useSelection ? 600 : 400,
+                }}
+              >
+                Selection ({Object.keys(sourceWorkspace.nodes).length} nodes)
+              </button>
+              <button
+                type="button"
+                onClick={() => setUseSelection(false)}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 4,
+                  padding: "4px 8px",
+                  borderRadius: 6,
+                  fontSize: 11.5,
+                  cursor: "pointer",
+                  border: !useSelection
+                    ? "1px solid var(--amber-2)"
+                    : "1px solid var(--border-subtle, oklch(0.35 0.02 255 / 0.3))",
+                  background: !useSelection ? "var(--amber-2)" : "transparent",
+                  color: !useSelection ? "var(--ink-0)" : "var(--text-muted, oklch(0.8 0.01 255))",
+                  fontWeight: !useSelection ? 600 : 400,
+                }}
+              >
+                Entire Board ({Object.keys(fullWorkspace.nodes).length} nodes)
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Code Metadata Bar */}
@@ -371,9 +432,7 @@ export function CodeExportModal({ onClose }: { onClose: () => void }) {
               style={{
                 padding: "7px 14px",
                 borderRadius: 6,
-                background: copied
-                  ? "oklch(0.35 0.1 140 / 0.4)"
-                  : "oklch(0.24 0.02 255 / 0.7)",
+                background: copied ? "oklch(0.35 0.1 140 / 0.4)" : "oklch(0.24 0.02 255 / 0.7)",
                 border: "1px solid var(--border-subtle, oklch(0.35 0.02 255 / 0.3))",
                 color: copied ? "oklch(0.9 0.15 140)" : "var(--text-main, white)",
                 fontSize: 13,

@@ -11,13 +11,10 @@ import {
 import { gatePlanOps } from "./planGate.js";
 import {
   OperationHistory,
-  applyLayout,
   applyOperations,
-  applyRoutes,
   applyValidOperations,
   attachPlanProvenance,
   attachProvenance,
-  computeLayoutWithRoutes,
   createWorkspace,
   existingTopics,
   foldStatementTopics,
@@ -25,15 +22,10 @@ import {
   withEditTrust,
   isConversationOnly,
   lensFor,
-  parseWorkspace,
-  parseWorkspaceOrDefault,
-  relayoutRegionWithRoutes,
   representationLabel,
-  starterFor,
   validateOperations,
   type DiagramKind,
   type Operation,
-  type RepresentationLens,
   type Workspace,
 } from "@lucent/core";
 import { streamGenerate, PlanRefusalError } from "./api.js";
@@ -53,11 +45,9 @@ import {
   fetchBoard,
   joinBoard,
   listServerProposals,
-  saveBoard,
   saveBoardDetailed,
   askLucent,
   type BoardRole,
-  type ServerProposal,
 } from "./boards.js";
 import {
   appendThread,
@@ -97,633 +87,39 @@ import { turnEffect } from "./turnEffect.js";
  * computeLayout — the AI never sets them (docs/03, docs/11).
  */
 
-export type View =
-  | "home"
-  | "dashboard"
-  | "canvas"
-  | "history"
-  | "meeting"
-  | "meetings"
-  | "projects"
-  | "review"
-  | "intelligence"
-  | "execution"
-  | "wireframe"
-  | "sequence"
-  | "er"
-  | "board"
-  | "document"
-  | "admin"
-  | "analytics"
-  | "notifications";
+export * from "./workspaceTypes.js";
+export * from "./workspaceHelpers.js";
 
-/** Views that are really canvas lenses (UX-1), and the lens each one means. */
-const LEGACY_LENS_VIEWS: Partial<Record<View, CanvasLens>> = {
-  board: "kanban",
-  document: "document",
-  wireframe: "wireframe",
-  sequence: "sequence",
-  er: "er",
-};
+import {
+  type View,
+  type CanvasLens,
+  type CanvasPhase,
+  type SyncStatus,
+  type Proposal,
+  type SendAttachments,
+  type GenPhase,
+  type SendOutcome,
+  type WorkspaceState,
+  LEGACY_LENS_VIEWS,
+} from "./workspaceTypes.js";
 
-/** Canvas sub-state is derived from the data, not stored separately. */
-export type CanvasPhase = "empty" | "generating" | "main" | "proposing" | "voice";
-
-/**
- * Canvas lenses (UX-1): alternate renderings of the same board on the canvas.
- * The registry's family lenses (sequence, ER) are part of the union by type,
- * so a family that gains a lens in the registry is a lens here too.
- */
-export type CanvasLens = "visual" | "kanban" | "document" | "wireframe" | RepresentationLens;
-
-/**
- * The lens follows the kind (V4). A family whose registry entry names a lens
- * (a sequence diagram, an ER diagram) is only readable through it, so when the
- * board's kind changes — the user converts it, the AI creates one, a peer
- * converts it, a board is opened — the lens moves with it:
- *
- *  - arriving at a kind with a lens presents that lens;
- *  - leaving one returns to the visual canvas, but ONLY when the lens on
- *    screen is the one the old kind implied — kanban, document or wireframe
- *    is the person's own choice, and a conversion never overrides it;
- *  - `prevKind` undefined is the board's first appearance (boot): its lens
- *    replaces only the default visual lens, so a `?lens=` deep link wins.
- *
- * Pure so the rule is tested without a provider; the provider calls it once
- * per kind change, during render, so the canvas never paints a frame of a
- * sequence board as boxes-and-arrows before switching.
- */
-export function lensForKindChange(
-  prevKind: DiagramKind | undefined,
-  nextKind: DiagramKind,
-  currentLens: CanvasLens,
-): CanvasLens {
-  if (prevKind === nextKind) return currentLens;
-  const nextLens = lensFor(nextKind);
-  if (nextLens) {
-    if (prevKind === undefined) return currentLens === "visual" ? nextLens : currentLens;
-    return nextLens;
-  }
-  const prevLens = prevKind === undefined ? undefined : lensFor(prevKind);
-  return prevLens !== undefined && currentLens === prevLens ? "visual" : currentLens;
-}
-
-/**
- * Whether the board is blank for the purpose of "Convert board to…": no
- * nodes, no groups (empty swimlanes or matrix cells are structure someone
- * built) and no manual shapes (stickies are content too — seeding a starter
- * among them would drop an example into someone's notes). Converting a blank
- * board seeds the family's starter instead of switching the kind of nothing.
- */
-export function boardIsBlank(ws: Workspace): boolean {
-  return (
-    Object.keys(ws.nodes).length === 0 &&
-    Object.keys(ws.groups).length === 0 &&
-    Object.keys(ws.shapes).length === 0
-  );
-}
-
-/**
- * The operations "Convert board to <kind>" applies: on a blank board the
- * family's registry starter (a minimal, editable example — so picking "State
- * machine" on an empty board shows a state machine, including when that is
- * already the board's kind), otherwise one TRANSFORM_DIAGRAM that keeps every
- * node and edge and re-lays them out in the new geometry. `idPrefix`
- * namespaces the starter's ids; the caller passes a fresh one per insert.
- */
-export function convertBoardOps(
-  ws: Workspace,
-  kind: DiagramKind,
-  idPrefix: string,
-): { ops: Operation[]; seeded: boolean } {
-  if (boardIsBlank(ws)) return { ops: starterFor(kind, idPrefix), seeded: true };
-  return { ops: [{ op: "TRANSFORM_DIAGRAM", to: kind }], seeded: false };
-}
-
-/** Realtime link state. "offline" covers both signed-out and disconnected. */
-export type SyncStatus = "offline" | "connecting" | "online";
-
-import type { ProposalStatus } from "./persistence.js";
-
-/**
- * A review-gate proposal. One shape for the live state AND the persisted
- * record (2026-09: persisting proposals is the reliability fix — a refresh
- * used to drop the AI's proposed ops while the chat reply describing them
- * survived, which read as Lucent losing work). `status` is `"pending"`
- * whenever the panel is open; decide/transition helpers in persistence.ts
- * keep every change idempotent. The active slot on the project record is
- * the current-or-most-recently-decided record; terminal ones are the audit
- * trail in `proposalHistory`.
- */
-export interface Proposal {
-  request: string;
-  operations: Operation[];
-  explanation: string;
-  /**
-   * Meeting provenance, when this batch came from live capture: stamped onto
-   * whatever it creates at apply time, so the board can always answer "why
-   * is this here?".
-   */
-  meetingId: string | null;
-  /** The source turns, quoted, when the proposal came from meeting capture. */
-  turns?: string[];
-  /** Stable index range of those turns in the meeting (Stage A provenance). */
-  turnRange?: [number, number];
-  /** Kinds of the source turns, when the capture classified them. */
-  turnKinds?: string[];
-  /** Stable across saves; a new proposal mints a new id. */
-  id: string;
-  status: ProposalStatus;
-  createdAt: number;
-}
-
-/** Files the user attached to a request: images to look at, documents to read. */
-export interface SendAttachments {
-  images?: Array<{ data: string; mediaType: string }>;
-  documents?: Array<{ name: string; text: string }>;
-  /**
-   * Provenance to stamp on whatever this request creates (M2). Meeting
-   * extraction passes its transcript id and the turns' span, so every node
-   * the model adds from the conversation can answer "why is this here?"
-   * — the board's audit trail for AI-generated content.
-   *
-   * Stage A: `turns` gains stable per-turn references alongside the quoted
-   * text. The quote is presentation (it changes if transcript normalization
-   * changes); the ids/range are the durable link — and they are what a later
-   * reverse navigation (open a transcript turn, jump back to the object it
-   * created) keys on, so the data is shaped for that now.
-   */
-  provenance?: {
-    meetingId: string;
-    /** Turn texts that fed this request, quoted in the provenance record. */
-    turns: string[];
-    /** Stable references to those turns — the index range in the meeting. */
-    turnRange?: [number, number];
-    /** Kinds of the source turns (decision / proposal / …) when classified. */
-    turnKinds?: string[];
-  };
-  /**
-   * Stage D2: this request is a PLAN derived from the named statement nodes.
-   * Present → the model's ops are gated against PLAN_SAFE_OPS (no lifecycle
-   * conversion — the acceptance rule is mechanical) and every created node is
-   * stamped with createdFrom (the source statement ids) through
-   * attachPlanProvenance — the fourth provenance writer, exactly where the
-   * meeting loop already stamps its evidence.
-   */
-  plan?: { statementIds: string[] };
-  /** Where the person asked, when it wasn't typed on the canvas (ADR 0047's run record). */
-  surface?: "voice";
-  /**
-   * docs/27 D2: this request's result is ALWAYS a proposal, whatever its
-   * size and however empty the board — "make these stickies a flowchart"
-   * restructures the person's own content, so they review it first.
-   */
-  propose?: boolean;
-}
-
-/** UX-2: user-facing generation phases (stream chars are display-only detail). */
-export type GenPhase = "understanding" | "constructing" | "validating" | "applying";
-
-/**
- * What a `send` actually did (P1-MT-002) — the honest terminal states the
- * pipeline can reach. `applied`/`proposed` carry the op count so callers can
- * say precisely what landed or awaits review; `failed` carries the message
- * already shown in chat, for callers that report status elsewhere (the
- * meeting view's extraction heartbeat).
- */
-export type SendOutcome =
-  /**
-   * `reply` on the three answered kinds is what Lucent says back in a voice
-   * conversation (the model's conversational reply, or its explanation when it
-   * gave none) — the canvas and the meeting speak it.
-   */
-  | { outcome: "applied"; ops: number; reply: string }
-  | { outcome: "proposed"; ops: number; reply: string }
-  /** A zero-op reply — often a clarifying question — carried as `text` so a
-   *  caller outside the chat (the meeting's voice loop) can relay it. */
-  | { outcome: "answered"; text: string; reply: string }
-  | { outcome: "rejected" }
-  | { outcome: "failed"; error: string }
-  | { outcome: "busy" }
-  | { outcome: "refused" }
-  | { outcome: "cancelled" };
-
-export interface WorkspaceState {
-  view: View;
-  setView: (v: View) => void;
-  /** Active canvas lens (UX-1). Only meaningful when `view` is `"canvas"`. */
-  lens: CanvasLens;
-  setLens: (l: CanvasLens) => void;
-
-  projectId: string;
-  projectName: string;
-  setProjectName: (n: string) => void;
-
-  workspace: Workspace;
-  chat: ChatEntry[];
-  /** Workspace architectural rules & durable context (Initiative 2). */
-  rules: string;
-  setRules: (rules: string) => void;
-
-  busy: boolean;
-  /** M5/E1: streamed-payload characters received so far while busy; 0 otherwise. */
-  streamChars: number;
-  /** Node labels parsed from the stream so far — a live build preview; [] when idle. */
-  streamNodes: string[];
-  /** Sketch choreography: nodeId → flow-order index for the batch just
-   * generated, so the canvas reveals it node-by-node; null when idle. */
-  sketchOrder: Record<string, number> | null;
-  /** End the sketch reveal now (called when the user starts interacting). */
-  cancelSketch: () => void;
-  /** UX-2: which generation phase the pill should name; null when idle. */
-  genPhase: GenPhase | null;
-  /** UX-2: abort the in-flight generation; safe before apply, no-op otherwise. */
-  cancelSend: () => void;
-  listening: boolean;
-  setListening: (v: boolean) => void;
-
-  proposal: Proposal | null;
-  canvasPhase: CanvasPhase;
-
-  history: OperationHistory;
-  canUndo: boolean;
-  canRedo: boolean;
-
-  /** Live collaborators on the current board (empty when offline/solo). */
-  peers: Peer[];
-  /** Report this user's cursor/selection/viewport to collaborators. */
-  setPresence: (update: {
-    cursor?: { x: number; y: number } | null;
-    selection?: string[];
-    viewport?: Viewport | null;
-  }) => void;
-  /** docs/28 S5: who has the board's spotlight (everyone follows their view). */
-  spotlight: Spotlight | null;
-  /** Take the spotlight, or give it up. */
-  setSpotlight: (on: boolean) => void;
-  /** Bring everyone else to this view, once. */
-  summon: (viewport: Viewport) => void;
-  /** The latest "bring everyone here" that reached this board, for the canvas to follow. */
-  lastSummon: { from: Spotlight; viewport: Viewport; at: number } | null;
-  /** Realtime connection state, for the share dialog and a status dot. */
-  syncStatus: SyncStatus;
-  /** This user's role on the shared board, once connected. */
-  syncRole: BoardRole | null;
-  /**
-   * True when this user may look but not touch: they joined someone else's
-   * shared board as a viewer. The server already rejects their operations, so
-   * without this the UI would offer edits that silently bounce. Every editing
-   * entry point must check it — `applyManual` and `send` refuse outright, and
-   * the views hide the affordances rather than letting them fail.
-   */
-  readOnly: boolean;
-  /**
-   * True when this person may comment, react and vote (docs/26 F8): everyone
-   * but a viewer. A commenter is `readOnly` for content but not for talk.
-   */
-  canComment: boolean;
-  /** Server-side board id when this project is shared; null when local-only. */
-  boardId: string | null;
-  /**
-   * Publish the current board to the server and join its realtime room, so a
-   * second person opening the same URL collaborates live. Returns the board id,
-   * or null when not signed in / the server refused.
-   */
-  startSharing: () => Promise<string | null>;
-  /**
-   * Same as startSharing, but returns detailed error information if sharing/saving fails.
-   */
-  startSharingDetailed: () => Promise<
-    { ok: true; boardId: string } | { ok: false; error: string }
-  >;
-  /**
-   * Open a board that lives on the server, by board id. Distinct from
-   * `openProject`, which loads a local project out of localStorage: a server
-   * board has no local copy to load, so the workspace comes from the API and
-   * the realtime room has to be joined -- otherwise two people opening the
-   * same board from the dashboard would quietly edit separate copies of it.
-   * False when the board is gone or not shared with this user.
-   */
-  openBoard: (id: string) => Promise<boolean>;
-
-  /**
-   * The outcome of a `send` — the contract callers need to report honestly
-   * (P1-MT-002): "Extracted N turns" used to print even when generation
-   * failed, was refused, or was skipped because another request was busy,
-   * because `send` returned void and swallowed its own failures. Every
-   * terminal state the pipeline can reach is named here.
-   */
-  send: (
-    message: string,
-    selection?: string[],
-    attachments?: SendAttachments,
-  ) => Promise<SendOutcome>;
-  /**
-   * Ask Lucent (Stage C1): the read direction of the AI pill's Build/Ask
-   * split. The question goes to POST /api/boards/:id/ask over the shared
-   * board's history; the reply lands in the chat with citations attached.
-   * Read-only: an ask never mutates the board, and a viewer may ask (asking
-   * is reading — the same content the history view shows, answered by the
-   * model instead of listed).
-   */
-  /**
-   * Ask about the board (the Ask lens). Resolves to what was said back — the
-   * answer, or the reason there isn't one — so a voice conversation can speak
-   * it; null when nothing was asked.
-   */
-  ask: (question: string) => Promise<string | null>;
-  /** The pill's Build/Ask mode; shared across views so the toggle persists. */
-  pillMode: "build" | "ask";
-  setPillMode: (mode: "build" | "ask") => void;
-  /**
-   * Citation navigation (Stage C1): jump to a cited node, meeting, or
-   * revision. Node → select+focus on the canvas; meeting → the transcript
-   * (with the turn range highlighted); revision → the history view. No-op
-   * when the cited object no longer exists.
-   */
-  onCitation: (citation: {
-    kind: "node" | "meeting" | "revision";
-    id: string;
-    turnRange?: [number, number];
-  }) => void;
-  /** ADR 0048: select and frame several nodes on the canvas (an answer's evidence). */
-  revealNodes: (ids: string[]) => void;
-  /**
-   * docs/27 D2: open a client-computed batch (a sorted sticky wall) as a
-   * proposal. False when there is nothing valid to propose or the board is
-   * read-only.
-   */
-  proposeOps: (operations: Operation[], request: string, explanation: string) => Promise<boolean>;
-  applyProposal: () => void;
-  cancelProposal: () => void;
-  undo: () => void;
-  redo: () => void;
-  restoreVersion: (index: number) => void;
-  selectDiagram: (kind: DiagramKind) => void;
-  /**
-   * "Convert board to <kind>" — the context menu's and ⌘K's one path. A blank
-   * board gets the family's starter; a board with content is transformed
-   * (`convertBoardOps`). The lens follows the new kind on its own.
-   */
-  convertBoard: (kind: DiagramKind) => void;
-  /**
-   * Change one region's diagram kind (a group with a kind), or clear it back
-   * to the board-wide layout with `null`. The manual counterpart of the AI's
-   * SET_GROUP_KIND — same op, same undo.
-   */
-  setRegionKind: (groupId: string, kind: DiagramKind | null) => void;
-  /**
-   * Doc 18 Phase 4 — the two-phase layout's async half, surfaced. `refining`
-   * while the ELK worker re-flows the board/region phase 1 just committed;
-   * `degraded` when every engine failed on a commit-path re-flow (phase-1
-   * geometry is on screen; `retryLayout` re-attempts). Never an error state
-   * the user must clear — the board is always valid.
-   */
-  layoutStatus: { phase: "idle" } | { phase: "refining" } | { phase: "degraded" };
-  retryLayout: () => void;
-  /** Apply manual board operations (shapes/links/node moves) and commit to
-   * history (docs/13). Returns false when the batch fails validation, so callers
-   * can report the failure instead of appearing to succeed. */
-  applyManual: (ops: Operation[], label: string) => boolean;
-
-  /**
-   * Parallel diagrams: create a fresh board and run `prompt` against it. The
-   * current board is untouched — this is the action behind the AI's "this
-   * looks like a new board" reply.
-   */
-  startNewBoardFor: (prompt: string) => void;
-
-  /**
-   * Resolve a user id to a display name. Combines the local signed-in user,
-   * peer presence, and a fallback to the raw id so unknown authors don't
-   * disappear from comment threads (M0.4).
-   */
-  nameFor: (userId: string) => string;
-
-  newProject: () => void;
-  openProject: (id: string) => void;
-  /**
-   * Adopt a board from a file the user picked. Typed `unknown` because the value
-   * arrives straight from `JSON.parse`: it is parsed here, not by the caller.
-   */
-  importWorkspace: (imported: unknown, name?: string) => void;
-  /** Clarification question and options when intent is ambiguous. */
-  clarification: import("@lucent/core").ClarificationChoice | null;
-  clearClarification: () => void;
-  /** Live streaming chain-of-thought / reasoning output while AI generates. */
-  streamThinking: string;
-}
+import {
+  lensForKindChange,
+  laidOut,
+  laidOutScoped,
+  type LayoutScope,
+  touchedIdsOf,
+  opsNeedLayout,
+  withDefaults,
+  proposalThreshold,
+  convertBoardOps,
+  reviewWorkspace,
+  serverProposalToPanel,
+  stripInviteFromUrl,
+  stripBoardFromUrl,
+} from "./workspaceHelpers.js";
 
 const Ctx = createContext<WorkspaceState | null>(null);
-
-/** Review-gate threshold from settings (UX-1): always=>0, large=>5, never=>Infinity. */
-export function proposalThreshold(): number {
-  const mode = settingsStore.get().approvalThreshold;
-  if (mode === "always") return 0;
-  if (mode === "never") return Infinity;
-  return 5;
-}
-
-function laidOut(ws: Workspace): Workspace {
-  // No strategy is passed: computeLayout picks radial for mind maps and layered
-  // otherwise, so switching representation actually changes the arrangement.
-  // No direction either (Phase 5): core resolves the board's layout intent
-  // (SET_LAYOUT_INTENT) as the default — absent intent stays vertical, so
-  // existing boards render exactly as before. Routes ride along (V5): the
-  // same pass derives the long edges' bend points, stamped exactly like the
-  // node positions it computes.
-  const { layout, routes } = computeLayoutWithRoutes(ws);
-  return applyRoutes(applyLayout(ws, layout), routes);
-}
-
-/** What the synchronous pass decided — the async refinement's instruction. */
-interface LayoutScope {
-  kind: "region" | "board";
-  /** The region that re-flowed (kind: "region"). */
-  groupId?: string;
-}
-
-/**
- * The spatial-additivity commit path (M2): if every node this batch TOUCHES
- * (creates or edits) sits inside one group, re-layout just that group at its
- * current origin and leave the rest of the board pixel-identical. This is the
- * product invariant "never rearrange what's built" — a meeting that grows the
- * pricing region must not shuffle the product region the user already read.
- * Falls back to the full-board pass when the batch is unscoped (or the group
- * is unknown), which is the correct behaviour for whole-board transforms.
- *
- * `touched` is the set of node ids the batch creates or modifies, derived by
- * the caller from the ops themselves.
- *
- * Doc 18 Phase 4: this is now PHASE 1 of the two-phase commit. The return
- * carries the scope so the caller can run the async ELK refinement (phase 2)
- * over exactly the same region — the refinement re-lays out only what this
- * pass already decided to re-flow, so the spatial-additivity invariant holds
- * for both engines.
- */
-function laidOutScoped(
-  ws: Workspace,
-  touched: ReadonlySet<string>,
-): { ws: Workspace; scope: LayoutScope } {
-  const full = (): { ws: Workspace; scope: LayoutScope } => ({
-    ws: laidOut(ws),
-    scope: { kind: "board" },
-  });
-  if (touched.size === 0) return full();
-  const groupIds = new Set<string>();
-  for (const id of touched) {
-    const g = ws.nodes[id]?.groupId ?? ws.groups[id]?.id;
-    if (!g) return full(); // unscoped: a batch touching loose nodes relayouts all
-    groupIds.add(g);
-  }
-  if (groupIds.size !== 1) return full(); // crosses regions: global pass
-  const groupId = [...groupIds][0];
-  if (!groupId) return full();
-  const regionResult = relayoutRegionWithRoutes(ws, groupId);
-  if (!regionResult) return full();
-  let next = applyRoutes(applyLayout(ws, regionResult.layout), regionResult.routes);
-  // Growth can extend the region into a right-hand neighbour; push only the
-  // neighbours actually overlapped (never a global shuffle).
-  next = pushRegionNeighbors(next, groupId);
-  return { ws: next, scope: { kind: "region", groupId } };
-}
-
-/** Node/group ids a batch creates or modifies — the "what did we touch" set. */
-function touchedIdsOf(ops: readonly Operation[]): Set<string> {
-  const touched = new Set<string>();
-  for (const op of ops) {
-    switch (op.op) {
-      case "CREATE_NODE":
-      case "DELETE_NODE":
-      case "CHANGE_TEXT":
-      case "CHANGE_NODE_TYPE":
-      case "SET_ISSUE":
-      case "UPDATE_ISSUE":
-      case "SET_STATEMENT":
-      case "UPDATE_STATEMENT":
-      case "MOVE_NODE":
-      case "CONNECT_NODES":
-      case "DISCONNECT_NODES": {
-        // Both endpoints count for an edge op: a connect implies the pair's
-        // region grew, and either endpoint's group is the natural scope.
-        if ("id" in op && typeof op.id === "string") touched.add(op.id);
-        if ("source" in op && typeof op.source === "string") touched.add(op.source);
-        if ("target" in op && typeof op.target === "string") touched.add(op.target);
-        break;
-      }
-      case "CREATE_GROUP":
-      case "DELETE_GROUP":
-      case "SET_GROUP_KIND":
-        touched.add(op.id);
-        break;
-      case "TRANSFORM_DIAGRAM":
-        // A whole-board transform is explicitly global — scope to nothing so
-        // the full pass runs.
-        return new Set();
-      default:
-        break;
-    }
-  }
-  return touched;
-}
-
-/** Whether a batch contains operations that alter semantic graph topology or layout. */
-function opsNeedLayout(ops: readonly Operation[]): boolean {
-  for (const op of ops) {
-    switch (op.op) {
-      case "CREATE_NODE":
-      case "DELETE_NODE":
-      case "CHANGE_TEXT":
-      case "CHANGE_NODE_TYPE":
-      case "SET_ISSUE":
-      case "UPDATE_ISSUE":
-      case "SET_STATEMENT":
-      case "UPDATE_STATEMENT":
-      case "CONNECT_NODES":
-      case "DISCONNECT_NODES":
-      case "CREATE_GROUP":
-      case "DELETE_GROUP":
-      case "SET_GROUP_KIND":
-      case "TRANSFORM_DIAGRAM":
-        return true;
-      default:
-        break;
-    }
-  }
-  return false;
-}
-
-/**
- * Fill in collections a workspace may predate, so a board saved by an older
- * build (or fetched from the server) never crashes a reducer that assumes them.
- * Now passes through the M0.5 schema parser, which validates sink-bearing fields
- * and warns on real corruption rather than silently swallowing it.
- */
-function withDefaults(ws: unknown): Workspace {
-  return parseWorkspaceOrDefault(ws, "loaded workspace");
-}
-
-/**
- * Parse an untrusted workspace and keep the reason it failed.
- *
- * `withDefaults` is right where nobody asked for this particular board — a
- * server broadcast, a reconnect, a reload — because substituting an empty one
- * beats a blank screen and the console warning is for operators. It is wrong
- * where the user pointed at *this* file or *this* saved project: there an empty
- * canvas with no explanation reads as lost work, so the caller needs a detail to
- * show. Exported because this is the whole boundary between an untrusted JSON
- * blob and the render sinks, and the wording below is what the user reads.
- */
-export function reviewWorkspace(
-  value: unknown,
-  what: string,
-): { workspace: Workspace | null; error: string | null } {
-  const parsed = parseWorkspace(value);
-  if (parsed.ok && parsed.workspace) return { workspace: parsed.workspace, error: null };
-  return {
-    workspace: null,
-    error: `${what} isn't a valid Lucent board: ${parsed.detail ?? "unrecognised format"}`,
-  };
-}
-
-/**
- * Drop `invite` from the address bar once it has been redeemed. The token grants
- * access to anyone who reloads the URL, so leaving it visible turns a one-time
- * invite into a link the recipient can forward.
- */
-/**
- * Mirror a server-side proposal record into the panel's Proposal shape
- * (Stage B3). The panel renders from the local type; this adapter keeps the
- * two contracts in one visible place instead of scattering field mappings.
- */
-function serverProposalToPanel(server: ServerProposal): Proposal {
-  return {
-    id: server.id,
-    request: server.request,
-    operations: server.operations as Operation[],
-    explanation: server.explanation ?? "",
-    meetingId: server.meetingId,
-    ...(server.provenance?.quote ? { turns: [server.provenance.quote] } : {}),
-    ...(server.provenance?.turnRange ? { turnRange: server.provenance.turnRange } : {}),
-    ...(server.provenance?.turnKinds?.length ? { turnKinds: server.provenance.turnKinds } : {}),
-    status: server.status,
-    createdAt: server.createdAt,
-  };
-}
-
-function stripInviteFromUrl(): void {
-  const url = new URL(window.location.href);
-  if (!url.searchParams.has("invite")) return;
-  url.searchParams.delete("invite");
-  window.history.replaceState({}, "", url.toString());
-}
-
-function stripBoardFromUrl(): void {
-  const url = new URL(window.location.href);
-  if (!url.searchParams.has("board")) return;
-  url.searchParams.delete("board");
-  window.history.replaceState({}, "", url.toString());
-}
 
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
   // Resume the project that was open before the reload. Doing this during the
@@ -834,11 +230,11 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
    */
   const [lensKind, setLensKind] = useState<DiagramKind>(workspace.diagramKind);
   if (lensKind !== workspace.diagramKind) {
-  setLensKind(workspace.diagramKind);
-  setLens((current) => lensForKindChange(lensKind, workspace.diagramKind, current));
-}
-boardKindRef.current = workspace.diagramKind;
-const [chat, setChat] = useState<ChatEntry[]>(restored?.chat ?? []);
+    setLensKind(workspace.diagramKind);
+    setLens((current) => lensForKindChange(lensKind, workspace.diagramKind, current));
+  }
+  boardKindRef.current = workspace.diagramKind;
+  const [chat, setChat] = useState<ChatEntry[]>(restored?.chat ?? []);
   const [rules, setRulesState] = useState<string>(restored?.rules ?? "");
   const rulesRef = useRef<string>(rules);
   rulesRef.current = rules;
@@ -881,7 +277,9 @@ const [chat, setChat] = useState<ChatEntry[]>(restored?.chat ?? []);
    * so the toggle survives view switches the same way the conversation does.
    */
   const [pillMode, setPillMode] = useState<"build" | "ask">("build");
-  const [clarification, setClarification] = useState<import("@lucent/core").ClarificationChoice | null>(null);
+  const [clarification, setClarification] = useState<
+    import("@lucent/core").ClarificationChoice | null
+  >(null);
   const clearClarification = useCallback(() => setClarification(null), []);
   // A pending proposal restores from the project record (2026-09: the
   // reliability fix — a refresh used to drop the AI's proposed ops). Terminal
@@ -995,99 +393,102 @@ const [chat, setChat] = useState<ChatEntry[]>(restored?.chat ?? []);
    * authoritative: its broadcasts replace local state, and local commits are
    * sent for sequencing rather than applied twice.
    */
-  const connectSync = useCallback((id: string, initial: Workspace) => {
-    syncRef.current?.disconnect();
-    // A new board's room says who has its spotlight when it welcomes us.
-    setSpotlightState(null);
-    setLastSummon(null);
-    const sync = new BoardSync(id, initial, {
-      onWorkspace: (ws) => {
-        applyingRemote.current = true;
-        // A remote broadcast is not a local commit: don't push it onto the
-        // undo stack, otherwise undoing my own change would revert the peer's
-        // edit and then a follow-up undo would put it back. The workspace
-        // state catches up without history pollution (M0.4).
-        // WHOLESALE deliveries (the welcome catchup replay, a resync) rebuild
-        // the workspace from ops, which carry no coordinates — nodes land
-        // unpositioned and stack at (0,0) under the region labels. Incremental
-        // frames never drop positions (applyOperations preserves fields), so
-        // Re-layout ONLY when positions are genuinely missing from both the incoming
-        // workspace and our local workspace (M2). Incremental frames or echos of
-        // operations we already positioned must keep their coordinates rather than
-        // triggering a delayed relayout.
-        const currentNodes = workspaceRef.current.nodes;
-        const mergedNodes = { ...ws.nodes };
-        for (const [id, node] of Object.entries(mergedNodes)) {
-          if (!node.position && currentNodes[id]?.position) {
-            mergedNodes[id] = { ...node, position: currentNodes[id].position };
+  const connectSync = useCallback(
+    (id: string, initial: Workspace) => {
+      syncRef.current?.disconnect();
+      // A new board's room says who has its spotlight when it welcomes us.
+      setSpotlightState(null);
+      setLastSummon(null);
+      const sync = new BoardSync(id, initial, {
+        onWorkspace: (ws) => {
+          applyingRemote.current = true;
+          // A remote broadcast is not a local commit: don't push it onto the
+          // undo stack, otherwise undoing my own change would revert the peer's
+          // edit and then a follow-up undo would put it back. The workspace
+          // state catches up without history pollution (M0.4).
+          // WHOLESALE deliveries (the welcome catchup replay, a resync) rebuild
+          // the workspace from ops, which carry no coordinates — nodes land
+          // unpositioned and stack at (0,0) under the region labels. Incremental
+          // frames never drop positions (applyOperations preserves fields), so
+          // Re-layout ONLY when positions are genuinely missing from both the incoming
+          // workspace and our local workspace (M2). Incremental frames or echos of
+          // operations we already positioned must keep their coordinates rather than
+          // triggering a delayed relayout.
+          const currentNodes = workspaceRef.current.nodes;
+          const mergedNodes = { ...ws.nodes };
+          for (const [id, node] of Object.entries(mergedNodes)) {
+            if (!node.position && currentNodes[id]?.position) {
+              mergedNodes[id] = { ...node, position: currentNodes[id].position };
+            }
           }
-        }
-        const wsWithPositions = { ...ws, nodes: mergedNodes };
-        const hasUnpositioned = Object.values(wsWithPositions.nodes).some((n) => !n.position);
-        const positioned = hasUnpositioned ? laidOut(wsWithPositions) : wsWithPositions;
-        historyRef.current.syncFromRemote(positioned);
-        setWorkspace(positioned);
-        setTick((t) => t + 1);
-        applyingRemote.current = false;
-        // Phase 2 (doc 18 Phase 4): a wholesale delivery re-derived geometry,
-        // so the ELK refinement is legitimate — WITHOUT persisting (peers
-        // derive their own geometry; ops carry no coordinates) and without
-        // history (already handled above by syncFromRemote). Reached through
-        // the live ref: this callback is armed once, before `refineLayout`
-        // exists, and a project switch must leave a late frame refining the
-        // CURRENT board with the CURRENT persist slot.
-        if (hasUnpositioned) refineRef.current(positioned, { kind: "board" });
-      },
-      onPeers: setPeers,
-      onStatus: setSyncStatus,
-      onRole: setSyncRole,
-      onSpotlight: setSpotlightState,
-      onSummon: (from, viewport) => setLastSummon({ from, viewport, at: Date.now() }),
-      onRejected: (error) => {
-        // A viewer's edit, or a stale op. The server state we already hold wins.
-        setChat((c) => [...c, { role: "error", text: `Change refused: ${error}` }]);
-      },
-      // Stage B4: a server-level error is never swallowed. "board deleted"
-      // from an eviction means this client is editing a ghost — the honest
-      // reaction is leaving the board, not letting the user type into it.
-      onError: (message) => {
-        if (/deleted/i.test(message)) {
-          setChat((c) => [...c, { role: "error", text: "This board was deleted." }]);
-          setView("dashboard");
-          return;
-        }
-        setChat((c) => [...c, { role: "error", text: message }]);
-      },
-      // Stage B3: a peer's proposal opens on this board too — the record is
-      // server-side now, so the panel is board state, not a local draft.
-      onProposalCreated: (server, supersededId) => {
-        serverProposalRef.current = { boardId: server.boardId, id: server.id };
-        decidedRef.current = null;
-        setProposal(serverProposalToPanel(server));
-        // A create supersedes the pending record this browser held locally
-        // (the same-board predecessor): its local mirror closes with it.
-        if (supersededId && proposalRecordRef.current?.id === supersededId) {
-          proposalRecordRef.current = undefined;
-        }
-      },
-      onProposalDecided: (event) => {
-        // The decision happened — possibly here, possibly on a peer. The
-        // panel closes either way; the ops (if approved) arrive as the room's
-        // ordinary broadcast, applying through onWorkspace above.
-        setProposal((p) => (p && p.id === event.id ? null : p));
-        if (serverProposalRef.current?.id === event.id) serverProposalRef.current = null;
-      },
-      // Stage D7: an inbound-queue decision (accept/dismiss, this browser
-      // or a peer's). The Intelligence view refetches the queue through
-      // its own effect; the board state itself converges through the op
-      // frame the accept committed. This callback exists so the frame is
-      // not silently dropped (the default handler would log an unknown
-      // message kind).
-      onInboundDecided: () => {},
-    });
-    syncRef.current = sync;
-    sync.connect();
-  }, []);
+          const wsWithPositions = { ...ws, nodes: mergedNodes };
+          const hasUnpositioned = Object.values(wsWithPositions.nodes).some((n) => !n.position);
+          const positioned = hasUnpositioned ? laidOut(wsWithPositions) : wsWithPositions;
+          historyRef.current.syncFromRemote(positioned);
+          setWorkspace(positioned);
+          setTick((t) => t + 1);
+          applyingRemote.current = false;
+          // Phase 2 (doc 18 Phase 4): a wholesale delivery re-derived geometry,
+          // so the ELK refinement is legitimate — WITHOUT persisting (peers
+          // derive their own geometry; ops carry no coordinates) and without
+          // history (already handled above by syncFromRemote). Reached through
+          // the live ref: this callback is armed once, before `refineLayout`
+          // exists, and a project switch must leave a late frame refining the
+          // CURRENT board with the CURRENT persist slot.
+          if (hasUnpositioned) refineRef.current(positioned, { kind: "board" });
+        },
+        onPeers: setPeers,
+        onStatus: setSyncStatus,
+        onRole: setSyncRole,
+        onSpotlight: setSpotlightState,
+        onSummon: (from, viewport) => setLastSummon({ from, viewport, at: Date.now() }),
+        onRejected: (error) => {
+          // A viewer's edit, or a stale op. The server state we already hold wins.
+          setChat((c) => [...c, { role: "error", text: `Change refused: ${error}` }]);
+        },
+        // Stage B4: a server-level error is never swallowed. "board deleted"
+        // from an eviction means this client is editing a ghost — the honest
+        // reaction is leaving the board, not letting the user type into it.
+        onError: (message) => {
+          if (/deleted/i.test(message)) {
+            setChat((c) => [...c, { role: "error", text: "This board was deleted." }]);
+            setView("dashboard");
+            return;
+          }
+          setChat((c) => [...c, { role: "error", text: message }]);
+        },
+        // Stage B3: a peer's proposal opens on this board too — the record is
+        // server-side now, so the panel is board state, not a local draft.
+        onProposalCreated: (server, supersededId) => {
+          serverProposalRef.current = { boardId: server.boardId, id: server.id };
+          decidedRef.current = null;
+          setProposal(serverProposalToPanel(server));
+          // A create supersedes the pending record this browser held locally
+          // (the same-board predecessor): its local mirror closes with it.
+          if (supersededId && proposalRecordRef.current?.id === supersededId) {
+            proposalRecordRef.current = undefined;
+          }
+        },
+        onProposalDecided: (event) => {
+          // The decision happened — possibly here, possibly on a peer. The
+          // panel closes either way; the ops (if approved) arrive as the room's
+          // ordinary broadcast, applying through onWorkspace above.
+          setProposal((p) => (p && p.id === event.id ? null : p));
+          if (serverProposalRef.current?.id === event.id) serverProposalRef.current = null;
+        },
+        // Stage D7: an inbound-queue decision (accept/dismiss, this browser
+        // or a peer's). The Intelligence view refetches the queue through
+        // its own effect; the board state itself converges through the op
+        // frame the accept committed. This callback exists so the frame is
+        // not silently dropped (the default handler would log an unknown
+        // message kind).
+        onInboundDecided: () => {},
+      });
+      syncRef.current = sync;
+      sync.connect();
+    },
+    [setView],
+  );
 
   /**
    * Take a board fetched from the server as the live one: its workspace, name,
@@ -1961,6 +1362,9 @@ const [chat, setChat] = useState<ChatEntry[]>(restored?.chat ?? []);
           // folded topic ride into history and the room with them (Stage C2
           // + C5).
           commitAndShare(next, foldedOps, explanation, conversation, projectName, result.runId);
+          if (foldedOps.some((op) => op.op === "CREATE_WIREFRAME")) {
+            setLens("wireframe");
+          }
           return { outcome: "applied", ops: foldedOps.length, reply };
         }
       } catch (err) {
@@ -1980,8 +1384,13 @@ const [chat, setChat] = useState<ChatEntry[]>(restored?.chat ?? []);
           !/quota|rate limit|plan|auth|access/i.test(rawMsg);
 
         let userMsg = rawMsg;
-        if (/Model returned invalid operations|invalid diagram operations|safeParseOperations|invalid_type/i.test(rawMsg)) {
-          userMsg = "Lucent had trouble formatting the layout operations for that request. Try describing the change a bit differently.";
+        if (
+          /Model returned invalid operations|invalid diagram operations|safeParseOperations|invalid_type/i.test(
+            rawMsg,
+          )
+        ) {
+          userMsg =
+            "Lucent had trouble formatting the layout operations for that request. Try describing the change a bit differently.";
         } else if (/failed to fetch|networkerror|fetch failed/i.test(rawMsg)) {
           userMsg = "Unable to reach the server. Please check your connection.";
         } else if (/rate limit|too many requests|429/i.test(rawMsg)) {
@@ -2001,16 +1410,14 @@ const [chat, setChat] = useState<ChatEntry[]>(restored?.chat ?? []);
         // entirely — on reload the board looked like the request never
         // happened. Keep the failed attempt visible.
         persist(workspace, conversation, projectName);
-        return cancelled
-          ? { outcome: "cancelled" }
-          : { outcome: "failed", error: userMsg };
+        return cancelled ? { outcome: "cancelled" } : { outcome: "failed", error: userMsg };
       } finally {
         setBusy(false);
         setGenPhase(null);
         genAbortRef.current = null;
       }
     },
-    [busy, chat, workspace, commitAndShare, projectName, readOnly, persist, openProposal],
+    [busy, chat, workspace, commitAndShare, projectName, readOnly, persist, openProposal, boardId],
   );
 
   /**
@@ -2358,6 +1765,9 @@ const [chat, setChat] = useState<ChatEntry[]>(restored?.chat ?? []);
     ];
     setChat(conversation);
     commitAndShare(next, appliedOps, proposal.explanation, conversation, projectName);
+    if (appliedOps.some((op) => op.op === "CREATE_WIREFRAME")) {
+      setLens("wireframe");
+    }
     // The panel closes; the record (now status:"approved") stays in the ref
     // so the very next persist() archives it durably.
     setProposal(null);
@@ -2543,7 +1953,7 @@ const [chat, setChat] = useState<ChatEntry[]>(restored?.chat ?? []);
     // a shared board from an earlier session).
     setSharedBoardId(null);
     leaveSharedBoard();
-  }, [leaveSharedBoard]);
+  }, [leaveSharedBoard, setView]);
 
   /**
    * Parallel diagrams: open a FRESH board and immediately send `prompt` to it,
@@ -2593,7 +2003,7 @@ const [chat, setChat] = useState<ChatEntry[]>(restored?.chat ?? []);
       setSharedBoardId(null);
       leaveSharedBoard();
     },
-    [leaveSharedBoard],
+    [leaveSharedBoard, setView],
   );
 
   useEffect(() => {
@@ -2650,7 +2060,7 @@ const [chat, setChat] = useState<ChatEntry[]>(restored?.chat ?? []);
       setSharedBoardId(null);
       leaveSharedBoard();
     },
-    [leaveSharedBoard],
+    [leaveSharedBoard, setView],
   );
 
   const openProject = useCallback(
@@ -2690,7 +2100,7 @@ const [chat, setChat] = useState<ChatEntry[]>(restored?.chat ?? []);
       setSharedBoardId(null);
       leaveSharedBoard();
     },
-    [leaveSharedBoard],
+    [leaveSharedBoard, setView],
   );
 
   /**
@@ -2715,7 +2125,7 @@ const [chat, setChat] = useState<ChatEntry[]>(restored?.chat ?? []);
       setView("canvas");
       return true;
     },
-    [adoptBoard],
+    [adoptBoard, setView],
   );
 
   const canvasPhase: CanvasPhase = useMemo(() => {

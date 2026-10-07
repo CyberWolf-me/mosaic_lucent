@@ -373,10 +373,7 @@ export function visibleShapes(
  */
 export function visibleShapeLinks(
   shapeLinks: ShapeLink[],
-  workspaceOrShapes:
-    | Workspace
-    | Record<string, Shape>
-    | ReadonlyMap<string, Shape>,
+  workspaceOrShapes: Workspace | Record<string, Shape> | ReadonlyMap<string, Shape>,
   view: Rect | null,
   keep?: ReadonlySet<string>,
   dragOverride?: { id: string; x: number; y: number } | null,

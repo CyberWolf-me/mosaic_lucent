@@ -124,7 +124,8 @@ export function toolParametersJsonSchema(): JsonSchema {
           options: {
             type: "array",
             items: { type: "string" },
-            description: "2 to 4 concise options formatted as choices (e.g. 'OAuth2 + JWT', 'Session Cookies').",
+            description:
+              "2 to 4 concise options formatted as choices (e.g. 'OAuth2 + JWT', 'Session Cookies').",
           },
         },
         required: ["question", "options"],

@@ -1,5 +1,5 @@
 import { boardTeams, grantTeam, removeTeamGrant, type TeamRole } from "../teams.js";
-import { useEffect, useState, type SVGProps } from "react";
+import { useEffect, useState, useCallback, type SVGProps } from "react";
 import { createPortal } from "react-dom";
 import { Ico, ToolIco } from "./icons.js";
 import { NotificationTray } from "./NotificationTray.js";
@@ -514,11 +514,11 @@ function ShareDialog({ onClose }: { onClose: () => void }) {
   const [tierSaving, setTierSaving] = useState(false);
   const [closing, setClosing] = useState(false);
 
-  const requestClose = () => {
+  const requestClose = useCallback(() => {
     if (closing) return;
     setClosing(true);
     setTimeout(onClose, 150);
-  };
+  }, [closing, onClose]);
 
   // Load the member list whenever the dialog opens on a shared board, so role
   // changes and removals act on current data rather than a stale snapshot.
@@ -1083,7 +1083,8 @@ export function LeftRail({
   side?: "left" | "right";
   onOpenSettings?: (section?: string) => void;
 }) {
-  const { view, setView, lens, setLens, newProject, workspace, boardId, projectId } = useWorkspace();
+  const { view, setView, lens, setLens, newProject, workspace, boardId, projectId } =
+    useWorkspace();
   const [confirmNew, setConfirmNew] = useState(false);
 
   // Does the current board hold work worth warning about before replacing it?

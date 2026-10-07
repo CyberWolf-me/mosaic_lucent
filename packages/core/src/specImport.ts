@@ -1,4 +1,3 @@
-import type { DiagramKind, NodeDetails } from "./model.js";
 import type { Operation } from "./operations.js";
 
 /**
@@ -49,8 +48,10 @@ export function classifySpec(text: string, fileName?: string): SpecFormat {
   if (
     /["']?openapi["']?\s*:\s*["']?3\./.test(trimmed) ||
     /["']?swagger["']?\s*:\s*["']?2\./.test(trimmed) ||
-    (trimmed.includes('"paths"') && (trimmed.includes('"components"') || trimmed.includes('"info"'))) ||
-    (/^\s*paths:\s*$/m.test(trimmed) && (/info:\s*$/m.test(trimmed) || /components:\s*$/m.test(trimmed)))
+    (trimmed.includes('"paths"') &&
+      (trimmed.includes('"components"') || trimmed.includes('"info"'))) ||
+    (/^\s*paths:\s*$/m.test(trimmed) &&
+      (/info:\s*$/m.test(trimmed) || /components:\s*$/m.test(trimmed)))
   ) {
     return "openapi";
   }
@@ -84,12 +85,11 @@ export function classifySpec(text: string, fileName?: string): SpecFormat {
 
 export function sqlDdlToOps(sql: string): Operation[] {
   // Strip block comments /* ... */ and line comments -- ...
-  const cleanSql = sql
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/--.*$/gm, "");
+  const cleanSql = sql.replace(/\/\*[\s\S]*?\*\//g, "").replace(/--.*$/gm, "");
 
   // Match CREATE TABLE [IF NOT EXISTS] [schema.]table_name ( body );
-  const tableRegex = /CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:[`"']?\w+[`"']?\.)?[`"']?(\w+)[`"']?\s*\(([\s\S]*?)\)(?:\s*;|\s*$)/gi;
+  const tableRegex =
+    /CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:[`"']?\w+[`"']?\.)?[`"']?(\w+)[`"']?\s*\(([\s\S]*?)\)(?:\s*;|\s*$)/gi;
   const ops: Operation[] = [{ op: "CREATE_DIAGRAM", kind: "er" }];
 
   interface TableMeta {
@@ -265,7 +265,10 @@ export function prismaToOps(prismaText: string): Operation[] {
     const fields: string[] = [];
     const relations: Array<{ targetName: string; relName?: string }> = [];
 
-    const lines = body.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+    const lines = body
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter(Boolean);
     for (const line of lines) {
       if (line.startsWith("@@")) continue; // model-level directives (@@map, @@index)
 
@@ -277,8 +280,21 @@ export function prismaToOps(prismaText: string): Operation[] {
       const isUnique = line.includes("@unique");
 
       // Check if fieldType is another model reference
-      const cleanType = fieldType.replace(/[\[\]?]/g, "");
-      const isRelation = line.includes("@relation") || (/^[A-Z]/.test(cleanType) && !["String", "Int", "Boolean", "DateTime", "Float", "Decimal", "Json", "Bytes", "BigInt"].includes(cleanType));
+      const cleanType = fieldType.replace(/[[\]?]/g, "");
+      const isRelation =
+        line.includes("@relation") ||
+        (/^[A-Z]/.test(cleanType) &&
+          ![
+            "String",
+            "Int",
+            "Boolean",
+            "DateTime",
+            "Float",
+            "Decimal",
+            "Json",
+            "Bytes",
+            "BigInt",
+          ].includes(cleanType));
 
       if (isRelation) {
         relations.push({ targetName: cleanType, relName: fieldName });
@@ -349,12 +365,32 @@ export function prismaToOps(prismaText: string): Operation[] {
 // OpenAPI / Swagger Ingestion
 // ---------------------------------------------------------------------------
 
+interface OpenApiPathItem {
+  tags?: string[];
+  summary?: string;
+  [key: string]: unknown;
+}
+
+interface OpenApiSchema {
+  properties?: Record<string, { type?: string; $ref?: string; [key: string]: unknown }>;
+  [key: string]: unknown;
+}
+
+interface OpenApiDoc {
+  paths?: Record<string, Record<string, OpenApiPathItem>>;
+  components?: {
+    schemas?: Record<string, OpenApiSchema>;
+  };
+  definitions?: Record<string, OpenApiSchema>;
+  [key: string]: unknown;
+}
+
 export function openApiToOps(text: string): Operation[] {
-  let doc: any = null;
+  let doc: OpenApiDoc | null = null;
 
   // Try JSON parse first
   try {
-    doc = JSON.parse(text);
+    doc = JSON.parse(text) as OpenApiDoc;
   } catch {
     // If not JSON, parse YAML via lightweight YAML extractor
     doc = parseYamlOpenApi(text);
@@ -409,7 +445,8 @@ export function openApiToOps(text: string): Operation[] {
     const propLines: string[] = [];
     for (const propName of Object.keys(props).slice(0, 16)) {
       const p = props[propName] ?? {};
-      const typeStr = p.type ?? (p.$ref ? p.$ref.split("/").pop() : "any");
+      const refStr = typeof p.$ref === "string" ? p.$ref.split("/").pop() : "any";
+      const typeStr = p.type ?? refStr;
       propLines.push(`${propName}: ${typeStr}`);
     }
 
@@ -450,8 +487,7 @@ export function openApiToOps(text: string): Operation[] {
       const primaryTag = tags[0];
       const groupId = primaryTag ? createdGroups.get(primaryTag) : undefined;
 
-      const nodeType =
-        method === "get" ? "service" : method === "post" ? "process" : "service";
+      const nodeType = method === "get" ? "service" : method === "post" ? "process" : "service";
 
       const detailsItems: string[] = [];
       if (summary) detailsItems.push(summary);
@@ -478,7 +514,10 @@ export function openApiToOps(text: string): Operation[] {
       // Link endpoint to schema if mentioned in request or response
       const opStr = JSON.stringify(opObj);
       for (const [schemaName, sId] of schemaNodeIds.entries()) {
-        if (opStr.toLowerCase().includes(`/${schemaName}`) || opStr.toLowerCase().includes(`"${schemaName}"`)) {
+        if (
+          opStr.toLowerCase().includes(`/${schemaName}`) ||
+          opStr.toLowerCase().includes(`"${schemaName}"`)
+        ) {
           ops.push({
             op: "CONNECT_NODES",
             source: endpointId,
@@ -494,8 +533,8 @@ export function openApiToOps(text: string): Operation[] {
 }
 
 /** Lightweight YAML parser for OpenAPI paths & schemas when JSON is not used */
-function parseYamlOpenApi(yaml: string): Record<string, any> {
-  const doc: Record<string, any> = { paths: {}, components: { schemas: {} } };
+function parseYamlOpenApi(yaml: string): OpenApiDoc {
+  const doc: OpenApiDoc = { paths: {}, components: { schemas: {} } };
   const lines = yaml.split(/\r?\n/);
 
   let inPaths = false;
@@ -529,6 +568,7 @@ function parseYamlOpenApi(yaml: string): Record<string, any> {
       const pathMatch = trimmed.match(/^(\/[\w{}/.-]+):\s*$/);
       if (pathMatch) {
         currentPath = pathMatch[1]!;
+        if (!doc.paths) doc.paths = {};
         doc.paths[currentPath] = {};
         currentMethod = "";
         continue;
@@ -538,19 +578,28 @@ function parseYamlOpenApi(yaml: string): Record<string, any> {
       const methodMatch = trimmed.match(/^(get|post|put|delete|patch):\s*$/i);
       if (methodMatch && currentPath) {
         currentMethod = methodMatch[1]!.toLowerCase();
-        doc.paths[currentPath][currentMethod] = { tags: [], summary: "" };
+        if (!doc.paths) doc.paths = {};
+        if (!doc.paths[currentPath]) doc.paths[currentPath] = {};
+        doc.paths[currentPath]![currentMethod] = { tags: [], summary: "" };
         continue;
       }
 
       // Summary
       if (currentPath && currentMethod && trimmed.startsWith("summary:")) {
-        doc.paths[currentPath][currentMethod].summary = trimmed.replace(/^summary:\s*["']?/, "").replace(/["']?$/, "");
+        const item = doc.paths?.[currentPath]?.[currentMethod];
+        if (item) {
+          item.summary = trimmed.replace(/^summary:\s*["']?/, "").replace(/["']?$/, "");
+        }
         continue;
       }
 
       // Tags: - Users
       if (currentPath && currentMethod && trimmed.startsWith("- ")) {
-        doc.paths[currentPath][currentMethod].tags.push(trimmed.replace(/^-\s*/, ""));
+        const item = doc.paths?.[currentPath]?.[currentMethod];
+        if (item) {
+          if (!item.tags) item.tags = [];
+          item.tags.push(trimmed.replace(/^-\s*/, ""));
+        }
         continue;
       }
     }
@@ -559,12 +608,19 @@ function parseYamlOpenApi(yaml: string): Record<string, any> {
       const schemaMatch = trimmed.match(/^(\w+):\s*$/);
       if (schemaMatch && !["type", "properties", "required"].includes(schemaMatch[1]!)) {
         currentSchema = schemaMatch[1]!;
+        if (!doc.components) doc.components = {};
+        if (!doc.components.schemas) doc.components.schemas = {};
         doc.components.schemas[currentSchema] = { properties: {} };
         continue;
       }
       const propMatch = trimmed.match(/^(\w+):\s*$/);
       if (propMatch && currentSchema && trimmed.startsWith("  ")) {
-        doc.components.schemas[currentSchema].properties[propMatch[1]!] = { type: "string" };
+        const schemas = doc.components?.schemas;
+        if (schemas && schemas[currentSchema]) {
+          const schema = schemas[currentSchema]!;
+          if (!schema.properties) schema.properties = {};
+          schema.properties[propMatch[1]!] = { type: "string" };
+        }
       }
     }
   }

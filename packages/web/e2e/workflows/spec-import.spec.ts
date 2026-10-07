@@ -32,7 +32,10 @@ test.describe("Workflow: Code & Specification Ingestion (Initiative 4)", () => {
     for (let i = 0; i < 5; i++) {
       const btn = page.getByRole("button", { name: /^(Skip|Got it|Done|Close|Finish)$/i });
       if ((await btn.count()) === 0) break;
-      await btn.first().click({ force: true }).catch(() => {});
+      await btn
+        .first()
+        .click({ force: true })
+        .catch(() => {});
       await page.waitForTimeout(300);
     }
     await page.evaluate(() => localStorage.setItem("lucent.tour.seen.v1", "1"));
@@ -65,7 +68,9 @@ test.describe("Workflow: Code & Specification Ingestion (Initiative 4)", () => {
 
     // 7. Verify modal dismissed and canvas rendered ER entity tables
     await expect(dialog).not.toBeVisible();
-    await expect(page.locator(".er-entity-head", { hasText: "users" })).toBeVisible({ timeout: 15_000 });
+    await expect(page.locator(".er-entity-head", { hasText: "users" })).toBeVisible({
+      timeout: 15_000,
+    });
     await expect(page.locator(".er-entity-head", { hasText: "orders" })).toBeVisible();
     await expect(page.locator(".er-entity-head", { hasText: "products" })).toBeVisible();
 
@@ -85,7 +90,9 @@ test.describe("Workflow: Code & Specification Ingestion (Initiative 4)", () => {
 
     // 11. Verify modal dismissed and docker compose nodes rendered
     await expect(dialog).not.toBeVisible();
-    await expect(page.locator(".node-title", { hasText: "gateway" })).toBeVisible({ timeout: 15_000 });
+    await expect(page.locator(".node-title", { hasText: "gateway" })).toBeVisible({
+      timeout: 15_000,
+    });
     await expect(page.locator(".node-title", { hasText: "postgres" })).toBeVisible();
     await expect(page.locator(".node-title", { hasText: "redis" })).toBeVisible();
   });

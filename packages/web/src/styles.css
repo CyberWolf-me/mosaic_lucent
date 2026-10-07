@@ -698,27 +698,27 @@ html[data-theme="light"] .rail-btn[data-tip]::after {
   max-width: 780px;
   width: min(780px, calc(100vw - 500px));
   display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 10px 10px 20px;
-  background: oklch(from var(--paper-0) l c h / 0.85);
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 14px 10px 14px;
+  background: oklch(from var(--paper-0) l c h / 0.94);
   backdrop-filter: blur(24px) saturate(1.5);
   -webkit-backdrop-filter: blur(24px) saturate(1.5);
   border: 1px solid var(--stroke-2);
-  border-radius: 999px;
+  border-radius: 18px;
   box-shadow:
-    inset 0 1px 0 0 oklch(1 0 0 / 0.1),
+    inset 0 1px 0 0 oklch(1 0 0 / 0.15),
     var(--elev-3);
   transition:
-    box-shadow 0.3s var(--e-out),
-    border-color 0.3s var(--e-out),
+    box-shadow 0.25s var(--e-out),
+    border-color 0.25s var(--e-out),
     width 0.35s cubic-bezier(0.16, 1, 0.3, 1),
     min-width 0.35s cubic-bezier(0.16, 1, 0.3, 1);
 }
 .ai-pill:focus-within {
   border-color: var(--amber-2);
   box-shadow:
-    inset 0 1px 0 0 oklch(1 0 0 / 0.12),
+    inset 0 1px 0 0 oklch(1 0 0 / 0.15),
     0 0 0 1px var(--amber-2),
     0 0 24px -6px var(--amber-glow),
     var(--elev-3);
@@ -726,56 +726,84 @@ html[data-theme="light"] .rail-btn[data-tip]::after {
 .ai-pill.listening {
   border-color: oklch(0.82 0.15 75 / 0.5);
   box-shadow:
-    inset 0 1px 0 0 oklch(1 0 0 / 0.12),
+    inset 0 1px 0 0 oklch(1 0 0 / 0.15),
     var(--elev-3),
     0 0 0 4px oklch(0.82 0.15 75 / 0.08),
     0 0 40px -8px var(--amber-glow);
-}
-.ai-pill .pill-icon {
-  width: 26px;
-  height: 26px;
-  display: grid;
-  place-items: center;
-  color: var(--ink-2);
-  flex-shrink: 0;
-}
-.ai-pill input {
-  flex: 1;
-  font-size: 15.5px;
-  color: var(--ink-0);
-  padding: 5px 0;
-}
-/* The prompt field is a textarea now (ui/GrowTextarea.tsx): it grows with the
-   text instead of scrolling one line sideways. It carries the same look as the
-   old input, plus the resets a textarea needs to sit flush in the pill. */
-.ai-pill textarea {
-  flex: 1;
-  min-width: 0;
-  font-size: 15.5px;
-  color: var(--ink-0);
-  padding: 5px 0;
-  margin: 0;
-  border: none;
-  outline: none;
-  background: transparent;
-  font-family: inherit;
-  line-height: 1.5;
-  resize: none;
-  display: block;
-}
-.ai-pill textarea::placeholder {
-  color: var(--ink-3);
-}
-/* Past one line, drop the capsule corners and let the buttons ride the bottom
-   so a tall field reads as a rounded box, not a stretched pill. */
-.ai-pill.multiline {
-  align-items: flex-end;
-  border-radius: 20px;
 }
 .ai-pill.read-only {
   background: var(--canvas-2);
   border-style: dashed;
   cursor: default;
+}
+
+/* Row 1: The spacious, prominent input area */
+.ai-pill-input-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+}
+.ai-pill-input-row .pill-icon {
+  width: 24px;
+  height: 24px;
+  margin-top: 2px;
+  display: grid;
+  place-items: center;
+  color: var(--ink-2);
+  flex-shrink: 0;
+}
+.ai-pill-input-row textarea {
+  flex: 1;
+  min-width: 0;
+  font-size: 14.5px;
+  font-family: inherit;
+  color: var(--ink-0);
+  padding: 3px 0;
+  margin: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  line-height: 1.5;
+  resize: none;
+  display: block;
+}
+.ai-pill-input-row textarea::placeholder {
+  color: var(--ink-3);
+  font-style: normal;
+  font-family: inherit;
+}
+
+/* Row 2: The balanced accessory toolbar */
+.ai-pill-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  gap: 8px;
+  padding-top: 6px;
+  border-top: 1px solid oklch(from var(--stroke-1) l c h / 0.45);
+}
+.ai-pill-toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.ai-pill-toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+/* Readonly banner row */
+.ai-pill-readonly-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 4px 6px;
 }
 .ai-pill .pill-notice {
   flex: 1;
@@ -783,35 +811,130 @@ html[data-theme="light"] .rail-btn[data-tip]::after {
   color: var(--ink-1);
   font-style: italic;
 }
-.ai-pill input::placeholder {
-  color: var(--ink-3);
+
+/* Build / Ask Segmented Mode Switcher in AIPill */
+.ai-pill .ai-mode-toggle {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px;
+  background: var(--canvas-3);
+  border-radius: 999px;
+  border: 1px solid var(--stroke-1);
+  gap: 2px;
+}
+.ai-pill .ai-mode-toggle button {
+  padding: 3px 10px;
+  font-size: 11.5px;
+  font-weight: 500;
+  border-radius: 999px;
+  color: var(--ink-2);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: all 0.15s var(--e-out);
+  white-space: nowrap;
+}
+.ai-pill .ai-mode-toggle button:hover {
+  color: var(--ink-0);
+  background: var(--canvas-4);
+}
+.ai-pill .ai-mode-toggle button.active {
+  background: var(--paper-0);
+  color: var(--ink-0);
+  box-shadow: 0 1px 3px oklch(0 0 0 / 0.1);
+  font-weight: 600;
+}
+
+/* Model Tier Selector in AIPill */
+.ai-pill .model-tier-selector {
+  border-radius: 999px;
+  background: var(--canvas-3);
+  border: 1px solid var(--stroke-1);
+  padding: 2px;
+  gap: 2px;
+  display: inline-flex;
+  align-items: center;
+}
+.ai-pill .model-tier-selector button {
+  font-size: 11px;
+  font-weight: 500;
+  padding: 3px 8px;
+  border-radius: 999px;
+  color: var(--ink-2);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: all 0.15s var(--e-out);
+  white-space: nowrap;
+}
+.ai-pill .model-tier-selector button:hover {
+  color: var(--ink-0);
+  background: var(--canvas-4);
+}
+.ai-pill .model-tier-selector button.active {
+  background: var(--paper-0);
+  color: var(--ink-0);
+  box-shadow: 0 1px 3px oklch(0 0 0 / 0.1);
+  font-weight: 600;
+}
+
+/* Slash Trigger & Kbd hint */
+.slash-trigger-btn {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ink-2);
+  background: var(--canvas-3);
+  border: 1px solid var(--stroke-1);
+  border-radius: 6px;
+  padding: 0;
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.slash-trigger-btn:hover {
+  background: var(--canvas-4);
+  color: var(--ink-0);
+  border-color: var(--stroke-2);
 }
 .ai-pill .kbd {
   font-family: var(--font-mono);
   font-size: 10px;
   color: var(--ink-3);
-  padding: 3px 6px;
+  padding: 2px 6px;
   border: 1px solid var(--stroke-1);
   border-radius: 4px;
   background: oklch(from var(--paper-3) l c h / 0.5);
+  line-height: 1.4;
+  user-select: none;
 }
+
+/* Circular Action Buttons: Mic, Phone, Send */
 .mic-btn {
-  width: 38px;
-  height: 38px;
+  width: 30px;
+  height: 30px;
   border-radius: 999px;
   background: var(--canvas-3);
-  color: var(--ink-0);
+  border: 1px solid var(--stroke-1);
+  color: var(--ink-1);
   display: grid;
   place-items: center;
-  transition: all 0.2s var(--e-out);
+  transition: all 0.15s var(--e-out);
   flex-shrink: 0;
+  cursor: pointer;
 }
 .mic-btn svg {
-  width: 18px;
-  height: 18px;
+  width: 15px;
+  height: 15px;
+  pointer-events: none;
 }
 .mic-btn:hover {
   background: var(--canvas-4);
+  color: var(--ink-0);
+  border-color: var(--stroke-2);
 }
 .mic-btn:active {
   transform: scale(0.94);
@@ -819,50 +942,88 @@ html[data-theme="light"] .rail-btn[data-tip]::after {
 .mic-btn.active {
   background: linear-gradient(135deg, var(--amber-2), var(--amber-3));
   color: var(--canvas-0);
+  border-color: var(--amber-2);
   box-shadow:
-    0 0 0 3px oklch(0.82 0.15 75 / 0.15),
-    0 0 24px -4px var(--amber-glow);
+    0 0 0 2px oklch(0.82 0.15 75 / 0.15),
+    0 0 16px -4px var(--amber-glow);
+}
+.voice-call-btn {
+  border-color: oklch(from var(--sig-violet, #6366f1) l c h / 0.35);
+  color: var(--ink-1);
+}
+.voice-call-btn svg {
+  pointer-events: none;
+}
+.voice-call-btn:hover {
+  border-color: var(--sig-violet, #6366f1);
+  color: var(--sig-violet, #6366f1);
+  background: oklch(from var(--sig-violet, #6366f1) l c h / 0.08);
+}
+.voice-call-btn.active {
+  background: var(--sig-violet, #6366f1);
+  color: #fff;
+  border-color: var(--sig-violet, #6366f1);
+  box-shadow: 0 0 12px oklch(from var(--sig-violet, #6366f1) l c h / 0.45);
 }
 .send-btn {
-  width: 38px;
-  height: 38px;
+  width: 30px;
+  height: 30px;
   border-radius: 999px;
   background: var(--ink-0);
   color: var(--canvas-0);
+  border: 1px solid var(--ink-0);
   display: grid;
   place-items: center;
   transition: all 0.15s var(--e-out);
   flex-shrink: 0;
+  cursor: pointer;
 }
 .send-btn svg {
-  width: 18px;
-  height: 18px;
+  width: 14px;
+  height: 14px;
+  pointer-events: none;
 }
-.send-btn:hover {
-  background: var(--paper-2);
+.send-btn:hover:not(:disabled) {
+  background: var(--ink-1);
+  transform: scale(1.04);
 }
-.send-btn:active {
+.send-btn:active:not(:disabled) {
   transform: scale(0.94);
 }
 .send-btn:disabled {
   opacity: 0.35;
-  cursor: default;
+  cursor: not-allowed;
+  transform: none;
+}
+
+@keyframes pill-child-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 
 /* Slash Command Menu */
 .slash-menu {
-  width: min(640px, calc(100vw - 32px));
-  background: oklch(from var(--paper-0) l c h / 0.92);
+  width: min(720px, calc(100vw - 48px));
+  max-width: 100%;
+  background: oklch(from var(--paper-0) l c h / 0.94);
   backdrop-filter: blur(24px) saturate(1.5);
   -webkit-backdrop-filter: blur(24px) saturate(1.5);
   border: 1px solid var(--stroke-2);
   border-radius: 16px;
-  box-shadow: var(--elev-3), 0 0 24px -8px var(--amber-glow);
+  box-shadow:
+    var(--elev-3),
+    0 0 24px -8px var(--amber-glow);
   padding: 8px;
   display: flex;
   flex-direction: column;
   gap: 4px;
-  animation: pill-in 0.2s var(--e-out) both;
+  animation: pill-child-in 0.18s cubic-bezier(0.16, 1, 0.3, 1) both;
   z-index: 40;
 }
 
@@ -898,8 +1059,25 @@ html[data-theme="light"] .rail-btn[data-tip]::after {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  max-height: 280px;
+  max-height: 290px;
   overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--stroke-2) transparent;
+  padding-right: 3px;
+}
+
+.slash-list::-webkit-scrollbar {
+  width: 5px;
+}
+.slash-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+.slash-list::-webkit-scrollbar-thumb {
+  background: var(--stroke-2);
+  border-radius: 999px;
+}
+.slash-list::-webkit-scrollbar-thumb:hover {
+  background: var(--ink-3);
 }
 
 .slash-item {
@@ -1009,23 +1187,68 @@ html[data-theme="light"] .rail-btn[data-tip]::after {
 
 /* Slash Active Indicator */
 .slash-active-badge {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 4px 10px;
+  gap: 8px;
+  padding: 4px 12px 4px 10px;
   border-radius: 999px;
-  background: oklch(from var(--paper-0) l c h / 0.9);
+  background: oklch(from var(--paper-0) l c h / 0.94);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
   border: 1px solid var(--amber-2);
-  box-shadow: var(--elev-1);
-  font-size: 11px;
-  font-family: var(--font-mono);
+  box-shadow: var(--elev-2);
+  font-size: 11.5px;
   color: var(--ink-0);
-  animation: pill-in 0.15s var(--e-out) both;
+  margin-bottom: 2px;
+  animation: slash-badge-pop 0.2s cubic-bezier(0.16, 1, 0.3, 1) both;
+  max-width: min(90vw, 720px);
+}
+
+@keyframes slash-badge-pop {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 
 .slash-active-badge .badge-cmd {
   font-weight: 700;
+  font-family: var(--font-mono);
   color: var(--amber-1);
+}
+
+.slash-active-badge .badge-desc {
+  font-size: 11px;
+  color: var(--ink-2);
+}
+
+.slash-active-badge .badge-placeholder {
+  font-size: 11px;
+  color: var(--ink-3);
+  font-style: italic;
+}
+
+.slash-active-badge .badge-clear-btn {
+  background: transparent;
+  border: none;
+  padding: 2px;
+  margin-left: 2px;
+  color: var(--ink-3);
+  cursor: pointer;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+}
+
+.slash-active-badge .badge-clear-btn:hover {
+  color: var(--ink-0);
+  background: var(--canvas-3);
 }
 
 .slash-trigger-btn {
@@ -1916,6 +2139,18 @@ html[data-theme="light"] {
   top: auto;
   left: 50%;
   transform: translateX(-50%);
+}
+.shape-toolbar.minimized {
+  gap: 3px;
+  padding: 4px 6px;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.shape-toolbar .toolbar-toggle-btn {
+  color: var(--ink-2);
+}
+.shape-toolbar .toolbar-toggle-btn:hover {
+  color: var(--ink-0);
+  background: var(--canvas-2);
 }
 
 /* Consolidated Top-Right Canvas Utility Bar */
@@ -3598,7 +3833,7 @@ html[data-board="sketch"] .frame-tag {
   left: 0;
   display: none;
   flex-direction: column;
-  min-width: 120px;
+  min-width: 240px;
   padding: 6px;
   gap: 2px;
   background: oklch(from var(--canvas-2) l c h / 0.97);
@@ -3629,6 +3864,52 @@ html[data-board="sketch"] .frame-tag {
 .export-menu .export-pop button:hover {
   background: var(--canvas-3);
   color: var(--ink-0);
+}
+.export-menu .export-pop .export-scope-banner {
+  padding: 6px 8px;
+  background: var(--canvas-3);
+  border-radius: 6px;
+  margin-bottom: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.export-menu .export-pop .export-scope-label {
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--ink-2);
+}
+.export-menu .export-pop .export-scope-pills {
+  display: flex;
+  gap: 4px;
+}
+.export-menu .export-pop .export-scope-pills .scope-pill {
+  flex: 1;
+  font-size: 11px;
+  padding: 4px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--stroke-1);
+  background: var(--canvas-2);
+  color: var(--ink-2);
+  cursor: pointer;
+  text-align: center;
+  transition: all 0.15s ease;
+}
+.export-menu .export-pop .export-scope-pills .scope-pill:hover {
+  color: var(--ink-0);
+  border-color: var(--stroke-2);
+}
+.export-menu .export-pop .export-scope-pills .scope-pill.active {
+  background: var(--canvas-0);
+  color: var(--amber-1);
+  border-color: var(--amber-2);
+  font-weight: 600;
+}
+.export-menu .export-pop .export-scope-hint {
+  font-size: 11px;
+  color: var(--ink-2);
 }
 
 /* Board overview (docs/14 §17) */
@@ -7728,9 +8009,9 @@ textarea:focus-visible {
   color: var(--ink-1);
 }
 .rule-template-chip.active {
-  border-color: var(--accent, oklch(0.65 0.20 250));
-  background: color-mix(in oklch, var(--accent, oklch(0.65 0.20 250)) 12%, var(--canvas-1));
-  color: var(--accent, oklch(0.65 0.20 250));
+  border-color: var(--accent, oklch(0.65 0.2 250));
+  background: color-mix(in oklch, var(--accent, oklch(0.65 0.2 250)) 12%, var(--canvas-1));
+  color: var(--accent, oklch(0.65 0.2 250));
 }
 .rule-template-clear-btn {
   font-size: 11px;
@@ -7771,11 +8052,13 @@ textarea:focus-visible {
   background: var(--canvas-0);
   color: var(--ink-1);
   outline: none;
-  transition: border-color 0.14s ease, box-shadow 0.14s ease;
+  transition:
+    border-color 0.14s ease,
+    box-shadow 0.14s ease;
 }
 .rule-field-input:focus {
-  border-color: var(--accent, oklch(0.65 0.20 250));
-  box-shadow: 0 0 0 2px color-mix(in oklch, var(--accent, oklch(0.65 0.20 250)) 20%, transparent);
+  border-color: var(--accent, oklch(0.65 0.2 250));
+  box-shadow: 0 0 0 2px color-mix(in oklch, var(--accent, oklch(0.65 0.2 250)) 20%, transparent);
 }
 .rule-field-input.warning {
   border-color: color-mix(in oklch, var(--amber-2, oklch(0.75 0.16 65)) 35%, var(--stroke-1));
@@ -7796,11 +8079,13 @@ textarea:focus-visible {
   font-family: inherit;
   resize: vertical;
   line-height: 1.45;
-  transition: border-color 0.14s ease, box-shadow 0.14s ease;
+  transition:
+    border-color 0.14s ease,
+    box-shadow 0.14s ease;
 }
 .rule-field-textarea:focus {
-  border-color: var(--accent, oklch(0.65 0.20 250));
-  box-shadow: 0 0 0 2px color-mix(in oklch, var(--accent, oklch(0.65 0.20 250)) 20%, transparent);
+  border-color: var(--accent, oklch(0.65 0.2 250));
+  box-shadow: 0 0 0 2px color-mix(in oklch, var(--accent, oklch(0.65 0.2 250)) 20%, transparent);
 }
 
 /* In-Canvas Node AI Floating Micro-Actions Toolbar (Initiative 3) */
@@ -7833,8 +8118,8 @@ textarea:focus-visible {
 .node-ai-btn:active,
 .node-ai-btn.active {
   background: var(--accent-tint, oklch(0.55 0.18 250 / 0.18));
-  color: var(--accent, oklch(0.65 0.20 250));
-  border-color: color-mix(in oklch, var(--accent, oklch(0.65 0.20 250)) 40%, transparent);
+  color: var(--accent, oklch(0.65 0.2 250));
+  border-color: color-mix(in oklch, var(--accent, oklch(0.65 0.2 250)) 40%, transparent);
 }
 
 .node-ai-btn-ghost {
@@ -7847,7 +8132,7 @@ textarea:focus-visible {
 }
 
 .node-ai-btn-send {
-  background: var(--accent, oklch(0.65 0.20 250)) !important;
+  background: var(--accent, oklch(0.65 0.2 250)) !important;
   color: white !important;
   border: 0 !important;
 }
@@ -7867,36 +8152,6 @@ textarea:focus-visible {
 
 /* ================= Model Tier, Thinking & Telemetry ================= */
 
-/* Model Tier Selector in AIPill */
-.model-tier-selector {
-  border-radius: 999px;
-  background: var(--canvas-2);
-  border: 1px solid var(--stroke-2);
-  padding: 2px;
-  gap: 2px;
-}
-.model-tier-selector button {
-  font-size: 11px;
-  font-weight: 500;
-  padding: 3px 8px;
-  border-radius: 999px;
-  color: var(--ink-2);
-  background: transparent;
-  border: none;
-  cursor: pointer;
-  transition: all 0.15s var(--e-out);
-  white-space: nowrap;
-}
-.model-tier-selector button:hover {
-  color: var(--ink-0);
-  background: var(--canvas-3);
-}
-.model-tier-selector button.active {
-  background: var(--paper-0);
-  color: var(--ink-0);
-  box-shadow: 0 1px 3px oklch(0 0 0 / 0.1);
-  font-weight: 600;
-}
 
 /* Live Thinking Stream in AIPill */
 .live-thinking-accordion {
@@ -7907,8 +8162,10 @@ textarea:focus-visible {
   border: 1px solid var(--amber-2);
   border-radius: 14px;
   padding: 8px 12px;
-  box-shadow: var(--elev-2), 0 0 16px -4px var(--amber-glow);
-  animation: pill-in 0.2s var(--e-out) both;
+  box-shadow:
+    var(--elev-2),
+    0 0 16px -4px var(--amber-glow);
+  animation: pill-child-in 0.18s cubic-bezier(0.16, 1, 0.3, 1) both;
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -8032,4 +8289,3 @@ textarea:focus-visible {
   color: var(--amber-1);
   font-weight: 500;
 }
-

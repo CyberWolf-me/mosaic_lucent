@@ -643,7 +643,9 @@ export function buildUserPrompt(request: GenerateRequest): string {
     const formatted = formatWorkspaceRulesPrompt(request.rules);
     if (formatted.trim()) {
       const clampedRules = clamp(formatted.trim(), PAYLOAD_LIMITS.rules);
-      sections.push(`<workspace-rules>\n${escapeHarnessTags(clampedRules.text)}\n</workspace-rules>`);
+      sections.push(
+        `<workspace-rules>\n${escapeHarnessTags(clampedRules.text)}\n</workspace-rules>`,
+      );
     }
   }
 

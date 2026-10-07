@@ -136,11 +136,14 @@ import {
   buildBoardSvg,
   escapeAttr,
   shapesInFrame,
+  nodesInFrame,
+  subWorkspaceFromSelection,
   nextSelectable,
   alignPositions,
   distributePositions,
   type AlignGuide,
 } from "../board/geometry.js";
+import { CodeExportModal } from "../ui/CodeExportModal.js";
 import { DIAGRAM_LABELS } from "../scene.js";
 
 /**
@@ -334,7 +337,6 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
     lens,
     syncStatus,
     boardId,
-    startSharing,
     startSharingDetailed,
     setPresence,
     spotlight,
@@ -966,10 +968,13 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
     // Selected images and file/text objects travel with the request, so
     // "turn this screenshot into a wireframe" has something to look at.
     const attachments = collectAttachments(workspace, sel);
+    const isWireframePrompt = /\b(?:wireframe|ui mockup|mockup|ui screen|ui prototype)\b/i.test(text);
     const textToSend =
-      lens === "wireframe" && !/\b(?:wireframe|ui mockup|prototype|mockup)\b/i.test(text)
-        ? `Create a wireframe UI mockup for: ${text}. Emit a CREATE_WIREFRAME operation with root kind "screen".`
-        : text;
+      isWireframePrompt && !/CREATE_WIREFRAME/i.test(text)
+        ? `${text}. Emit a CREATE_WIREFRAME operation with root kind "screen".`
+        : lens === "wireframe" && !isWireframePrompt
+          ? `Create a wireframe UI mockup for: ${text}. Emit a CREATE_WIREFRAME operation with root kind "screen".`
+          : text;
     void send(textToSend, sel, attachments);
   }, [
     message,
@@ -1357,17 +1362,38 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
   // Live drag updates local override for smoothness; commit writes to history.
   // While dragging, snap the moving shape's edges to nearby shapes / grid and
   // surface the matches as Figma-style guide lines.
-  const [dragOverride, setDragOverride] = useState<{ id: string; x: number; y: number } | null>(
-    null,
-  );
+  const [dragOverride, setDragOverride] = useState<{
+    id: string;
+    x: number;
+    y: number;
+    carriedShapes?: Map<string, { x: number; y: number }>;
+  } | null>(null);
   const [guides, setGuides] = useState<AlignGuide[]>([]);
   const moveShape = useCallback(
     (id: string, x: number, y: number, commit: boolean) => {
       const others = Object.values(workspace.shapes).filter((s) => s.id !== id);
       const size = workspace.shapes[id]?.size;
       const p = snapPosition(x, y, others, 6, 8, size);
+      const moving = workspace.shapes[id];
+      const dx = p.x - (moving?.position.x ?? p.x);
+      const dy = p.y - (moving?.position.y ?? p.y);
+
+      // A frame carries the shapes AND semantic diagram nodes inside it; a group carries its members.
+      const carriedShapes = new Set<string>();
+      const carriedNodes = new Set<string>();
+      if (moving?.kind === "frame") {
+        for (const cid of shapesInFrame(moving, Object.values(workspace.shapes))) carriedShapes.add(cid);
+        for (const nid of nodesInFrame(moving, Object.values(workspace.nodes))) carriedNodes.add(nid);
+      }
+      if (moving?.groupId) {
+        for (const s of Object.values(workspace.shapes)) {
+          if (s.id !== id && s.groupId === moving.groupId) carriedShapes.add(s.id);
+        }
+      }
+
       if (commit) {
         setDragOverride(null);
+        setNodeDrag(null);
         // One haptic tick when the drop lands on an alignment guide: the
         // causal gesture's payoff moment (skill §13), never on remote/AI
         // moves. Reads current guides without subscribing to them.
@@ -1375,32 +1401,47 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
           if (g.length > 0) emitHaptic(8);
           return [];
         });
-        const moving = workspace.shapes[id];
-        const dx = p.x - (moving?.position.x ?? p.x);
-        const dy = p.y - (moving?.position.y ?? p.y);
         const ops: import("@lucent/core").Operation[] = [{ op: "UPDATE_SHAPE", id, position: p }];
-        // A frame carries the shapes inside it; a group carries its members.
-        const carried = new Set<string>();
-        if (moving?.kind === "frame") {
-          for (const cid of shapesInFrame(moving, Object.values(workspace.shapes)))
-            carried.add(cid);
-        }
-        if (moving?.groupId) {
-          for (const s of Object.values(workspace.shapes)) {
-            if (s.id !== id && s.groupId === moving.groupId) carried.add(s.id);
+        for (const cid of carriedShapes) {
+          const c = workspace.shapes[cid];
+          if (c) {
+            ops.push({
+              op: "UPDATE_SHAPE",
+              id: cid,
+              position: { x: c.position.x + dx, y: c.position.y + dy },
+            });
           }
         }
-        for (const cid of carried) {
-          const c = workspace.shapes[cid]!;
-          ops.push({
-            op: "UPDATE_SHAPE",
-            id: cid,
-            position: { x: c.position.x + dx, y: c.position.y + dy },
-          });
+        for (const nid of carriedNodes) {
+          const n = workspace.nodes[nid];
+          if (n?.position) {
+            ops.push({
+              op: "MOVE_NODE",
+              id: nid,
+              position: { x: Math.round(n.position.x + dx), y: Math.round(n.position.y + dy) },
+            });
+          }
         }
-        applyManual(ops, "Move shape");
+        applyManual(
+          ops,
+          moving?.kind === "frame" && (carriedShapes.size > 0 || carriedNodes.size > 0)
+            ? `Move frame with ${carriedShapes.size + carriedNodes.size} items`
+            : "Move shape",
+        );
       } else {
-        setDragOverride({ id, x: p.x, y: p.y });
+        const carriedShapeMap = new Map<string, { x: number; y: number }>();
+        for (const cid of carriedShapes) {
+          const c = workspace.shapes[cid];
+          if (c) {
+            carriedShapeMap.set(cid, { x: c.position.x + dx, y: c.position.y + dy });
+          }
+        }
+        setDragOverride({ id, x: p.x, y: p.y, carriedShapes: carriedShapeMap });
+        if (carriedNodes.size > 0) {
+          setNodeDrag({ ids: carriedNodes, dx, dy });
+        } else {
+          setNodeDrag(null);
+        }
         // Guides come from the snapped position, so a line appears exactly when
         // an edge or centre actually lines up.
         setGuides(
@@ -1410,7 +1451,7 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
         );
       }
     },
-    [applyManual, workspace.shapes],
+    [applyManual, workspace.shapes, workspace.nodes],
   );
 
   const relabelShape = useCallback(
@@ -2741,25 +2782,42 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
   };
   useEffect(() => onCanvasCommand((cmd) => commandRef.current(cmd)), []);
 
+  const effectiveSelectedNodes = useMemo(() => {
+    const s = new Set(selectedNodes);
+    if (selected && workspace.nodes[selected]) s.add(selected);
+    return s;
+  }, [selectedNodes, selected, workspace.nodes]);
+
+  const hasSelection = effectiveSelectedNodes.size > 0 || selectedShapes.size > 0;
+  const [exportScope, setExportScope] = useState<"selection" | "all">("all");
+  const [showCodeExportModal, setShowCodeExportModal] = useState(false);
+
+  const targetExportWorkspace = useMemo(() => {
+    if (exportScope === "selection" && hasSelection) {
+      return subWorkspaceFromSelection(workspace, effectiveSelectedNodes, selectedShapes);
+    }
+    return workspace;
+  }, [workspace, exportScope, hasSelection, effectiveSelectedNodes, selectedShapes]);
+
   // Export the current board (nodes + shapes) as a downloadable SVG snapshot.
   // Icons first: culled cards never loaded theirs, and the export is sync.
   const exportSvg = useCallback(async () => {
-    await preloadExportData(workspace);
-    const svg = buildBoardSvg(workspace);
+    await preloadExportData(targetExportWorkspace);
+    const svg = buildBoardSvg(targetExportWorkspace);
     const blob = new Blob([svg], { type: "image/svg+xml" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `${projectName || "lucent-board"}.svg`;
+    a.download = `${projectName || "lucent-board"}${exportScope === "selection" ? "-selection" : ""}.svg`;
     a.click();
     URL.revokeObjectURL(url);
-    notify("Exported board as SVG.");
-  }, [workspace, projectName, notify]);
+    notify(exportScope === "selection" ? "Exported selection as SVG." : "Exported board as SVG.");
+  }, [targetExportWorkspace, projectName, exportScope, notify]);
 
   // Rasterize the SVG snapshot to a PNG via an offscreen canvas.
   const exportPng = useCallback(async () => {
-    await preloadExportData(workspace);
-    const svg = buildBoardSvg(workspace);
+    await preloadExportData(targetExportWorkspace);
+    const svg = buildBoardSvg(targetExportWorkspace);
     const svgBlob = new Blob([svg], { type: "image/svg+xml" });
     const url = URL.createObjectURL(svgBlob);
     const img = new Image();
@@ -2782,10 +2840,10 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
         const purl = URL.createObjectURL(png);
         const a = document.createElement("a");
         a.href = purl;
-        a.download = `${projectName || "lucent-board"}.png`;
+        a.download = `${projectName || "lucent-board"}${exportScope === "selection" ? "-selection" : ""}.png`;
         a.click();
         URL.revokeObjectURL(purl);
-        notify("Exported board as PNG.");
+        notify(exportScope === "selection" ? "Exported selection as PNG." : "Exported board as PNG.");
       }, "image/png");
     };
     img.onerror = () => {
@@ -2793,19 +2851,19 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
       notify("Couldn't rasterize the board to PNG.");
     };
     img.src = url;
-  }, [workspace, projectName, notify]);
+  }, [targetExportWorkspace, projectName, exportScope, notify]);
 
   // Export the semantic workspace as JSON (round-trippable board data).
   const exportJson = useCallback(() => {
-    const blob = new Blob([JSON.stringify(workspace, null, 2)], { type: "application/json" });
+    const blob = new Blob([JSON.stringify(targetExportWorkspace, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `${projectName || "lucent-board"}.json`;
+    a.download = `${projectName || "lucent-board"}${exportScope === "selection" ? "-selection" : ""}.json`;
     a.click();
     URL.revokeObjectURL(url);
-    notify("Exported board as JSON.");
-  }, [workspace, projectName, notify]);
+    notify(exportScope === "selection" ? "Exported selection as JSON." : "Exported board as JSON.");
+  }, [targetExportWorkspace, projectName, exportScope, notify]);
 
   const downloadText = useCallback(
     (text: string, ext: string, mime: string, label: string) => {
@@ -2813,61 +2871,61 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `${projectName || "lucent-board"}.${ext}`;
+      a.download = `${projectName || "lucent-board"}${exportScope === "selection" ? "-selection" : ""}.${ext}`;
       a.click();
       URL.revokeObjectURL(url);
       notify(label);
     },
-    [projectName, notify],
+    [projectName, exportScope, notify],
   );
 
   const exportMarkdown = useCallback(
     () =>
       downloadText(
-        boardToMarkdown(workspace),
+        boardToMarkdown(targetExportWorkspace),
         "md",
         "text/markdown",
-        "Exported board as Markdown.",
+        exportScope === "selection" ? "Exported selection as Markdown." : "Exported board as Markdown.",
       ),
-    [workspace, downloadText],
+    [targetExportWorkspace, exportScope, downloadText],
   );
   const exportDigest = useCallback(
     () =>
       downloadText(
-        generateBoardDigest(workspace, projectName),
+        generateBoardDigest(targetExportWorkspace, projectName),
         "md",
         "text/markdown",
-        "Exported executive board digest as Markdown.",
+        exportScope === "selection" ? "Exported selection digest as Markdown." : "Exported executive board digest as Markdown.",
       ),
-    [workspace, projectName, downloadText],
+    [targetExportWorkspace, projectName, exportScope, downloadText],
   );
   const copyDigest = useCallback(async () => {
     try {
-      await navigator.clipboard.writeText(generateBoardDigest(workspace, projectName));
-      notify("Copied board digest to clipboard.");
+      await navigator.clipboard.writeText(generateBoardDigest(targetExportWorkspace, projectName));
+      notify(exportScope === "selection" ? "Copied selection digest to clipboard." : "Copied board digest to clipboard.");
     } catch {
       notify("Clipboard access was blocked. Use Export → Board Digest instead.");
     }
-  }, [workspace, projectName, notify]);
+  }, [targetExportWorkspace, projectName, exportScope, notify]);
   const exportCsv = useCallback(
-    () => downloadText(boardToCsv(workspace), "csv", "text/csv", "Exported board as CSV."),
-    [workspace, downloadText],
+    () => downloadText(boardToCsv(targetExportWorkspace), "csv", "text/csv", exportScope === "selection" ? "Exported selection as CSV." : "Exported board as CSV."),
+    [targetExportWorkspace, exportScope, downloadText],
   );
   // Mermaid is the interchange format GitHub, GitLab, and Notion render inline,
   // so this is the practical "integration" path: paste the board into a README.
   const exportMermaid = useCallback(
     () =>
-      downloadText(boardToMermaid(workspace), "mmd", "text/plain", "Exported board as Mermaid."),
-    [workspace, downloadText],
+      downloadText(boardToMermaid(targetExportWorkspace), "mmd", "text/plain", exportScope === "selection" ? "Exported selection as Mermaid." : "Exported board as Mermaid."),
+    [targetExportWorkspace, exportScope, downloadText],
   );
   const copyMermaid = useCallback(async () => {
     try {
-      await navigator.clipboard.writeText(boardToMermaid(workspace));
-      notify("Copied Mermaid to the clipboard — paste it into a README or ticket.");
+      await navigator.clipboard.writeText(boardToMermaid(targetExportWorkspace));
+      notify(exportScope === "selection" ? "Copied selected Mermaid to clipboard." : "Copied Mermaid to the clipboard — paste it into a README or ticket.");
     } catch {
       notify("Clipboard access was blocked. Use Export → Mermaid instead.");
     }
-  }, [workspace, notify]);
+  }, [targetExportWorkspace, exportScope, notify]);
 
   const [exportOpen, setExportOpen] = useState(false);
 
@@ -3401,10 +3459,14 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
                 viewport={viewportBox}
               />
               {drawShapes.map((sh) => {
-                const withDrag =
-                  dragOverride && dragOverride.id === sh.id
-                    ? { ...sh, position: { x: dragOverride.x, y: dragOverride.y } }
-                    : sh;
+                let withDrag = sh;
+                if (dragOverride) {
+                  if (dragOverride.id === sh.id) {
+                    withDrag = { ...sh, position: { x: dragOverride.x, y: dragOverride.y } };
+                  } else if (dragOverride.carriedShapes?.has(sh.id)) {
+                    withDrag = { ...sh, position: dragOverride.carriedShapes.get(sh.id)! };
+                  }
+                }
                 return (
                   <ShapeElement
                     key={sh.id}
@@ -3857,14 +3919,59 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
           />
           <div className={`export-btn export-menu${exportOpen ? " open" : ""}`}>
             <button
-              title="Export board"
-              onClick={() => setExportOpen((prev) => !prev)}
+              title="Export board or selection"
+              onClick={() => {
+                setExportOpen((prev) => {
+                  const next = !prev;
+                  if (next && hasSelection) setExportScope("selection");
+                  return next;
+                });
+              }}
             >
-              <Ico.Share /> Export
+              <Ico.Share /> Export {hasSelection && exportScope === "selection" ? `(${effectiveSelectedNodes.size})` : ""}
             </button>
             <div className="export-pop" onClick={() => setExportOpen(false)}>
-              <button onClick={exportSvg}>SVG</button>
-              <button onClick={exportPng}>PNG</button>
+              <div
+                className="export-scope-banner"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <span className="export-scope-label">Scope</span>
+                {hasSelection ? (
+                  <div className="export-scope-pills">
+                    <button
+                      type="button"
+                      className={`scope-pill ${exportScope === "selection" ? "active" : ""}`}
+                      onClick={() => setExportScope("selection")}
+                    >
+                      Selection ({effectiveSelectedNodes.size})
+                    </button>
+                    <button
+                      type="button"
+                      className={`scope-pill ${exportScope === "all" ? "active" : ""}`}
+                      onClick={() => setExportScope("all")}
+                    >
+                      Entire Board ({Object.keys(workspace.nodes).length})
+                    </button>
+                  </div>
+                ) : (
+                  <span className="export-scope-hint">
+                    Entire Board ({Object.keys(workspace.nodes).length} nodes)
+                  </span>
+                )}
+              </div>
+              <div className="export-sep" />
+              <button
+                onClick={() => {
+                  setExportOpen(false);
+                  setShowCodeExportModal(true);
+                }}
+                title="Export as TypeScript, Prisma, PostgreSQL DDL, Docker Compose, or XState"
+              >
+                Code (TS / Prisma / SQL / Docker)…
+              </button>
+              <button onClick={exportMermaid}>Mermaid ({exportScope === "selection" ? "Selection" : "All"})</button>
+              <button onClick={exportSvg}>SVG ({exportScope === "selection" ? "Selection" : "All"})</button>
+              <button onClick={exportPng}>PNG ({exportScope === "selection" ? "Selection" : "All"})</button>
               <button onClick={exportPdf}>PDF</button>
               {slides.length > 0 && (
                 <button
@@ -3874,22 +3981,27 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
                   Slides PDF
                 </button>
               )}
-              <button onClick={exportJson}>JSON</button>
-              <button onClick={exportMarkdown}>Markdown</button>
+              <button onClick={exportJson}>JSON ({exportScope === "selection" ? "Selection" : "All"})</button>
+              <button onClick={exportMarkdown}>Markdown ({exportScope === "selection" ? "Selection" : "All"})</button>
               <button
                 onClick={exportDigest}
                 title="Executive digest with governance metrics, decisions, actions, risks and Mermaid diagram"
               >
                 Board Digest (.md)
               </button>
-              <button onClick={exportCsv}>CSV</button>
-              <button onClick={exportMermaid}>Mermaid</button>
+              <button onClick={exportCsv}>CSV ({exportScope === "selection" ? "Selection" : "All"})</button>
               <div className="export-sep" />
-              <button onClick={() => void copyDigest()}>Copy Board Digest</button>
               <button onClick={() => void copyMermaid()}>Copy Mermaid</button>
+              <button onClick={() => void copyDigest()}>Copy Board Digest</button>
               <button onClick={() => void importMermaid()}>Paste Mermaid…</button>
             </div>
           </div>
+          {showCodeExportModal && (
+            <CodeExportModal
+              sourceWorkspace={targetExportWorkspace}
+              onClose={() => setShowCodeExportModal(false)}
+            />
+          )}
           {mode === "edit" && overviewOpen && canvasPhase !== "proposing" && (
             <Minimap
               workspace={workspace}
@@ -3899,7 +4011,10 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
             />
           )}
           <StatusBadge>
-            {canvasPhase === "generating" || canvasPhase === "voice" || voiceAgentState === "thinking" || busy ? (
+            {canvasPhase === "generating" ||
+            canvasPhase === "voice" ||
+            voiceAgentState === "thinking" ||
+            busy ? (
               <span
                 style={{
                   width: 6,
@@ -3929,7 +4044,10 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
                   : shapes.length > 0
                     ? `${shapes.length} shape${shapes.length > 1 ? "s" : ""} · `
                     : ""}
-              {voiceAgentState !== "thinking" && !busy && canvasPhase !== "generating" && `${nodeCount} nodes`}
+              {voiceAgentState !== "thinking" &&
+                !busy &&
+                canvasPhase !== "generating" &&
+                `${nodeCount} nodes`}
               {openThreads > 0 ? ` · ${openThreads} open comment${openThreads > 1 ? "s" : ""}` : ""}
               {selected ? " · 1 selected" : settings.autosave ? " · Autosaved" : ""}
               {/* Semantic-zoom note (UX-4): edge labels hide below 70% (see
@@ -3983,7 +4101,12 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
               <span>Zen Mode</span>
               <button
                 className="icon-btn"
-                style={{ padding: "2px 8px", fontSize: 11, borderRadius: 6, background: "var(--canvas-3)" }}
+                style={{
+                  padding: "2px 8px",
+                  fontSize: 11,
+                  borderRadius: 6,
+                  background: "var(--canvas-3)",
+                }}
                 onClick={() => {
                   setZenMode(false);
                   notify("Zen mode disabled");

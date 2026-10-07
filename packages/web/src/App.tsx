@@ -16,11 +16,7 @@ import { ProjectsView } from "./views/ProjectsView.js";
 import { ReviewView } from "./views/ReviewView.js";
 import { IntelligenceView } from "./views/IntelligenceView.js";
 import { ExecutionView } from "./views/ExecutionView.js";
-import { WireframeView } from "./views/WireframeView.js";
-import { SequenceView } from "./views/SequenceView.js";
-import { ErView } from "./views/ErView.js";
-import { BoardView } from "./views/BoardView.js";
-import { DocumentView } from "./views/DocumentView.js";
+
 import { HomeView } from "./views/HomeView.js";
 import { NotificationsView } from "./views/NotificationsView.js";
 import { CommandOverlay } from "./ui/CommandOverlay.js";

@@ -19,16 +19,16 @@ import { expect, test } from "@playwright/test";
 test.describe("Workflow: Enhanced Features (Clarification, Digest Export & Virtualization)", () => {
   test.setTimeout(120_000);
 
-  test("interactive AI clarification chip bar disambiguation and selection", async ({
-    page,
-  }) => {
+  test("interactive AI clarification chip bar disambiguation and selection", async ({ page }) => {
     // 1. Intercept /api/generate streaming requests for ambiguous requests using RegExp
     let interceptedOnce = false;
     await page.route(/\/api\/generate/, async (route) => {
-      let postData: any = null;
+      let postData: Record<string, unknown> | null = null;
       try {
-        postData = route.request().postDataJSON();
-      } catch {}
+        postData = route.request().postDataJSON() as Record<string, unknown>;
+      } catch {
+        // ignore JSON parse error
+      }
       const msg = postData?.message ?? postData?.prompt;
       if (!interceptedOnce && typeof msg === "string" && msg.toLowerCase().includes("auth")) {
         interceptedOnce = true;
@@ -58,13 +58,19 @@ test.describe("Workflow: Enhanced Features (Clarification, Digest Export & Virtu
     await page.locator('input[type="text"]').first().fill("Clarification User");
     await page.locator('input[type="email"]').first().fill(`clarify-${Date.now()}@lucent.test`);
     await page.locator('input[type="password"]').first().fill("password-123456");
-    await page.getByRole("button", { name: /create account|sign up/i }).first().click();
+    await page
+      .getByRole("button", { name: /create account|sign up/i })
+      .first()
+      .click();
 
     // Dismiss onboarding tour
     for (let i = 0; i < 5; i++) {
       const btn = page.getByRole("button", { name: /^(Skip|Got it|Done|Close|Finish)$/i });
       if ((await btn.count()) === 0) break;
-      await btn.first().click({ force: true }).catch(() => {});
+      await btn
+        .first()
+        .click({ force: true })
+        .catch(() => {});
       await page.waitForTimeout(300);
     }
     await page.evaluate(() => localStorage.setItem("lucent.tour.seen.v1", "1"));
@@ -109,10 +115,7 @@ test.describe("Workflow: Enhanced Features (Clarification, Digest Export & Virtu
     await expect(page.locator(".node").first()).toBeVisible();
   });
 
-  test("executive board digest export (.md) and clipboard copy", async ({
-    page,
-    context,
-  }) => {
+  test("executive board digest export (.md) and clipboard copy", async ({ page, context }) => {
     // Grant clipboard permissions for automated test
     await context.grantPermissions(["clipboard-read", "clipboard-write"]).catch(() => {});
 
@@ -121,13 +124,19 @@ test.describe("Workflow: Enhanced Features (Clarification, Digest Export & Virtu
     await page.locator('input[type="text"]').first().fill("Digest User");
     await page.locator('input[type="email"]').first().fill(`digest-${Date.now()}@lucent.test`);
     await page.locator('input[type="password"]').first().fill("password-123456");
-    await page.getByRole("button", { name: /create account|sign up/i }).first().click();
+    await page
+      .getByRole("button", { name: /create account|sign up/i })
+      .first()
+      .click();
 
     // Dismiss tour
     for (let i = 0; i < 5; i++) {
       const btn = page.getByRole("button", { name: /^(Skip|Got it|Done|Close|Finish)$/i });
       if ((await btn.count()) === 0) break;
-      await btn.first().click({ force: true }).catch(() => {});
+      await btn
+        .first()
+        .click({ force: true })
+        .catch(() => {});
       await page.waitForTimeout(300);
     }
     await page.evaluate(() => localStorage.setItem("lucent.tour.seen.v1", "1"));
@@ -195,13 +204,19 @@ test.describe("Workflow: Enhanced Features (Clarification, Digest Export & Virtu
     await page.locator('input[type="text"]').first().fill("Perf User");
     await page.locator('input[type="email"]').first().fill(`perf-${Date.now()}@lucent.test`);
     await page.locator('input[type="password"]').first().fill("password-123456");
-    await page.getByRole("button", { name: /create account|sign up/i }).first().click();
+    await page
+      .getByRole("button", { name: /create account|sign up/i })
+      .first()
+      .click();
 
     // Dismiss tour
     for (let i = 0; i < 5; i++) {
       const btn = page.getByRole("button", { name: /^(Skip|Got it|Done|Close|Finish)$/i });
       if ((await btn.count()) === 0) break;
-      await btn.first().click({ force: true }).catch(() => {});
+      await btn
+        .first()
+        .click({ force: true })
+        .catch(() => {});
       await page.waitForTimeout(300);
     }
     await page.evaluate(() => localStorage.setItem("lucent.tour.seen.v1", "1"));
