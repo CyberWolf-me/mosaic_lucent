@@ -88,6 +88,7 @@ import {
   type VoicePhase,
 } from "../voiceConversation.js";
 import { getSttProvider, isAnyVoiceSupported, type VoiceSession } from "../stt/index.js";
+import { VoiceStateHud, type VoiceHudSnapshot } from "../meeting-room/VoiceStateHud.js";
 import { VoiceAgentBar } from "../ui/VoiceAgentBar.js";
 import {
   startVoiceAgentSession,
@@ -495,6 +496,19 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
   const [voicePhase, setVoicePhase] = useState<VoicePhase>("idle");
   const voicePlaybackRef = useRef<TtsPlayback | null>(null);
   const voiceIdleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Debug voice-state HUD (docs/26 §7): opt-in via ?voicehud=1 on Canvas view.
+  const voiceHud = useMemo(
+    () =>
+      typeof window !== "undefined" && new URLSearchParams(window.location.search).has("voicehud"),
+    [],
+  );
+  const [, setHudTick] = useState(0);
+  useEffect(() => {
+    if (!voiceHud) return;
+    const t = setInterval(() => setHudTick((n) => n + 1), 500);
+    return () => clearInterval(t);
+  }, [voiceHud]);
 
   const shapes = Object.values(workspace.shapes);
   const nodeCount = Object.keys(workspace.nodes).length;
@@ -4198,6 +4212,57 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
           </div>
 
           {canvasPhase === "proposing" && <ProposalPanel />}
+
+          {voiceHud && (() => {
+            const isAgentActive =
+              voiceAgentState === "listening" ||
+              voiceAgentState === "thinking" ||
+              voiceAgentState === "agent_speaking";
+            return (
+              <VoiceStateHud
+                snapshot={{
+                  recording: listening || voicePhase === "listening" || isAgentActive,
+                  sttStatus: listening
+                    ? "listening"
+                    : voicePhase === "listening"
+                      ? "listening"
+                      : isAgentActive
+                        ? voiceAgentState
+                        : "idle",
+                  ttsSpeaking:
+                    isTtsSpeaking() ||
+                    voicePhase === "speaking" ||
+                    voiceAgentState === "agent_speaking",
+                  conversation:
+                    voicePhase === "speaking" || voiceAgentState === "agent_speaking"
+                      ? "ai_responding"
+                      : voicePhase === "thinking" || voiceAgentState === "thinking"
+                        ? "invoked"
+                        : conversingRef.current && voicePhase === "listening"
+                          ? "waiting_for_followup"
+                          : "dormant",
+                  leaseRemainingSec: conversingRef.current && voicePhase === "listening" ? 15 : 0,
+                  turnCount: chat.length,
+                  micStatus: voiceAgentMuted
+                    ? "MUTED"
+                    : listening || voicePhase === "listening" || isAgentActive
+                      ? "ACTIVE"
+                      : "STANDBY",
+                  vadStatus:
+                    listening || voicePhase === "listening"
+                      ? "DETECTING"
+                      : isAgentActive
+                        ? "SPEECH"
+                        : "OFF",
+                  echoSuppressionActive:
+                    isTtsSpeaking() ||
+                    voicePhase === "speaking" ||
+                    voiceAgentState === "agent_speaking",
+                  lastTranscript: chat.length > 0 ? chat[chat.length - 1]?.text : undefined,
+                }}
+              />
+            );
+          })()}
 
           <VoiceAgentBar
             state={voiceAgentState}
