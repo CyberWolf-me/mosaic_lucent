@@ -1054,10 +1054,12 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
     const hook = {
       startCapture: (mode?: MeetingMode) => {
         initCapture(mode ?? modeRef.current);
+        setRecording(true);
         bump();
       },
       stopCapture: () => {
         stopRecordingRef.current?.();
+        setRecording(false);
         bump();
       },
       setRecording: (on: boolean) => setRecording(on),
@@ -2754,7 +2756,7 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
             {
               recording,
               sttStatus,
-              ttsSpeaking: isTtsSpeaking(),
+              ttsSpeaking: isTtsSpeaking() || leaseManagerRef.current.getState() === "ai_responding",
               conversation: leaseManagerRef.current.getState(),
               leaseRemainingSec,
               leaseSpeaker: activeLease?.speakerName ?? activeLease?.speakerId,
@@ -2766,7 +2768,8 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
                   ? "SPEECH"
                   : "DETECTING"
                 : "OFF",
-              echoSuppressionActive: isTtsSpeaking(),
+              echoSuppressionActive:
+                isTtsSpeaking() || leaseManagerRef.current.getState() === "ai_responding",
               lastTranscript: turns.length > 0 ? turns[turns.length - 1]?.text : undefined,
             } satisfies VoiceHudSnapshot
           }

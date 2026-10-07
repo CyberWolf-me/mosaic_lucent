@@ -30,6 +30,9 @@ test.describe("Voice Hardening Phase 3: Browser Diagnostics HUD Certification", 
       .first()
       .click();
 
+    // Wait for auth navigation away from /signup
+    await page.waitForURL((url) => !url.pathname.includes("/signup"), { timeout: 15_000 });
+
     // Dismiss onboarding modals
     for (let i = 0; i < 5; i++) {
       const btn = page.getByRole("button", { name: /^(Skip|Got it|Done|Close|Finish)$/i });
@@ -45,20 +48,18 @@ test.describe("Voice Hardening Phase 3: Browser Diagnostics HUD Certification", 
       localStorage.setItem("lucent.tour.seen.v1", "1");
     });
 
+    // Wait for authenticated canvas to mount
+    const promptInput = page.getByLabel("Describe what you want to build");
+    await expect(promptInput).toBeVisible({ timeout: 30_000 });
+
     // 2. Open Meeting view with ?voicehud=1
-    await page.evaluate(() => {
-      const u = new URL(window.location.href);
-      u.searchParams.set("view", "meeting");
-      u.searchParams.set("voicehud", "1");
-      window.history.pushState(null, "", u.toString());
-      window.dispatchEvent(new PopStateEvent("popstate"));
-    });
+    await page.goto("/?view=meeting&voicehud=1");
 
     // Verify Meeting mode mounts
     await expect(page.getByText(/Capture mode/i).first()).toBeVisible({ timeout: 15_000 });
 
     // 3. Verify VoiceStateHud is mounted and visible
-    const hud = page.locator(".voice-hud");
+    const hud = page.locator(".voice-hud:visible");
     await expect(hud).toBeVisible({ timeout: 10_000 });
     await expect(hud.getByText("VOICE STATE")).toBeVisible();
 
@@ -172,9 +173,20 @@ test.describe("Voice Hardening Phase 3: Browser Diagnostics HUD Certification", 
 
     // 11. Stop capture and verify return to IDLE
     const stopBtn = page.getByRole("button", { name: /stop/i });
-    if ((await stopBtn.count()) > 0) {
-      await stopBtn.click();
-      await expect(macroState).toHaveText("IDLE", { timeout: 10_000 });
+    if ((await stopBtn.count()) > 0 && (await stopBtn.first().isVisible())) {
+      await stopBtn.first().click();
+    } else {
+      await page.evaluate(() => {
+        const dbg = (
+          window as unknown as {
+            __lucentVoiceDebug?: {
+              stopCapture: () => void;
+            };
+          }
+        ).__lucentVoiceDebug;
+        dbg?.stopCapture();
+      });
     }
+    await expect(macroState).toHaveText("IDLE", { timeout: 10_000 });
   });
 });
