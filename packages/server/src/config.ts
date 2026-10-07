@@ -132,6 +132,10 @@ export interface Config {
     name: string | undefined;
     voice: string | undefined;
   };
+  posthog?: {
+    apiKey: string;
+    host: string;
+  };
 }
 
 export interface ConfigEnv {
@@ -193,6 +197,10 @@ export interface ConfigEnv {
   LUCENT_OAUTH_GITHUB_CLIENT_SECRET?: string;
   LUCENT_ALLOW_BYO_KEYS?: string;
   LUCENT_AI_SELF_HOSTED?: string;
+  LUCENT_POSTHOG_KEY?: string;
+  LUCENT_POSTHOG_HOST?: string;
+  POSTHOG_PROJECT_TOKEN?: string;
+  POSTHOG_HOST?: string;
   NODE_ENV?: string;
 }
 
@@ -313,6 +321,13 @@ export function readConfig(env: ConfigEnv = process.env): Config {
       name: env.LUCENT_TTS_NAME || undefined,
       voice: env.LUCENT_TTS_VOICE || undefined,
     },
+    posthog: (() => {
+      const apiKey = (env.LUCENT_POSTHOG_KEY || env.POSTHOG_PROJECT_TOKEN)?.trim();
+      if (!apiKey) return undefined;
+      const host =
+        (env.LUCENT_POSTHOG_HOST || env.POSTHOG_HOST)?.trim() || "https://us.i.posthog.com";
+      return { apiKey, host };
+    })(),
   };
 }
 

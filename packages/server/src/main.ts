@@ -5,6 +5,7 @@ import { selectVectorProvider } from "./vector.js";
 import { selectProvider } from "./provider.js";
 import { UsageTracker, limitsFromEnv } from "./usage.js";
 import { Telemetry } from "./telemetry.js";
+import { createPostHogSink } from "./posthog.js";
 import { InMemoryUserStore, type UserStore } from "./accounts.js";
 import { sessionSecret } from "./config.js";
 import { InMemoryBoardStore, type BoardStore } from "./boards.js";
@@ -702,6 +703,12 @@ const imageProvider = selectImageProvider();
 const vectorProvider = selectVectorProvider();
 console.log(`[lucent] vector: ${vectorProvider ? vectorProvider.name : "off"}`);
 
+const telemetry = new Telemetry();
+if (config.posthog) {
+  telemetry.subscribe(createPostHogSink(config.posthog));
+  console.log(`[lucent] posthog: telemetry sink enabled (${config.posthog.host})`);
+}
+
 const { server, realtime, writeMeetingRecap, automations } = createApp({
   config,
   provider,
@@ -771,7 +778,7 @@ const { server, realtime, writeMeetingRecap, automations } = createApp({
   secret: sessionSecret(),
   usage,
   limits,
-  telemetry: new Telemetry(),
+  telemetry,
   authLimiter,
   sharedLimiter,
   tickets,
