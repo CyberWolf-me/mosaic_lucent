@@ -2760,6 +2760,14 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
               leaseSpeaker: activeLease?.speakerName ?? activeLease?.speakerId,
               lastSpeaker,
               turnCount: turns.length,
+              micStatus: recording ? "ACTIVE" : "STANDBY",
+              vadStatus: recording
+                ? sttStatus === "transcribing"
+                  ? "SPEECH"
+                  : "DETECTING"
+                : "OFF",
+              echoSuppressionActive: isTtsSpeaking(),
+              lastTranscript: turns.length > 0 ? turns[turns.length - 1]?.text : undefined,
             } satisfies VoiceHudSnapshot
           }
         />

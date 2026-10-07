@@ -115,7 +115,66 @@ test.describe("Voice Hardening Phase 3: Browser Diagnostics HUD Certification", 
       timeout: 10_000,
     });
 
-    // 7. Verify attribution in HUD
+    // 7. Verify attribution in HUD and snippet display
     await expect(hud.getByText("Alice")).toBeVisible({ timeout: 10_000 });
+    await expect(hud.getByText("Snippet")).toBeVisible({ timeout: 10_000 });
+
+    // 8. Test AI response state transition: SPEAKING, Echo suppression active
+    await page.evaluate(() => {
+      const dbg = (
+        window as unknown as {
+          __lucentVoiceDebug?: {
+            aiStart: () => void;
+          };
+        }
+      ).__lucentVoiceDebug;
+      if (dbg) {
+        dbg.aiStart();
+      }
+    });
+
+    await expect(macroState).toHaveText("SPEAKING", { timeout: 10_000 });
+    await expect(hud.getByText("SUPPRESSED")).toBeVisible({ timeout: 10_000 });
+
+    // 9. Test AI playback completion: triggers follow-up lease window (15s)
+    await page.evaluate(() => {
+      const dbg = (
+        window as unknown as {
+          __lucentVoiceDebug?: {
+            aiDone: (answer: string) => void;
+          };
+        }
+      ).__lucentVoiceDebug;
+      if (dbg) {
+        dbg.aiDone("We use Stripe. Should I connect webhooks?");
+      }
+    });
+
+    // Verify countdown window is active
+    await expect(hud.getByText(/1[0-5]s/)).toBeVisible({ timeout: 10_000 });
+
+    // 10. Test Barge-in: "Lucent, stop" halts AI and resets lease
+    await page.evaluate(() => {
+      const dbg = (
+        window as unknown as {
+          __lucentVoiceDebug?: {
+            bargeIn: (s: string, t: string) => void;
+          };
+        }
+      ).__lucentVoiceDebug;
+      if (dbg) {
+        dbg.bargeIn("Alice", "Lucent, stop");
+      }
+    });
+
+    // Verify return to LISTENING state
+    await expect(macroState).toHaveText("LISTENING", { timeout: 10_000 });
+
+    // 11. Stop capture and verify return to IDLE
+    const stopBtn = page.getByRole("button", { name: /stop/i });
+    if ((await stopBtn.count()) > 0) {
+      await stopBtn.click();
+      await expect(macroState).toHaveText("IDLE", { timeout: 10_000 });
+    }
   });
 });
