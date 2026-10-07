@@ -171,10 +171,10 @@ export function addressesOtherPerson(text: string, knownTeammates: string[] = []
 export function isSpeculativeSpeech(text: string): boolean {
   const t = text.trim();
   const SPECULATIVE_PATTERNS = [
-    /\b(?:we'?re|i'?m)\s+(?:thinking\s+about|considering|wondering\s+if)\b/i,
-    /\b(?:maybe|perhaps|probably|possibly)\s+(?:we\s+should|we\s+could|i\s+should)\b/i,
+    /\b(?:we'?re|i'?m|we\s+were|i\s+was)\s+(?:thinking\s+about|considering|wondering\s+if)\b/i,
+    /\b(?:maybe|perhaps|probably|possibly)\s+(?:we\s+should|we\s+could|i\s+should|going\s+to|planning\s+to)\b/i,
     /\bwhat\s+if\s+(?:we|you|i)\b/i,
-    /\b(?:sarah|bob|alice|charlie|someone|anybody)\s+said\s+we\s+should\b/i,
+    /\b(?:sarah|bob|alice|charlie|someone|anybody)\s+(?:said|suggested|mentioned)\s+(?:we\s+should|we\s+could)?\b/i,
     /\bi\s+don'?t\s+think\s+we\s+should\b/i,
     /\b(?:could\s+be\s+that|might\s+want\s+to|might\s+need\s+to)\b/i,
     /\bwe\s+were\s+discussing\b/i,
@@ -190,9 +190,9 @@ export function isMutationUtterance(text: string): boolean {
   if (isSpeculativeSpeech(t)) return false;
 
   const MUTATION_VERBS =
-    /^\s*(?:(?:actually|so|now|and|then|also|okay|ok)\s+)?(?:can\s+you\s+|could\s+you\s+|please\s+)?(move|put|place|draw|create|build|add|make|design|generate|show|render|delete|remove|change|color|connect|link|rearrange|align|group|ungroup)\b/i;
+    /^\s*(?:(?:actually|so|now|and|then|also|okay|ok)[,\s]+)?(?:can\s+you\s+|could\s+you\s+|please\s+)?(move|put|place|draw|create|build|add|make|design|generate|show|render|delete|remove|change|color|connect|link|rearrange|align|group|ungroup)\b/i;
   const MUTATION_TARGETS =
-    /\b(diagram|flowchart|workflow|pipeline|architecture|wireframe|mindmap|mind\s+map|journey|system|process|flow|box|boxes|node|nodes|sticky|stickies|note|notes|arrow|arrows|shape|shapes|checkout|payments|stripe|database|cache|service|services|api|backend|frontend|queue|queues|table|chart|component|components|card|cards|task|tasks|step|steps|underneath|below|above|next\s+to|beside)\b/i;
+    /\b(diagram|flowchart|workflow|pipeline|architecture|wireframe|mindmap|mind\s+map|journey|system|process|flow|box|boxes|node|nodes|sticky|stickies|note|notes|arrow|arrows|shape|shapes|checkout|payments|stripe|database|cache|service|services|api|backend|frontend|auth|redis|postgres|postgresql|mysql|mongodb|sqlite|kafka|queue|queues|table|chart|component|components|card|cards|task|tasks|step|steps|underneath|below|above|next\s+to|beside)\b/i;
 
   if (MUTATION_VERBS.test(t)) {
     return (

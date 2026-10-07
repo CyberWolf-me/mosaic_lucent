@@ -132,9 +132,9 @@ export function addressesOtherPerson(text: string, knownTeammates: string[] = []
 export function isMutationUtterance(text: string): boolean {
   const t = text.trim();
   const MUTATION_VERBS =
-    /^\s*(?:(?:actually|so|now|and|then|also|okay|ok)\s+)?(?:can\s+you\s+|could\s+you\s+|please\s+)?(move|put|place|draw|create|build|add|make|design|generate|show|render|delete|remove|change|color|connect|link|rearrange|align|group|ungroup)\b/i;
+    /^\s*(?:(?:actually|so|now|and|then|also|okay|ok)[,\s]+)?(?:can\s+you\s+|could\s+you\s+|please\s+)?(move|put|place|draw|create|build|add|make|design|generate|show|render|delete|remove|change|color|connect|link|rearrange|align|group|ungroup)\b/i;
   const MUTATION_TARGETS =
-    /\b(diagram|flowchart|workflow|pipeline|architecture|wireframe|mindmap|mind\s+map|journey|system|process|flow|box|boxes|node|nodes|sticky|stickies|note|notes|arrow|arrows|shape|shapes|checkout|payments|stripe|database|cache|service|services|api|backend|frontend|queue|queues|table|chart|component|components|card|cards|task|tasks|step|steps|underneath|below|above|next\s+to|beside)\b/i;
+    /\b(diagram|flowchart|workflow|pipeline|architecture|wireframe|mindmap|mind\s+map|journey|system|process|flow|box|boxes|node|nodes|sticky|stickies|note|notes|arrow|arrows|shape|shapes|checkout|payments|stripe|database|cache|service|services|api|backend|frontend|auth|redis|postgres|postgresql|mysql|mongodb|sqlite|kafka|queue|queues|table|chart|component|components|card|cards|task|tasks|step|steps|underneath|below|above|next\s+to|beside)\b/i;
 
   if (MUTATION_VERBS.test(t)) {
     return (
