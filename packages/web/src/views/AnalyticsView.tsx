@@ -4,7 +4,7 @@ import { Ico } from "../ui/icons.js";
 import { requestSettings } from "../ui/Chrome.js";
 import { Button, Card, FilterChips, Page, PageHeader, SectionLabel } from "../ui/kit.js";
 import { fetchOrgs, preferredOrg } from "../billing.js";
-import { isPostHogEnabled, getPostHogConfig } from "../analytics/posthog.js";
+import { isPostHogEnabled } from "../analytics/posthog.js";
 
 /**
  * Analytics dashboard (M7).
@@ -55,7 +55,6 @@ export function AnalyticsView({ onBack }: { onBack: () => void }) {
   const [trends, setTrends] = useState<Record<string, UsageTrendRow[]> | null>(null);
   const [windowDays, setWindowDays] = useState(30);
   const isPostHogActive = isPostHogEnabled();
-  const posthogConfig = getPostHogConfig();
 
   useEffect(() => {
     let cancelled = false;
@@ -150,7 +149,7 @@ export function AnalyticsView({ onBack }: { onBack: () => void }) {
             <Button variant="ghost" onClick={() => requestSettings("billing")}>
               <Ico.Book /> Plan &amp; usage
             </Button>
-            {isPostHogActive && (
+            {isPostHogActive && isOwner && (
               <Button
                 variant="ghost"
                 onClick={() =>
@@ -160,8 +159,9 @@ export function AnalyticsView({ onBack }: { onBack: () => void }) {
                     "noopener,noreferrer",
                   )
                 }
+                title="PostHog event stream (workspace owners only)"
               >
-                <Ico.Gauge /> PostHog Analytics ↗
+                <Ico.Gauge /> PostHog Console ↗
               </Button>
             )}
           </>
@@ -172,51 +172,7 @@ export function AnalyticsView({ onBack }: { onBack: () => void }) {
           {error}
         </div>
       )}
-      {isPostHogActive && (
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            flexWrap: "wrap",
-            gap: "12px",
-            padding: "12px 16px",
-            borderRadius: "var(--radius-md, 8px)",
-            background: "var(--surface-raised, rgba(255,255,255,0.03))",
-            border: "1px solid var(--border-subtle, rgba(255,255,255,0.08))",
-            marginBottom: "16px",
-          }}
-        >
-          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-            <span
-              style={{
-                width: "8px",
-                height: "8px",
-                borderRadius: "50%",
-                background: "#10b981",
-                boxShadow: "0 0 6px #10b981",
-                display: "inline-block",
-                flexShrink: 0,
-              }}
-            />
-            <span style={{ fontSize: "13px", color: "var(--fg-muted, #94a3b8)" }}>
-              Live telemetry streaming to <strong>PostHog</strong> ({posthogConfig?.host}). User interactions, AI generations, and sessions are actively recorded.
-            </span>
-          </div>
-          <Button
-            variant="ghost"
-            onClick={() =>
-              window.open(
-                "https://us.posthog.com/project/events",
-                "_blank",
-                "noopener,noreferrer",
-              )
-            }
-          >
-            Open PostHog Dashboard ↗
-          </Button>
-        </div>
-      )}
+
       <div className="boards-usage-toolbar">
         <SectionLabel>Meters</SectionLabel>
         <div className="boards-usage-window">

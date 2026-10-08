@@ -305,6 +305,12 @@ export interface DispatcherOptions {
   consumers?: Partial<Record<OutboxEventType, OutboxConsumer[]>>;
   /** Injected for tests; defaults to `setInterval`. */
   intervalMs?: number;
+  /**
+   * Interval when the outbox was empty on the previous tick.
+   * Defaults to 10,000 ms (or LUCENT_OUTBOX_IDLE_INTERVAL_MS if set).
+   * Backs off from aggressive 1s idle database polling.
+   */
+  idleIntervalMs?: number;
   batchSize?: number;
 }
 
@@ -327,8 +333,10 @@ export class OutboxDispatcher {
   private readonly consumers: Partial<Record<OutboxEventType, OutboxConsumer[]>>;
   private readonly batchSize: number;
   private readonly intervalMs: number;
-  private timer: ReturnType<typeof setInterval> | undefined;
+  private readonly idleIntervalMs: number;
+  private timer: ReturnType<typeof setTimeout> | undefined;
   private ticking = false;
+  private stopped = false;
   /** Facts for the metrics surface (P3 wires them into Prometheus). */
   private delivered = 0;
   private failed = 0;
@@ -337,6 +345,16 @@ export class OutboxDispatcher {
     this.consumers = options.consumers ?? {};
     this.batchSize = options.batchSize ?? OUTBOX_BATCH_SIZE;
     this.intervalMs = options.intervalMs ?? 1_000;
+    const envIdle = process.env.LUCENT_OUTBOX_IDLE_INTERVAL_MS
+      ? Number(process.env.LUCENT_OUTBOX_IDLE_INTERVAL_MS)
+      : undefined;
+    this.idleIntervalMs =
+      options.idleIntervalMs ??
+      (envIdle !== undefined && !Number.isNaN(envIdle)
+        ? envIdle
+        : options.intervalMs !== undefined
+          ? options.intervalMs
+          : 10_000);
   }
 
   /** Register a consumer after construction (routes/services attach late). */
@@ -402,16 +420,31 @@ export class OutboxDispatcher {
 
   start(): void {
     if (this.timer) return;
-    this.timer = setInterval(() => {
-      void this.tick();
-    }, this.intervalMs);
-    // Never hold the process open for the drain loop.
-    this.timer.unref?.();
+    this.stopped = false;
+    const schedule = (delayMs: number) => {
+      this.timer = setTimeout(async () => {
+        if (this.stopped) {
+          this.timer = undefined;
+          return;
+        }
+        const res = await this.tick();
+        if (this.stopped) {
+          this.timer = undefined;
+          return;
+        }
+        const nextDelay = res.delivered > 0 ? this.intervalMs : this.idleIntervalMs;
+        schedule(nextDelay);
+      }, delayMs);
+      // Never hold the process open for the drain loop.
+      this.timer.unref?.();
+    };
+    schedule(this.intervalMs);
   }
 
   stop(): void {
+    this.stopped = true;
     if (!this.timer) return;
-    clearInterval(this.timer);
+    clearTimeout(this.timer);
     this.timer = undefined;
   }
 

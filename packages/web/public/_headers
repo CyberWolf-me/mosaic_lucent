@@ -1,0 +1,11 @@
+# Global security headers for all pages and routes
+/*
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: SAMEORIGIN
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: microphone=(self), camera=(), geolocation=()
+  Strict-Transport-Security: max-age=31536000; includeSubDomains; preload
+
+# Aggressive immutable caching for Vite hashed assets
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable

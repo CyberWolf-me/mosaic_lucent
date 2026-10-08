@@ -15,6 +15,8 @@
  * socket reconnecting every 20s" are different tickets.
  */
 
+import { getSessionReplayUrl } from "./analytics/posthog.js";
+
 export interface SupportContext {
   /** From the workspace: object counts, never contents. */
   nodes: number;
@@ -46,6 +48,8 @@ export interface SupportReport {
   timezone: string;
   connection: string;
   context: SupportContext;
+  /** Link to PostHog session replay when active. */
+  sessionReplayUrl?: string;
   /** Epoch ms — lets support correlate against server logs by time. */
   at: number;
 }
@@ -78,6 +82,7 @@ export function buildSupportReport(ctx: SupportContext): SupportReport {
     timezone: Intl.DateTimeFormat().resolvedOptions().timeZone ?? "unknown",
     connection: nav.connection ?? "unknown",
     context: ctx,
+    sessionReplayUrl: getSessionReplayUrl(),
     at: Date.now(),
   };
 }

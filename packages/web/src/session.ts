@@ -220,10 +220,11 @@ export async function attemptSignup(
   name: string,
   email: string,
   password: string,
+  turnstileToken?: string,
 ): Promise<SignupResult> {
   let res: Response;
   try {
-    res = await postJson("/api/auth/signup", { name, email, password });
+    res = await postJson("/api/auth/signup", { name, email, password, turnstileToken });
   } catch {
     return transportError();
   }

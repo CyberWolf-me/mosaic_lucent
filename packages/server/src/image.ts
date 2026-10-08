@@ -1,5 +1,6 @@
 import { z } from "zod";
 import {
+  CloudflareImageProvider,
   MockImageProvider,
   OpenAIImageProvider,
   PollinationsImageProvider,
@@ -87,6 +88,21 @@ export function selectImageProvider(env: NodeJS.ProcessEnv = process.env): Image
   const fallbackModels = modelList.slice(1);
 
   const timeoutMs = imageTimeoutMs(env);
+
+  const imageProvider = (env.LUCENT_IMAGE_PROVIDER ?? "").toLowerCase();
+  if (imageProvider === "cloudflare" || imageProvider === "workers-ai") {
+    const accountId = env.CLOUDFLARE_ACCOUNT_ID ?? "812ad3c4e3c15fa0227f57e932fe45de";
+    const apiToken = env.CLOUDFLARE_AI_TOKEN ?? env.CLOUDFLARE_API_TOKEN ?? env.LUCENT_IMAGE_KEY;
+    if (!apiToken) {
+      throw new Error("LUCENT_IMAGE_PROVIDER=cloudflare but CLOUDFLARE_AI_TOKEN is not set");
+    }
+    return new CloudflareImageProvider({
+      accountId,
+      apiToken,
+      ...(env.LUCENT_IMAGE_MODEL ? { model: env.LUCENT_IMAGE_MODEL } : {}),
+      ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+    });
+  }
 
   if (apiKey && baseUrl) {
     return new OpenAIImageProvider({

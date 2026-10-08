@@ -12,6 +12,8 @@ scratch/
 *.tar.gz
 .kilo/
 .agents/
+skills-lock.json
+.vscode/
 redesign/
 *.png
 lucent-field-report.html

@@ -491,15 +491,23 @@ export interface JobRunnerOptions {
   families?: JobFamily[];
   /** Jobs claimed per tick. */
   batchSize?: number;
-  /** How often the worker polls. */
+  /** How often the worker polls when jobs are active. */
   intervalMs?: number;
+  /**
+   * How often the worker polls when the previous tick claimed zero jobs.
+   * Defaults to 10,000 ms (or LUCENT_JOB_IDLE_INTERVAL_MS if set).
+   * Backs off from aggressive 1s idle database polling while keeping
+   * active queues fast.
+   */
+  idleIntervalMs?: number;
 }
 
 export class JobRunner {
   private readonly families: JobFamily[];
   private readonly batchSize: number;
   private readonly intervalMs: number;
-  private timer: ReturnType<typeof setInterval> | undefined;
+  private readonly idleIntervalMs: number;
+  private timer: ReturnType<typeof setTimeout> | undefined;
   private running = false;
   /** Set by `stop()`: a graceful drain finishes the in-flight tick, no more. */
   private draining = false;
@@ -510,6 +518,16 @@ export class JobRunner {
     this.families = options.families ?? [...JOB_FAMILIES];
     this.batchSize = options.batchSize ?? 10;
     this.intervalMs = options.intervalMs ?? 1_000;
+    const envIdle = process.env.LUCENT_JOB_IDLE_INTERVAL_MS
+      ? Number(process.env.LUCENT_JOB_IDLE_INTERVAL_MS)
+      : undefined;
+    this.idleIntervalMs =
+      options.idleIntervalMs ??
+      (envIdle !== undefined && !Number.isNaN(envIdle)
+        ? envIdle
+        : options.intervalMs !== undefined
+          ? options.intervalMs
+          : 10_000);
   }
 
   /**
@@ -561,15 +579,30 @@ export class JobRunner {
 
   start(): void {
     if (this.timer) return;
-    this.timer = setInterval(() => {
-      void this.tick();
-    }, this.intervalMs);
-    this.timer.unref?.();
+    this.draining = false;
+    const schedule = (delayMs: number) => {
+      this.timer = setTimeout(async () => {
+        if (this.draining) {
+          this.timer = undefined;
+          return;
+        }
+        const res = await this.tick();
+        if (this.draining) {
+          this.timer = undefined;
+          return;
+        }
+        const nextDelay = res.claimed > 0 ? this.intervalMs : this.idleIntervalMs;
+        schedule(nextDelay);
+      }, delayMs);
+      this.timer.unref?.();
+    };
+    schedule(this.intervalMs);
   }
 
   stop(): void {
+    this.draining = true;
     if (this.timer) {
-      clearInterval(this.timer);
+      clearTimeout(this.timer);
       this.timer = undefined;
     }
   }

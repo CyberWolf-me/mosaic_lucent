@@ -198,6 +198,7 @@ import { registerThreadRoutes } from "./routes/threads.js";
 import { InMemoryThreadStore } from "./threads.js";
 import { InMemoryStatementIndexStore, StatementIndexer } from "./statementIndex.js";
 import { openPortal, startCheckout, type BillingIntegration } from "./billing/service.js";
+import { verifyTurnstileToken } from "./turnstile.js";
 
 /**
  * The HTTP + WebSocket application, assembled from injected dependencies.
@@ -3655,6 +3656,14 @@ export function createApp(deps: AppDeps): App {
         const raw = await readBody(req);
         const parsed = raw ? JSON.parse(raw) : {};
         const email = typeof parsed.email === "string" ? parsed.email : "";
+        if (process.env.LUCENT_TURNSTILE_SECRET_KEY) {
+          const turnstileToken = parsed.turnstileToken ?? parsed["cf-turnstile-response"];
+          const outcome = await verifyTurnstileToken(turnstileToken, clientKey(req));
+          if (!outcome.success) {
+            send(res, 403, { error: "turnstile_failed", detail: "Cloudflare Turnstile bot verification failed." });
+            return;
+          }
+        }
         if (!(await applyAuthLimiter(req, res, email, "/api/auth/signup"))) return;
         const result = await handleSignup(authCtx, parsed, orgStore, requestOrigin(req));
         writeHandleResult(res, result);

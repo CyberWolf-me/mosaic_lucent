@@ -243,10 +243,93 @@ export function AuthView({ mode, onMode, onSuccess }: AuthViewProps) {
   );
 }
 
+const TURNSTILE_SITE_KEY = "0x4AAAAAAFQtclPTl2yqvFcG";
+
+function TurnstileWidget({ onTokenChange }: { onTokenChange: (token: string | null) => void }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const widgetIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    let timer: ReturnType<typeof setInterval> | null = null;
+    let cancelled = false;
+
+    function mountWidget() {
+      if (cancelled || !containerRef.current) return;
+      const turnstile = (
+        window as unknown as {
+          turnstile?: {
+            render: (el: HTMLElement, opts: Record<string, unknown>) => string;
+            remove: (id: string) => void;
+          };
+        }
+      ).turnstile;
+
+      if (!turnstile || widgetIdRef.current !== null) return;
+
+      try {
+        widgetIdRef.current = turnstile.render(containerRef.current, {
+          sitekey: TURNSTILE_SITE_KEY,
+          callback: (token: string) => {
+            if (!cancelled) onTokenChange(token);
+          },
+          "expired-callback": () => {
+            if (!cancelled) onTokenChange(null);
+          },
+          "error-callback": () => {
+            if (!cancelled) onTokenChange(null);
+          },
+          theme: "auto",
+        });
+      } catch {
+        /* ignore render errors */
+      }
+    }
+
+    if (typeof window !== "undefined" && "turnstile" in window) {
+      mountWidget();
+    } else {
+      timer = setInterval(() => {
+        if (typeof window !== "undefined" && "turnstile" in window) {
+          if (timer) clearInterval(timer);
+          timer = null;
+          mountWidget();
+        }
+      }, 150);
+    }
+
+    return () => {
+      cancelled = true;
+      if (timer) clearInterval(timer);
+      const turnstile = (
+        window as unknown as {
+          turnstile?: { remove: (id: string) => void };
+        }
+      ).turnstile;
+      if (widgetIdRef.current !== null && turnstile) {
+        try {
+          turnstile.remove(widgetIdRef.current);
+        } catch {
+          /* ignore */
+        }
+        widgetIdRef.current = null;
+      }
+    };
+  }, [onTokenChange]);
+
+  return (
+    <div
+      ref={containerRef}
+      className="auth-turnstile"
+      style={{ margin: "12px 0", minHeight: 65, display: "flex", justifyContent: "center" }}
+    />
+  );
+}
+
 function SignupForm(props: { onMode: (m: Mode) => void; onDone: () => void }) {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
   const [error, setError] = useError();
   const [busy, setBusy] = useState(false);
 
@@ -254,7 +337,7 @@ function SignupForm(props: { onMode: (m: Mode) => void; onDone: () => void }) {
     e.preventDefault();
     setBusy(true);
     setError(null);
-    const result = await attemptSignup(name, email, password);
+    const result = await attemptSignup(name, email, password, turnstileToken ?? undefined);
     // `attemptSignup` has already stored the session on success; the only thing
     // left for the screen to do is leave.
     if (result.kind === "error") {
@@ -286,6 +369,7 @@ function SignupForm(props: { onMode: (m: Mode) => void; onDone: () => void }) {
         required
         minLength={8}
       />
+      <TurnstileWidget onTokenChange={setTurnstileToken} />
       {error && <p className="auth-error">{error}</p>}
       <Submit busy={busy} idle="Create account" busyLabel="Creating account…" />
       <OauthButtons />

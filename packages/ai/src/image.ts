@@ -276,3 +276,74 @@ export class OpenAIImageProvider implements ImageProvider {
     throw new Error("Image provider returned no image data");
   }
 }
+
+export interface CloudflareImageOptions {
+  accountId: string;
+  apiToken: string;
+  model?: string;
+  fetchImpl?: typeof fetch;
+  timeoutMs?: number;
+}
+
+/**
+ * Cloudflare Workers AI image generation (@cf/bytedance/stable-diffusion-xl-lightning,
+ * @cf/stabilityai/stable-diffusion-xl-base-1.0, or @cf/black-forest-labs/flux-1-schnell).
+ */
+export class CloudflareImageProvider implements ImageProvider {
+  readonly name = "cloudflare-workers-ai";
+  readonly model: string;
+  private readonly accountId: string;
+  private readonly apiToken: string;
+  private readonly fetchImpl: typeof fetch;
+  private readonly timeoutMs: number;
+
+  constructor(options: CloudflareImageOptions) {
+    this.accountId = options.accountId;
+    this.apiToken = options.apiToken;
+    this.model = options.model ?? "@cf/bytedance/stable-diffusion-xl-lightning";
+    this.fetchImpl =
+      options.fetchImpl ??
+      (typeof fetch !== "undefined" ? fetch : (undefined as unknown as typeof fetch));
+    this.timeoutMs = options.timeoutMs ?? DEFAULT_IMAGE_TIMEOUT_MS;
+  }
+
+  async generateImage(request: ImageRequest): Promise<ImageResult> {
+    const url = `https://api.cloudflare.com/client/v4/accounts/${this.accountId}/ai/run/${this.model}`;
+    const cleanPrompt = request.prompt.trim();
+    const res = await this.fetchImpl(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${this.apiToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        prompt: cleanPrompt,
+        num_steps: 4,
+      }),
+      signal: AbortSignal.timeout(this.timeoutMs),
+    });
+
+    if (!res.ok) {
+      const detail = await res.text().catch(() => "");
+      throw new Error(`Cloudflare Workers AI image failed (${res.status}): ${detail.slice(0, 300)}`);
+    }
+
+    const arrayBuf = await res.arrayBuffer();
+    let b64 = "";
+    if (typeof Buffer !== "undefined") {
+      b64 = Buffer.from(arrayBuf).toString("base64");
+    } else {
+      const bytes = new Uint8Array(arrayBuf);
+      let binary = "";
+      for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]!);
+      b64 = btoa(binary);
+    }
+
+    const mime = sniffImageMime(b64) ?? res.headers.get("content-type") ?? "image/png";
+    const src = `data:${mime};base64,${b64}`;
+    return {
+      src,
+      explanation: `Generated visual for "${cleanPrompt}".`,
+    };
+  }
+}

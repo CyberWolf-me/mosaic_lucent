@@ -84,16 +84,16 @@ export function detectAddress(text: string): AddressedQuery {
 export function detectDismissal(text: string): boolean {
   const t = text
     .toLowerCase()
-    .replace(/[.!?,]/g, " ")
+    .replace(/[.!?,—–-]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
 
   return (
-    /^(?:ok(?:ay)? )?(?:thanks?(?: you)?(?: lucent)? )?(?:that'?s (?:all|it|enough|clear)|stop(?: listening)?|bye|goodbye|we'?re done|i'?m done|got it|back to the team|never mind|all good|nothing else|stay quiet)(?: for now)?(?: thanks?(?: you)?)?$/.test(
+    /^(?:ok(?:ay)?\s+)?(?:thanks?(?:\s+you)?(?:\s+lucent)?\s+)?(?:that'?s\s+(?:all|it|enough|clear)|that\s+makes\s+sense|stop(?:\s+listening)?|bye|goodbye|we'?re\s+done|i'?m\s+done|got\s+it|back\s+to\s+the\s+team|never\s*mind|all\s+good|nothing\s+else|stay\s+quiet)(?:\s+for\s+now)?(?:\s+thanks?(?:\s+you)?)?(?:\s+lucent)?$/.test(
       t,
     ) ||
-    /^\s*(?:thanks?(?:\s+you)?|got\s+it|all\s+good|back\s+to\s+the\s+team)(?:\s+lucent)?[.!]?\s*$/i.test(
-      text.trim(),
+    /^(?:ok(?:ay)?\s+)?(?:thanks?(?:\s+you)?|got\s+it|all\s+good|back\s+to\s+the\s+team|that\s+makes\s+sense)(?:\s+lucent)?$/.test(
+      t,
     )
   );
 }

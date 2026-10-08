@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { closeDb, createDb, type Db } from "../src/db/client.js";
 import { migrate } from "../src/db/migrate.js";
 import { outboxEvents } from "../src/db/schema.js";
@@ -197,6 +197,53 @@ describe("the dispatcher", () => {
     stop();
     await dispatcher.tick();
     expect(seen).toHaveLength(1);
+  });
+
+  it("backs off to idleIntervalMs when no events are delivered, resumes intervalMs when active", async () => {
+    vi.useFakeTimers();
+    try {
+      const store = new InMemoryOutbox();
+      let deliveredCount = 0;
+      const dispatcher = new OutboxDispatcher({
+        store,
+        intervalMs: 100,
+        idleIntervalMs: 1000,
+        consumers: {
+          ProposalApproved: [
+            () => {
+              deliveredCount += 1;
+            },
+          ],
+        },
+      });
+
+      dispatcher.start();
+
+      // At 100ms: first tick fires, outbox is empty (delivered = 0).
+      // Next tick should be scheduled at +1000ms (idleIntervalMs).
+      await vi.advanceTimersByTimeAsync(100);
+      expect(deliveredCount).toBe(0);
+
+      // Advance by 500ms (total 600ms). Idle interval has not elapsed yet.
+      await vi.advanceTimersByTimeAsync(500);
+      expect(deliveredCount).toBe(0);
+
+      // Now append an event
+      await store.append({ type: "ProposalApproved", boardId: "b1" });
+
+      // Advance remaining 500ms (total 1100ms from start) -> idle tick fires and delivers!
+      await vi.advanceTimersByTimeAsync(500);
+      expect(deliveredCount).toBe(1);
+
+      // Since an event was delivered, next tick should be scheduled at intervalMs (100ms)!
+      await store.append({ type: "ProposalApproved", boardId: "b2" });
+      await vi.advanceTimersByTimeAsync(100);
+      expect(deliveredCount).toBe(2);
+
+      dispatcher.stop();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

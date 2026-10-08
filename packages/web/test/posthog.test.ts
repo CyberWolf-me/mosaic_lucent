@@ -1,11 +1,18 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   configurePostHog,
+  getSessionReplayUrl,
   identify,
+  isFeatureEnabled,
   isPostHogEnabled,
   pageview,
   resetUser,
   track,
+  trackAiAccepted,
+  trackAiFeedback,
+  trackAiGeneration,
+  trackAiPrompt,
+  trackAiUndone,
 } from "../src/analytics/posthog.js";
 
 describe("PostHog Web Analytics", () => {
@@ -91,6 +98,26 @@ describe("PostHog Web Analytics", () => {
       email: "user@example.com",
       name: "Alice",
     });
+  });
+
+  it("tracks AI activation funnel steps cleanly", () => {
+    // trackAiPrompt, trackAiGeneration, trackAiAccepted, trackAiUndone, trackAiFeedback
+    expect(() => {
+      trackAiPrompt("voice", "create");
+      trackAiGeneration("success", 1200, 15, false);
+      trackAiAccepted("gen_1");
+      trackAiUndone(15, "gen_1");
+      trackAiFeedback("positive", "clean layout");
+    }).not.toThrow();
+  });
+
+  it("evaluates feature flags with fallback defaults", () => {
+    expect(isFeatureEnabled("elk-layout", false)).toBe(false);
+    expect(isFeatureEnabled("elk-layout", true)).toBe(true);
+  });
+
+  it("provides session replay url when available without throwing", () => {
+    expect(() => getSessionReplayUrl()).not.toThrow();
   });
 
   it("handles network failure without throwing", () => {

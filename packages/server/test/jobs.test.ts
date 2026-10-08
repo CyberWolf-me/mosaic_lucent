@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { closeDb, createDb, type Db } from "../src/db/client.js";
 import { migrate } from "../src/db/migrate.js";
 import { jobs } from "../src/db/schema.js";
@@ -259,6 +259,52 @@ describe("the runner", () => {
     });
     await runner.tick();
     expect(runs).toBe(1);
+  });
+
+  it("backs off to idleIntervalMs when no jobs are claimed, resumes intervalMs when active", async () => {
+    vi.useFakeTimers();
+    try {
+      const queue = new InMemoryJobQueue();
+      let handled = 0;
+      const runner = new JobRunner({
+        queue,
+        workerId: "w1",
+        intervalMs: 100,
+        idleIntervalMs: 1000,
+        handlers: {
+          work: () => {
+            handled += 1;
+          },
+        },
+      });
+
+      runner.start();
+
+      // At 100ms: first tick fires, queue is empty (claimed = 0).
+      // Next tick should be scheduled at +1000ms (idleIntervalMs).
+      await vi.advanceTimersByTimeAsync(100);
+      expect(handled).toBe(0);
+
+      // Advance by 500ms (total 600ms). Idle interval has not elapsed yet.
+      await vi.advanceTimersByTimeAsync(500);
+      expect(handled).toBe(0);
+
+      // Now enqueue a job
+      await queue.enqueue({ family: "ai", type: "work" });
+
+      // Advance remaining 500ms (total 1100ms from start) -> idle tick fires and processes the job!
+      await vi.advanceTimersByTimeAsync(500);
+      expect(handled).toBe(1);
+
+      // Since a job was claimed, the next tick should be scheduled at intervalMs (100ms), NOT 1000ms!
+      await queue.enqueue({ family: "ai", type: "work" });
+      await vi.advanceTimersByTimeAsync(100);
+      expect(handled).toBe(2);
+
+      runner.stop();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

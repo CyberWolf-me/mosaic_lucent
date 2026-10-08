@@ -531,11 +531,14 @@ if (config.billing.stripeSecretKey || config.billing.stripeWebhookSecret) {
   console.log("[lucent] billing: Stripe configured (checkout, portal, webhook)");
 }
 
+const role = parseRole(process.env.LUCENT_ROLE);
+
 /**
- * M3: cross-instance wiring. When Postgres is configured, build the
- * PresenceStore + Fanout instances and a stable per-process `instanceId`.
- * The presence store writes to the `presence` table; the fanout opens a
- * dedicated `LISTEN` connection.
+ * M3: cross-instance wiring. When Postgres is configured and this role serves
+ * HTTP/WebSocket traffic, build the PresenceStore + Fanout instances and a
+ * stable per-process `instanceId`. The presence store writes to the `presence`
+ * table; the fanout opens a dedicated `LISTEN` connection. Non-HTTP workers
+ * and schedulers do not open LISTEN connections.
  *
  * Failure to open the LISTEN connection is loud-once-and-continue: the
  * presence store still works for the in-process path, and the fanout can
@@ -545,7 +548,7 @@ if (config.billing.stripeSecretKey || config.billing.stripeWebhookSecret) {
 let presenceStore: import("./presence.js").PresenceStore | undefined;
 let fanout: import("./fanout.js").Fanout | undefined;
 const instanceId = `srv_${process.pid}_${Math.random().toString(36).slice(2, 8)}`;
-if (db) {
+if (db && servesHttp(role)) {
   const { PostgresPresenceStore } = await import("./store/pg-presence.js");
   presenceStore = new PostgresPresenceStore(db);
   try {
@@ -822,14 +825,17 @@ metrics.collect(() => liveRooms.set(realtime.roomCount()));
 const pruneTimer = setInterval(() => {
   usage.prune();
   authLimiter.prune();
-  void tickets.prune();
+  if (runsJobs(role)) {
+    void tickets.prune();
+  }
 }, 10 * 60_000);
 pruneTimer.unref?.();
 
-// P2: start the outbox drain. Every second, a bounded batch; a no-op tick
-// costs one indexed SELECT of zero rows. Started here (not at construction)
-// so the store exists before anything can be queued against it.
-outboxDispatcher.start();
+// P2: start the outbox drain under the worker role (or LUCENT_ROLE=all fallback).
+// API instances do not drain the outbox to prevent duplicate polling queries.
+if (runsJobs(role)) {
+  outboxDispatcher.start();
+}
 
 // M4.3: the webhook sweep. Stripe redelivers for ~3 days; this is what picks
 // up the rows that outlive those retries, plus deliveries whose worker died
@@ -1116,8 +1122,7 @@ async function sweepIntegration(): Promise<void> {
 //
 // The scheduler is leaderless: it enqueues with a dedupe key, and the queue's
 // partial unique index makes a second scheduler's enqueue a no-op. That is
-// why there is no leader election here — the claim already provides it.
-const role = parseRole(process.env.LUCENT_ROLE);
+// (role was parsed above before presence/fanout setup)
 // (jobQueue is built beside the outbox above, so its consumers can queue work.)
 
 async function runSchedulerTick(): Promise<void> {
@@ -1293,8 +1298,11 @@ async function shutdown(signal: string): Promise<void> {
   // Drain once before closing the pool: a committed event that has not been
   // delivered is the one thing this process is holding that a restart would
   // otherwise have to wait a full interval to pick up.
-  outboxDispatcher.stop();
-  await outboxDispatcher.tick().catch(() => undefined);
+  if (runsJobs(role)) {
+    outboxDispatcher.stop();
+    await outboxDispatcher.tick().catch(() => undefined);
+  }
+  jobRunner?.stop();
   realtime.close();
   await new Promise<void>((resolve) => server.close(() => resolve()));
   if (db) await closeDb(db);

@@ -48,6 +48,9 @@ const spoken: Spoken[] = [];
 
 function stubSpeechSynthesis() {
   vi.stubGlobal("window", {
+    ...(globalThis.window as object | undefined),
+    addEventListener: () => {},
+    removeEventListener: () => {},
     speechSynthesis: {
       speak: (u: { text: string; onend: (() => void) | null; onerror: (() => void) | null }) => {
         spoken.push({
@@ -79,6 +82,8 @@ const played: Played[] = [];
 function stubAudio() {
   vi.stubGlobal("window", {
     ...(globalThis.window as object | undefined),
+    addEventListener: () => {},
+    removeEventListener: () => {},
     Audio: class {
       onended: (() => void) | null = null;
       onerror: (() => void) | null = null;
