@@ -22,7 +22,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
     method: context.request.method,
     headers: context.request.headers,
     body: context.request.body,
-    redirect: "follow",
+    redirect: "manual",
   });
 
   const response = await fetch(modifiedRequest);
