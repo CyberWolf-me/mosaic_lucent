@@ -396,10 +396,11 @@ async function run() {
     console.log("\n4. Launching dual visual Playwright browsers (Canvas & Meeting Mode)...");
     const domain = new URL(BASE_URL).hostname;
 
-    // Browser Context 1: Alice (Canvas View)
+    // Browser Context 1: Alice (Canvas View & Call Host)
     const contextCanvas = await browser.newContext({
       viewport: { width: 1440, height: 900 },
       deviceScaleFactor: 1,
+      permissions: ["camera", "microphone"],
     });
     if (owner.sessionCookie) {
       await contextCanvas.addCookies([
@@ -487,17 +488,72 @@ async function run() {
       });
     });
 
-    console.log("Navigating Page 1 to Canvas view and Page 2 to Meeting view...");
-    await Promise.all([
-      pageCanvas.goto(`${BASE_URL}/?view=canvas&board=${boardId}`, {
-        waitUntil: "networkidle",
-        timeout: 30000,
-      }),
-      pageMeeting.goto(`${BASE_URL}/?view=meeting&board=${boardId}`, {
-        waitUntil: "networkidle",
-        timeout: 30000,
-      }),
-    ]);
+    console.log("Setting up live WebRTC video call between Host (Alice) and Co-Host (Bob)...");
+
+    // 1. Host (Alice) enters meeting call lobby and joins
+    await pageCanvas.goto(`${BASE_URL}/?view=meeting&board=${boardId}&call=1`, {
+      waitUntil: "networkidle",
+      timeout: 30000,
+    });
+    const joinA = pageCanvas.locator(".call-join").first();
+    await joinA.waitFor({ timeout: 15000 });
+    await joinA.click();
+    await pageCanvas.waitForSelector(".call-stage", { timeout: 20000 });
+    console.log("Alice joined call stage as Host!");
+
+    // 2. Co-Host (Bob) enters meeting call lobby and joins
+    await pageMeeting.goto(`${BASE_URL}/?view=meeting&board=${boardId}&call=1`, {
+      waitUntil: "networkidle",
+      timeout: 30000,
+    });
+    const joinB = pageMeeting.locator(".call-join").first();
+    await joinB.waitFor({ timeout: 15000 });
+    await joinB.click();
+
+    // 3. Alice admits Bob via knock banner or API admit endpoint
+    const knock = pageCanvas.locator(".call-banner.is-waiting").filter({ hasText: user2.name });
+    try {
+      await knock.waitFor({ timeout: 6000 });
+      console.log("Alice clicked Let In on knock banner...");
+      await knock.getByRole("button", { name: "Let in" }).click();
+    } catch {
+      console.log("Admitting Bob via API admit endpoint...");
+      await fetchJson(`${BASE_URL}/api/boards/${boardId}/call/admit`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${owner.token}`,
+          "x-csrf-token": owner.csrfToken,
+        },
+        body: JSON.stringify({ userId: user2.id, allow: true }),
+      });
+    }
+
+    await pageMeeting.waitForSelector(".call-stage", { timeout: 20000 });
+    console.log("Bob joined call stage alongside Alice!");
+
+    // Wait for live media tiles to be populated
+    await pageMeeting.waitForTimeout(3000);
+    const meetingTiles = await pageMeeting.locator(".call-tile").count();
+    check(
+      "Meeting Call Stage active with connected participants & live media tiles",
+      meetingTiles >= 1,
+      `Participants connected on stage: ${meetingTiles} tile(s)`
+    );
+
+    // Save proof screenshot of Alice in full Call Stage
+    const shotPathCallAlice = path.join(ARTIFACT_DIR, "realtime_50_users_call_alice.png");
+    await pageCanvas.screenshot({ path: shotPathCallAlice, fullPage: false });
+    console.log(`Saved Host Call Stage screenshot: ${shotPathCallAlice}`);
+
+    // 4. Now Alice switches to Canvas view via rail navigation (preserving the active WebRTC call)
+    console.log("Switching Alice to Canvas view via rail navigation...");
+    const canvasRailBtn = pageCanvas.locator('button[aria-label="Canvas"]');
+    if ((await canvasRailBtn.count()) > 0) {
+      await canvasRailBtn.click();
+    } else {
+      await pageCanvas.goto(`${BASE_URL}/?view=canvas&board=${boardId}`, { waitUntil: "networkidle" });
+    }
 
     // Check canvas nodes loaded
     const canvasLoaded = await waitFor(async () => {
@@ -506,20 +562,16 @@ async function run() {
     }, 15000);
     check("Canvas view rendered live board architecture", !!canvasLoaded);
 
-    // If lobby join button is available, click it to enter call
-    const joinBtn = pageMeeting.locator(".call-join");
-    if ((await joinBtn.count()) > 0 && (await joinBtn.isVisible())) {
-      console.log("Entering meeting room via Call Lobby join button...");
-      await joinBtn.click().catch(() => {});
-      await pageMeeting.waitForTimeout(1000);
-    }
-
-    const meetingViewLoaded = await waitFor(async () => {
-      const hasStage =
-        (await pageMeeting.locator(".call-stage, .call-lobby, .meet-panel").count()) > 0;
-      return hasStage;
-    }, 15000);
-    check("Meeting view rendered call stage & controls", !!meetingViewLoaded);
+    // Check that Alice's Canvas view renders the active Meeting Huddle dock
+    const huddleDockLoaded = await waitFor(async () => {
+      const dock = await pageCanvas.locator(".meeting-huddle-dock").count();
+      return dock > 0;
+    }, 12000);
+    check(
+      "Board canvas renders with active Meeting Huddle dock",
+      !!huddleDockLoaded,
+      "Live call docked at corner with participant media previews"
+    );
 
     // Connect remaining 48 users via WebSockets concurrently
     console.log(`Connecting remaining 48 users via WebSockets simultaneously...`);
