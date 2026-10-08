@@ -886,7 +886,44 @@ function splitDetailLines(details: unknown): unknown {
   };
 }
 
-export function sanitizeRawOperations(raw: unknown): unknown {
+/**
+ * Batch-wide shapes that fail every operation at once, so nothing is left to
+ * salvage: the array sent as a JSON string, the array wrapped in its own
+ * `{ operations: [...] }` object, or one bare operation instead of a list.
+ */
+function unwrapOperations(raw: unknown): unknown {
+  let value = raw;
+  if (typeof value === "string") {
+    try {
+      value = JSON.parse(value);
+    } catch {
+      return raw;
+    }
+  }
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    const inner = (value as { operations?: unknown }).operations;
+    if (Array.isArray(inner)) return inner;
+    if ("op" in value) return [value];
+    return raw;
+  }
+  return Array.isArray(value) ? value : raw;
+}
+
+/** Keys a model uses for the operation name when it leaves out `op`. */
+const OP_NAME_KEYS = ["operation", "action", "type"] as const;
+
+/** Keys a model uses to nest the operation fields one level down. */
+const NESTED_ARG_KEYS = ["params", "parameters", "args", "arguments", "payload"] as const;
+
+function knownOpName(value: unknown, knownOps: ReadonlySet<string>): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const name = value.toUpperCase().trim();
+  const resolved = OP_ALIASES[name] ?? name;
+  return knownOps.has(resolved) ? resolved : undefined;
+}
+
+export function sanitizeRawOperations(input: unknown): unknown {
+  const raw = unwrapOperations(input);
   if (!Array.isArray(raw)) return raw;
   const knownOps = new Set(ALL_OPERATION_NAMES);
   const normalized: Array<Record<string, unknown>> = [];
@@ -897,8 +934,29 @@ export function sanitizeRawOperations(raw: unknown): unknown {
     }
     const copy = { ...item } as Record<string, unknown>;
     let op = typeof copy.op === "string" ? copy.op.toUpperCase().trim() : "";
+    if (!op) {
+      for (const key of OP_NAME_KEYS) {
+        const named = knownOpName(copy[key], knownOps);
+        if (named) {
+          op = named;
+          delete copy[key];
+          break;
+        }
+      }
+    }
     const aliased = OP_ALIASES[op];
     if (aliased) op = aliased;
+    const contract = KNOWN_OP_KEYS.get(op);
+    for (const key of NESTED_ARG_KEYS) {
+      const nested = copy[key];
+      if (contract?.has(key) || !nested || typeof nested !== "object" || Array.isArray(nested)) {
+        continue;
+      }
+      delete copy[key];
+      for (const [k, v] of Object.entries(nested)) {
+        if (copy[k] === undefined) copy[k] = v;
+      }
+    }
     if (!knownOps.has(op)) {
       if (copy.source && copy.target) {
         op = "CONNECT_NODES";

@@ -5141,8 +5141,16 @@ export function createApp(deps: AppDeps): App {
           operations: ops,
           outcome: result.outcome,
           repaired: result.repaired,
+          ...(result.schemaIssues ? { schemaIssues: result.schemaIssues } : {}),
           requestId: traceOf(req),
         });
+        if (result.schemaIssues) {
+          logger.warn("generate_schema_issues", {
+            requestId: traceOf(req),
+            outcome: result.outcome,
+            issues: result.schemaIssues,
+          });
+        }
         if (result.status >= 400) {
           telemetry.record({
             kind: "error",
@@ -5368,8 +5376,16 @@ export function createApp(deps: AppDeps): App {
           operations: outcome.operations,
           outcome: outcome.outcome,
           repaired: outcome.repaired,
+          ...(outcome.schemaIssues ? { schemaIssues: outcome.schemaIssues } : {}),
           requestId: traceOf(req),
         });
+        if (outcome.schemaIssues) {
+          logger.warn("generate_schema_issues", {
+            requestId: traceOf(req),
+            outcome: outcome.outcome,
+            issues: outcome.schemaIssues,
+          });
+        }
         if (outcome.status >= 400) {
           telemetry.record({
             kind: "error",

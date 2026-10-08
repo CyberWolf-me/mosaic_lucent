@@ -156,6 +156,20 @@ export interface Allowance {
 }
 
 /**
+ * A generation the server refused in its terminal stream frame. `schemaIssues`
+ * is set when the model's batch had no valid operation even after the repair
+ * round: the failing schema locations, with no model content.
+ */
+export class GenerateError extends Error {
+  constructor(
+    message: string,
+    readonly schemaIssues?: string[],
+  ) {
+    super(message);
+  }
+}
+
+/**
  * Turn a failed response into the error to throw, so "backend not running" is
  * never reported as "the AI service is unavailable".
  *
@@ -557,6 +571,7 @@ export async function streamGenerate(
   let buffer = "";
   let done: GenerateResponse | null = null;
   let failure: string | null = null;
+  let failureIssues: string[] | undefined;
 
   const handleFrame = (event: string, data: unknown): void => {
     if (event === "phase") {
@@ -633,11 +648,14 @@ export async function streamGenerate(
       return;
     }
     if (event === "error") {
-      const body = data as { error?: unknown; detail?: unknown };
+      const body = data as { error?: unknown; detail?: unknown; schemaIssues?: unknown };
       failure =
         typeof body.error === "string"
           ? body.error + (typeof body.detail === "string" ? ` — ${body.detail}` : "")
           : "The generation failed.";
+      if (Array.isArray(body.schemaIssues)) {
+        failureIssues = body.schemaIssues.filter((i): i is string => typeof i === "string");
+      }
     }
   };
 
@@ -680,7 +698,7 @@ export async function streamGenerate(
   }
   externalSignal?.removeEventListener("abort", onExternalAbort);
 
-  if (failure) throw new Error(failure);
+  if (failure) throw new GenerateError(failure, failureIssues);
   if (!done) throw new Error("The stream ended without a result — please try again.");
   return done;
 }

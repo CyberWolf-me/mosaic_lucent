@@ -6,7 +6,11 @@ export * from "./externalPlan.js";
 export { MockProvider } from "./providers/mock.js";
 export { AnthropicProvider } from "./providers/anthropic.js";
 export { OpenAICompatibleProvider } from "./providers/openai-compat.js";
-export { parseModelJson, parseToolArguments } from "./providers/toolCall.js";
+export {
+  InvalidOperationsError,
+  parseModelJson,
+  parseToolArguments,
+} from "./providers/toolCall.js";
 export * from "./image.js";
 export * from "./vector.js";
 export * from "./notes.js";

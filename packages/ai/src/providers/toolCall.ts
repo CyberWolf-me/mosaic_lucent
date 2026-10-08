@@ -70,6 +70,43 @@ export function completionMeta(
   };
 }
 
+/**
+ * Thrown when no operation in the model's batch passes the schema. It carries
+ * what a caller needs to ask the model for one repair and to log the failure:
+ * the rejected batch, the zod issues, and the tokens the failed call spent.
+ */
+export class InvalidOperationsError extends Error {
+  override readonly name = "InvalidOperationsError";
+  constructor(
+    message: string,
+    readonly rejected: unknown,
+    readonly issues: ReadonlyArray<{ path: PropertyKey[]; code: string; message: string }>,
+    readonly usage?: TokenUsage,
+  ) {
+    super(message);
+  }
+
+  /**
+   * The issue locations with no model content: the operation name, then the
+   * field path with list indexes as `*`, then the zod code. Safe to log and to
+   * send to analytics, and stable enough to group by.
+   */
+  issuePaths(limit = 10): string[] {
+    const ops = Array.isArray(this.rejected) ? this.rejected : [];
+    const paths = new Set<string>();
+    for (const issue of this.issues) {
+      const [first, ...rest] = issue.path;
+      const entry = typeof first === "number" ? (ops[first] as { op?: unknown } | null) : null;
+      const op =
+        typeof first !== "number" ? "(batch)" : typeof entry?.op === "string" ? entry.op : "(op)";
+      const field = rest.map((k) => (typeof k === "number" ? "*" : String(k))).join(".");
+      paths.add(`${op}${field ? `.${field}` : ""}:${issue.code}`);
+      if (paths.size >= limit) break;
+    }
+    return [...paths];
+  }
+}
+
 function toResult(parsed: ToolArgs, source: string, meta?: CompletionMeta): GenerateResult {
   const sanitized = sanitizeRawOperations(parsed.operations ?? []);
   const result = safeParseOperations(sanitized);
@@ -93,7 +130,12 @@ function toResult(parsed: ToolArgs, source: string, meta?: CompletionMeta): Gene
         .slice(0, 3)
         .map((i) => `${i.path.join(".") || "item"}: ${i.message}`)
         .join("; ");
-      throw new Error(`Model returned invalid operations (${source}): ${issues}`);
+      throw new InvalidOperationsError(
+        `Model returned invalid operations (${source}): ${issues}`,
+        sanitized,
+        result.error.issues,
+        meta?.usage,
+      );
     }
   }
 

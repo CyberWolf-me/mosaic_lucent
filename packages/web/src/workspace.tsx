@@ -28,7 +28,8 @@ import {
   type Operation,
   type Workspace,
 } from "@lucent/core";
-import { streamGenerate, PlanRefusalError } from "./api.js";
+import { streamGenerate, GenerateError, PlanRefusalError } from "./api.js";
+import { trackAiGeneration } from "./analytics/posthog.js";
 import {
   elkEligible,
   elkRegionEligible,
@@ -1040,6 +1041,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       const aborter = new AbortController();
       genAbortRef.current = aborter;
       setGenPhase("understanding");
+      const startedAt = Date.now();
+      let outcomeTracked = false;
       try {
         // `chat` (not withUser) is the prior conversation; the current message is
         // sent separately, so passing withUser would duplicate it.
@@ -1094,6 +1097,11 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         setStreamNodes([]);
         setStreamThinking("");
         setGenPhase("validating");
+        // A batch with no ops and no words is a failure; the catch records it.
+        if (result.operations.length > 0 || result.explanation?.trim() || result.reply?.trim()) {
+          trackAiGeneration("success", Date.now() - startedAt, result.operations.length);
+          outcomeTracked = true;
+        }
         if (result.clarification) {
           setClarification(result.clarification);
         }
@@ -1384,17 +1392,38 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           !/quota|rate limit|plan|auth|access/i.test(rawMsg);
 
         let userMsg = rawMsg;
+        let errorKind = "other";
         if (
           /Model returned invalid operations|invalid diagram operations|safeParseOperations|invalid_type/i.test(
             rawMsg,
           )
         ) {
+          errorKind = "schema";
           userMsg =
             "Lucent had trouble formatting the layout operations for that request. Try describing the change a bit differently.";
         } else if (/failed to fetch|networkerror|fetch failed/i.test(rawMsg)) {
+          errorKind = "network";
           userMsg = "Unable to reach the server. Please check your connection.";
         } else if (/rate limit|too many requests|429/i.test(rawMsg)) {
+          errorKind = "rate_limit";
           userMsg = "AI provider rate limit reached. Please wait a moment before trying again.";
+        } else if (/failed validation|drew nothing/i.test(rawMsg)) {
+          errorKind = "validation";
+        }
+        if (!cancelled && !outcomeTracked) {
+          trackAiGeneration(
+            errorKind === "schema" || errorKind === "validation"
+              ? "validation_error"
+              : "provider_error",
+            Date.now() - startedAt,
+            0,
+            {
+              kind: err instanceof PlanRefusalError ? "plan" : errorKind,
+              ...(err instanceof GenerateError && err.schemaIssues
+                ? { schemaIssues: err.schemaIssues }
+                : {}),
+            },
+          );
         }
 
         const conversation: ChatEntry[] = [
