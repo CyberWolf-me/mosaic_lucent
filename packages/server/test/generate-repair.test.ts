@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { summarizeWorkspace } from "@lucent/ai";
+import { parseToolArguments, summarizeWorkspace } from "@lucent/ai";
 import type { GenerateResult, LLMProvider } from "@lucent/ai";
 import { createWorkspace } from "@lucent/core";
 import type { Operation } from "@lucent/core";
@@ -23,7 +23,9 @@ const GOOD_BATCH: Operation[] = [
 ];
 
 /** Provider that fails validation on the first call, answers a script after. */
-function scriptedProvider(responses: GenerateResult[]): LLMProvider & {
+function scriptedProvider(
+  responses: Array<GenerateResult | (() => GenerateResult)>,
+): LLMProvider & {
   calls: Array<{ message: string }>;
 } {
   const calls: Array<{ message: string }> = [];
@@ -34,7 +36,7 @@ function scriptedProvider(responses: GenerateResult[]): LLMProvider & {
       calls.push({ message: request.message });
       const next = responses[calls.length - 1];
       if (!next) throw new Error("script exhausted");
-      return next;
+      return typeof next === "function" ? next() : next;
     },
     // Stage C1 made generateAnswer part of the interface; unreachable here.
     async generateAnswer() {
@@ -102,5 +104,54 @@ describe("bounded repair round", () => {
     expect(result.status).toBe(200);
     expect(provider.calls).toHaveLength(1);
     expect(result.completion?.usage).toEqual({ inputTokens: 12, outputTokens: 9 });
+  });
+});
+
+describe("schema repair round", () => {
+  /** A real parse of a batch where no operation passes the schema. */
+  const schemaFailure = () =>
+    parseToolArguments(
+      { operations: [{ op: "CREATE_NODE", id: "a", nodeType: "step", label: "A", groupId: "" }] },
+      { usage: { inputTokens: 7, outputTokens: 3 } },
+    );
+
+  it("retries once with the schema issues and the original request, then succeeds", async () => {
+    const provider = scriptedProvider([
+      schemaFailure,
+      { operations: GOOD_BATCH, usage: { inputTokens: 20, outputTokens: 8 } },
+    ]);
+    const result = await handleGenerate(provider, { message: "add a node", summary: emptySummary });
+    expect(result.status).toBe(200);
+    expect(provider.calls).toHaveLength(2);
+    expect(provider.calls[1]!.message).toContain("rejected by the operation schema");
+    expect(provider.calls[1]!.message).toContain("0.groupId");
+    expect(provider.calls[1]!.message).toContain("add a node");
+    expect(result.repaired).toBe(true);
+    expect(result.schemaIssues).toEqual(["CREATE_NODE.groupId:too_small"]);
+    // The failed call's tokens are metered with the repair call's.
+    expect(result.completion?.usage).toEqual({ inputTokens: 27, outputTokens: 11 });
+  });
+
+  it("answers 422 validation, not a 502, when the repair also fails the schema", async () => {
+    const provider = scriptedProvider([schemaFailure, schemaFailure]);
+    const result = await handleGenerate(provider, { message: "x", summary: emptySummary });
+    expect(result.status).toBe(422);
+    expect(result.outcome).toBe("validation");
+    expect(provider.calls).toHaveLength(2);
+    const body = result.body as { detail: string; schemaIssues: string[] };
+    expect(body.detail).toMatch(/Model returned invalid operations/);
+    expect(body.schemaIssues).toEqual(["CREATE_NODE.groupId:too_small"]);
+  });
+
+  it("keeps a transport failure on the first call a 502 with no retry", async () => {
+    const provider = scriptedProvider([
+      () => {
+        throw new Error("upstream 503");
+      },
+    ]);
+    const result = await handleGenerate(provider, { message: "x", summary: emptySummary });
+    expect(result.status).toBe(502);
+    expect(provider.calls).toHaveLength(1);
+    expect(result.schemaIssues).toBeUndefined();
   });
 });

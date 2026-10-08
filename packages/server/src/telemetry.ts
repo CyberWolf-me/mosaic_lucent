@@ -39,6 +39,8 @@ export type TelemetryEvent =
        */
       outcome: "success" | "provider" | "validation" | "other";
       repaired: boolean;
+      /** Where a batch with no valid operation failed the schema; no model content. */
+      schemaIssues?: string[];
     } & Correlated)
   | ({ kind: "image"; ms: number; provider: string } & Correlated)
   /**

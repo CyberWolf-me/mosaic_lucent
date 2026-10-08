@@ -1,5 +1,10 @@
 import { describe, it, expect, vi } from "vitest";
-import { AnthropicProvider, OpenAICompatibleProvider, parseToolArguments } from "../src/index.js";
+import {
+  AnthropicProvider,
+  InvalidOperationsError,
+  OpenAICompatibleProvider,
+  parseToolArguments,
+} from "../src/index.js";
 import { summarizeWorkspace } from "../src/index.js";
 import { createWorkspace, TOOL_NAME } from "@lucent/core";
 
@@ -113,6 +118,25 @@ describe("OpenAI-compatible tool calling", () => {
     await expect(makeOpenAi(fetchImpl).generateOperations(request)).rejects.toThrow(
       /invalid operations/i,
     );
+  });
+
+  it("throws InvalidOperationsError with content-free issue paths", () => {
+    let caught: unknown;
+    try {
+      parseToolArguments({
+        operations: [
+          { op: "CREATE_NODE", id: "a", nodeType: "step", label: "secret label", groupId: "" },
+          { op: "CONNECT_NODES", source: "a" },
+        ],
+      });
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(InvalidOperationsError);
+    const paths = (caught as InvalidOperationsError).issuePaths();
+    expect(paths).toContain("CREATE_NODE.groupId:too_small");
+    expect(paths.some((p) => p.startsWith("CONNECT_NODES.target:"))).toBe(true);
+    expect(paths.join(" ")).not.toContain("secret");
   });
 
   it("reports unparseable tool arguments clearly", async () => {

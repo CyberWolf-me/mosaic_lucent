@@ -286,18 +286,23 @@ export function trackAiPrompt(source: "voice" | "text" | "quick_action", mode: s
   track("ai_prompt_submitted", { source, mode });
 }
 
-/** Record when an AI generation completes. */
+/**
+ * Record how an AI generation ended, success or failure. `operation_count`,
+ * not `operations_count`: `sanitize` drops every key that starts with
+ * "operations". `schemaIssues` are schema locations only, never model content.
+ */
 export function trackAiGeneration(
   outcome: "success" | "validation_error" | "provider_error",
   durationMs: number,
-  operationsCount: number,
-  repaired = false,
+  operationCount: number,
+  failure?: { kind: string; schemaIssues?: string[] },
 ): void {
   track("ai_generation_completed", {
     outcome,
     duration_ms: durationMs,
-    operations_count: operationsCount,
-    repaired,
+    operation_count: operationCount,
+    error_kind: failure?.kind,
+    schema_issues: failure?.schemaIssues,
   });
 }
 

@@ -104,7 +104,7 @@ describe("PostHog Web Analytics", () => {
     // trackAiPrompt, trackAiGeneration, trackAiAccepted, trackAiUndone, trackAiFeedback
     expect(() => {
       trackAiPrompt("voice", "create");
-      trackAiGeneration("success", 1200, 15, false);
+      trackAiGeneration("success", 1200, 15);
       trackAiAccepted("gen_1");
       trackAiUndone(15, "gen_1");
       trackAiFeedback("positive", "clean layout");

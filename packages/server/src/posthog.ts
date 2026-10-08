@@ -58,6 +58,7 @@ export function createPostHogSink(
           operations_count: event.operations,
           outcome: event.outcome,
           repaired: event.repaired,
+          schema_issues: event.schemaIssues,
           request_id: event.requestId,
         });
         break;

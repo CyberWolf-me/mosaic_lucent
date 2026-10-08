@@ -1,5 +1,10 @@
 import { z } from "zod";
-import { REQUEST_LIMITS, streamViaGenerate, summarizeWorkspace } from "@lucent/ai";
+import {
+  InvalidOperationsError,
+  REQUEST_LIMITS,
+  streamViaGenerate,
+  summarizeWorkspace,
+} from "@lucent/ai";
 import type { GenerateResult, LLMProvider, StreamCallbacks, TokenUsage } from "@lucent/ai";
 import {
   ASSISTANT_AUTHOR,
@@ -446,6 +451,8 @@ export interface HandleResult {
   outcome: GenerateOutcome;
   /** Whether the bounded repair round ran, success or not. */
   repaired: boolean;
+  /** Schema issue paths of a first batch that had no valid operation (see PipelineOutcome). */
+  schemaIssues?: string[];
   /**
    * What the provider reported about the completion: which model answered and
    * what it cost. Deliberately a sibling of `body` rather than a field in it —
@@ -520,6 +527,48 @@ async function requestRepair(
     });
   } catch {
     return null;
+  }
+}
+
+/**
+ * The schema repair round: the first batch had no operation that passed the
+ * schema, so nothing was left to validate or salvage. Hand the model its
+ * rejected batch and the schema issues once, with the original request,
+ * because on an empty board the rejected batch can be all the model has. The
+ * result carries the tokens of both calls. A failure comes back as the error,
+ * never a throw: the caller reports the first schema failure.
+ */
+async function requestSchemaRepair(
+  provider: LLMProvider,
+  request: z.infer<typeof generateRequestSchema>,
+  failed: InvalidOperationsError,
+): Promise<GenerateResult | Error> {
+  const complaints = failed.issues
+    .slice(0, REPAIR_ERROR_BUDGET)
+    .map((i) => `- ${i.path.join(".") || "operations"}: ${i.message}`)
+    .join("\n");
+  const message = [
+    "Your previous batch was rejected by the operation schema: no operation in it was valid.",
+    "Rejected batch:",
+    JSON.stringify(failed.rejected ?? null).slice(0, REPAIR_OPS_BUDGET),
+    "Schema errors:",
+    complaints,
+    "Emit the full batch again as an `operations` array of objects, each with an `op` field from the permitted vocabulary and the fields that operation requires.",
+    "The original request:",
+    request.message,
+  ].join("\n");
+  try {
+    const second = await provider.generateOperations({
+      ...request,
+      message: message.slice(0, REQUEST_LIMITS.messageChars),
+    });
+    const usage = usageFor(second, {
+      operations: [],
+      ...(failed.usage ? { usage: failed.usage } : {}),
+    });
+    return { ...second, ...(usage ? { usage } : {}) };
+  } catch (err) {
+    return err as Error;
   }
 }
 
@@ -675,12 +724,14 @@ export async function handleGenerate(
       body: outcome.body,
       outcome: outcome.outcome,
       repaired: outcome.repaired,
+      schemaIssues: outcome.schemaIssues,
     };
   }
   return {
     status: 200,
     outcome: outcome.outcome,
     repaired: outcome.repaired,
+    schemaIssues: outcome.schemaIssues,
     body: {
       operations: outcome.operations,
       explanation: outcome.explanation,
@@ -738,6 +789,12 @@ export type PipelineOutcome =
        * land and offer to re-ask the model for just those.
        */
       warnings?: Array<{ op: string; reason: string }>;
+      /**
+       * Set when the first batch had no operation that passed the schema and
+       * the schema repair round ran: where the batch failed, with no model
+       * content (InvalidOperationsError.issuePaths). Safe to log.
+       */
+      schemaIssues?: string[];
     }
   | {
       ok: false;
@@ -747,6 +804,7 @@ export type PipelineOutcome =
       outcome: GenerateOutcome;
       /** False on every refusal: the repair round only runs post-provider. */
       repaired: boolean;
+      schemaIssues?: string[];
     };
 
 /**
@@ -816,6 +874,8 @@ async function runGeneratePipeline(
   };
 
   let result;
+  let repaired = false;
+  let schemaIssues: string[] | undefined;
   try {
     result = stream
       ? await (provider.streamOperations
@@ -823,13 +883,36 @@ async function runGeneratePipeline(
           : streamViaGenerate(provider, modelRequest, stream))
       : await provider.generateOperations(modelRequest);
   } catch (err) {
-    return {
-      ok: false,
-      status: 502,
-      body: { error: "provider failed", detail: (err as Error).message },
-      outcome: "provider",
-      repaired: false,
-    };
+    if (!(err instanceof InvalidOperationsError)) {
+      return {
+        ok: false,
+        status: 502,
+        body: { error: "provider failed", detail: (err as Error).message },
+        outcome: "provider",
+        repaired: false,
+      };
+    }
+    // The model answered, but no operation passed the schema. This used to be
+    // a 502 and an empty board. Give the model one schema repair round.
+    schemaIssues = err.issuePaths();
+    repaired = true;
+    const second = await requestSchemaRepair(provider, parsed.data, err);
+    if (second instanceof Error) {
+      return {
+        ok: false,
+        status: 422,
+        body: {
+          error: "operations failed validation",
+          detail: err.message,
+          schemaIssues,
+          repaired,
+        },
+        outcome: "validation",
+        repaired,
+        schemaIssues,
+      };
+    }
+    result = second;
   }
 
   // Defence in depth: the tool schema already withholds coordinate-bearing
@@ -866,7 +949,6 @@ async function runGeneratePipeline(
   // and a batch that cannot be repaired once will rarely repair twice. A
   // provider failure inside the round is not a 502 — the first call
   // succeeded, so the honest answer is still the validation failure.
-  let repaired = false;
   const firstResult = result;
   if (errors.length > 0) {
     const second = await requestRepair(provider, parsed.data, operations, errors);
@@ -890,7 +972,7 @@ async function runGeneratePipeline(
   // metered as a separate attempt ONLY when a repair round actually replaced
   // `result` — otherwise it IS `result`, and summing it would double-count a
   // single call's tokens.
-  const priorAttempt = repaired ? firstResult : undefined;
+  const priorAttempt = result !== firstResult ? firstResult : undefined;
   let completion: NonNullable<HandleResult["completion"]> = {
     ...(result.model ? { model: result.model } : {}),
     ...(usageFor(result, priorAttempt) ? { usage: usageFor(result, priorAttempt)! } : {}),
@@ -912,6 +994,7 @@ async function runGeneratePipeline(
       body: { error: "operations failed validation", errors, repaired },
       outcome: "validation",
       repaired,
+      schemaIssues,
     };
   }
   let warnings = partial
@@ -1074,6 +1157,7 @@ async function runGeneratePipeline(
       warnings,
       outcome: "success",
       repaired,
+      schemaIssues,
       thinking: result.thinking ?? null,
       latencyMs,
     };
@@ -1093,6 +1177,7 @@ async function runGeneratePipeline(
     warnings,
     outcome: "success",
     repaired,
+    schemaIssues,
     thinking: result.thinking ?? null,
     latencyMs,
   };
@@ -1135,6 +1220,7 @@ export async function handleGenerateStream(
   completion: NonNullable<HandleResult["completion"]> | null;
   outcome: GenerateOutcome;
   repaired: boolean;
+  schemaIssues?: string[];
 }> {
   const emit = send ?? (() => {});
   emit("start", { provider: provider.name, streaming: true });
@@ -1170,6 +1256,7 @@ export async function handleGenerateStream(
       completion: null,
       outcome: outcome.outcome,
       repaired: outcome.repaired,
+      schemaIssues: outcome.schemaIssues,
     };
   }
   emit("phase", { phase: "validating", message: "Optimizing layout..." });
@@ -1209,5 +1296,6 @@ export async function handleGenerateStream(
     completion: outcome.completion,
     outcome: outcome.outcome,
     repaired: outcome.repaired,
+    schemaIssues: outcome.schemaIssues,
   };
 }

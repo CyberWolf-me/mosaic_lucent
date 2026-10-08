@@ -263,3 +263,37 @@ describe("sanitizeRawOperations tolerance", () => {
     expect(updatedWs.wireframes["wf-main"]?.title).toBe("New Wireframe");
   });
 });
+
+describe("sanitizeRawOperations batch-wide shapes", () => {
+  const node = { op: "CREATE_NODE", id: "n1", nodeType: "step", label: "Start" };
+
+  it("accepts the batch as a JSON string, a wrapper object, or one bare operation", () => {
+    expect(parseOperations(JSON.stringify([node]))).toHaveLength(1);
+    expect(parseOperations({ operations: [node] })).toHaveLength(1);
+    expect(parseOperations(JSON.stringify({ operations: [node] }))).toHaveLength(1);
+    expect(parseOperations(node)).toHaveLength(1);
+  });
+
+  it("reads the operation name from operation, action, or type when op is missing", () => {
+    const fixed = parseOperations([
+      { operation: "create_node", id: "a", nodeType: "step", label: "A" },
+      { action: "ADD_NODE", id: "b", nodeType: "step", label: "B" },
+      { type: "CONNECT_NODES", source: "a", target: "b", relationship: "next" },
+    ]);
+    expect(fixed.map((o) => o.op)).toEqual(["CREATE_NODE", "CREATE_NODE", "CONNECT_NODES"]);
+    expect(fixed[0]).toMatchObject({ nodeType: "step" });
+  });
+
+  it("lifts operation fields nested under params or arguments", () => {
+    const fixed = parseOperations([
+      { op: "CREATE_NODE", params: { id: "a", nodeType: "step", label: "A" } },
+      { op: "CONNECT_NODES", arguments: { source: "a", target: "b", relationship: "next" } },
+    ]);
+    expect(fixed[0]).toMatchObject({ id: "a", nodeType: "step", label: "A" });
+    expect(fixed[1]).toMatchObject({ source: "a", target: "b" });
+  });
+
+  it("leaves an unparseable string for the schema to reject", () => {
+    expect(() => parseOperations("not json")).toThrow();
+  });
+});
