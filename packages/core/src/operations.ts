@@ -925,7 +925,7 @@ function knownOpName(value: unknown, knownOps: ReadonlySet<string>): string | un
 export function sanitizeRawOperations(input: unknown): unknown {
   const raw = unwrapOperations(input);
   if (!Array.isArray(raw)) return raw;
-  const knownOps: ReadonlySet<string> = new Set(ALL_OPERATION_NAMES);
+  const knownOps = new Set(ALL_OPERATION_NAMES);
   const normalized: Array<Record<string, unknown>> = [];
   for (const item of raw) {
     if (!item || typeof item !== "object") {

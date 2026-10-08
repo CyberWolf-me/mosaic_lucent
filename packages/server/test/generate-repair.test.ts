@@ -132,6 +132,17 @@ describe("schema repair round", () => {
     expect(result.completion?.usage).toEqual({ inputTokens: 27, outputTokens: 11 });
   });
 
+  it("never runs the validation round after the schema round", async () => {
+    const provider = scriptedProvider([
+      schemaFailure,
+      { operations: [...GOOD_BATCH, ...BAD_BATCH] },
+    ]);
+    const result = await handleGenerate(provider, { message: "x", summary: emptySummary });
+    expect(result.status).toBe(200);
+    expect(provider.calls).toHaveLength(2);
+    expect((result.body as { operations: unknown[] }).operations).toHaveLength(1);
+  });
+
   it("answers 422 validation, not a 502, when the repair also fails the schema", async () => {
     const provider = scriptedProvider([schemaFailure, schemaFailure]);
     const result = await handleGenerate(provider, { message: "x", summary: emptySummary });

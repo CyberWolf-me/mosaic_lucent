@@ -802,7 +802,7 @@ export type PipelineOutcome =
       body: unknown;
       /** Why the generation ended (see GenerateOutcome). */
       outcome: GenerateOutcome;
-      /** False on every refusal: the repair round only runs post-provider. */
+      /** True only when the schema repair round ran and also failed. */
       repaired: boolean;
       schemaIssues?: string[];
     };
@@ -949,8 +949,10 @@ async function runGeneratePipeline(
   // and a batch that cannot be repaired once will rarely repair twice. A
   // provider failure inside the round is not a 502 — the first call
   // succeeded, so the honest answer is still the validation failure.
+  // A request gets one repair round in total: a batch the schema round already
+  // repaired goes to partial application below, not to a second round.
   const firstResult = result;
-  if (errors.length > 0) {
+  if (errors.length > 0 && !repaired) {
     const second = await requestRepair(provider, parsed.data, operations, errors);
     if (second) {
       repaired = true;
