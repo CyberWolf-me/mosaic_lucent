@@ -3675,6 +3675,7 @@ export function createApp(deps: AppDeps): App {
         const result = await handleSignup(authCtx, parsed, orgStore, requestOrigin(req));
         writeHandleResult(res, result);
       } catch (err) {
+        console.error("[AUTH SIGNUP ERROR]", (err as any)?.cause || err);
         send(res, 400, { error: "bad request", detail: (err as Error).message });
       }
       return;

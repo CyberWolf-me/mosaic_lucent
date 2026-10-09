@@ -57,29 +57,37 @@ export class PostgresRateLimiter {
 
   async check(key: string, now: number = Date.now()): Promise<LimiterDecision> {
     const start = windowStart(now, this.options.windowMs);
-    // One statement: increment if present, insert otherwise, and return the
-    // post-increment count. Two instances cannot both read "before".
-    const rows = await this.db.db
-      .insert(rateCounters)
-      .values({ key, windowStart: start, hits: 1 })
-      .onConflictDoUpdate({
-        target: [rateCounters.key, rateCounters.windowStart],
-        set: { hits: sql`${rateCounters.hits} + 1` },
-      })
-      .returning({ hits: rateCounters.hits });
+    try {
+      // One statement: increment if present, insert otherwise, and return the
+      // post-increment count. Two instances cannot both read "before".
+      const rows = await this.db.db
+        .insert(rateCounters)
+        .values({ key, windowStart: start, hits: 1 })
+        .onConflictDoUpdate({
+          target: [rateCounters.key, rateCounters.windowStart],
+          set: { hits: sql`${rateCounters.hits} + 1` },
+        })
+        .returning({ hits: rateCounters.hits });
 
-    const hits = rows[0]?.hits ?? 1;
-    if (hits > this.options.perWindow) {
-      // Over the limit. `retryAfter` is until the window rolls, which is the
-      // honest answer for a fixed window: the earliest a retry can succeed.
-      const resetsAt = start + this.options.windowMs;
-      return {
-        allowed: false,
-        retryAfterSeconds: Math.max(1, Math.ceil((resetsAt - now) / 1000)),
-        remaining: 0,
-      };
+      const hits = rows[0]?.hits ?? 1;
+      if (hits > this.options.perWindow) {
+        // Over the limit. `retryAfter` is until the window rolls, which is the
+        // honest answer for a fixed window: the earliest a retry can succeed.
+        const resetsAt = start + this.options.windowMs;
+        return {
+          allowed: false,
+          retryAfterSeconds: Math.max(1, Math.ceil((resetsAt - now) / 1000)),
+          remaining: 0,
+        };
+      }
+      return { allowed: true, retryAfterSeconds: 0, remaining: this.options.perWindow - hits };
+    } catch (err) {
+      console.warn(
+        "[lucent] postgres rate limiter transient failure (failing open):",
+        (err as Error).message,
+      );
+      return { allowed: true, retryAfterSeconds: 0, remaining: 1 };
     }
-    return { allowed: true, retryAfterSeconds: 0, remaining: this.options.perWindow - hits };
   }
 
   /** Retention: drop windows that have rolled past. */

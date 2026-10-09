@@ -481,6 +481,7 @@ export class RealtimeServer {
         seq: result.head,
         operationId: result.entry?.operationId,
         ...(result.requestId !== undefined ? { requestId: result.requestId } : {}),
+        ...(this.deps.instanceId ? { workerId: this.deps.instanceId } : {}),
         duplicate: true,
       });
       return;

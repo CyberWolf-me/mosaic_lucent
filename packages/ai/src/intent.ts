@@ -15,7 +15,11 @@ export function classifyIntentFastPath(prompt: string, workspace: Workspace): Di
   let expectedTopology: ExpectedTopology | null = null;
 
   // 1. Explicit diagram kind keywords
-  if (/\b(flowchart|flow chart|process flow|step-by-step|workflow|user journey)\b/i.test(p)) {
+  if (
+    /\b(flowchart|flow chart|process flow|step-by-step|workflow|user journey|service flow|data flow|user flow|flow)\b/i.test(
+      p,
+    )
+  ) {
     targetKind = "flowchart";
     expectedTopology = "directed_flow";
   } else if (

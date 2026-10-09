@@ -4,12 +4,12 @@
  *
  * Usage:
  *   node scripts/load-test/runner.mjs --profile=smoke
- *   node scripts/load-test/runner.mjs --profile=baseline
- *   node scripts/load-test/runner.mjs --profile=target
- *   node scripts/load-test/runner.mjs --profile=hot-board
- *   node scripts/load-test/runner.mjs --profile=ai-storm
- *   node scripts/load-test/runner.mjs --profile=resilience
+ *   node scripts/load-test/runner.mjs --profile=all
  *   node scripts/load-test/runner.mjs --scenario=LT-02
+ *   node scripts/load-test/runner.mjs --profile=resilience --target=http://127.0.0.1:4387
+ *
+ * Profiles run their scenarios in order; each scenario is ISOLATED — a throw is
+ * recorded and the suite continues, so one failing scenario never aborts the rest.
  */
 
 import { CONFIG, assertNonProd } from "./config.mjs";
@@ -37,24 +37,51 @@ import {
   runLT18,
 } from "./scenarios.mjs";
 
+const SCENARIOS = {
+  smoke: runSmoke,
+  baseline: runBaseline,
+  "LT-01": runLT01,
+  "LT-02": runLT02,
+  "LT-03": runLT03,
+  "LT-04": runLT04,
+  "LT-05": runLT05,
+  "LT-06": runLT06,
+  "LT-07": runLT07,
+  "LT-08": runLT08,
+  "LT-09": runLT09,
+  "LT-10": runLT10,
+  "LT-11": runLT11,
+  "LT-12": runLT12,
+  "LT-13": runLT13,
+  "LT-14": runLT14,
+  "LT-15": runLT15,
+  "LT-16": runLT16,
+  "LT-17": runLT17,
+  "LT-18": runLT18,
+};
+
+const ALL = Object.keys(SCENARIOS);
+
+const PROFILES = {
+  smoke: ["smoke"],
+  baseline: ["baseline"],
+  target: ["LT-01"],
+  "hot-board": ["LT-02", "LT-03"],
+  "ai-storm": ["LT-04", "LT-05"],
+  workflows: ["LT-06", "LT-07", "LT-12", "LT-13", "LT-14"],
+  resilience: ["LT-08", "LT-09", "LT-10", "LT-11", "LT-15", "LT-18"],
+  capacity: ["LT-16", "LT-17"],
+  all: ALL,
+};
+
 function parseArgs() {
   const args = process.argv.slice(2);
-  const options = {
-    profile: "smoke",
-    scenario: null,
-    target: CONFIG.TARGET_URL,
-  };
-
+  const options = { profile: "smoke", scenario: null, target: CONFIG.TARGET_URL };
   for (const arg of args) {
-    if (arg.startsWith("--profile=")) {
-      options.profile = arg.split("=")[1];
-    } else if (arg.startsWith("--scenario=")) {
-      options.scenario = arg.split("=")[1].toUpperCase();
-    } else if (arg.startsWith("--target=")) {
-      options.target = arg.split("=")[1];
-    }
+    if (arg.startsWith("--profile=")) options.profile = arg.split("=")[1];
+    else if (arg.startsWith("--scenario=")) options.scenario = arg.split("=")[1].toUpperCase();
+    else if (arg.startsWith("--target=")) options.target = arg.split("=")[1];
   }
-
   return options;
 }
 
@@ -72,161 +99,53 @@ async function main() {
   const runId = `LT_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
   const metrics = new MetricsCollector(runId, CONFIG.ARTIFACT_DIR);
 
+  const keys = options.scenario ? [options.scenario] : PROFILES[options.profile];
+  if (!keys) {
+    console.error(`Unknown profile: ${options.profile}`);
+    process.exit(1);
+  }
+
   console.log("============================================================");
   console.log("LUCENT CONCURRENCY & WORKFLOW LOAD-TEST RUNNER");
   console.log(`Run ID:      ${runId}`);
   console.log(`Target:      ${options.target}`);
   console.log(`Profile:     ${options.profile}`);
   console.log(`Scenario:    ${options.scenario || "All in profile"}`);
+  console.log(`Sequence:    ${keys.join(", ")}`);
   console.log(`Artifacts:   ${CONFIG.ARTIFACT_DIR}`);
   console.log("============================================================\n");
 
   const tStart = Date.now();
 
-  try {
-    if (options.scenario) {
-      switch (options.scenario) {
-        case "LT-01":
-          await runLT01(options.target, metrics, CONFIG);
-          break;
-        case "LT-02":
-          await runLT02(options.target, metrics, CONFIG);
-          break;
-        case "LT-03":
-          await runLT03(options.target, metrics, CONFIG);
-          break;
-        case "LT-04":
-          await runLT04(options.target, metrics, CONFIG);
-          break;
-        case "LT-05":
-          await runLT05(options.target, metrics, CONFIG);
-          break;
-        case "LT-06":
-          await runLT06(options.target, metrics, CONFIG);
-          break;
-        case "LT-07":
-          await runLT07(options.target, metrics, CONFIG);
-          break;
-        case "LT-08":
-          await runLT08(options.target, metrics, CONFIG);
-          break;
-        case "LT-09":
-          await runLT09(options.target, metrics, CONFIG);
-          break;
-        case "LT-10":
-          await runLT10(options.target, metrics, CONFIG);
-          break;
-        case "LT-11":
-          await runLT11(options.target, metrics, CONFIG);
-          break;
-        case "LT-12":
-          await runLT12(options.target, metrics, CONFIG);
-          break;
-        case "LT-13":
-          await runLT13(options.target, metrics, CONFIG);
-          break;
-        case "LT-14":
-          await runLT14(options.target, metrics, CONFIG);
-          break;
-        case "LT-15":
-          await runLT15(options.target, metrics, CONFIG);
-          break;
-        case "LT-16":
-          await runLT16(options.target, metrics, CONFIG);
-          break;
-        case "LT-17":
-          await runLT17(options.target, metrics, CONFIG);
-          break;
-        case "LT-18":
-          await runLT18(options.target, metrics, CONFIG);
-          break;
-        default:
-          console.error(`Unknown scenario: ${options.scenario}`);
-          process.exit(1);
-      }
-    } else {
-      switch (options.profile) {
-        case "smoke":
-          await runSmoke(options.target, metrics, CONFIG);
-          break;
-        case "baseline":
-          await runBaseline(options.target, metrics, CONFIG);
-          break;
-        case "target":
-          await runLT01(options.target, metrics, CONFIG);
-          break;
-        case "hot-board":
-          await runLT02(options.target, metrics, CONFIG);
-          await runLT03(options.target, metrics, CONFIG);
-          break;
-        case "ai-storm":
-          await runLT04(options.target, metrics, CONFIG);
-          await runLT05(options.target, metrics, CONFIG);
-          break;
-        case "workflows":
-          await runLT06(options.target, metrics, CONFIG);
-          await runLT07(options.target, metrics, CONFIG);
-          await runLT12(options.target, metrics, CONFIG);
-          await runLT13(options.target, metrics, CONFIG);
-          await runLT14(options.target, metrics, CONFIG);
-          break;
-        case "resilience":
-          await runLT08(options.target, metrics, CONFIG);
-          await runLT09(options.target, metrics, CONFIG);
-          await runLT10(options.target, metrics, CONFIG);
-          await runLT11(options.target, metrics, CONFIG);
-          await runLT15(options.target, metrics, CONFIG);
-          await runLT18(options.target, metrics, CONFIG);
-          break;
-        case "capacity":
-          await runLT16(options.target, metrics, CONFIG);
-          await runLT17(options.target, metrics, CONFIG);
-          break;
-        case "all":
-          await runSmoke(options.target, metrics, CONFIG);
-          await runBaseline(options.target, metrics, CONFIG);
-          await runLT01(options.target, metrics, CONFIG);
-          await runLT02(options.target, metrics, CONFIG);
-          await runLT03(options.target, metrics, CONFIG);
-          await runLT04(options.target, metrics, CONFIG);
-          await runLT05(options.target, metrics, CONFIG);
-          await runLT06(options.target, metrics, CONFIG);
-          await runLT07(options.target, metrics, CONFIG);
-          await runLT08(options.target, metrics, CONFIG);
-          await runLT09(options.target, metrics, CONFIG);
-          await runLT10(options.target, metrics, CONFIG);
-          await runLT11(options.target, metrics, CONFIG);
-          await runLT12(options.target, metrics, CONFIG);
-          await runLT13(options.target, metrics, CONFIG);
-          await runLT14(options.target, metrics, CONFIG);
-          await runLT15(options.target, metrics, CONFIG);
-          await runLT16(options.target, metrics, CONFIG);
-          await runLT17(options.target, metrics, CONFIG);
-          await runLT18(options.target, metrics, CONFIG);
-          break;
-        default:
-          console.error(`Unknown profile: ${options.profile}`);
-          process.exit(1);
-      }
+  // Per-scenario isolation: a throw is recorded, then the suite moves on.
+  for (const key of keys) {
+    const fn = SCENARIOS[key];
+    if (!fn) {
+      console.error(`Unknown scenario key: ${key}`);
+      metrics.recordError(key, new Error(`unknown scenario key ${key}`));
+      continue;
     }
-  } catch (err) {
-    console.error("\n[FATAL ERROR IN RUNNER]", err);
-    metrics.recordError("RunnerMain", err);
-  } finally {
-    metrics.finish();
-    const totalElapsedSec = Math.round((Date.now() - tStart) / 1000);
-    console.log("\n============================================================");
-    console.log(`TEST EXECUTION FINISHED (${totalElapsedSec}s)`);
-    console.log("============================================================\n");
-
-    const report = metrics.generateReport(
-      `Lucent Load Test Run Report (${options.profile.toUpperCase()})`,
-    );
-    console.log(report);
-
-    const hasFailures = metrics.checks.some((c) => !c.pass) || metrics.errors.length > 0;
-    process.exit(hasFailures ? 1 : 0);
+    try {
+      await fn(options.target, metrics, CONFIG);
+    } catch (err) {
+      metrics.recordError(key, err);
+      console.error(`\n[scenario ${key} aborted] ${err?.message || err}\n`);
+    }
   }
+
+  metrics.finish();
+  const totalElapsedSec = Math.round((Date.now() - tStart) / 1000);
+  console.log("\n============================================================");
+  console.log(`TEST EXECUTION FINISHED (${totalElapsedSec}s)`);
+  console.log("============================================================\n");
+
+  const report = metrics.generateReport(
+    `Lucent Load Test Run Report (${options.profile.toUpperCase()})`,
+  );
+  console.log(report);
+
+  const hasFailures = metrics.checks.some((c) => !c.pass) || metrics.errors.length > 0;
+  process.exit(hasFailures ? 1 : 0);
 }
 
 main();

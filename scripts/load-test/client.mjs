@@ -70,37 +70,51 @@ export async function createTestUser(baseUrl, idx, runId, password = "LoadTestPa
   const email = `LT_${runId}_U${String(idx).padStart(3, "0")}_${Math.floor(Math.random() * 10000)}@lucent.test`;
   const name = `LT-User-${idx}`;
 
-  const csrf = await fetchJson(`${baseUrl}/api/auth/csrf`);
-  const csrfToken = csrf.data?.token || "";
+  let lastErr = null;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const csrf = await fetchJson(`${baseUrl}/api/auth/csrf`);
+      const csrfToken = csrf.data?.token || "";
 
-  const res = await fetch(`${baseUrl}/api/auth/signup`, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "x-csrf-token": csrfToken,
-    },
-    body: JSON.stringify({ email, password, name }),
-  });
+      const res = await fetch(`${baseUrl}/api/auth/signup`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-csrf-token": csrfToken,
+        },
+        body: JSON.stringify({ email, password, name }),
+      });
 
-  if (res.status !== 201) {
-    const errBody = await res.text();
-    console.error(`[SIGNUP FAILURE] Status: ${res.status}, Body: ${errBody}`);
-    throw new Error(`Failed to create account ${email}: status ${res.status} (${errBody})`);
+      if (res.status === 201) {
+        const sessionCookie = extractSessionCookie(res.headers);
+        const data = await res.json();
+        return {
+          idx,
+          id: data.user?.id || data.id,
+          email,
+          name,
+          token: data.token,
+          sessionCookie,
+          csrfToken,
+          durationMs: Date.now() - t0,
+        };
+      }
+
+      const errBody = await res.text();
+      lastErr = new Error(`status ${res.status} (${errBody})`);
+      if (attempt < 3) {
+        await new Promise((r) => setTimeout(r, 600 * attempt));
+      }
+    } catch (err) {
+      lastErr = err;
+      if (attempt < 3) {
+        await new Promise((r) => setTimeout(r, 600 * attempt));
+      }
+    }
   }
 
-  const sessionCookie = extractSessionCookie(res.headers);
-  const data = await res.json();
-
-  return {
-    idx,
-    id: data.user?.id || data.id,
-    email,
-    name,
-    token: data.token,
-    sessionCookie,
-    csrfToken,
-    durationMs: Date.now() - t0,
-  };
+  console.error(`[SIGNUP FAILURE] Account ${email} failed after 3 attempts: ${lastErr?.message}`);
+  throw new Error(`Failed to create account ${email}: ${lastErr?.message}`);
 }
 
 /**

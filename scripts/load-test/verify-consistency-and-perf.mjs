@@ -65,7 +65,7 @@ class MultiWorkerCluster {
             PORT: String(port),
             LUCENT_PORT: String(port),
             LUCENT_WORKER_ID: workerId,
-            LUCENT_DATABASE_POOL_MAX: "3",
+            LUCENT_DATABASE_POOL_MAX: "5",
           },
           stdio: ["ignore", "pipe", "pipe"],
         },
@@ -80,9 +80,30 @@ class MultiWorkerCluster {
       });
 
       this.workers.push({ id: workerId, port, proc, url });
+
+      // If this is worker 1, wait for it to become healthy first so migrations/seeding complete cleanly
+      if (i === 0) {
+        let healthy = false;
+        for (let attempt = 0; attempt < 30; attempt++) {
+          try {
+            const res = await fetchJson(`${url}/health`);
+            if (res?.ok && res.data?.ok) {
+              healthy = true;
+              console.log(
+                `  ✓ ${workerId} is healthy at ${url} (Worker ID: ${res.data.workerId || workerId})`,
+              );
+              break;
+            }
+          } catch {}
+          await new Promise((r) => setTimeout(r, 500));
+        }
+        if (!healthy) throw new Error(`Primary worker ${workerId} failed to boot`);
+      } else {
+        await new Promise((r) => setTimeout(r, 600));
+      }
     }
 
-    // Wait for all workers to be healthy
+    // Wait for remaining workers to be healthy
     console.log("Waiting for all workers to become healthy...");
     for (const w of this.workers) {
       let healthy = false;
@@ -180,14 +201,26 @@ async function runContentionAudit(cluster, metrics, levels = [10, 25, 50], repea
 
     console.log(`\n>>> Testing Concurrency Level: ${N} Simultaneous Users (${repeats} runs) <<<`);
 
+    // Provision pool of N users once for this concurrency level across the 4 workers
+    const poolRunId = `pool_${N}_${Date.now()}`;
+    const owner = await createTestUser(primaryUrl, `own_${N}`, poolRunId, CONFIG.DEFAULT_PASSWORD);
+    const users = await pMap(
+      Array.from({ length: N }, (_, i) => i + 1),
+      async (idx) => {
+        const targetWorker = cluster.workers[(idx - 1) % cluster.workers.length];
+        const u = await createTestUser(
+          targetWorker.url,
+          `${N}_${idx}`,
+          poolRunId,
+          CONFIG.DEFAULT_PASSWORD,
+        );
+        return { ...u, targetUrl: targetWorker.url };
+      },
+      8,
+    );
+
     for (let runIdx = 1; runIdx <= repeats; runIdx++) {
       const runId = `c_${N}_r${runIdx}_${Date.now()}`;
-      const owner = await createTestUser(
-        primaryUrl,
-        `own_${N}_${runIdx}`,
-        runId,
-        CONFIG.DEFAULT_PASSWORD,
-      );
       const boardRes = await createBoard(
         primaryUrl,
         owner.token,
@@ -196,22 +229,8 @@ async function runContentionAudit(cluster, metrics, levels = [10, 25, 50], repea
       const boardId = boardRes.boardId;
       const share = await shareBoard(primaryUrl, owner.token, boardId, "editor");
 
-      // Provision N users distributed across the 4 workers in round-robin fashion
-      const users = await pMap(
-        Array.from({ length: N }, (_, i) => i + 1),
-        async (idx) => {
-          const targetWorker = cluster.workers[(idx - 1) % cluster.workers.length];
-          const u = await createTestUser(
-            targetWorker.url,
-            `${N}_${idx}`,
-            runId,
-            CONFIG.DEFAULT_PASSWORD,
-          );
-          await joinBoard(targetWorker.url, u.token, boardId, share.token);
-          return { ...u, targetUrl: targetWorker.url };
-        },
-        8,
-      );
+      // Join board for all users in the pool
+      await pMap(users, (u) => joinBoard(u.targetUrl, u.token, boardId, share.token), 8);
 
       // Create realtime clients connected to their assigned workers
       const clients = users.map(
