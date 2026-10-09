@@ -65,7 +65,7 @@ class MultiWorkerCluster {
             PORT: String(port),
             LUCENT_PORT: String(port),
             LUCENT_WORKER_ID: workerId,
-            LUCENT_DATABASE_POOL_MAX: "5",
+            LUCENT_DATABASE_POOL_MAX: "2",
           },
           stdio: ["ignore", "pipe", "pipe"],
         },
@@ -144,7 +144,7 @@ class MultiWorkerCluster {
           PORT: String(w.port),
           LUCENT_PORT: String(w.port),
           LUCENT_WORKER_ID: w.id,
-          LUCENT_DATABASE_POOL_MAX: "3",
+          LUCENT_DATABASE_POOL_MAX: "2",
         },
         stdio: ["ignore", "pipe", "pipe"],
       },
@@ -216,7 +216,7 @@ async function runContentionAudit(cluster, metrics, levels = [10, 25, 50], repea
         );
         return { ...u, targetUrl: targetWorker.url };
       },
-      8,
+      4,
     );
 
     for (let runIdx = 1; runIdx <= repeats; runIdx++) {
@@ -230,7 +230,7 @@ async function runContentionAudit(cluster, metrics, levels = [10, 25, 50], repea
       const share = await shareBoard(primaryUrl, owner.token, boardId, "editor");
 
       // Join board for all users in the pool
-      await pMap(users, (u) => joinBoard(u.targetUrl, u.token, boardId, share.token), 8);
+      await pMap(users, (u) => joinBoard(u.targetUrl, u.token, boardId, share.token), 4);
 
       // Create realtime clients connected to their assigned workers
       const clients = users.map(
@@ -238,7 +238,7 @@ async function runContentionAudit(cluster, metrics, levels = [10, 25, 50], repea
           new RealtimeClient({ baseUrl: u.targetUrl, token: u.token, boardId, user: u, metrics }),
       );
 
-      await pMap(clients, (c) => c.connect(), 8);
+      await pMap(clients, (c) => c.connect(), 4);
 
       const fanoutDelays = [];
       clients.forEach((c) => {
@@ -663,12 +663,33 @@ async function runLargeBoardJoinsAudit(
   const w1 = cluster.workers[0];
   const results = {};
 
+  const maxClients = Math.max(...clientScales);
+  const poolRunId = `scale_pool_${Date.now()}`;
+  console.log(`Provisioning pool of ${maxClients} test clients across 4 workers...`);
+  const poolUsers = await pMap(
+    Array.from({ length: maxClients }, (_, i) => i + 1),
+    async (idx) => {
+      const targetWorker = cluster.workers[(idx - 1) % cluster.workers.length];
+      const u = await createTestUser(
+        targetWorker.url,
+        `p4_${idx}`,
+        poolRunId,
+        CONFIG.DEFAULT_PASSWORD,
+      );
+      return { ...u, targetUrl: targetWorker.url };
+    },
+    4,
+  );
+
   for (const objCount of sizes) {
     const runId = `scale_${objCount}_${Date.now()}`;
     const owner = await createTestUser(w1.url, `own_${objCount}`, runId, CONFIG.DEFAULT_PASSWORD);
     const boardRes = await createBoard(w1.url, owner.token, `Large Board ${objCount} (${runId})`);
     const boardId = boardRes.boardId;
     const share = await shareBoard(w1.url, owner.token, boardId, "editor");
+
+    // All pool users join this board
+    await pMap(poolUsers, (u) => joinBoard(u.targetUrl, u.token, boardId, share.token), 4);
 
     console.log(`\n--- Seeding Board with ${objCount} Objects ---`);
     const tSeed0 = Date.now();
@@ -705,23 +726,9 @@ async function runLargeBoardJoinsAudit(
       console.log(
         `  Testing simultaneous join of ${clientCount} clients on ${objCount}-object board...`,
       );
-      const users = await pMap(
-        Array.from({ length: clientCount }, (_, i) => i + 1),
-        async (idx) => {
-          const targetWorker = cluster.workers[(idx - 1) % cluster.workers.length];
-          const u = await createTestUser(
-            targetWorker.url,
-            `j_${objCount}_${idx}`,
-            runId,
-            CONFIG.DEFAULT_PASSWORD,
-          );
-          await joinBoard(targetWorker.url, u.token, boardId, share.token);
-          return { ...u, targetUrl: targetWorker.url };
-        },
-        8,
-      );
+      const activeUsers = poolUsers.slice(0, clientCount);
 
-      const clients = users.map(
+      const clients = activeUsers.map(
         (u) =>
           new RealtimeClient({ baseUrl: u.targetUrl, token: u.token, boardId, user: u, metrics }),
       );

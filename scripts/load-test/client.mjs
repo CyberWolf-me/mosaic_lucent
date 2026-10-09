@@ -337,17 +337,26 @@ export class RealtimeClient {
     const t0 = Date.now();
 
     // 1. Mint ticket
-    const ticketRes = await fetchJson(`${this.baseUrl}/api/realtime/ticket`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${this.token}`,
-      },
-    });
+    let ticket = null;
+    let lastTicketRes = null;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      const ticketRes = await fetchJson(`${this.baseUrl}/api/realtime/ticket`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${this.token}`,
+        },
+      });
+      lastTicketRes = ticketRes;
+      if (ticketRes.data?.ticket) {
+        ticket = ticketRes.data.ticket;
+        break;
+      }
+      if (attempt < 3) await new Promise((r) => setTimeout(r, 400 * attempt));
+    }
 
-    const ticket = ticketRes.data?.ticket;
     if (!ticket) {
-      throw new Error(`Failed to mint realtime ticket: status ${ticketRes.status}`);
+      throw new Error(`Failed to mint realtime ticket: status ${lastTicketRes?.status}`);
     }
 
     const wsProto = this.baseUrl.startsWith("https") ? "wss:" : "ws:";
