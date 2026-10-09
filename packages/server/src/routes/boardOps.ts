@@ -11,6 +11,7 @@ import {
 } from "@lucent/core";
 import { commitBatch } from "../commitBatch.js";
 import { outputHash } from "../aiRuns.js";
+import { orchestrateGeneration } from "../orchestrator.js";
 import type { RegisterRoutes } from "./context.js";
 
 /**
@@ -289,4 +290,113 @@ export const registerBoardOpsRoutes: RegisterRoutes = (router, s) => {
       ...(requestId !== undefined ? { requestId } : {}),
     });
   });
+
+  router.post("/api/boards/:id/orchestrate", async (ctx) => {
+    const { req, res } = ctx;
+    const boardId = ctx.param("id");
+    const caller = await requireBoardCaller(req, res, boardId);
+    if (!caller) return;
+    const { user, viaAgent } = caller;
+    if (!meter(req, res, "/api/boards/:id/orchestrate")) return;
+
+    const viaMcp = req.headers["x-lucent-client"] === "mcp";
+    const actor = viaAgent
+      ? ({ actorType: "ai", actorId: "voice-agent", initiatedBy: user.id } as const)
+      : viaMcp
+        ? ({ actorType: "ai", actorId: "mcp", initiatedBy: user.id } as const)
+        : ({ actorType: "user", actorId: user.id, initiatedBy: user.id } as const);
+
+    const guard = await requireBoardRole(
+      req,
+      res,
+      boardId,
+      "editor",
+      "/api/boards/:id/orchestrate",
+      user,
+    );
+    if (!guard.ok) return;
+
+    const refusal = await outboundRefusal(guard.board, "agent");
+    if (refusal) {
+      send(res, 403, {
+        error: refusal.error,
+        classification: refusal.classification,
+        boundary: refusal.boundary,
+      });
+      return;
+    }
+
+    let body: {
+      prompt?: unknown;
+      requestId?: unknown;
+      expectedSeq?: unknown;
+    };
+    try {
+      const raw = await readBody(req);
+      body = raw ? (JSON.parse(raw) as typeof body) : {};
+    } catch (err) {
+      send(res, 400, { error: "bad request", detail: (err as Error).message });
+      return;
+    }
+
+    if (typeof body.prompt !== "string" || !body.prompt.trim()) {
+      send(res, 400, { error: "prompt must be a non-empty string" });
+      return;
+    }
+
+    const requestId =
+      typeof body.requestId === "string" &&
+      body.requestId.length > 0 &&
+      body.requestId.length <= 64
+        ? body.requestId
+        : undefined;
+
+    const expectedSeq = typeof body.expectedSeq === "number" ? body.expectedSeq : undefined;
+
+    const outcome = await orchestrateGeneration(s, {
+      boardId,
+      userId: user.id,
+      prompt: body.prompt.trim(),
+      actor,
+      requestId,
+      expectedSeq,
+    });
+
+    if (outcome.ok) {
+      send(res, 200, {
+        ok: true,
+        outcome: "committed",
+        seq: outcome.seq,
+        operations: outcome.operations,
+        plan: outcome.plan,
+        explanation: outcome.explanation,
+        ...(outcome.duplicate ? { duplicate: true } : {}),
+      });
+      return;
+    }
+
+    if (outcome.outcome === "unresolved") {
+      send(res, 422, {
+        ok: false,
+        outcome: "unresolved",
+        reason: outcome.reason,
+        partialPlan: outcome.partialPlan,
+        diagnostics: outcome.diagnostics,
+      });
+      return;
+    }
+
+    if (outcome.outcome === "conflict") {
+      send(res, 409, {
+        ok: false,
+        outcome: "conflict",
+        reason: outcome.reason,
+        headSeq: outcome.headSeq,
+      });
+      return;
+    }
+
+    send(res, 404, { ok: false, error: outcome.reason });
+  });
 };
+

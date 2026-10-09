@@ -26,7 +26,8 @@ You are interacting with the user over a real-time duplex voice call while they 
 - When the user asks a question, share advice or ideas proactively, and offer to diagram them.
 
 # Canvas Tools & Organizing Elements
-- 'apply_canvas_operations' changes the board. Call it whenever the user asks to build, add, modify, organize, or connect diagram elements.
+- 'construct_diagram' constructs, extends, connects, or organizes diagrams from conversational speech using Lucent's unified understanding pipeline. Prefer this when building new systems, flows, mind maps, or expanding diagrams.
+- 'apply_canvas_operations' applies direct structured operations. Call it when doing explicit edits.
 - 'get_board_summary' lists what is currently on the board (nodes, edges, groups, shapes/notes). Call it before modifying or organizing existing elements, or to answer questions.
 - Never give nodes positions or coordinates — Lucent's layout engine places nodes automatically.
 - Sticky notes and manual shapes DO have explicit (x, y) coordinates:
@@ -247,7 +248,48 @@ export function createApplyOpsTool(config: AgentContextConfig) {
   });
 }
 
+export function createOrchestrateDiagramTool(config: AgentContextConfig) {
+  return llm.tool({
+    description:
+      "Construct, extend, or organize structured diagrams on the canvas from conversational speech. Automatically infers diagram type, resolves symbolic relationships, and lays out components.",
+    parameters: z.object({
+      prompt: z.string().describe("What the user asked to build, connect, or diagram"),
+    }),
+    execute: async ({ prompt }) => {
+      if (!config.boardId) return { success: false, error: "No boardId available in context" };
+      if (!config.grant) return NO_GRANT;
+
+      try {
+        const headers: Record<string, string> = {
+          "content-type": "application/json",
+          ...authHeaders(config),
+        };
+
+        const res = await fetch(`${config.serverUrl}/api/boards/${config.boardId}/orchestrate`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({ prompt }),
+        });
+
+        if (!res.ok) {
+          const text = await res.text();
+          return { success: false, error: refusalReasons(text) };
+        }
+
+        const data = (await res.json()) as { ok: boolean; operations?: unknown[]; explanation?: string };
+        return {
+          success: true,
+          message: data.explanation || "Applied diagram updates to the canvas.",
+        };
+      } catch (err) {
+        return { success: false, error: (err as Error).message };
+      }
+    },
+  });
+}
+
 export function createGetBoardSummaryTool(config: AgentContextConfig) {
+
   return llm.tool({
     description:
       "Get a concise summary of all components currently on the Lucent canvas (nodes, edges, shapes, wireframes).",
@@ -374,6 +416,7 @@ export default defineAgent({
     // 4. Create Voice Agent Tools
     const applyOps = createApplyOpsTool(config);
     const getSummary = createGetBoardSummaryTool(config);
+    const constructDiagram = createOrchestrateDiagramTool(config);
 
     // 5. Initialize the AgentSession orchestrator
     // Disable preemptiveGeneration and raise endpointing minDelay to 1000ms.
@@ -394,9 +437,11 @@ export default defineAgent({
       instructions: VOICE_AGENT_INSTRUCTIONS,
       tools: {
         apply_canvas_operations: applyOps,
+        construct_diagram: constructDiagram,
         get_board_summary: getSummary,
       },
     });
+
 
     // 6. Start the voice session in the room
     await session.start({

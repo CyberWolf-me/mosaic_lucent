@@ -145,6 +145,8 @@ export interface RealtimeDeps {
 export class RealtimeServer {
   private readonly wss: WebSocketServer;
   private readonly rooms = new Map<string, Room>();
+  /** In-flight room cold starts, to avoid duplicate Room instantiation under concurrent joins. */
+  private readonly pendingRooms = new Map<string, Promise<Room>>();
   /** Sockets grouped by board, for broadcast. */
   private readonly connsByBoard = new Map<string, Set<Conn>>();
   /** Live bus subscriptions, per hosted board (M3). */
@@ -210,6 +212,7 @@ export class RealtimeServer {
     for (const unsub of this.fanoutUnsubs.values()) unsub();
     this.fanoutUnsubs.clear();
     this.rooms.clear();
+    this.pendingRooms.clear();
     this.connsByBoard.clear();
   }
 
@@ -244,6 +247,7 @@ export class RealtimeServer {
         .catch(() => {});
     }
     this.rooms.delete(boardId);
+    this.pendingRooms.delete(boardId);
     this.connsByBoard.delete(boardId);
     const unsub = this.fanoutUnsubs.get(boardId);
     if (unsub) {
@@ -380,8 +384,21 @@ export class RealtimeServer {
 
   private async applyOp(conn: Conn, msg: ClientMsg): Promise<void> {
     if (!conn.boardId) return;
-    const room = this.rooms.get(conn.boardId);
-    if (!room) return;
+    let room = this.rooms.get(conn.boardId);
+    if (!room) {
+      const board = await this.deps.boardStore.get(conn.boardId);
+      if (!board) return;
+      room = await this.roomFor(conn.boardId, board.workspace, board.ownerId);
+    }
+    if (!room.roleOf(conn.userId)) {
+      const board = await this.deps.boardStore.get(conn.boardId);
+      if (board) {
+        const role = await this.deps.boardStore.memberRole(conn.boardId, conn.userId, (uid) =>
+          this.deps.orgRoleFor(uid, board.orgId),
+        );
+        if (role) room.setRole(conn.userId, role);
+      }
+    }
 
     // The request id is bounded and shape-checked: it is echoed into acks and
     // stored as the idempotency key, so a hostile string must not ride either.
@@ -766,8 +783,12 @@ export class RealtimeServer {
    * base, and the room is built exactly as before.
    */
   private async roomFor(boardId: string, workspace: Workspace, ownerId: string): Promise<Room> {
-    let room = this.rooms.get(boardId);
-    if (!room) {
+    const existing = this.rooms.get(boardId);
+    if (existing) return existing;
+    const pending = this.pendingRooms.get(boardId);
+    if (pending) return pending;
+
+    const buildPromise = (async () => {
       // M3: the room allocates seqs through the board store, so two instances
       // serving one board draw from the same uniqueness source (the log's
       // (board_id, seq) key) instead of each counting in its own memory. The
@@ -820,6 +841,7 @@ export class RealtimeServer {
       // and only the tail replays. `Room.fromSnapshot` records the snapshot's
       // seq as baseSeq, which is what makes the reseed-vs-catchup decision in
       // `join` honest. No snapshot: the full log is the only correct base.
+      let room: Room;
       const snapshot = await this.deps.boardStore.latestSnapshot(boardId);
       if (snapshot) {
         const tail = await this.deps.boardStore.loadLog(boardId, snapshot.seq);
@@ -834,8 +856,15 @@ export class RealtimeServer {
       }
       this.rooms.set(boardId, room);
       this.subscribeFanout(boardId, room);
+      return room;
+    })();
+
+    this.pendingRooms.set(boardId, buildPromise);
+    try {
+      return await buildPromise;
+    } finally {
+      this.pendingRooms.delete(boardId);
     }
-    return room;
   }
 
   /**

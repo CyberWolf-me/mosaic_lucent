@@ -16,3 +16,5 @@ export * from "./vectorEdit.js";
 export * from "./cache.js";
 export * from "./evals.js";
 export { GOLDEN_SET } from "./golden.js";
+export * from "./intent.js";
+export * from "./planGenerator.js";

@@ -56,9 +56,17 @@ export interface LayoutOptions {
   ringGap?: number;
   /** Vertical distance between swimlanes in a process map. */
   laneGap?: number;
+  /** Scope of mutation: e.g. "extend_region" to preserve existing node coordinates without churn */
+  mutationScope?: "new_canvas" | "extend_region" | "refine_selection" | "reorganize_only";
+  /** Explicit set of existing node IDs to preserve strictly identically */
+  existingNodeIds?: string[] | Set<string>;
 }
 
-const DEFAULTS: Required<Omit<LayoutOptions, "strategy">> = {
+export type LayoutOptionsResolved = Required<
+  Omit<LayoutOptions, "strategy" | "mutationScope" | "existingNodeIds">
+>;
+
+const DEFAULTS: LayoutOptionsResolved = {
   nodeSize: { width: 160, height: 64 },
   layerGap: 120,
   nodeGap: 48,
@@ -81,7 +89,7 @@ const DEFAULTS: Required<Omit<LayoutOptions, "strategy">> = {
 function withIntentDefaults(
   workspace: Workspace,
   options: LayoutOptions,
-): Required<Omit<LayoutOptions, "strategy">> {
+): LayoutOptionsResolved {
   const merged = { ...DEFAULTS, ...options };
   const intentDirection = workspace.layoutIntent?.direction;
   if (!options.direction && intentDirection) merged.direction = intentDirection;
@@ -275,6 +283,12 @@ function dispatchLayoutWithRoutes(
   // Empty board short-circuit (the old computeLayout's contract): no nodes
   // means {}, before any strategy runs.
   if (Object.keys(workspace.nodes).length === 0) return { layout: {}, routes: {} };
+
+  // Incremental mutation scope: extend_region anchors new nodes without rearranging existing canvas
+  if (options.mutationScope === "extend_region") {
+    return extendRegionLayoutWithRoutes(workspace, options);
+  }
+
   // Region partitioning first, exactly as the old computeLayout body did:
   // each region lays out under its own strategy, board flow separately.
   // The merged options carry the board's intent direction (withIntentDefaults
@@ -298,7 +312,7 @@ function dispatchLayoutWithRoutes(
   };
 }
 
-function layeredLayoutWithRoutes(
+function layeredSingleComponentLayoutWithRoutes(
   workspace: Workspace,
   options: LayoutOptions = {},
 ): { layout: LayoutResult; routes: EdgeRoutes } {
@@ -816,13 +830,390 @@ function layeredLayoutWithRoutes(
 }
 
 /**
+ * Find Weakly Connected Components (WCC) of a graph using Disjoint Set Union.
+ * Deterministic: preserves node insertion order.
+ */
+export function findWeaklyConnectedComponents(
+  nodeIds: string[],
+  edges: Workspace["edges"],
+): string[][] {
+  if (nodeIds.length === 0) return [];
+  const parent = new Map<string, string>();
+  for (const id of nodeIds) parent.set(id, id);
+
+  const find = (i: string): string => {
+    let root = i;
+    while (root !== parent.get(root)) {
+      root = parent.get(root)!;
+    }
+    let curr = i;
+    while (curr !== root) {
+      const next = parent.get(curr)!;
+      parent.set(curr, root);
+      curr = next;
+    }
+    return root;
+  };
+
+  const union = (i: string, j: string) => {
+    const rootI = find(i);
+    const rootJ = find(j);
+    if (rootI !== rootJ) {
+      parent.set(rootJ, rootI);
+    }
+  };
+
+  const validNodes = new Set(nodeIds);
+  for (const edge of Object.values(edges)) {
+    if (validNodes.has(edge.source) && validNodes.has(edge.target)) {
+      union(edge.source, edge.target);
+    }
+  }
+
+  const groups = new Map<string, string[]>();
+  for (const id of nodeIds) {
+    const root = find(id);
+    if (!groups.has(root)) groups.set(root, []);
+    groups.get(root)!.push(id);
+  }
+
+  const idIndex = new Map(nodeIds.map((id, idx) => [id, idx]));
+  return [...groups.values()].sort((a, b) => {
+    const idxA = idIndex.get(a[0]!) ?? 0;
+    const idxB = idIndex.get(b[0]!) ?? 0;
+    return idxA - idxB;
+  });
+}
+
+/**
+ * Two-stage layered layout: decomposes disconnected subgraphs and isolated nodes into
+ * Weakly Connected Components (WCC), lays out each component independently, and packs
+ * their bounding boxes using 2D shelf/grid packing targeting a 16:9 aspect ratio.
+ * This completely prevents horizontal sprawl (e.g. 15 disconnected cards stretching 3,000px).
+ */
+function layeredLayoutWithRoutes(
+  workspace: Workspace,
+  options: LayoutOptions = {},
+): { layout: LayoutResult; routes: EdgeRoutes } {
+  const nodeIds = Object.keys(workspace.nodes);
+  if (nodeIds.length === 0) return { layout: {}, routes: {} };
+
+  const components = findWeaklyConnectedComponents(nodeIds, workspace.edges);
+  if (components.length <= 1) {
+    return layeredSingleComponentLayoutWithRoutes(workspace, options);
+  }
+
+  const opts = withIntentDefaults(workspace, options);
+  const compLayouts: Array<{
+    nodeIds: string[];
+    layout: LayoutResult;
+    routes: EdgeRoutes;
+    bounds: { x: number; y: number; w: number; h: number };
+  }> = [];
+
+  for (const compNodes of components) {
+    const subWs = subWorkspaceFor(workspace, compNodes, workspace.diagramKind);
+    const subOut = layeredSingleComponentLayoutWithRoutes(subWs, options);
+    const b = boundsOf(subOut.layout);
+    compLayouts.push({
+      nodeIds: compNodes,
+      layout: subOut.layout,
+      routes: subOut.routes,
+      bounds: b,
+    });
+  }
+
+  // Normalize each component so its top-left is at (0, 0)
+  const normalizedLayouts = compLayouts.map((comp) => {
+    const dx = -comp.bounds.x;
+    const dy = -comp.bounds.y;
+    const normLayout: LayoutResult = {};
+    for (const [id, item] of Object.entries(comp.layout)) {
+      normLayout[id] = {
+        position: { x: item.position.x + dx, y: item.position.y + dy },
+        size: item.size,
+      };
+    }
+    const normRoutes: EdgeRoutes = {};
+    for (const [edgeId, pts] of Object.entries(comp.routes)) {
+      normRoutes[edgeId] = pts.map((p) => ({ x: p.x + dx, y: p.y + dy }));
+    }
+    return {
+      ...comp,
+      layout: normLayout,
+      routes: normRoutes,
+      width: Math.max(comp.bounds.w, 1),
+      height: Math.max(comp.bounds.h, 1),
+    };
+  });
+
+  const gapX = opts.nodeGap ?? 48;
+  const gapY = opts.nodeGap ?? 48;
+  const hasComplexComponents = normalizedLayouts.some((c) => c.nodeIds.length > 1);
+  const compGapX = hasComplexComponents ? Math.max(gapX, 64) : gapX;
+  const compGapY = hasComplexComponents ? Math.max(gapY, 64) : gapY;
+
+  let totalArea = 0;
+  for (const comp of normalizedLayouts) {
+    totalArea += (comp.width + compGapX) * (comp.height + compGapY);
+  }
+
+  const singleRowWidth = normalizedLayouts.reduce(
+    (sum, c, idx) => sum + c.width + (idx > 0 ? compGapX : 0),
+    0,
+  );
+  const targetRatio = 16 / 9;
+  const maxCompWidth = Math.max(...normalizedLayouts.map((c) => c.width));
+  const idealWidth = Math.sqrt(totalArea * targetRatio);
+  const targetShelfWidth = Math.max(idealWidth, maxCompWidth, Math.min(singleRowWidth, 960));
+
+  interface Shelf {
+    items: Array<{ compIndex: number; width: number; height: number }>;
+    width: number;
+    height: number;
+  }
+
+  const shelves: Shelf[] = [];
+  let currentItems: Shelf["items"] = [];
+  let currentWidth = 0;
+  let currentHeight = 0;
+
+  for (let i = 0; i < normalizedLayouts.length; i++) {
+    const comp = normalizedLayouts[i]!;
+    const neededWidth = currentItems.length === 0 ? comp.width : currentWidth + compGapX + comp.width;
+    if (currentItems.length > 0 && neededWidth > targetShelfWidth) {
+      shelves.push({
+        items: currentItems,
+        width: currentWidth,
+        height: currentHeight,
+      });
+      currentItems = [{ compIndex: i, width: comp.width, height: comp.height }];
+      currentWidth = comp.width;
+      currentHeight = comp.height;
+    } else {
+      currentItems.push({ compIndex: i, width: comp.width, height: comp.height });
+      currentWidth = neededWidth;
+      currentHeight = Math.max(currentHeight, comp.height);
+    }
+  }
+  if (currentItems.length > 0) {
+    shelves.push({
+      items: currentItems,
+      width: currentWidth,
+      height: currentHeight,
+    });
+  }
+
+  const finalLayout: LayoutResult = {};
+  const finalRoutes: EdgeRoutes = {};
+
+  let shelfY = 0;
+  for (const shelf of shelves) {
+    let shelfX = -shelf.width / 2;
+    for (const item of shelf.items) {
+      const comp = normalizedLayouts[item.compIndex]!;
+      for (const [id, placed] of Object.entries(comp.layout)) {
+        finalLayout[id] = {
+          position: { x: placed.position.x + shelfX, y: placed.position.y + shelfY },
+          size: placed.size,
+        };
+      }
+      for (const [edgeId, pts] of Object.entries(comp.routes)) {
+        finalRoutes[edgeId] = pts.map((p) => ({ x: p.x + shelfX, y: p.y + shelfY }));
+      }
+      shelfX += item.width + compGapX;
+    }
+    shelfY += shelf.height + compGapY;
+  }
+
+  return { layout: finalLayout, routes: finalRoutes };
+}
+
+/**
+ * Incremental layout for extend_region mutations:
+ * Anchors newly added nodes and subgraphs directly to connected existing nodes,
+ * preserving existing node coordinates strictly identically to avoid canvas churn.
+ */
+export function extendRegionLayoutWithRoutes(
+  workspace: Workspace,
+  options: LayoutOptions & { existingNodeIds?: string[] | Set<string> } = {},
+): { layout: LayoutResult; routes: EdgeRoutes } {
+  const opts = withIntentDefaults(workspace, options);
+  const nodeIds = Object.keys(workspace.nodes);
+  if (nodeIds.length === 0) return { layout: {}, routes: {} };
+
+  const existingSet = options.existingNodeIds
+    ? new Set(options.existingNodeIds)
+    : new Set(nodeIds.filter((id) => workspace.nodes[id]?.position !== undefined));
+
+  // If no nodes are established yet, fall back to normal layout
+  if (existingSet.size === 0) {
+    return dispatchLayoutWithRoutes(workspace, { ...options, mutationScope: undefined });
+  }
+
+  const layout: LayoutResult = {};
+  const routes: EdgeRoutes = {};
+
+  // 1. Existing nodes strictly preserve their positions
+  for (const id of existingSet) {
+    const node = workspace.nodes[id];
+    if (!node) continue;
+    const size =
+      node.size ??
+      measureNode(node.label ?? "", opts.nodeSize, {
+        extraHeight: nodeCardExtraHeight(node),
+      });
+    layout[id] = {
+      position: { x: node.position?.x ?? 0, y: node.position?.y ?? 0 },
+      size,
+    };
+  }
+
+  // 2. Identify new nodes to place
+  const newIds = nodeIds.filter((id) => !existingSet.has(id));
+  if (newIds.length === 0) {
+    return { layout, routes };
+  }
+
+  // 3. Decompose new nodes into connected components
+  const newComponents = findWeaklyConnectedComponents(newIds, workspace.edges);
+  const isVertical = (opts.direction ?? "vertical") === "vertical";
+
+  for (const compNodes of newComponents) {
+    // Find connections to existing nodes
+    const existingParents: string[] = [];
+    const existingChildren: string[] = [];
+    for (const edge of Object.values(workspace.edges)) {
+      if (existingSet.has(edge.source) && compNodes.includes(edge.target)) {
+        if (!existingParents.includes(edge.source)) existingParents.push(edge.source);
+      }
+      if (compNodes.includes(edge.source) && existingSet.has(edge.target)) {
+        if (!existingChildren.includes(edge.target)) existingChildren.push(edge.target);
+      }
+    }
+
+    // Lay out the new component in its own coordinate frame
+    const subWs = subWorkspaceFor(workspace, compNodes, workspace.diagramKind);
+    const subOut = layeredLayoutWithRoutes(subWs, { ...options, mutationScope: undefined });
+    const subB = boundsOf(subOut.layout);
+
+    // Calculate anchor point
+    let anchorX: number;
+    let anchorY: number;
+
+    if (existingParents.length > 0) {
+      if (isVertical) {
+        anchorX =
+          existingParents.reduce(
+            (sum, id) => sum + layout[id]!.position.x + layout[id]!.size.width / 2,
+            0,
+          ) / existingParents.length;
+        anchorY =
+          Math.max(...existingParents.map((id) => layout[id]!.position.y + layout[id]!.size.height)) +
+          opts.layerGap;
+      } else {
+        anchorX =
+          Math.max(...existingParents.map((id) => layout[id]!.position.x + layout[id]!.size.width)) +
+          opts.layerGap;
+        anchorY =
+          existingParents.reduce(
+            (sum, id) => sum + layout[id]!.position.y + layout[id]!.size.height / 2,
+            0,
+          ) / existingParents.length;
+      }
+    } else if (existingChildren.length > 0) {
+      if (isVertical) {
+        anchorX =
+          existingChildren.reduce(
+            (sum, id) => sum + layout[id]!.position.x + layout[id]!.size.width / 2,
+            0,
+          ) / existingChildren.length;
+        anchorY =
+          Math.min(...existingChildren.map((id) => layout[id]!.position.y)) -
+          opts.layerGap -
+          subB.h;
+      } else {
+        anchorX =
+          Math.min(...existingChildren.map((id) => layout[id]!.position.x)) -
+          opts.layerGap -
+          subB.w;
+        anchorY =
+          existingChildren.reduce(
+            (sum, id) => sum + layout[id]!.position.y + layout[id]!.size.height / 2,
+            0,
+          ) / existingChildren.length;
+      }
+    } else {
+      // Disconnected new component: place adjacent to existing bounds
+      const existBounds = boundsOf(layout);
+      if (isVertical) {
+        anchorX = existBounds.x + existBounds.w + opts.laneGap;
+        anchorY = existBounds.y;
+      } else {
+        anchorX = existBounds.x;
+        anchorY = existBounds.y + existBounds.h + opts.laneGap;
+      }
+    }
+
+    let dx = Math.round(anchorX - (subB.x + subB.w / 2));
+    let dy = Math.round(anchorY - subB.y);
+
+    // Collision avoidance against already placed nodes (existing + previous new)
+    const hits = (candidateX: number, candidateY: number) => {
+      const left = candidateX + subB.x;
+      const right = left + subB.w;
+      const top = candidateY + subB.y;
+      const bottom = top + subB.h;
+      return Object.values(layout).some((p) => {
+        const pLeft = p.position.x;
+        const pRight = p.position.x + p.size.width;
+        const pTop = p.position.y;
+        const pBottom = p.position.y + p.size.height;
+        return left < pRight && right > pLeft && top < pBottom && bottom > pTop;
+      });
+    };
+
+    for (let pass = 0; pass < 24; pass++) {
+      if (!hits(dx, dy)) break;
+      if (isVertical) {
+        dx += opts.nodeGap + 32;
+      } else {
+        dy += opts.nodeGap + 32;
+      }
+    }
+
+    // Assign positions and routes
+    for (const [id, placed] of Object.entries(subOut.layout)) {
+      layout[id] = {
+        position: { x: placed.position.x + dx, y: placed.position.y + dy },
+        size: placed.size,
+      };
+    }
+    for (const [edgeId, pts] of Object.entries(subOut.routes)) {
+      routes[edgeId] = pts.map((p) => ({ x: p.x + dx, y: p.y + dy }));
+    }
+  }
+
+  return { layout, routes };
+}
+
+export function extendRegionLayout(
+  workspace: Workspace,
+  options: LayoutOptions & { existingNodeIds?: string[] | Set<string> } = {},
+): LayoutResult {
+  return extendRegionLayoutWithRoutes(workspace, options).layout;
+}
+
+export const extendRegion = extendRegionLayout;
+
+/**
  * Radial layout for mind maps: the most-connected node sits at the centre and
  * each breadth-first ring fans out around it. Deterministic — ring membership
  * and angle come from BFS order, so the same graph always lays out identically.
  */
 function radialLayout(
   workspace: Workspace,
-  opts: Required<Omit<LayoutOptions, "strategy">>,
+  opts: LayoutOptionsResolved,
 ): LayoutResult {
   const { nodeSize, ringGap, nodeGap } = opts;
   const nodeIds = Object.keys(workspace.nodes);
@@ -956,7 +1347,7 @@ function radialLayout(
  */
 function treeLayout(
   workspace: Workspace,
-  opts: Required<Omit<LayoutOptions, "strategy">>,
+  opts: LayoutOptionsResolved,
 ): LayoutResult {
   const { nodeSize, layerGap, nodeGap } = opts;
   const nodeIds = Object.keys(workspace.nodes);
@@ -1083,7 +1474,7 @@ function treeLayout(
  */
 function swimlaneLayout(
   workspace: Workspace,
-  opts: Required<Omit<LayoutOptions, "strategy">>,
+  opts: LayoutOptionsResolved,
 ): LayoutResult {
   const { nodeSize, layerGap, laneGap } = opts;
   const nodeIds = Object.keys(workspace.nodes);
@@ -1257,7 +1648,7 @@ function boundsOf(layout: LayoutResult): { x: number; y: number; w: number; h: n
 function _layoutWithRegions(
   workspace: Workspace,
   partition: RegionPartition,
-  opts: Required<Omit<LayoutOptions, "strategy">>,
+  opts: LayoutOptionsResolved,
 ): LayoutResult {
   const result: LayoutResult = {};
   const pins = Object.values(workspace.nodes).filter((n) => n.pinned);
@@ -1317,7 +1708,7 @@ function _layoutWithRegions(
 function layoutWithRegionsRoutes(
   workspace: Workspace,
   partition: RegionPartition,
-  opts: Required<Omit<LayoutOptions, "strategy">>,
+  opts: LayoutOptionsResolved,
 ): { layout: LayoutResult; routes: EdgeRoutes } {
   const result: LayoutResult = {};
   const routes: EdgeRoutes = {};
@@ -1378,7 +1769,7 @@ function layoutWithRegionsRoutes(
 function layoutSingleRoutes(
   ws: Workspace,
   kind: DiagramKind,
-  opts: Required<Omit<LayoutOptions, "strategy">>,
+  opts: LayoutOptionsResolved,
 ): { layout: LayoutResult; routes: EdgeRoutes } {
   const strategy = STRATEGY_FOR_KIND[kind] ?? "layered";
   if (strategy === "radial") return { layout: radialLayout(ws, opts), routes: {} };
@@ -1416,7 +1807,7 @@ function subWorkspaceFor(workspace: Workspace, ids: string[], kind: DiagramKind)
 function layoutSingle(
   ws: Workspace,
   kind: DiagramKind,
-  opts: Required<Omit<LayoutOptions, "strategy">>,
+  opts: LayoutOptionsResolved,
 ): LayoutResult {
   const strategy = STRATEGY_FOR_KIND[kind] ?? "layered";
   if (strategy === "radial") return radialLayout(ws, opts);
@@ -1436,7 +1827,7 @@ function layoutSingle(
  */
 function layeredLayout(
   workspace: Workspace,
-  opts: Required<Omit<LayoutOptions, "strategy">>,
+  opts: LayoutOptionsResolved,
 ): LayoutResult {
   return computeLayout(workspace, { ...opts, strategy: "layered" });
 }
@@ -1874,7 +2265,7 @@ function flowRank(workspace: Workspace): Map<string, number> {
  */
 function timelineLayout(
   workspace: Workspace,
-  opts: Required<Omit<LayoutOptions, "strategy">>,
+  opts: LayoutOptionsResolved,
 ): LayoutResult {
   const { nodeSize, nodeGap, laneGap } = opts;
   const ids = Object.keys(workspace.nodes);
@@ -1942,7 +2333,7 @@ function timelineLayout(
  */
 function gridLayout(
   workspace: Workspace,
-  opts: Required<Omit<LayoutOptions, "strategy">>,
+  opts: LayoutOptionsResolved,
 ): LayoutResult {
   const { nodeSize, nodeGap } = opts;
   const ids = Object.keys(workspace.nodes);
@@ -2102,7 +2493,7 @@ function storyRelease(node: Node | undefined): string | null {
  */
 function storyMapGeometry(
   workspace: Workspace,
-  opts: Required<Omit<LayoutOptions, "strategy">>,
+  opts: LayoutOptionsResolved,
 ): { layout: LayoutResult; grid: StoryMapGrid } {
   const { nodeSize } = opts;
   const ids = Object.keys(workspace.nodes);
@@ -2257,7 +2648,7 @@ function storyMapGeometry(
  */
 function storyMapLayout(
   workspace: Workspace,
-  opts: Required<Omit<LayoutOptions, "strategy">>,
+  opts: LayoutOptionsResolved,
 ): LayoutResult {
   return storyMapGeometry(workspace, opts).layout;
 }

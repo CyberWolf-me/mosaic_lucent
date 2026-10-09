@@ -37,3 +37,6 @@ export * from "./workspaceRules.js";
 export * from "./specImport.js";
 export * from "./codeExport.js";
 export * from "./voice.js";
+export * from "./plan.js";
+export * from "./compiler.js";
+export * from "./qualityGate.js";
