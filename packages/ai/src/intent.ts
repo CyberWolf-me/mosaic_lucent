@@ -33,6 +33,18 @@ export function classifyIntentFastPath(prompt: string, workspace: Workspace): Di
   } else if (/\b(er diagram|erd|database schema|relational model|tables and entities)\b/i.test(p)) {
     targetKind = "er";
     expectedTopology = "relational_network";
+  } else if (/\b(matrix|comparison table|feature matrix|comparison matrix)\b/i.test(p)) {
+    targetKind = "matrix";
+    expectedTopology = "independent_clusters";
+  } else if (/\b(decision tree|decision-tree)\b/i.test(p)) {
+    targetKind = "decisiontree";
+    expectedTopology = "tree_hierarchy";
+  } else if (/\b(sequence diagram|sequence flow)\b/i.test(p)) {
+    targetKind = "sequence";
+    expectedTopology = "directed_flow";
+  } else if (/\b(timeline|roadmap|chronological)\b/i.test(p)) {
+    targetKind = "timeline";
+    expectedTopology = "directed_flow";
   } else if (
     /\b(brainstorm|ideas|sticky notes|stickies|discuss|thoughts|feedback items)\b/i.test(p)
   ) {

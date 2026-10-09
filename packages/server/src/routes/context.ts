@@ -54,6 +54,7 @@ export interface RouteServices {
   readonly metrics: MetricsRegistry;
   readonly telemetry: Telemetry;
   readonly secret: string;
+  readonly instanceId?: string;
   /** The configured web origin — the redirect target SAML's ACS ends at. */
   readonly webOrigin: string;
   /**

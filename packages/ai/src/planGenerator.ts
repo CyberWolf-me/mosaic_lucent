@@ -137,6 +137,34 @@ function generateMockPlan(
     };
   }
 
+  // Scenario: Comparison Matrix / Table
+  if (
+    intent.targetKind === "matrix" ||
+    p.includes("matrix") ||
+    p.includes("comparison table") ||
+    p.includes("feature comparison")
+  ) {
+    return {
+      intent: {
+        ...intent,
+        targetKind: "matrix",
+        expectedTopology: "independent_clusters",
+      },
+      nodes: [
+        { ref: "opt1", label: "Option A: PostgreSQL", role: "option" },
+        { ref: "opt2", label: "Option B: MongoDB", role: "option" },
+        { ref: "crit1", label: "ACID Compliance", role: "criterion" },
+        { ref: "crit2", label: "Horizontal Scaling", role: "criterion" },
+      ],
+      edges: [
+        { from: "opt1", to: "crit1", relation: "relates_to" },
+        { from: "opt2", to: "crit2", relation: "relates_to" },
+      ],
+      groups: [],
+      explanation: "Constructed comparison matrix table.",
+    };
+  }
+
   // Scenario 2: Flowchart (directed flow)
   if (intent.targetKind === "flowchart" || intent.expectedTopology === "directed_flow") {
     return {

@@ -837,7 +837,7 @@ export function createApp(deps: AppDeps): App {
     "access-control-allow-methods": "GET, POST, PATCH, DELETE, OPTIONS",
     "access-control-allow-headers": "content-type, authorization, x-csrf-token, x-request-id",
     "access-control-allow-credentials": "true",
-    "access-control-expose-headers": "x-request-id",
+    "access-control-expose-headers": "x-request-id, x-worker-id",
   };
 
   function send(res: ServerResponse, status: number, body: unknown): void {
@@ -2043,6 +2043,9 @@ export function createApp(deps: AppDeps): App {
     const method = (req.method ?? "GET").toUpperCase();
     const route = routeLabel(req.url ?? "/");
     res.setHeader("x-request-id", requestId);
+    if (deps.instanceId) {
+      res.setHeader("x-worker-id", deps.instanceId);
+    }
     httpInFlight.inc();
 
     let settled = false;
@@ -2433,6 +2436,7 @@ export function createApp(deps: AppDeps): App {
     metrics,
     telemetry,
     secret,
+    instanceId: deps.instanceId,
     provider,
     imageProvider,
     stt: sttService,
@@ -4999,6 +5003,25 @@ export function createApp(deps: AppDeps): App {
         ...guard.board,
         classification: classificationOf(guard.board),
         role: guard.role,
+        latestSeq: seq,
+      });
+      return;
+    }
+
+    if (
+      req.method === "POST" &&
+      req.url?.startsWith("/api/boards/") &&
+      req.url.endsWith("/reconcile")
+    ) {
+      if (!requireCsrf(req, res, "/api/boards/:id/reconcile")) return;
+      const id = req.url.slice("/api/boards/".length, -"/reconcile".length);
+      const guard = await requireBoardRole(req, res, id, "editor", "/api/boards/:id/reconcile");
+      if (!guard.ok) return;
+      const healed = await boardStore.reconcile?.(id);
+      const seq = await boardStore.latestSeq(id);
+      send(res, 200, {
+        ok: true,
+        board: healed ?? guard.board,
         latestSeq: seq,
       });
       return;

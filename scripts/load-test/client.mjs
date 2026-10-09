@@ -83,7 +83,9 @@ export async function createTestUser(baseUrl, idx, runId, password = "LoadTestPa
   });
 
   if (res.status !== 201) {
-    throw new Error(`Failed to create account ${email}: status ${res.status}`);
+    const errBody = await res.text();
+    console.error(`[SIGNUP FAILURE] Status: ${res.status}, Body: ${errBody}`);
+    throw new Error(`Failed to create account ${email}: status ${res.status} (${errBody})`);
   }
 
   const sessionCookie = extractSessionCookie(res.headers);
@@ -385,6 +387,7 @@ export class RealtimeClient {
       this.joined = true;
       this.version = msg.version || 0;
       this.role = msg.role;
+      this.workerId = msg.workerId || null;
       if (Array.isArray(msg.peers)) {
         for (const p of msg.peers) this.peers.set(p.userId, p);
       }

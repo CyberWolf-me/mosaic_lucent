@@ -547,7 +547,8 @@ const role = parseRole(process.env.LUCENT_ROLE);
  */
 let presenceStore: import("./presence.js").PresenceStore | undefined;
 let fanout: import("./fanout.js").Fanout | undefined;
-const instanceId = `srv_${process.pid}_${Math.random().toString(36).slice(2, 8)}`;
+const instanceId =
+  process.env.LUCENT_WORKER_ID || `srv_${process.pid}_${Math.random().toString(36).slice(2, 8)}`;
 if (db && servesHttp(role)) {
   const { PostgresPresenceStore } = await import("./store/pg-presence.js");
   presenceStore = new PostgresPresenceStore(db);

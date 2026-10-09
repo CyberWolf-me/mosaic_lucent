@@ -1,6 +1,11 @@
 import { and, asc, desc, eq, exists, gt, isNull, lt, notExists, or, sql } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
-import { parseWorkspaceOrDefault, type Workspace, type Operation } from "@lucent/core";
+import {
+  applyOperations,
+  parseWorkspaceOrDefault,
+  type Workspace,
+  type Operation,
+} from "@lucent/core";
 import type { Db } from "../db/client.js";
 import {
   boardMembers,
@@ -23,7 +28,7 @@ import type {
   TrashedBoard,
 } from "../boards.js";
 import { effectiveBoardRole, type Role } from "../identity.js";
-import { newOperationId } from "../boards.js";
+import { newOperationId, emptyWorkspace } from "../boards.js";
 
 /**
  * Postgres-backed BoardStore. Implements the full interface: board CRUD, the
@@ -573,6 +578,21 @@ export class PostgresBoardStore implements BoardStore {
       returning "seq"
     `);
     return result.rows.length;
+  }
+
+  async reconcile(id: string): Promise<StoredBoard | undefined> {
+    const board = await this.get(id);
+    if (!board) return undefined;
+    const snapshot = await this.latestSnapshot(id);
+    let base = snapshot ? snapshot.workspace : emptyWorkspace(board.name);
+    const fromSeq = snapshot ? snapshot.seq : 0;
+    const log = await this.loadLog(id, fromSeq);
+    for (const entry of log) {
+      base = applyOperations(base, entry.ops);
+    }
+    const updated: StoredBoard = { ...board, workspace: base, updatedAt: Date.now() };
+    await this.put(updated);
+    return updated;
   }
 }
 

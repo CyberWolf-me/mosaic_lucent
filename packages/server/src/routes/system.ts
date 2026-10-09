@@ -36,7 +36,7 @@ export function registerSystemRoutes(router: AppRouter, s: RouteServices): void 
   };
 
   router.get("/health", (ctx) => {
-    send(ctx.res, 200, { ok: true });
+    send(ctx.res, 200, { ok: true, ...(s.instanceId ? { workerId: s.instanceId } : {}) });
   });
 
   /**
@@ -48,6 +48,7 @@ export function registerSystemRoutes(router: AppRouter, s: RouteServices): void 
     if (!(await metricsGateOpen(ctx.req, ctx.res))) return;
     const snap = s.telemetry.snapshot();
     send(ctx.res, 200, {
+      ...(s.instanceId ? { workerId: s.instanceId } : {}),
       ...(config.metricsVerbose
         ? snap
         : {

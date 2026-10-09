@@ -232,6 +232,9 @@ export class Room {
       // durable state. Entries are already validated and applied at write
       // time, so we just trust the workspace snapshot + log ordering.
       for (const entry of initialLog) {
+        if (options.baseSeq !== undefined && entry.seq > this.baseSeq) {
+          this.workspace = applyOperations(this.workspace, entry.ops);
+        }
         this.log.push(entry);
         if (entry.requestId !== undefined) this.committedRequests.set(entry.requestId, entry.seq);
       }
@@ -522,6 +525,7 @@ export class Room {
         this.workspace = applyOperations(this.workspace, entry.ops);
         this.log.push(entry);
         this.head = entry.seq;
+        if (entry.requestId !== undefined) this.committedRequests.set(entry.requestId, entry.seq);
         absorbed.push(entry);
       }
     }
@@ -557,6 +561,7 @@ export class Room {
       this.workspace = applyOperations(this.workspace, entry.ops);
       this.log.push(entry);
       this.head = entry.seq;
+      if (entry.requestId !== undefined) this.committedRequests.set(entry.requestId, entry.seq);
       absorbed.push(entry);
     }
     return absorbed;

@@ -141,6 +141,7 @@ export interface Config {
 export interface ConfigEnv {
   LUCENT_HOST?: string;
   LUCENT_PORT?: string;
+  PORT?: string;
   LUCENT_WEB_ORIGIN?: string;
   /** Comma-separated extension of LUCENT_WEB_ORIGIN; each entry joins the CSRF allow-list. */
   LUCENT_WEB_ORIGINS?: string;
@@ -259,7 +260,7 @@ export function readConfig(env: ConfigEnv = process.env): Config {
 
   return {
     host: env.LUCENT_HOST ?? "127.0.0.1",
-    port: num(env.LUCENT_PORT, 4387),
+    port: num(env.LUCENT_PORT ?? env.PORT, 4387),
     webOrigin: env.LUCENT_WEB_ORIGIN ?? "http://localhost:5173",
     webOrigins: (() => {
       const primary = env.LUCENT_WEB_ORIGIN ?? "http://localhost:5173";

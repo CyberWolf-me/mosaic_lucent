@@ -38,4 +38,54 @@ describe("classifyIntentFastPath", () => {
     expect(intent?.expectedTopology).toBe("relational_network");
     expect(intent?.mutationScope).toBe("extend_region");
   });
+
+  it("classifies explicit ER diagram and database schema requests", () => {
+    const ws = createWorkspace();
+    const intent = classifyIntentFastPath(
+      "Design database schema and ER diagram for users and orders",
+      ws,
+    );
+    expect(intent).not.toBeNull();
+    expect(intent?.targetKind).toBe("er");
+    expect(intent?.expectedTopology).toBe("relational_network");
+  });
+
+  it("classifies explicit mind map and tree hierarchy requests", () => {
+    const ws = createWorkspace();
+    const intent = classifyIntentFastPath("Mind map of our Q4 goals and initiatives", ws);
+    expect(intent).not.toBeNull();
+    expect(intent?.targetKind).toBe("mindmap");
+    expect(intent?.expectedTopology).toBe("tree_hierarchy");
+  });
+
+  it("classifies matrix and comparison table requests", () => {
+    const ws = createWorkspace();
+    const intent = classifyIntentFastPath(
+      "Create a comparison matrix between PostgreSQL and MongoDB",
+      ws,
+    );
+    expect(intent).not.toBeNull();
+    expect(intent?.targetKind).toBe("matrix");
+    expect(intent?.expectedTopology).toBe("independent_clusters");
+  });
+
+  it("classifies decision tree requests", () => {
+    const ws = createWorkspace();
+    const intent = classifyIntentFastPath("Build a decision tree for refund authorization", ws);
+    expect(intent).not.toBeNull();
+    expect(intent?.targetKind).toBe("decisiontree");
+    expect(intent?.expectedTopology).toBe("tree_hierarchy");
+  });
+
+  it("returns null for ambiguous requests on empty canvas rather than guessing", () => {
+    const ws = createWorkspace();
+    const intent = classifyIntentFastPath("make something cool and interesting", ws);
+    expect(intent).toBeNull();
+  });
+
+  it("returns null for unsupported out-of-domain requests", () => {
+    const ws = createWorkspace();
+    const intent = classifyIntentFastPath("Render a 3D CAD model of an airplane engine", ws);
+    expect(intent).toBeNull();
+  });
 });

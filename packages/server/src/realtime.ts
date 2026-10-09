@@ -363,6 +363,7 @@ export class RealtimeServer {
         role: room.roleOf(conn.userId),
         peers: room.peers(conn.userId),
         spotlight: room.spotlight(),
+        ...(this.deps.instanceId ? { workerId: this.deps.instanceId } : {}),
       });
       this.broadcast(boardId, { type: "peer-joined", presence }, conn);
       return;
@@ -377,6 +378,7 @@ export class RealtimeServer {
       catchup: room.since(fromSeq),
       peers: room.peers(conn.userId),
       spotlight: room.spotlight(),
+      ...(this.deps.instanceId ? { workerId: this.deps.instanceId } : {}),
     });
     // Tell everyone else this person is here.
     this.broadcast(boardId, { type: "peer-joined", presence }, conn);
@@ -497,6 +499,7 @@ export class RealtimeServer {
       seq: result.entry?.seq,
       operationId: result.entry?.operationId,
       ...(result.requestId !== undefined ? { requestId: result.requestId } : {}),
+      ...(this.deps.instanceId ? { workerId: this.deps.instanceId } : {}),
     });
 
     // Broadcast what this commit absorbed first (entries another instance

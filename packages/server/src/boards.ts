@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import type { Workspace } from "@lucent/core";
-import { createWorkspace } from "@lucent/core";
+import { applyOperations, createWorkspace } from "@lucent/core";
 import { effectiveBoardRole, type Role } from "./identity.js";
 import type { BoardClassification } from "./classification.js";
 
@@ -351,6 +351,11 @@ export interface BoardStore {
   pruneLog(boardId: string, upToSeq: number, olderThan?: number): Promise<number>;
   /** Keep the newest `keep` snapshots, delete the rest; returns how many went. */
   pruneSnapshots(boardId: string, keep: number): Promise<number>;
+  /**
+   * Reconcile/recover a lagging board projection by replaying operations from
+   * the latest snapshot (or base) to head.
+   */
+  reconcile?(id: string): Promise<StoredBoard | undefined>;
 }
 
 /** True when a share link is still redeemable at `now`. */
@@ -628,6 +633,21 @@ export class InMemoryBoardStore implements BoardStore {
     if (list.length <= keep) return 0;
     this.snapshots.set(boardId, list.slice(list.length - keep));
     return list.length - keep;
+  }
+
+  async reconcile(id: string): Promise<StoredBoard | undefined> {
+    const board = await this.get(id);
+    if (!board) return undefined;
+    const snapshot = await this.latestSnapshot(id);
+    let base = snapshot ? snapshot.workspace : emptyWorkspace(board.name);
+    const fromSeq = snapshot ? snapshot.seq : 0;
+    const log = await this.loadLog(id, fromSeq);
+    for (const entry of log) {
+      base = applyOperations(base, entry.ops);
+    }
+    const updated: StoredBoard = { ...board, workspace: base, updatedAt: Date.now() };
+    await this.put(updated);
+    return updated;
   }
 }
 
