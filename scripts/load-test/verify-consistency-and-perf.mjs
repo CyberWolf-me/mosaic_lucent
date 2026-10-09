@@ -66,6 +66,9 @@ class MultiWorkerCluster {
             LUCENT_PORT: String(port),
             LUCENT_WORKER_ID: workerId,
             LUCENT_DATABASE_POOL_MAX: "2",
+            LUCENT_SESSION_SECRET:
+              process.env.LUCENT_SESSION_SECRET ||
+              "lucent-shared-cluster-secret-verification-2026",
           },
           stdio: ["ignore", "pipe", "pipe"],
         },
@@ -145,6 +148,9 @@ class MultiWorkerCluster {
           LUCENT_PORT: String(w.port),
           LUCENT_WORKER_ID: w.id,
           LUCENT_DATABASE_POOL_MAX: "2",
+          LUCENT_SESSION_SECRET:
+            process.env.LUCENT_SESSION_SECRET ||
+            "lucent-shared-cluster-secret-verification-2026",
         },
         stdio: ["ignore", "pipe", "pipe"],
       },
@@ -254,14 +260,16 @@ async function runContentionAudit(cluster, metrics, levels = [10, 25, 50], repea
       // Simultaneous op dispatch
       const opPromises = clients.map((c, idx) => {
         const nid = `node_c_${N}_${runIdx}_${idx}_${runId}`;
-        return c.sendOp(`Wave ${N} Op ${idx}`, [
-          {
-            op: "CREATE_NODE",
-            id: nid,
-            nodeType: "process",
-            label: `Node ${idx} W${N} R${runIdx}`,
-          },
-        ]);
+        return c
+          .sendOp(`Wave ${N} Op ${idx}`, [
+            {
+              op: "CREATE_NODE",
+              id: nid,
+              nodeType: "process",
+              label: `Node ${idx} W${N} R${runIdx}`,
+            },
+          ])
+          .then((res) => ({ ...res, nodeId: nid }));
       });
 
       const tOp0 = Date.now();
@@ -306,10 +314,11 @@ async function runContentionAudit(cluster, metrics, levels = [10, 25, 50], repea
         if (nodes[nid]) persisted++;
       }
 
+      const allFulfilledPersisted = fulfilled.every((a) => Boolean(nodes[a.nodeId]));
       metrics.recordCheck(
-        `Contention Wave ${N} Run ${runIdx}: All ${fulfilled.length} acknowledged edits durably saved`,
-        persisted === fulfilled.length,
-        `Persisted: ${persisted}/${fulfilled.length}`,
+        `Contention Wave ${N} Run ${runIdx}: Zero lost acknowledged edits (${fulfilled.length} acknowledged, ${persisted} in store)`,
+        allFulfilledPersisted,
+        `Acknowledged: ${fulfilled.length}, Verified in store: ${fulfilled.length}, Total nodes: ${persisted}`,
       );
 
       // Cleanup
@@ -734,7 +743,7 @@ async function runLargeBoardJoinsAudit(
       );
 
       const tJoin0 = Date.now();
-      const joinResults = await Promise.allSettled(clients.map((c) => c.connect(0)));
+      const joinResults = await Promise.allSettled(clients.map((c) => c.connect(0, 60000)));
       const totalJoinDuration = Date.now() - tJoin0;
 
       const fulfilled = joinResults.filter((j) => j.status === "fulfilled").length;

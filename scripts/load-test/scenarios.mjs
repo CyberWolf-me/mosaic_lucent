@@ -1033,8 +1033,43 @@ export async function runLT10(baseUrl, metrics, config) {
     const patchRes = await updateMemberRole(baseUrl, owner.token, boardId, collab.id, "viewer");
     metrics.recordCheck("Member role patched to 'viewer'", patchRes.ok);
 
-    // Collaborator attempts to perform another edit through existing socket or REST
-    console.log("Revoked user attempting edit...");
+    // B23 probe: does the collaborator's STILL-OPEN socket keep editing after the
+    // downgrade? The room caches the role from join and only re-fetches when it
+    // has none, so a demoted editor may keep writing over a pre-existing socket.
+    // Single attempt (maxRetries=0) so sendOp's retry-with-rejoin can't mask it.
+    console.log("Revoked user attempting an edit over the STILL-OPEN socket (B23 probe)...");
+    let openSocketRefused = false;
+    let b23Detail = "";
+    try {
+      const wsAttempt = await cCollab.sendOp(
+        "Demoted Open-Socket Edit",
+        [
+          {
+            op: "CREATE_NODE",
+            id: `b23_ws_${runId}`,
+            nodeType: "process",
+            label: "B23 Open-Socket Edit",
+          },
+        ],
+        null,
+        15000,
+        0,
+      );
+      b23Detail = `ACCEPTED on the open socket (seq ${wsAttempt.seq}) — B23 CONFIRMED: a demoted member kept editing over a pre-existing socket`;
+    } catch (err) {
+      const msg = String(err?.message || err);
+      openSocketRefused = /permission|editor role required/i.test(msg);
+      b23Detail = openSocketRefused ? "refused (permission)" : `refused/other: ${msg}`;
+    }
+    metrics.recordCheck("Demoted member's open WebSocket is refused (B23)", openSocketRefused, b23Detail);
+    const afterWs = await getBoard(baseUrl, owner.token, boardId);
+    metrics.recordCheck(
+      "No B23 open-socket edit leaked into persisted state",
+      !afterWs.workspace?.nodes?.[`b23_ws_${runId}`],
+    );
+
+    // Collaborator attempts to perform another edit through REST
+    console.log("Revoked user attempting edit via REST...");
     const restAttempt = await postBoardOps(baseUrl, collab.token, boardId, [
       {
         op: "CREATE_NODE",
@@ -1838,9 +1873,11 @@ export async function runLT14(baseUrl, metrics, config) {
       "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
       "base64",
     );
-    const uploadUsers = users.slice(0, 5);
-    const uploadPromises = uploadUsers.map((u) =>
-      uploadAsset(baseUrl, u.token, boardId, fakePng, "image/png", u.csrfToken),
+    // Uploads must come from a member of the BOARD'S org. A shared collaborator
+    // from another personal org is correctly refused by the cross-tenant board-id
+    // guard (that produced the earlier 404s), so the board-org owner uploads here.
+    const uploadPromises = Array.from({ length: 5 }, () =>
+      uploadAsset(baseUrl, owner.token, boardId, fakePng, "image/png", owner.csrfToken),
     );
 
     // 2. Concurrent exports (3 users)
@@ -1867,8 +1904,8 @@ export async function runLT14(baseUrl, metrics, config) {
     ]);
 
     metrics.recordCheck(
-      "Asset upload requests answered cleanly",
-      uploadResults.every((r) => r.ok || r.status === 201 || r.status === 400 || r.status === 404),
+      "Asset uploads succeeded for a board-org member",
+      uploadResults.every((r) => r.ok || r.status === 200 || r.status === 201),
       `Statuses: ${uploadResults.map((r) => r.status).join(", ")}`,
     );
     metrics.recordCheck(
