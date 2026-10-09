@@ -345,9 +345,7 @@ export const registerBoardOpsRoutes: RegisterRoutes = (router, s) => {
     }
 
     const requestId =
-      typeof body.requestId === "string" &&
-      body.requestId.length > 0 &&
-      body.requestId.length <= 64
+      typeof body.requestId === "string" && body.requestId.length > 0 && body.requestId.length <= 64
         ? body.requestId
         : undefined;
 
@@ -399,4 +397,3 @@ export const registerBoardOpsRoutes: RegisterRoutes = (router, s) => {
     send(res, 404, { ok: false, error: outcome.reason });
   });
 };
-

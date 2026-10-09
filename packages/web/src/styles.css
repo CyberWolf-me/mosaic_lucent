@@ -8152,7 +8152,6 @@ textarea:focus-visible {
 
 /* ================= Model Tier, Thinking & Telemetry ================= */
 
-
 /* Live Thinking Stream in AIPill */
 .live-thinking-accordion {
   width: min(620px, calc(100vw - 32px));

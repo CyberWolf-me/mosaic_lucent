@@ -1,6 +1,11 @@
 import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { createPortal } from "react-dom";
-import { exportBoardToCode, type CodeExportFormat, type CodeExportResult, type Workspace } from "@lucent/core";
+import {
+  exportBoardToCode,
+  type CodeExportFormat,
+  type CodeExportResult,
+  type Workspace,
+} from "@lucent/core";
 import { useWorkspace } from "../workspace.js";
 import { useToast } from "./Toast.js";
 import { Ico } from "./icons.js";
@@ -287,53 +292,58 @@ export function CodeExportModal({
               </button>
             );
           })}
-          {sourceWorkspace && Object.keys(sourceWorkspace.nodes).length < Object.keys(fullWorkspace.nodes).length && (
-            <div style={{ display: "flex", alignItems: "center", gap: 6, marginLeft: "auto" }}>
-              <span style={{ fontSize: 12, color: "var(--text-muted, oklch(0.65 0.01 255))" }}>Scope:</span>
-              <button
-                type="button"
-                onClick={() => setUseSelection(true)}
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 4,
-                  padding: "4px 8px",
-                  borderRadius: 6,
-                  fontSize: 11.5,
-                  cursor: "pointer",
-                  border: useSelection
-                    ? "1px solid var(--amber-2)"
-                    : "1px solid var(--border-subtle, oklch(0.35 0.02 255 / 0.3))",
-                  background: useSelection ? "var(--amber-2)" : "transparent",
-                  color: useSelection ? "var(--ink-0)" : "var(--text-muted, oklch(0.8 0.01 255))",
-                  fontWeight: useSelection ? 600 : 400,
-                }}
-              >
-                Selection ({Object.keys(sourceWorkspace.nodes).length} nodes)
-              </button>
-              <button
-                type="button"
-                onClick={() => setUseSelection(false)}
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 4,
-                  padding: "4px 8px",
-                  borderRadius: 6,
-                  fontSize: 11.5,
-                  cursor: "pointer",
-                  border: !useSelection
-                    ? "1px solid var(--amber-2)"
-                    : "1px solid var(--border-subtle, oklch(0.35 0.02 255 / 0.3))",
-                  background: !useSelection ? "var(--amber-2)" : "transparent",
-                  color: !useSelection ? "var(--ink-0)" : "var(--text-muted, oklch(0.8 0.01 255))",
-                  fontWeight: !useSelection ? 600 : 400,
-                }}
-              >
-                Entire Board ({Object.keys(fullWorkspace.nodes).length} nodes)
-              </button>
-            </div>
-          )}
+          {sourceWorkspace &&
+            Object.keys(sourceWorkspace.nodes).length < Object.keys(fullWorkspace.nodes).length && (
+              <div style={{ display: "flex", alignItems: "center", gap: 6, marginLeft: "auto" }}>
+                <span style={{ fontSize: 12, color: "var(--text-muted, oklch(0.65 0.01 255))" }}>
+                  Scope:
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setUseSelection(true)}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 4,
+                    padding: "4px 8px",
+                    borderRadius: 6,
+                    fontSize: 11.5,
+                    cursor: "pointer",
+                    border: useSelection
+                      ? "1px solid var(--amber-2)"
+                      : "1px solid var(--border-subtle, oklch(0.35 0.02 255 / 0.3))",
+                    background: useSelection ? "var(--amber-2)" : "transparent",
+                    color: useSelection ? "var(--ink-0)" : "var(--text-muted, oklch(0.8 0.01 255))",
+                    fontWeight: useSelection ? 600 : 400,
+                  }}
+                >
+                  Selection ({Object.keys(sourceWorkspace.nodes).length} nodes)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setUseSelection(false)}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 4,
+                    padding: "4px 8px",
+                    borderRadius: 6,
+                    fontSize: 11.5,
+                    cursor: "pointer",
+                    border: !useSelection
+                      ? "1px solid var(--amber-2)"
+                      : "1px solid var(--border-subtle, oklch(0.35 0.02 255 / 0.3))",
+                    background: !useSelection ? "var(--amber-2)" : "transparent",
+                    color: !useSelection
+                      ? "var(--ink-0)"
+                      : "var(--text-muted, oklch(0.8 0.01 255))",
+                    fontWeight: !useSelection ? 600 : 400,
+                  }}
+                >
+                  Entire Board ({Object.keys(fullWorkspace.nodes).length} nodes)
+                </button>
+              </div>
+            )}
         </div>
 
         {/* Code Metadata Bar */}

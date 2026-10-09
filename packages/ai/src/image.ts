@@ -325,7 +325,9 @@ export class CloudflareImageProvider implements ImageProvider {
 
     if (!res.ok) {
       const detail = await res.text().catch(() => "");
-      throw new Error(`Cloudflare Workers AI image failed (${res.status}): ${detail.slice(0, 300)}`);
+      throw new Error(
+        `Cloudflare Workers AI image failed (${res.status}): ${detail.slice(0, 300)}`,
+      );
     }
 
     const arrayBuf = await res.arrayBuffer();

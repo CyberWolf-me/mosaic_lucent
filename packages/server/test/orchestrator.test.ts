@@ -61,7 +61,7 @@ async function harness(): Promise<Harness> {
 async function api(
   h: Harness,
   path: string,
-  options: { token?: string; agent?: string; body?: unknown } = {}
+  options: { token?: string; agent?: string; body?: unknown } = {},
 ) {
   const headers: Record<string, string> = {
     "content-type": "application/json",
@@ -196,7 +196,6 @@ describe("POST /api/boards/:id/orchestrate", () => {
       updatedAt: Date.now(),
     };
     await h.boardStore.put(board);
-
 
     const grant = issueAgentGrant({ boardId: board.id, userId: user.id }, SECRET);
 

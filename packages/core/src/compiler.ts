@@ -4,7 +4,12 @@ import type { SemanticPlan } from "./plan.js";
 
 export interface CompileDiagnostic {
   severity: "error" | "warning";
-  code: "AMBIGUOUS_LABEL" | "INVALID_EXISTING_ID" | "UNRESOLVED_ENDPOINT" | "SELF_CONNECTION";
+  code:
+    | "AMBIGUOUS_LABEL"
+    | "INVALID_EXISTING_ID"
+    | "UNRESOLVED_ENDPOINT"
+    | "UNRESOLVED_REFERENCE"
+    | "SELF_CONNECTION";
   message: string;
   ref?: string;
 }
@@ -26,7 +31,7 @@ export interface CompileResult {
 export function compileSemanticPlan(
   workspace: Workspace,
   plan: SemanticPlan,
-  idGenerator: () => string = () => Math.random().toString(36).slice(2, 10)
+  idGenerator: () => string = () => Math.random().toString(36).slice(2, 10),
 ): CompileResult {
   const operations: Operation[] = [];
   const diagnostics: CompileDiagnostic[] = [];
@@ -92,7 +97,19 @@ export function compileSemanticPlan(
     refToCanonicalId.set(node.ref, canonicalId);
   }
 
-  // 3. Emit CREATE_GROUP operations (must precede CREATE_NODE for validator)
+  // 3. Emit TRANSFORM_DIAGRAM if target representation differs on empty canvas or new_canvas
+  if (
+    plan.intent.targetKind &&
+    plan.intent.targetKind !== workspace.diagramKind &&
+    (plan.intent.mutationScope === "new_canvas" || Object.keys(workspace.nodes).length === 0)
+  ) {
+    operations.push({
+      op: "TRANSFORM_DIAGRAM",
+      to: plan.intent.targetKind,
+    });
+  }
+
+  // 4. Emit CREATE_GROUP operations (must precede CREATE_NODE for validator)
   for (const group of plan.groups) {
     const groupId = refToGroupId.get(group.ref)!;
     const children = group.memberRefs
@@ -136,7 +153,7 @@ export function compileSemanticPlan(
     if (!sourceId || !targetId) {
       diagnostics.push({
         severity: "error",
-        code: "UNRESOLVED_ENDPOINT",
+        code: "UNRESOLVED_REFERENCE",
         message: `Edge connects unresolved reference: from="${edge.from}", to="${edge.to}".`,
       });
       continue;

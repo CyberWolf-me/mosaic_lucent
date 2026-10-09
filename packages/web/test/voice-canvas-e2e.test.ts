@@ -32,7 +32,8 @@ describe("Complete Voice -> Canvas Golden Pipeline (Phase 2 / Task 2.2)", () => 
     let t = 1000;
 
     // 1. User Speaks: "Lucent, add Stripe to the payment architecture and connect it to the payment service."
-    const turn1Text = "Lucent, add Stripe to the payment architecture and connect it to the payment service.";
+    const turn1Text =
+      "Lucent, add Stripe to the payment architecture and connect it to the payment service.";
     const turn1: VoiceTurn = {
       id: "turn_1",
       text: turn1Text,
@@ -96,7 +97,8 @@ describe("Complete Voice -> Canvas Golden Pipeline (Phase 2 / Task 2.2)", () => 
     const outcome = {
       outcome: "applied" as const,
       ops: 2,
-      reply: "Done. I added Stripe and connected the payment service. Should I add webhook handlers for payment events?",
+      reply:
+        "Done. I added Stripe and connected the payment service. Should I add webhook handlers for payment events?",
       explanation: "Added Stripe service node and connected Payment Service to it.",
     };
     const replyText = spokenReply(outcome);

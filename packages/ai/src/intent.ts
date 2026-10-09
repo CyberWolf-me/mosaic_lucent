@@ -1,14 +1,4 @@
-import type {
-  DiagramIntent,
-  ExpectedTopology,
-  MutationScope,
-  SemanticPlan,
-  Workspace,
-} from "@lucent/core";
-import {
-  DiagramIntentSchema,
-  SemanticPlanSchema,
-} from "@lucent/core";
+import type { DiagramIntent, ExpectedTopology, MutationScope, Workspace } from "@lucent/core";
 
 /**
  * Deterministic Intent Classifier Fast-Path.
@@ -28,16 +18,24 @@ export function classifyIntentFastPath(prompt: string, workspace: Workspace): Di
   if (/\b(flowchart|flow chart|process flow|step-by-step|workflow|user journey)\b/i.test(p)) {
     targetKind = "flowchart";
     expectedTopology = "directed_flow";
-  } else if (/\b(architecture|system architecture|microservices?|backend architecture|cloud infrastructure)\b/i.test(p)) {
+  } else if (
+    /\b(architecture|system architecture|microservices?|backend architecture|cloud infrastructure)\b/i.test(
+      p,
+    )
+  ) {
     targetKind = "architecture";
     expectedTopology = "relational_network";
-  } else if (/\b(mind\s*map|mindmap|concept map|org chart|organization chart|hierarchy)\b/i.test(p)) {
+  } else if (
+    /\b(mind\s*map|mindmap|concept map|org chart|organization chart|hierarchy)\b/i.test(p)
+  ) {
     targetKind = "mindmap";
     expectedTopology = "tree_hierarchy";
   } else if (/\b(er diagram|erd|database schema|relational model|tables and entities)\b/i.test(p)) {
     targetKind = "er";
     expectedTopology = "relational_network";
-  } else if (/\b(brainstorm|ideas|sticky notes|stickies|discuss|thoughts|feedback items)\b/i.test(p)) {
+  } else if (
+    /\b(brainstorm|ideas|sticky notes|stickies|discuss|thoughts|feedback items)\b/i.test(p)
+  ) {
     targetKind = "flowchart";
     expectedTopology = "independent_clusters";
   }
@@ -143,7 +141,10 @@ export function planToolSchema(): Record<string, unknown> {
           properties: {
             ref: { type: "string", description: "Temporary symbolic ID (e.g. n1, n2)" },
             label: { type: "string", description: "Node label text" },
-            role: { type: "string", description: "Semantic role (e.g. service, database, step, note)" },
+            role: {
+              type: "string",
+              description: "Semantic role (e.g. service, database, step, note)",
+            },
             existingNodeId: {
               type: "string",
               description: "ID of an existing canvas node if referencing one",

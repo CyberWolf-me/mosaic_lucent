@@ -276,7 +276,11 @@ export function createOrchestrateDiagramTool(config: AgentContextConfig) {
           return { success: false, error: refusalReasons(text) };
         }
 
-        const data = (await res.json()) as { ok: boolean; operations?: unknown[]; explanation?: string };
+        const data = (await res.json()) as {
+          ok: boolean;
+          operations?: unknown[];
+          explanation?: string;
+        };
         return {
           success: true,
           message: data.explanation || "Applied diagram updates to the canvas.",
@@ -289,7 +293,6 @@ export function createOrchestrateDiagramTool(config: AgentContextConfig) {
 }
 
 export function createGetBoardSummaryTool(config: AgentContextConfig) {
-
   return llm.tool({
     description:
       "Get a concise summary of all components currently on the Lucent canvas (nodes, edges, shapes, wireframes).",
@@ -441,7 +444,6 @@ export default defineAgent({
         get_board_summary: getSummary,
       },
     });
-
 
     // 6. Start the voice session in the room
     await session.start({

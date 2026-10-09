@@ -27,10 +27,15 @@ export const onRequest: PagesFunction<Env> = async (context) => {
 
   const response = await fetch(modifiedRequest);
 
-  if (context.request.method === "GET" && cache && url.pathname === "/api/templates/public" && response.ok) {
+  if (
+    context.request.method === "GET" &&
+    cache &&
+    url.pathname === "/api/templates/public" &&
+    response.ok
+  ) {
     const cloned = response.clone();
     context.waitUntil(
-      cloned.text().then((text) => cache.put("templates:public", text, { expirationTtl: 300 }))
+      cloned.text().then((text) => cache.put("templates:public", text, { expirationTtl: 300 })),
     );
   }
 

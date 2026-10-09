@@ -48,7 +48,7 @@ services:
       LUCENT_WEB_ORIGIN: http://localhost:4387
       # Wire Postgres. The password matches the postgres service above; this
       # is the dev compose file, not a production template.
-      LUCENT_DATABASE_URL: postgres://lucent:lucent@postgres:5432/lucent
+      LUCENT_DATABASE_URL: postgres://lucent:lucent@postgres:5432/lucent?sslmode=disable
       # Required in production. The compose file ships a placeholder so the
       # container at least starts; replace in a real deploy.
       LUCENT_SESSION_SECRET: change-me-32-bytes-minimum-aaaaaaaaaaaaaaaaaa
@@ -82,7 +82,7 @@ services:
     command: ["node", "packages/server/dist/main.js"]
     environment:
       LUCENT_ROLE: worker
-      LUCENT_DATABASE_URL: postgres://lucent:lucent@postgres:5432/lucent
+      LUCENT_DATABASE_URL: postgres://lucent:lucent@postgres:5432/lucent?sslmode=disable
       LUCENT_SESSION_SECRET: change-me-32-bytes-minimum-aaaaaaaaaaaaaaaaaa
       # Every family by default. Narrow it to scale one family out, e.g.
       # `LUCENT_JOB_FAMILIES: ai` for a dedicated AI worker.

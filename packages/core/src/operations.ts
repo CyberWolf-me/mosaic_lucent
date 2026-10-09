@@ -799,7 +799,11 @@ function sanitizeWireframeElement(raw: unknown): Record<string, unknown> {
     }
   }
 
-  if (el.placeholder !== undefined && el.placeholder !== null && typeof el.placeholder !== "string") {
+  if (
+    el.placeholder !== undefined &&
+    el.placeholder !== null &&
+    typeof el.placeholder !== "string"
+  ) {
     el.placeholder = String(el.placeholder);
   }
 
@@ -981,7 +985,9 @@ export function sanitizeRawOperations(raw: unknown): unknown {
         copy.title = copy.title.trim();
       }
       if (copy.viewport !== "desktop" && copy.viewport !== "tablet" && copy.viewport !== "mobile") {
-        const vp = String(copy.viewport ?? "").toLowerCase().trim();
+        const vp = String(copy.viewport ?? "")
+          .toLowerCase()
+          .trim();
         if (vp === "mobile" || vp === "phone" || vp === "mobile-first" || vp === "smartphone") {
           copy.viewport = "mobile";
         } else if (vp === "tablet" || vp === "ipad") {

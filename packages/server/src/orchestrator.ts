@@ -1,4 +1,4 @@
-import type { Operation, Workspace, SemanticPlan, TrustCommitter } from "@lucent/core";
+import type { Operation, SemanticPlan, TrustCommitter } from "@lucent/core";
 import {
   compileSemanticPlan,
   evaluateTopologyQuality,
@@ -8,7 +8,7 @@ import {
 } from "@lucent/core";
 import { generateSemanticPlan, requestBoundedEdgeRepair } from "@lucent/ai";
 import { commitBatch, type CommitOutcome } from "./commitBatch.js";
-import { aiActor, userActor, type OperationActor, type StoredBoard } from "./boards.js";
+import { aiActor, userActor, type OperationActor } from "./boards.js";
 import type { RouteServices } from "./routes/context.js";
 
 export interface OrchestrateRequest {
@@ -57,7 +57,7 @@ export type OrchestrateOutcome =
  */
 export async function orchestrateGeneration(
   services: RouteServices,
-  req: OrchestrateRequest
+  req: OrchestrateRequest,
 ): Promise<OrchestrateOutcome> {
   // 1. Authoritative Board Load from Server Store (Never trust caller-supplied snapshot)
   const board = await services.boardStore.get(req.boardId);
@@ -117,7 +117,12 @@ export async function orchestrateGeneration(
 
   // 6. Bounded Repair Pass (Only if REPAIRABLE)
   if (quality.outcome === "REPAIRABLE") {
-    plan = await requestBoundedEdgeRepair(services.provider, board.workspace, plan, quality.missingConnections);
+    plan = await requestBoundedEdgeRepair(
+      services.provider,
+      board.workspace,
+      plan,
+      quality.missingConnections,
+    );
     compileRes = compileSemanticPlan(board.workspace, plan);
     if (!compileRes.ok) {
       return {
@@ -150,7 +155,7 @@ export async function orchestrateGeneration(
   const stampedOps = stampTrust(
     stampAuthorship(compileRes.operations, req.userId),
     committer,
-    board.workspace
+    board.workspace,
   );
 
   // 8. Final Invariant Validation before commit
@@ -182,7 +187,7 @@ export async function orchestrateGeneration(
     {
       expectedSeq: req.expectedSeq,
       requestId: req.requestId,
-    }
+    },
   );
 
   if (!outcome.ok) {

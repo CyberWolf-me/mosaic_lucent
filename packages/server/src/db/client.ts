@@ -21,8 +21,14 @@ export interface Db {
 
 export function pgConfigFromUrl(url: string): ClientConfig {
   const isRemote = !url.includes("localhost") && !url.includes("127.0.0.1");
-  const hasSslParam = url.includes("sslmode=") || url.includes("ssl=");
-  const needsSsl = isRemote || hasSslParam;
+  // An explicit opt-out wins so a local/self-hosted Postgres without TLS can be
+  // reached by a non-loopback hostname (e.g. the docker-compose service
+  // "postgres") without forcing SSL. Previously ANY sslmode= param forced SSL,
+  // which broke `sslmode=disable` and the local compose stack.
+  const sslDisabled = /[?&](sslmode=disable|ssl=false|ssl=0)/i.test(url);
+  const sslForced =
+    /[?&](sslmode=(require|verify-ca|verify-full|prefer|allow)|ssl=true|ssl=1)/i.test(url);
+  const needsSsl = !sslDisabled && (sslForced || isRemote);
   const ssl = needsSsl
     ? { rejectUnauthorized: process.env.LUCENT_DATABASE_SSL_REJECT_UNAUTHORIZED === "true" }
     : undefined;

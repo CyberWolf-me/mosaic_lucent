@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { createWorkspace } from "../src/model.js";
 import { compileSemanticPlan } from "../src/compiler.js";
 import { evaluateTopologyQuality } from "../src/qualityGate.js";
-import { SemanticPlan } from "../src/plan.js";
+import type { SemanticPlan } from "../src/plan.js";
 
 describe("evaluateTopologyQuality", () => {
   it("allows floating nodes in independent_clusters (brainstorming negative case)", () => {
@@ -50,9 +50,7 @@ describe("evaluateTopologyQuality", () => {
         { ref: "step2", label: "Verify 2FA" },
         { ref: "step_orphan", label: "Dangling Step" }, // No edges to this!
       ],
-      edges: [
-        { from: "step1", to: "step2", relation: "next" },
-      ],
+      edges: [{ from: "step1", to: "step2", relation: "next" }],
       groups: [],
       explanation: "",
     };
@@ -70,6 +68,69 @@ describe("evaluateTopologyQuality", () => {
     const pass2 = evaluateTopologyQuality(ws, plan, compiled.operations, true);
     expect(pass2.outcome).toBe("UNRESOLVED");
     expect(pass2.missingConnections).toContain("Dangling Step");
+  });
+
+  it("permits intentional cyclic workflows and retries in directed_flow by default", () => {
+    const ws = createWorkspace();
+    const plan: SemanticPlan = {
+      intent: {
+        userObjective: "Approval and revision retry loop",
+        targetKind: "flowchart",
+        expectedTopology: "directed_flow",
+        mutationScope: "new_canvas",
+        focusNodeIds: [],
+      },
+      nodes: [
+        { ref: "submit", label: "Submit Application" },
+        { ref: "review", label: "Manager Review" },
+        { ref: "revise", label: "Revise Application" },
+      ],
+      edges: [
+        { from: "submit", to: "review", relation: "next" },
+        { from: "review", to: "revise", relation: "next", label: "Rejected" },
+        { from: "revise", to: "review", relation: "next", label: "Resubmit" }, // Intentional retry cycle!
+      ],
+      groups: [],
+      explanation: "Workflow with retry cycle",
+    };
+
+    const compiled = compileSemanticPlan(ws, plan);
+    expect(compiled.ok).toBe(true);
+
+    const report = evaluateTopologyQuality(ws, plan, compiled.operations, false);
+    expect(report.outcome).toBe("PASS");
+    expect(report.violations).toHaveLength(0);
+  });
+
+  it("flags cycles in directed_flow only when strictAcyclic is explicitly requested", () => {
+    const ws = createWorkspace();
+    const plan: SemanticPlan = {
+      intent: {
+        userObjective: "Strictly DAG data pipeline",
+        targetKind: "flowchart",
+        expectedTopology: "directed_flow",
+        mutationScope: "new_canvas",
+        focusNodeIds: [],
+        strictAcyclic: true,
+      },
+      nodes: [
+        { ref: "stage1", label: "Ingest" },
+        { ref: "stage2", label: "Transform" },
+      ],
+      edges: [
+        { from: "stage1", to: "stage2", relation: "next" },
+        { from: "stage2", to: "stage1", relation: "next" },
+      ],
+      groups: [],
+      explanation: "",
+    };
+
+    const compiled = compileSemanticPlan(ws, plan);
+    expect(compiled.ok).toBe(true);
+
+    const report = evaluateTopologyQuality(ws, plan, compiled.operations, false);
+    expect(report.outcome).toBe("REPAIRABLE");
+    expect(report.violations.some((v) => v.code === "CYCLE_IN_DAG")).toBe(true);
   });
 
   it("detects directed cycles in tree_hierarchy", () => {
@@ -104,7 +165,68 @@ describe("evaluateTopologyQuality", () => {
     expect(report.violations.some((v) => v.code === "CYCLE_IN_HIERARCHY")).toBe(true);
   });
 
-  it("flags isolated services in relational_network", () => {
+  it("permits forest hierarchy with multiple roots when hierarchyStructure is forest", () => {
+    const ws = createWorkspace();
+    const plan: SemanticPlan = {
+      intent: {
+        userObjective: "Dual-track organization trees",
+        targetKind: "mindmap",
+        expectedTopology: "tree_hierarchy",
+        mutationScope: "new_canvas",
+        focusNodeIds: [],
+        hierarchyStructure: "forest",
+      },
+      nodes: [
+        { ref: "r1", label: "Product Org" },
+        { ref: "c1", label: "PM Team" },
+        { ref: "r2", label: "Engineering Org" },
+        { ref: "c2", label: "Dev Team" },
+      ],
+      edges: [
+        { from: "r1", to: "c1", relation: "contains" },
+        { from: "r2", to: "c2", relation: "contains" },
+      ],
+      groups: [],
+      explanation: "",
+    };
+
+    const compiled = compileSemanticPlan(ws, plan);
+    expect(compiled.ok).toBe(true);
+
+    const report = evaluateTopologyQuality(ws, plan, compiled.operations, false);
+    expect(report.outcome).toBe("PASS");
+    expect(report.violations).toHaveLength(0);
+  });
+
+  it("allows intentional standalone entities in relational_network", () => {
+    const ws = createWorkspace();
+    const plan: SemanticPlan = {
+      intent: {
+        userObjective: "System architecture with legend note",
+        targetKind: "architecture",
+        expectedTopology: "relational_network",
+        mutationScope: "new_canvas",
+        focusNodeIds: [],
+      },
+      nodes: [
+        { ref: "api", label: "API Gateway" },
+        { ref: "auth", label: "Auth Service" },
+        { ref: "legend", label: "Architecture Legend", standalone: true },
+      ],
+      edges: [{ from: "api", to: "auth", relation: "calls" }],
+      groups: [],
+      explanation: "",
+    };
+
+    const compiled = compileSemanticPlan(ws, plan);
+    expect(compiled.ok).toBe(true);
+
+    const report = evaluateTopologyQuality(ws, plan, compiled.operations, false);
+    expect(report.outcome).toBe("PASS");
+    expect(report.violations).toHaveLength(0);
+  });
+
+  it("flags isolated services in relational_network when not standalone", () => {
     const ws = createWorkspace();
     const plan: SemanticPlan = {
       intent: {
@@ -119,9 +241,7 @@ describe("evaluateTopologyQuality", () => {
         { ref: "auth", label: "Auth Service" },
         { ref: "billing", label: "Billing Service" }, // isolated!
       ],
-      edges: [
-        { from: "api", to: "auth", relation: "calls" },
-      ],
+      edges: [{ from: "api", to: "auth", relation: "calls" }],
       groups: [],
       explanation: "",
     };

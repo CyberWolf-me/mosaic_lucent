@@ -63,12 +63,7 @@ export interface PolicyDecision {
   reason: string;
 }
 
-export type MeetingModeKind =
-  | "canvas"
-  | "record"
-  | "intelligence"
-  | "assistant"
-  | "participant";
+export type MeetingModeKind = "canvas" | "record" | "intelligence" | "assistant" | "participant";
 
 export interface ResponsePolicyContext {
   mode: MeetingModeKind;
@@ -86,7 +81,11 @@ const LUCENT_NAME_PATTERN = "(?:lucent|loosened|loosen|loucent|lucente|lucid)";
 const LUCENT_NAMES_SET = new Set(["lucent", "loosened", "loosen", "loucent", "lucente", "lucid"]);
 
 /** Detect explicit invocation of Lucent. */
-export function detectAddress(text: string): { addressed: boolean; query: string; type: VoiceInvocationType } {
+export function detectAddress(text: string): {
+  addressed: boolean;
+  query: string;
+  type: VoiceInvocationType;
+} {
   const t = text.trim();
   if (!t) return { addressed: false, query: "", type: "unaddressed" };
 
@@ -137,9 +136,14 @@ export function detectDismissal(text: string): boolean {
 
   // Pattern covering single or compound polite signoffs:
   // e.g. "thanks", "thank you, that's all", "got it", "back to the team", "okay we're done"
-  return /^(?:ok(?:ay)? )?(?:thanks?(?: you)?(?: lucent)? )?(?:that'?s (?:all|it|enough|clear)|stop(?: listening)?|bye|goodbye|we'?re done|i'?m done|got it|back to the team|never mind|all good|nothing else|stay quiet)(?: for now)?(?: thanks?(?: you)?)?$/.test(
-    t,
-  ) || /^\s*(?:thanks?(?:\s+you)?|got\s+it|all\s+good|back\s+to\s+the\s+team)(?:\s+lucent)?[.!]?\s*$/i.test(text.trim());
+  return (
+    /^(?:ok(?:ay)? )?(?:thanks?(?: you)?(?: lucent)? )?(?:that'?s (?:all|it|enough|clear)|stop(?: listening)?|bye|goodbye|we'?re done|i'?m done|got it|back to the team|never mind|all good|nothing else|stay quiet)(?: for now)?(?: thanks?(?: you)?)?$/.test(
+      t,
+    ) ||
+    /^\s*(?:thanks?(?:\s+you)?|got\s+it|all\s+good|back\s+to\s+the\s+team)(?:\s+lucent)?[.!]?\s*$/i.test(
+      text.trim(),
+    )
+  );
 }
 
 /** Stop or cancel requests that command immediate silence/barge-in. */
@@ -300,12 +304,7 @@ export function evaluateVoicePolicy(
   ctx: ResponsePolicyContext,
   knownTeammates: string[] = [],
 ): PolicyDecision {
-  const intent = classifyVoiceIntent(
-    turn,
-    ctx.leaseActive,
-    ctx.leaseSpeakerId,
-    knownTeammates,
-  );
+  const intent = classifyVoiceIntent(turn, ctx.leaseActive, ctx.leaseSpeakerId, knownTeammates);
 
   // Capture is always true for non-empty speech (records in transcripts & candidate memory)
   const capture = turn.text.trim().length > 0;
@@ -527,7 +526,11 @@ export class VoiceFSM {
 
       case "BARGE_IN":
         // Immediate interruption during speaking or processing
-        if (this._state === "speaking" || this._state === "processing" || this._state === "acting") {
+        if (
+          this._state === "speaking" ||
+          this._state === "processing" ||
+          this._state === "acting"
+        ) {
           this.transition("interrupted", at, event.interruptingSpeakerId ?? this._speakerId);
           return this._state;
         }

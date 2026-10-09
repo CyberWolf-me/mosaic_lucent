@@ -7,7 +7,6 @@ import {
   applyLayout,
   findWeaklyConnectedComponents,
   extendRegionLayout,
-  extendRegionLayoutWithRoutes,
 } from "../src/layout.js";
 
 describe("Stable Component Layout (Stage 5)", () => {
@@ -204,9 +203,13 @@ describe("Stable Component Layout (Stage 5)", () => {
       expect(layout.users!.position.y).toBeGreaterThan(initialApiPos.y);
 
       // orders and users do NOT overlap horizontally
-      const leftChild = layout.orders!.position.x < layout.users!.position.x ? layout.orders! : layout.users!;
-      const rightChild = layout.orders!.position.x < layout.users!.position.x ? layout.users! : layout.orders!;
-      expect(rightChild.position.x).toBeGreaterThanOrEqual(leftChild.position.x + leftChild.size.width);
+      const leftChild =
+        layout.orders!.position.x < layout.users!.position.x ? layout.orders! : layout.users!;
+      const rightChild =
+        layout.orders!.position.x < layout.users!.position.x ? layout.users! : layout.orders!;
+      expect(rightChild.position.x).toBeGreaterThanOrEqual(
+        leftChild.position.x + leftChild.size.width,
+      );
     });
 
     it("places disconnected incremental nodes clear of the existing diagram without collision", () => {
@@ -249,7 +252,8 @@ describe("Stable Component Layout (Stage 5)", () => {
         const nTop = layout[id]!.position.y;
         const nBottom = nTop + layout[id]!.size.height;
 
-        const overlaps = isoLeft < nRight && isoRight > nLeft && isoTop < nBottom && isoBottom > nTop;
+        const overlaps =
+          isoLeft < nRight && isoRight > nLeft && isoTop < nBottom && isoBottom > nTop;
         expect(overlaps).toBe(false);
       }
     });

@@ -214,7 +214,9 @@ export function resetUser(): void {
     if (typeof sessionStorage !== "undefined") {
       sessionStorage.removeItem("lucent.posthog.anon_id");
     }
-  } catch {}
+  } catch {
+    // sessionStorage unavailable or restricted
+  }
   distinctId = getOrCreateAnonId();
   if (sdkInitialized && typeof posthog.reset === "function") {
     posthog.reset();
@@ -282,7 +284,10 @@ export function getSessionReplayUrl(): string | undefined {
  */
 
 /** Record when an AI prompt (voice or text) is submitted. */
-export function trackAiPrompt(source: "voice" | "text" | "quick_action", mode: string = "generate"): void {
+export function trackAiPrompt(
+  source: "voice" | "text" | "quick_action",
+  mode: string = "generate",
+): void {
   track("ai_prompt_submitted", { source, mode });
 }
 

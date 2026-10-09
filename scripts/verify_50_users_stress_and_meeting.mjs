@@ -1,6 +1,6 @@
 /**
  * 50-User High-Scale Realtime Collaboration & Meeting Mode Verification
- * 
+ *
  * Verifies all four conditions simultaneously:
  * 1. 50 active authenticated users connected simultaneously to the same board room.
  * 2. Sequential changes ("one by one") executed by each of the 50 users with monotonic sequencing.
@@ -157,20 +157,20 @@ async function run() {
           idx === 1
             ? "Alice (Owner & Host)"
             : idx === 2
-            ? "Bob (Meeting Co-Host)"
-            : idx <= MEETING_USERS
-            ? `User ${idx} (Meeting & Editor)`
-            : `User ${idx} (Canvas Editor)`;
+              ? "Bob (Meeting Co-Host)"
+              : idx <= MEETING_USERS
+                ? `User ${idx} (Meeting & Editor)`
+                : `User ${idx} (Canvas Editor)`;
         return await createAccount(roleName, `stress_usr${idx}`);
       },
-      8
+      8,
     );
     const provDuration = Date.now() - tProv0;
     const allProvOk = users.every((u) => u && !!u.token);
     check(
       `All ${TOTAL_USERS} accounts provisioned`,
       allProvOk,
-      `Completed in ${provDuration}ms (~${Math.round(provDuration / TOTAL_USERS)}ms/account)`
+      `Completed in ${provDuration}ms (~${Math.round(provDuration / TOTAL_USERS)}ms/account)`,
     );
 
     const owner = users[0];
@@ -240,14 +240,10 @@ async function run() {
         });
         return res.status === 200;
       },
-      10
+      10,
     );
     const allJoined = joinResults.every(Boolean);
-    check(
-      `All 49 collaborators joined board`,
-      allJoined,
-      `Completed in ${Date.now() - tJoin0}ms`
-    );
+    check(`All 49 collaborators joined board`, allJoined, `Completed in ${Date.now() - tJoin0}ms`);
 
     // -------------------------------------------------------------------------
     // Phase 3: Meeting Mode Setup for Half of Users (25 Users)
@@ -279,7 +275,7 @@ async function run() {
           body: JSON.stringify({ boardId }),
         });
       },
-      8
+      8,
     );
 
     // 3. Host admits all 24 guests
@@ -296,7 +292,7 @@ async function run() {
           body: JSON.stringify({ userId: u.id, allow: true }),
         });
       },
-      8
+      8,
     );
 
     // 4. Users 2..25 request token again (getting 200 with LiveKit tokens)
@@ -323,7 +319,7 @@ async function run() {
           host: res.data?.host,
         };
       },
-      8
+      8,
     );
 
     const meetingTokens = [
@@ -345,7 +341,7 @@ async function run() {
     check(
       `All ${MEETING_USERS} LiveKit meeting tokens minted`,
       allTokensMinted,
-      `Room: ${meetingTokens[0]?.room}, Server: ${meetingTokens[0]?.url}`
+      `Room: ${meetingTokens[0]?.room}, Server: ${meetingTokens[0]?.url}`,
     );
 
     // Set call states / attributes for meeting participants
@@ -375,7 +371,7 @@ async function run() {
         });
         return res.status === 200 || res.status === 409;
       },
-      8
+      8,
     );
 
     // Verify call status endpoint
@@ -387,7 +383,7 @@ async function run() {
     check(
       "Meeting status query succeeded",
       callStatus.status === 200,
-      `Participants listed: ${callStatus.data?.participants?.length ?? 0}`
+      `Participants listed: ${callStatus.data?.participants?.length ?? 0}`,
     );
 
     // -------------------------------------------------------------------------
@@ -422,7 +418,7 @@ async function run() {
         localStorage.setItem("lucent.scope", user.id);
         localStorage.setItem("lucent.tour.seen.v1", "1");
       },
-      [owner.user, owner.token]
+      [owner.user, owner.token],
     );
 
     // Browser Context 2: Bob (Meeting Mode View)
@@ -451,7 +447,7 @@ async function run() {
         localStorage.setItem("lucent.scope", user.id);
         localStorage.setItem("lucent.tour.seen.v1", "1");
       },
-      [user2.user, user2.token]
+      [user2.user, user2.token],
     );
 
     const pageCanvas = await contextCanvas.newPage();
@@ -538,7 +534,7 @@ async function run() {
     check(
       "Meeting Call Stage active with connected participants & live media tiles",
       meetingTiles >= 1,
-      `Participants connected on stage: ${meetingTiles} tile(s)`
+      `Participants connected on stage: ${meetingTiles} tile(s)`,
     );
 
     // Save proof screenshot of Alice in full Call Stage
@@ -552,7 +548,9 @@ async function run() {
     if ((await canvasRailBtn.count()) > 0) {
       await canvasRailBtn.click();
     } else {
-      await pageCanvas.goto(`${BASE_URL}/?view=canvas&board=${boardId}`, { waitUntil: "networkidle" });
+      await pageCanvas.goto(`${BASE_URL}/?view=canvas&board=${boardId}`, {
+        waitUntil: "networkidle",
+      });
     }
 
     // Check canvas nodes loaded
@@ -570,7 +568,7 @@ async function run() {
     check(
       "Board canvas renders with active Meeting Huddle dock",
       !!huddleDockLoaded,
-      "Live call docked at corner with participant media previews"
+      "Live call docked at corner with participant media previews",
     );
 
     // Connect remaining 48 users via WebSockets concurrently
@@ -640,14 +638,14 @@ async function run() {
           };
         });
       },
-      8
+      8,
     );
     const wsDuration = Date.now() - tWs0;
 
     check(
       `All 50 users connected simultaneously to the realtime room`,
       socketClients.length === 48 && socketClients.every((c) => c.joined),
-      `48 background sockets + 2 visual browsers connected in ${wsDuration}ms`
+      `48 background sockets + 2 visual browsers connected in ${wsDuration}ms`,
     );
 
     // Start 5s heartbeat to keep all sockets alive
@@ -670,7 +668,7 @@ async function run() {
           type: "presence",
           cursor: { x, y },
           selection: [],
-        })
+        }),
       );
     });
 
@@ -681,14 +679,19 @@ async function run() {
 
     // Check presence overflow bubble (+44 more)
     const presenceBubble = await waitFor(async () => {
-      const more = await pageCanvas.locator(".presence-avatar.more, [class*='presence-avatar']").count();
+      const more = await pageCanvas
+        .locator(".presence-avatar.more, [class*='presence-avatar']")
+        .count();
       return more > 0;
     }, 10000);
-    const bubbleText = await pageCanvas.locator(".presence-avatar.more").innerText().catch(() => "");
+    const bubbleText = await pageCanvas
+      .locator(".presence-avatar.more")
+      .innerText()
+      .catch(() => "");
     check(
       "Canvas renders 50-user presence overflow indicator",
       !!presenceBubble,
-      `Badge text: "${bubbleText}"`
+      `Badge text: "${bubbleText}"`,
     );
 
     // -------------------------------------------------------------------------
@@ -757,13 +760,15 @@ async function run() {
     check(
       `All ${TOTAL_USERS} sequential changes committed monotonically and delivered to all 50 users`,
       seqAllDelivered,
-      `50 ops completed in ${totalSeqTime}ms (median: ${medianSeqLat}ms, p95: ${p95SeqLat}ms)`
+      `50 ops completed in ${totalSeqTime}ms (median: ${medianSeqLat}ms, p95: ${p95SeqLat}ms)`,
     );
 
     // -------------------------------------------------------------------------
     // Phase 6: Concurrent Changes ("At the Same Time" across all 50 Users)
     // -------------------------------------------------------------------------
-    console.log(`\n6. Executing simultaneous changes at the exact same millisecond across all ${TOTAL_USERS} users...`);
+    console.log(
+      `\n6. Executing simultaneous changes at the exact same millisecond across all ${TOTAL_USERS} users...`,
+    );
     const tConcStart = Date.now();
 
     // Fire 50 simultaneous mutations concurrently (concurrency 20 prevents socket pool exhaustion)
@@ -800,21 +805,24 @@ async function run() {
           status: res.status,
         };
       },
-      8
+      8,
     );
 
-    const allOpsCommitted =
-      concurrentOps.every((o) => o.status === 200 && typeof o.seq === "number");
+    const allOpsCommitted = concurrentOps.every(
+      (o) => o.status === 200 && typeof o.seq === "number",
+    );
     const distinctSeqs = new Set(concurrentOps.map((o) => o.seq));
 
     check(
       `All ${TOTAL_USERS} concurrent mutations accepted & serialized without collision`,
       allOpsCommitted && distinctSeqs.size === TOTAL_USERS,
-      `Committed ${distinctSeqs.size}/${TOTAL_USERS} distinct sequence numbers`
+      `Committed ${distinctSeqs.size}/${TOTAL_USERS} distinct sequence numbers`,
     );
 
     // Wait until every one of the 50 clients has received all 50 concurrent ops
-    console.log(`Awaiting delivery of all 50 concurrent ops across all 50 clients (2,500 frame deliveries)...`);
+    console.log(
+      `Awaiting delivery of all 50 concurrent ops across all 50 clients (2,500 frame deliveries)...`,
+    );
     const allConcurrentDelivered = await waitFor(() => {
       return concurrentOps.every((o) => {
         const arrivals = opBroadcasts.get(o.seq);
@@ -826,7 +834,7 @@ async function run() {
     check(
       `100% of concurrent ops delivered to all 50 clients (0 dropped frames)`,
       !!allConcurrentDelivered,
-      `Full 2,500 frame deliveries verified in ${concElapsed}ms`
+      `Full 2,500 frame deliveries verified in ${concElapsed}ms`,
     );
 
     // -------------------------------------------------------------------------
@@ -867,7 +875,7 @@ async function run() {
     check(
       "Real AI provider responded with valid operations and telemetry",
       aiRes.status === 200 && Array.isArray(aiOps) && aiOps.length > 0,
-      `Provider: ${aiTelemetry?.provider}, Model: ${aiTelemetry?.model}, Latency: ${aiTelemetry?.latencyMs || aiDuration}ms, Ops: ${aiOps?.length}`
+      `Provider: ${aiTelemetry?.provider}, Model: ${aiTelemetry?.model}, Latency: ${aiTelemetry?.latencyMs || aiDuration}ms, Ops: ${aiOps?.length}`,
     );
 
     if (aiOps && aiOps.length > 0) {
@@ -893,7 +901,7 @@ async function run() {
       check(
         "AI-generated operations broadcast to all 50 realtime participants",
         !!allGotAi,
-        `Seq ${aiSeq} received by 50/50 clients`
+        `Seq ${aiSeq} received by 50/50 clients`,
       );
     }
 
@@ -917,7 +925,7 @@ async function run() {
 
     check(
       "Dual visual screenshots captured for Canvas and Meeting Mode",
-      fs.existsSync(shotPathCanvas) && fs.existsSync(shotPathMeeting)
+      fs.existsSync(shotPathCanvas) && fs.existsSync(shotPathMeeting),
     );
   } catch (err) {
     console.error("Test execution failed:", err);

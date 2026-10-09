@@ -92,6 +92,8 @@ export class RemoteBoardSession {
         return this.listExternalLinks();
       case "import_mermaid":
         return this.importMermaid(args);
+      case "construct_diagram":
+        return this.constructDiagram(args);
       case "export_mermaid":
         return this.exportMermaid();
       case "search_workspace":
@@ -295,6 +297,43 @@ export class RemoteBoardSession {
         {
           type: "text",
           text: `Applied ${outcome.applied ?? filtered.length} operation(s) to board ${this.opts.boardId} (seq ${outcome.seq ?? "?"}).`,
+        },
+      ],
+    };
+  }
+
+  private async constructDiagram(args: Record<string, unknown>): Promise<ToolResult> {
+    const prompt = typeof args.prompt === "string" ? args.prompt.trim() : "";
+    if (!prompt) return this.failure("`prompt` must be a non-empty string.");
+
+    const res = await this.request("POST", `/api/boards/${this.opts.boardId}/orchestrate`, {
+      prompt,
+      ...(args.plan ? { plan: args.plan } : {}),
+    });
+
+    if (!res.ok) {
+      const err = (await res.json().catch(() => null)) as {
+        error?: string;
+        reason?: string;
+      } | null;
+      return this.failure(
+        `Diagram construction failed (${res.status}): ${err?.reason || err?.error || "refused"}`,
+      );
+    }
+
+    this.cached = null;
+    const data = (await res.json()) as {
+      ok: boolean;
+      operations?: unknown[];
+      explanation?: string;
+    };
+    return {
+      content: [
+        {
+          type: "text",
+          text:
+            `Constructed diagram via pipeline: ${data.explanation || prompt}\n` +
+            `Operations applied: ${data.operations?.length ?? 0}. Call get_board to inspect.`,
         },
       ],
     };

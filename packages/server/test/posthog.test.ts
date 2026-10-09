@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import { createPostHogSink } from "../src/posthog.js";
-import type { TelemetryEvent } from "../src/telemetry.js";
 
 describe("PostHog Server Telemetry Sink", () => {
   it("formats and forwards telemetry events to PostHog capture endpoint", async () => {

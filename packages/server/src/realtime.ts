@@ -393,9 +393,12 @@ export class RealtimeServer {
     if (!room.roleOf(conn.userId)) {
       const board = await this.deps.boardStore.get(conn.boardId);
       if (board) {
-        const role = await this.deps.boardStore.memberRole(conn.boardId, conn.userId, (uid) =>
-          this.deps.orgRoleFor(uid, board.orgId),
-        );
+        const role =
+          board.ownerId === conn.userId
+            ? "owner"
+            : await this.deps.boardStore.memberRole(conn.boardId, conn.userId, (uid) =>
+                this.deps.orgRoleFor(uid, board.orgId),
+              );
         if (role) room.setRole(conn.userId, role);
       }
     }
@@ -495,6 +498,33 @@ export class RealtimeServer {
       operationId: result.entry?.operationId,
       ...(result.requestId !== undefined ? { requestId: result.requestId } : {}),
     });
+
+    // Broadcast what this commit absorbed first (entries another instance
+    // wrote while we were validating), then our own: clients advance by seq,
+    // so the absorbed ones must arrive before the entry built on top of them.
+    // Local dedupe by seq (boardSync.ts:126) makes a re-delivery harmless.
+    for (const entry of result.absorbed ?? []) {
+      this.broadcast(conn.boardId, { type: "op", entry });
+    }
+    // Broadcast the sequenced entry to everyone, including the sender, so all
+    // clients advance their cursor identically.
+    this.broadcast(conn.boardId, { type: "op", entry: result.entry });
+
+    // M3: cross-instance fanout. A sibling instance's subscribers should
+    // catch up via the bus; they deduplicate by `entry.seq` (which the
+    // client already does, boardSync.ts:126). Best-effort: a fanout
+    // failure must not undo a successful commit.
+    if (this.deps.fanout && result.entry && conn.boardId) {
+      void this.deps.fanout
+        .publish({
+          boardId: conn.boardId,
+          kind: "op",
+          seq: result.entry.seq,
+          userId: result.entry.by,
+        })
+        .catch(() => {});
+    }
+
     // Persist so the REST path and a future reconnect see the same state —
     // unless the commit already did: with a durable allocator wired into the
     // room (M3), the entry was written to the store as part of allocating its
@@ -517,30 +547,6 @@ export class RealtimeServer {
     // nothing on this critical path depends on its outcome.
     if (this.deps.notify && board) {
       void this.emitCommentNotifications(conn, board, result.entry?.ops ?? []);
-    }
-    // Broadcast what this commit absorbed first (entries another instance
-    // wrote while we were validating), then our own: clients advance by seq,
-    // so the absorbed ones must arrive before the entry built on top of them.
-    // Local dedupe by seq (boardSync.ts:126) makes a re-delivery harmless.
-    for (const entry of result.absorbed ?? []) {
-      this.broadcast(conn.boardId, { type: "op", entry });
-    }
-    // Broadcast the sequenced entry to everyone, including the sender, so all
-    // clients advance their cursor identically.
-    this.broadcast(conn.boardId, { type: "op", entry: result.entry });
-    // M3: cross-instance fanout. A sibling instance's subscribers should
-    // catch up via the bus; they deduplicate by `entry.seq` (which the
-    // client already does, boardSync.ts:126). Best-effort: a fanout
-    // failure must not undo a successful commit.
-    if (this.deps.fanout && result.entry && conn.boardId) {
-      void this.deps.fanout
-        .publish({
-          boardId: conn.boardId,
-          kind: "op",
-          seq: result.entry.seq,
-          userId: result.entry.by,
-        })
-        .catch(() => {});
     }
   }
 
@@ -849,10 +855,16 @@ export class RealtimeServer {
           append,
           fetch,
           findRequest,
+          maxRetries: 5,
         });
       } else {
         const log = await this.deps.boardStore.loadLog(boardId);
-        room = new Room(boardId, workspace, ownerId, mapLog(log), { append, fetch, findRequest });
+        room = new Room(boardId, workspace, ownerId, mapLog(log), {
+          append,
+          fetch,
+          findRequest,
+          maxRetries: 5,
+        });
       }
       this.rooms.set(boardId, room);
       this.subscribeFanout(boardId, room);

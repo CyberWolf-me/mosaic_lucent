@@ -109,7 +109,10 @@ export function VoiceStateHud({ snapshot }: { snapshot: VoiceHudSnapshot }) {
           gap: 2,
         }}
       >
-        <Row label="MIC" value={snapshot.micStatus ?? (snapshot.recording ? "ACTIVE" : "STANDBY")} />
+        <Row
+          label="MIC"
+          value={snapshot.micStatus ?? (snapshot.recording ? "ACTIVE" : "STANDBY")}
+        />
         <Row label="VAD" value={snapshot.vadStatus ?? (snapshot.recording ? "DETECTING" : "OFF")} />
         <Row label="STT" value={snapshot.recording ? snapshot.sttStatus.toUpperCase() : "OFF"} />
         <Row label="TTS" value={snapshot.ttsSpeaking ? "SPEAKING" : "IDLE"} />

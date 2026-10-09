@@ -1,6 +1,6 @@
 import type { Workspace, DiagramIntent, SemanticPlan } from "@lucent/core";
 import { SemanticPlanSchema } from "@lucent/core";
-import { classifyIntentFastPath, planToolSchema } from "./intent.js";
+import { classifyIntentFastPath } from "./intent.js";
 import type { LLMProvider } from "./provider.js";
 import { parseModelJson } from "./providers/toolCall.js";
 
@@ -11,7 +11,7 @@ export async function generateSemanticPlan(
   provider: LLMProvider,
   workspace: Workspace,
   prompt: string,
-  intentOverride?: DiagramIntent | null
+  intentOverride?: DiagramIntent | null,
 ): Promise<SemanticPlan> {
   const resolvedIntent = intentOverride ?? classifyIntentFastPath(prompt, workspace);
 
@@ -19,13 +19,6 @@ export async function generateSemanticPlan(
   if (provider.name === "mock" || !("apiKey" in provider)) {
     return generateMockPlan(prompt, workspace, resolvedIntent);
   }
-
-  // Real LLM provider call using single-turn tool calling
-  const tool = {
-    name: "construct_diagram_plan",
-    description: "Propose an intermediate semantic diagram plan with symbolic references",
-    parameters: planToolSchema(),
-  };
 
   const systemInstructions = `You are Lucent, an AI visual workspace copilot.
 Construct a structured semantic diagram plan for the user's request.
@@ -37,6 +30,7 @@ ${resolvedIntent ? `Target Diagram Kind: ${resolvedIntent.targetKind}\nExpected 
   // Call provider through the standard tool call interface
   const res = await provider.generateOperations({
     message: prompt,
+    rules: systemInstructions,
     summary: {
       diagramKind: resolvedIntent?.targetKind ?? workspace.diagramKind,
       nodes: Object.values(workspace.nodes).map((n) => ({
@@ -71,7 +65,7 @@ export async function requestBoundedEdgeRepair(
   provider: LLMProvider,
   workspace: Workspace,
   plan: SemanticPlan,
-  missingItemLabels: string[]
+  missingItemLabels: string[],
 ): Promise<SemanticPlan> {
   // If mock provider, synthesize the missing links deterministically
   if (provider.name === "mock") {
@@ -108,7 +102,7 @@ export async function requestBoundedEdgeRepair(
 function generateMockPlan(
   prompt: string,
   workspace: Workspace,
-  intentOverride?: DiagramIntent | null
+  intentOverride?: DiagramIntent | null,
 ): SemanticPlan {
   const intent: DiagramIntent = intentOverride ?? {
     userObjective: prompt,
@@ -121,9 +115,17 @@ function generateMockPlan(
   const p = prompt.toLowerCase();
 
   // Scenario 1: Brainstorming (independent clusters)
-  if (intent.expectedTopology === "independent_clusters" || p.includes("brainstorm") || p.includes("ideas")) {
+  if (
+    intent.expectedTopology === "independent_clusters" ||
+    p.includes("brainstorm") ||
+    p.includes("ideas")
+  ) {
     return {
-      intent: { ...intent, expectedTopology: "independent_clusters", targetKind: intent.targetKind ?? "flowchart" },
+      intent: {
+        ...intent,
+        expectedTopology: "independent_clusters",
+        targetKind: intent.targetKind ?? "flowchart",
+      },
       nodes: [
         { ref: "n1", label: "Idea 1: Core Strategy", role: "concept" },
         { ref: "n2", label: "Idea 2: Growth Engine", role: "concept" },
@@ -183,9 +185,7 @@ function generateMockPlan(
       { from: "n1", to: "n2", relation: "calls" },
       { from: "n2", to: "n3", relation: "reads_writes" },
     ],
-    groups: [
-      { ref: "g1", label: "Backend Core", memberRefs: ["n2", "n3"] },
-    ],
+    groups: [{ ref: "g1", label: "Backend Core", memberRefs: ["n2", "n3"] }],
     explanation: "Constructed relational system architecture.",
   };
 }

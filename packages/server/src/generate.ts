@@ -1,5 +1,10 @@
 import { z } from "zod";
-import { REQUEST_LIMITS, streamViaGenerate, summarizeWorkspace } from "@lucent/ai";
+import {
+  REQUEST_LIMITS,
+  streamViaGenerate,
+  summarizeWorkspace,
+  classifyIntentFastPath,
+} from "@lucent/ai";
 import type { GenerateResult, LLMProvider, StreamCallbacks, TokenUsage } from "@lucent/ai";
 import {
   ASSISTANT_AUTHOR,
@@ -804,13 +809,28 @@ async function runGeneratePipeline(
   const authoritativeBoard =
     candidateBoard && userId === candidateBoard.ownerId ? candidateBoard : undefined;
 
+  const workspace = authoritativeBoard
+    ? authoritativeBoard.workspace
+    : workspaceFromSummary(parsed.data.summary);
+
+  const resolvedIntent = classifyIntentFastPath(parsed.data.message, workspace);
+
   // Workspace memory (docs/23) and architectural rules (Initiative 2) ride the
   // FIRST model call only — not the bounded repair round below, which fixes
   // validator complaints that context can't help with and whose re-send would
   // double the context cost of a failure.
   const effectiveRules = parsed.data.rules ?? authoritativeBoard?.rules ?? undefined;
+  const targetKind =
+    resolvedIntent && Object.keys(workspace.nodes).length === 0
+      ? resolvedIntent.targetKind
+      : parsed.data.summary.diagramKind;
+
   const modelRequest = {
     ...parsed.data,
+    summary: {
+      ...parsed.data.summary,
+      diagramKind: targetKind,
+    },
     ...(memory ? { memory } : {}),
     ...(effectiveRules ? { rules: effectiveRules } : {}),
   };
@@ -842,13 +862,6 @@ async function runGeneratePipeline(
   // ADR 0047: the model never sets a statement's trust — the committer does.
   const filtered = withoutTrust(result.operations.filter((op) => !isHumanOnlyOperation(op.op)));
   const permitted = stampAuthorship(filtered, userId ?? ASSISTANT_AUTHOR);
-
-  // Authoritative board + ownership were resolved before the model call (above),
-  // so the digest could ride the first request; the stored workspace is the
-  // validation oracle here, else the request's own summary.
-  const workspace = authoritativeBoard
-    ? authoritativeBoard.workspace
-    : workspaceFromSummary(parsed.data.summary);
   // Repair likely-mis-ordered model output (e.g. node before its group) before
   // validating, so good-intent batches aren't rejected on ordering alone.
   // The topic fold (Stage C5) runs on every machine-authored batch — the
@@ -1011,7 +1024,15 @@ async function runGeneratePipeline(
   // like the first batch, and never loops.
   let connectOps: Operation[] = [];
   const createdIds = appliedBase.flatMap((op) => (op.op === "CREATE_NODE" ? [op.id] : []));
-  if (createdIds.length >= 2 && expectsEdges(mergedWorkspace.diagramKind)) {
+  const expectedTopology =
+    resolvedIntent?.expectedTopology ??
+    (expectsEdges(mergedWorkspace.diagramKind) ? "directed_flow" : "independent_clusters");
+
+  if (
+    createdIds.length >= 2 &&
+    expectedTopology !== "independent_clusters" &&
+    expectsEdges(mergedWorkspace.diagramKind)
+  ) {
     const floating = floatingAmong(mergedWorkspace, createdIds);
     if (floating.length > 0) {
       const connect = await requestConnect(provider, parsed.data.today, mergedWorkspace, floating);
@@ -1047,7 +1068,24 @@ async function runGeneratePipeline(
       }
     }
   }
-  const appliedOps = connectOps.length > 0 ? [...appliedBase, ...connectOps] : appliedBase;
+
+  let finalOps = connectOps.length > 0 ? [...appliedBase, ...connectOps] : appliedBase;
+  if (
+    resolvedIntent?.targetKind &&
+    Object.keys(workspace.nodes).length === 0 &&
+    mergedWorkspace.diagramKind !== resolvedIntent.targetKind
+  ) {
+    const hasTransform = finalOps.some((op) => op.op === "TRANSFORM_DIAGRAM");
+    if (!hasTransform) {
+      const transformOp: Operation = {
+        op: "TRANSFORM_DIAGRAM",
+        to: resolvedIntent.targetKind,
+      };
+      finalOps = [transformOp, ...finalOps];
+      mergedWorkspace = applyOperations(mergedWorkspace, [transformOp]);
+    }
+  }
+  const appliedOps = finalOps;
 
   // Persist the merged board so the next request validates against the new state.
   if (authoritative && authoritativeBoard) {

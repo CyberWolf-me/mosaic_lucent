@@ -6,7 +6,13 @@ import type { Operation } from "./operations.js";
 export type QualityOutcome = "PASS" | "REPAIRABLE" | "UNRESOLVED";
 
 export interface QualityViolation {
-  code: "DISCONNECTED_FLOW" | "CYCLE_IN_HIERARCHY" | "ISOLATED_IN_NETWORK" | "UNRESOLVED_REFERENCE";
+  code:
+    | "DISCONNECTED_FLOW"
+    | "CYCLE_IN_HIERARCHY"
+    | "CYCLE_IN_DAG"
+    | "MULTIPLE_ROOTS"
+    | "ISOLATED_IN_NETWORK"
+    | "UNRESOLVED_REFERENCE";
   message: string;
   nodeIds: string[];
 }
@@ -30,7 +36,7 @@ export function evaluateTopologyQuality(
   workspace: Workspace,
   plan: SemanticPlan,
   compiledOps: Operation[],
-  isSecondPass = false
+  isSecondPass = false,
 ): QualityReport {
   const topology = plan.intent.expectedTopology;
 
@@ -54,10 +60,13 @@ export function evaluateTopologyQuality(
     };
   }
 
-  // 2. Directed Flow (flowcharts, process maps, journeys): nodes must not float
+  // 2. Directed Flow (flowcharts, process maps, journeys)
   if (topology === "directed_flow") {
     // Only verify connectivity if batch created >= 2 nodes or extends an existing diagram
-    if (createdNodeIds.length >= 2 || (createdNodeIds.length === 1 && Object.keys(workspace.nodes).length > 0)) {
+    if (
+      createdNodeIds.length >= 2 ||
+      (createdNodeIds.length === 1 && Object.keys(workspace.nodes).length > 0)
+    ) {
       for (const id of createdNodeIds) {
         const inDeg = Object.values(projected.edges).filter((e) => e.target === id).length;
         const outDeg = Object.values(projected.edges).filter((e) => e.source === id).length;
@@ -68,6 +77,22 @@ export function evaluateTopologyQuality(
             code: "DISCONNECTED_FLOW",
             message: `Node "${label}" is completely disconnected in a directed flow.`,
             nodeIds: [id],
+          });
+        }
+      }
+    }
+
+    // Cycles: Real workflows can contain intentional retry/approval loops.
+    // Reject cycles only when the flow semantics explicitly require an acyclic graph (strictAcyclic = true).
+    if (plan.intent.strictAcyclic) {
+      const cycles = detectDirectedCycles(projected, createdNodeIds);
+      if (cycles.length > 0) {
+        for (const cycle of cycles) {
+          const cycleLabels = cycle.map((id) => projected.nodes[id]?.label ?? id).join(" -> ");
+          violations.push({
+            code: "CYCLE_IN_DAG",
+            message: `Cycle detected in strict acyclic flow: ${cycleLabels}`,
+            nodeIds: cycle,
           });
         }
       }
@@ -87,13 +112,50 @@ export function evaluateTopologyQuality(
         });
       }
     }
+
+    // Explicit single-root vs forest calibration:
+    // If hierarchyStructure is 'single_root' (and >=2 nodes created on empty canvas), verify exactly one root
+    if (
+      plan.intent.hierarchyStructure === "single_root" &&
+      createdNodeIds.length >= 2 &&
+      Object.keys(workspace.nodes).length === 0
+    ) {
+      const roots = createdNodeIds.filter((id) => {
+        const inDeg = Object.values(projected.edges).filter((e) => e.target === id).length;
+        return inDeg === 0;
+      });
+      if (roots.length > 1) {
+        const rootLabels = roots.map((id) => projected.nodes[id]?.label ?? id);
+        violations.push({
+          code: "MULTIPLE_ROOTS",
+          message: `Multiple root nodes found in single-root hierarchy: ${rootLabels.join(", ")}`,
+          nodeIds: roots,
+        });
+      }
+    }
   }
 
   // 4. Relational Network (architectures, ERDs): checks for isolated subsystems
   if (topology === "relational_network" && createdNodeIds.length >= 2) {
+    const standaloneRefs = new Set(
+      plan.nodes
+        .filter((n) => n.standalone || n.role === "note" || n.role === "legend")
+        .map((n) => n.ref),
+    );
+
     for (const id of createdNodeIds) {
+      // Find plan node if available
+      const planNode = plan.nodes.find(
+        (n) => n.label === projected.nodes[id]?.label || n.ref === id,
+      );
+      const isStandaloneAllowed =
+        plan.intent.allowStandalone === true ||
+        (planNode && (planNode.standalone || standaloneRefs.has(planNode.ref)));
+
+      if (isStandaloneAllowed) continue;
+
       const connectedEdges = Object.values(projected.edges).filter(
-        (e) => e.source === id || e.target === id
+        (e) => e.source === id || e.target === id,
       );
       if (connectedEdges.length === 0) {
         const label = projected.nodes[id]?.label ?? id;

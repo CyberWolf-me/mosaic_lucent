@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { ConversationalLeaseManager } from "../src/meeting-voice.js";
 import { isTtsSpeaking, type TtsPlayback } from "../src/tts.js";
 
@@ -38,11 +38,7 @@ describe("P0 Voice Barge-In & Cancellation Pipeline (Task 1.5)", () => {
     manager.onAiStartResponding();
 
     // User interrupts halfway through with a replacement command
-    const barge = manager.onBargeIn(
-      "alice",
-      "Wait, Lucent, use Stripe instead of PayPal",
-      2500,
-    );
+    const barge = manager.onBargeIn("alice", "Wait, Lucent, use Stripe instead of PayPal", 2500);
     expect(barge.interrupted).toBe(true);
     expect(barge.newQuery).toBe("use Stripe instead of PayPal");
 

@@ -1,5 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
-import { isTransientSpeechError, MAX_RESTARTS_IN_WINDOW, RESTART_WINDOW_MS } from "../src/stt/browser.js";
+import { describe, expect, it } from "vitest";
+import { isTransientSpeechError } from "../src/stt/browser.js";
 import { hostedDegradedReason } from "../src/stt/hosted.js";
 import { speakAnswer, type TtsProvider } from "../src/tts.js";
 import { VoiceFSM } from "@lucent/core";

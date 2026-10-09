@@ -60,11 +60,11 @@ async function runTests() {
     const csrfCheck = await fetchJson(`${BASE_URL}/api/auth/csrf`);
     record(
       "CSRF endpoint reachable and returns token",
-      csrfCheck.status === 200 && typeof csrfCheck.data?.token === "string"
+      csrfCheck.status === 200 && typeof csrfCheck.data?.token === "string",
     );
     record(
       "OAuth providers configured (Google & GitHub enabled)",
-      csrfCheck.data?.oauth?.google === true && csrfCheck.data?.oauth?.github === true
+      csrfCheck.data?.oauth?.google === true && csrfCheck.data?.oauth?.github === true,
     );
 
     const googleStart = await fetch(`${BASE_URL}/api/auth/oauth/google/start`, {
@@ -73,7 +73,7 @@ async function runTests() {
     record(
       "Google OAuth start returns HTTP 302 redirect",
       googleStart.status === 302 &&
-        googleStart.headers.get("location")?.includes("accounts.google.com")
+        googleStart.headers.get("location")?.includes("accounts.google.com"),
     );
 
     const githubStart = await fetch(`${BASE_URL}/api/auth/oauth/github/start`, {
@@ -82,7 +82,7 @@ async function runTests() {
     record(
       "GitHub OAuth start returns HTTP 302 redirect",
       githubStart.status === 302 &&
-        githubStart.headers.get("location")?.includes("github.com/login/oauth/authorize")
+        githubStart.headers.get("location")?.includes("github.com/login/oauth/authorize"),
     );
 
     // -------------------------------------------------------------------------
@@ -103,7 +103,11 @@ async function runTests() {
       body: JSON.stringify({ name: "Multi-Device Test Board" }),
     });
     const boardId = createBoardRes.data?.board?.id || createBoardRes.data?.id;
-    record("User A created a new board", createBoardRes.status === 201 && !!boardId, `Board ID: ${boardId}`);
+    record(
+      "User A created a new board",
+      createBoardRes.status === 201 && !!boardId,
+      `Board ID: ${boardId}`,
+    );
 
     // User B attempts to access User A's board without invitation
     const uninvitedGet = await fetchJson(`${BASE_URL}/api/boards/${boardId}`, {
@@ -111,7 +115,7 @@ async function runTests() {
     });
     record(
       "Uninvited User B receives 404 for User A's board (Tenant Isolation)",
-      uninvitedGet.status === 404
+      uninvitedGet.status === 404,
     );
 
     // User B attempts to join WS for User A's board
@@ -119,7 +123,8 @@ async function runTests() {
       method: "POST",
       headers: { authorization: `Bearer ${userB.token}` },
     });
-    const wsUrlUninvited = BASE_URL.replace(/^http/, "ws") + `/ws?ticket=${ticketB_uninvited.data?.ticket}`;
+    const wsUrlUninvited =
+      BASE_URL.replace(/^http/, "ws") + `/ws?ticket=${ticketB_uninvited.data?.ticket}`;
     const wsUninvited = new WebSocket(wsUrlUninvited);
     const uninvitedWsResult = await new Promise((resolve) => {
       wsUninvited.onopen = () => {
@@ -138,7 +143,7 @@ async function runTests() {
     wsUninvited.close();
     record(
       "Uninvited WebSocket join is rejected with error",
-      uninvitedWsResult?.type === "error" && uninvitedWsResult?.message === "board not found"
+      uninvitedWsResult?.type === "error" && uninvitedWsResult?.message === "board not found",
     );
 
     // User A generates an invitation share link
@@ -210,8 +215,14 @@ async function runTests() {
     });
 
     const [welcomeA, welcomeB] = await Promise.all([readyA, readyB]);
-    record("User A joined realtime room over WebSocket", welcomeA?.type === "welcome" || welcomeA?.type === "resync");
-    record("User B joined realtime room over WebSocket", welcomeB?.type === "welcome" || welcomeB?.type === "resync");
+    record(
+      "User A joined realtime room over WebSocket",
+      welcomeA?.type === "welcome" || welcomeA?.type === "resync",
+    );
+    record(
+      "User B joined realtime room over WebSocket",
+      welcomeB?.type === "welcome" || welcomeB?.type === "resync",
+    );
 
     // Test Op propagation from User A -> User B
     const bReceivedOp = new Promise((resolve) => {
@@ -237,18 +248,19 @@ async function runTests() {
           },
         ],
         label: "Add Node A",
-      })
+      }),
     );
 
     const receivedByB = await Promise.race([
       bReceivedOp,
-      new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout waiting for op on B")), 5000)),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("Timeout waiting for op on B")), 5000),
+      ),
     ]).catch(() => null);
 
     record(
       "Realtime Op broadcast: Device B received operation from Device A",
-      receivedByB?.type === "op" &&
-        receivedByB.ops?.some((o) => o.id === "node_from_user_a")
+      receivedByB?.type === "op" && receivedByB.ops?.some((o) => o.id === "node_from_user_a"),
     );
 
     // Test Op propagation from User B -> User A
@@ -275,18 +287,19 @@ async function runTests() {
           },
         ],
         label: "Add Node B",
-      })
+      }),
     );
 
     const receivedByA = await Promise.race([
       aReceivedOp,
-      new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout waiting for op on A")), 5000)),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("Timeout waiting for op on A")), 5000),
+      ),
     ]).catch(() => null);
 
     record(
       "Realtime Op broadcast: Device A received operation from Device B",
-      receivedByA?.type === "op" &&
-        receivedByA.ops?.some((o) => o.id === "node_from_user_b")
+      receivedByA?.type === "op" && receivedByA.ops?.some((o) => o.id === "node_from_user_b"),
     );
 
     wsA.close();
@@ -307,7 +320,7 @@ async function runTests() {
     record(
       "Device A minted LiveKit token for meeting",
       lkTokenA.status === 200 && typeof lkTokenA.data?.token === "string",
-      `Room: ${lkTokenA.data?.room}`
+      `Room: ${lkTokenA.data?.room}`,
     );
 
     const lkTokenB = await fetchJson(`${BASE_URL}/api/livekit/token`, {
@@ -321,7 +334,7 @@ async function runTests() {
     record(
       "Device B minted LiveKit token for meeting",
       lkTokenB.status === 200 && typeof lkTokenB.data?.token === "string",
-      `Room: ${lkTokenB.data?.room}`
+      `Room: ${lkTokenB.data?.room}`,
     );
 
     // -------------------------------------------------------------------------
@@ -346,7 +359,7 @@ async function runTests() {
     record(
       "AI Ask endpoint handled cleanly (200 with answer OR 429 rate limit backoff)",
       isAskSuccess || isAskRateLimited,
-      `Status: ${askRes.status}`
+      `Status: ${askRes.status}`,
     );
 
     // Test Generate endpoint
@@ -371,7 +384,7 @@ async function runTests() {
     record(
       "AI Generate endpoint handled cleanly (200 with ops OR 429 rate limit backoff)",
       isGenSuccess || isGenRateLimited,
-      `Status: ${genRes.status}`
+      `Status: ${genRes.status}`,
     );
   } catch (err) {
     console.error("Test execution encountered an error:", err);

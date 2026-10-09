@@ -1,11 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   addressesOtherPerson,
-  classifyVoiceIntent,
   detectAddress,
   detectDismissal,
   evaluateVoicePolicy,
-  isDirectAnswer,
   isMutationUtterance,
   isSpeculativeSpeech,
   isStopRequest,
@@ -214,10 +212,7 @@ describe("Voice Semantic Contract & Policy (Core)", () => {
         leaseActive: false,
         userRole: "viewer",
       };
-      const decision = evaluateVoicePolicy(
-        makeTurn("Lucent, add Stripe"),
-        viewerCtx,
-      );
+      const decision = evaluateVoicePolicy(makeTurn("Lucent, add Stripe"), viewerCtx);
       expect(decision.capture).toBe(true);
       expect(decision.speak).toBe(true);
       expect(decision.act).toBe(false);

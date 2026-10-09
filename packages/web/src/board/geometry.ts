@@ -794,7 +794,11 @@ export function shapesInFrame(frame: Shape, shapes: Shape[]): string[] {
 /** Node ids contained within or largely intersecting a frame's box (for frame drag-together). */
 export function nodesInFrame(
   frame: Shape,
-  nodes: Array<{ id: string; position?: { x: number; y: number }; size?: { width: number; height: number } }>,
+  nodes: Array<{
+    id: string;
+    position?: { x: number; y: number };
+    size?: { width: number; height: number };
+  }>,
 ): string[] {
   const fx = frame.position.x;
   const fy = frame.position.y;

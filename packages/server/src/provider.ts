@@ -37,7 +37,8 @@ export function selectProvider(
   if (provider === "cloudflare" || provider === "workers-ai") {
     const accountId = env.CLOUDFLARE_ACCOUNT_ID ?? "812ad3c4e3c15fa0227f57e932fe45de";
     const apiKey = env.CLOUDFLARE_AI_TOKEN ?? env.CLOUDFLARE_API_TOKEN ?? env.LUCENT_AI_KEY;
-    if (!apiKey) throw new Error("LUCENT_AI_PROVIDER=cloudflare but CLOUDFLARE_AI_TOKEN is not set");
+    if (!apiKey)
+      throw new Error("LUCENT_AI_PROVIDER=cloudflare but CLOUDFLARE_AI_TOKEN is not set");
     return new OpenAICompatibleProvider({
       apiKey,
       baseUrl: `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/v1`,

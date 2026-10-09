@@ -29,3 +29,4 @@ scripts/stream-peek.mjs
 scripts/export-check.mjs
 test-results/
 playwright-report/
+.load-artifacts/

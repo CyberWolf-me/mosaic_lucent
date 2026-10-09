@@ -1304,13 +1304,7 @@ export const ToolIco = {
     </svg>
   ),
   More: (p: P) => (
-    <svg
-      width="14"
-      height="14"
-      viewBox="0 0 24 24"
-      fill="currentColor"
-      {...p}
-    >
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" {...p}>
       <circle cx="12" cy="12" r="2" />
       <circle cx="19" cy="12" r="2" />
       <circle cx="5" cy="12" r="2" />

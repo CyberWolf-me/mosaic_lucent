@@ -27,7 +27,11 @@ export function createPostHogSink(
 ): (event: TelemetryEvent) => void {
   const endpoint = `${config.host.replace(/\/+$/, "")}/capture/`;
 
-  const send = (eventName: string, props: Record<string, unknown>, distinctId = "lucent-server") => {
+  const send = (
+    eventName: string,
+    props: Record<string, unknown>,
+    distinctId = "lucent-server",
+  ) => {
     const payload: PostHogCapturePayload = {
       api_key: config.apiKey,
       event: eventName,

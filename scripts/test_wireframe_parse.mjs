@@ -17,7 +17,11 @@ function sanitizeWireframeElement(raw) {
     }
   }
 
-  if (el.placeholder !== undefined && el.placeholder !== null && typeof el.placeholder !== "string") {
+  if (
+    el.placeholder !== undefined &&
+    el.placeholder !== null &&
+    typeof el.placeholder !== "string"
+  ) {
     el.placeholder = String(el.placeholder);
   }
 
@@ -88,7 +92,9 @@ function sanitizeOp(copy) {
       copy.title = copy.title.trim();
     }
     if (copy.viewport !== "desktop" && copy.viewport !== "tablet" && copy.viewport !== "mobile") {
-      const vp = String(copy.viewport ?? "").toLowerCase().trim();
+      const vp = String(copy.viewport ?? "")
+        .toLowerCase()
+        .trim();
       if (vp === "mobile" || vp === "phone" || vp === "mobile-first" || vp === "smartphone") {
         copy.viewport = "mobile";
       } else if (vp === "tablet" || vp === "ipad") {
@@ -130,11 +136,11 @@ const samples = [
           direction: "vertical",
           children: [
             { kind: "header", text: "Listing header" },
-            { kind: "button", text: "Click me", variant: "outline" }
-          ]
-        }
-      }
-    ]
+            { kind: "button", text: "Click me", variant: "outline" },
+          ],
+        },
+      },
+    ],
   },
   {
     name: "missing id, title present, horizontal direction",
@@ -145,10 +151,10 @@ const samples = [
         root: {
           kind: "screen",
           direction: "horizontal",
-          children: []
-        }
-      }
-    ]
+          children: [],
+        },
+      },
+    ],
   },
   {
     name: "root is screen directly without root wrapper, e.g. children directly",
@@ -157,11 +163,9 @@ const samples = [
         op: "CREATE_WIREFRAME",
         id: "wf-2",
         title: "Homepage",
-        children: [
-          { kind: "nav", label: "Navigation" }
-        ]
-      }
-    ]
+        children: [{ kind: "nav", label: "Navigation" }],
+      },
+    ],
   },
   {
     name: "UPDATE_WIREFRAME alias/op",
@@ -172,11 +176,11 @@ const samples = [
         title: "Homepage Updated",
         root: {
           kind: "screen",
-          children: []
-        }
-      }
-    ]
-  }
+          children: [],
+        },
+      },
+    ],
+  },
 ];
 
 for (const s of samples) {
@@ -185,6 +189,9 @@ for (const s of samples) {
   const parsed = safeParseOperations(sanitized);
   console.log("Success:", parsed.success);
   if (!parsed.success) {
-    console.log("Issues:", parsed.error.issues.map(i => `${i.path.join(".")}: ${i.message}`));
+    console.log(
+      "Issues:",
+      parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`),
+    );
   }
 }

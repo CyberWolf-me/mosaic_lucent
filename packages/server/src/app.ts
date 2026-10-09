@@ -3660,7 +3660,10 @@ export function createApp(deps: AppDeps): App {
           const turnstileToken = parsed.turnstileToken ?? parsed["cf-turnstile-response"];
           const outcome = await verifyTurnstileToken(turnstileToken, clientKey(req));
           if (!outcome.success) {
-            send(res, 403, { error: "turnstile_failed", detail: "Cloudflare Turnstile bot verification failed." });
+            send(res, 403, {
+              error: "turnstile_failed",
+              detail: "Cloudflare Turnstile bot verification failed.",
+            });
             return;
           }
         }

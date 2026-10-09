@@ -85,10 +85,7 @@ describe("Conversational Lease Empirical Matrix & Boundaries (Phase 1 / Task 1.4
 
       // 3. User after 14.9s (t = 24900): "And what about refunds?" -> boundary case, should answer
       t = 24_900;
-      const turn3 = manager.evaluateTurn(
-        { speaker: "alice", text: "And what about refunds?" },
-        t,
-      );
+      const turn3 = manager.evaluateTurn({ speaker: "alice", text: "And what about refunds?" }, t);
       expect(turn3.action).toBe("followup_query");
 
       // Lucent finishes at t = 27000
@@ -98,10 +95,7 @@ describe("Conversational Lease Empirical Matrix & Boundaries (Phase 1 / Task 1.4
 
       // 4. User after 20s (t = 47000): "What did we decide?" -> should require invocation
       t = 47_000;
-      const turn4 = manager.evaluateTurn(
-        { speaker: "alice", text: "What did we decide?" },
-        t,
-      );
+      const turn4 = manager.evaluateTurn({ speaker: "alice", text: "What did we decide?" }, t);
       expect(turn4.action).toBe("ignore");
       if (turn4.action === "ignore") {
         expect(turn4.reason).toBe("lease_expired");
@@ -121,10 +115,7 @@ describe("Conversational Lease Empirical Matrix & Boundaries (Phase 1 / Task 1.4
 
       // 6. Another participant speaks (Bob): "Yeah, what about shipping?" -> lease should close/suspend
       t += 3000;
-      const turn6 = manager.evaluateTurn(
-        { speaker: "bob", text: "Yeah, what about shipping?" },
-        t,
-      );
+      const turn6 = manager.evaluateTurn({ speaker: "bob", text: "Yeah, what about shipping?" }, t);
       expect(turn6.action).toBe("ignore");
       if (turn6.action === "ignore") {
         expect(turn6.reason).toBe("different_speaker");
@@ -168,7 +159,10 @@ describe("Conversational Lease Empirical Matrix & Boundaries (Phase 1 / Task 1.4
       manager.onExplicitInvocation("alice", "draw payments", "Alice", 1000);
       manager.onTtsDone("Done. I drew payments.", 2000);
 
-      const res = manager.evaluateTurn({ speaker: "alice", text: "Thanks Lucent, that's all" }, 3000);
+      const res = manager.evaluateTurn(
+        { speaker: "alice", text: "Thanks Lucent, that's all" },
+        3000,
+      );
       expect(res.action).toBe("dismiss");
       if (res.action === "dismiss") {
         expect(res.reason).toBe("conversational_handoff");

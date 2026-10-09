@@ -14,7 +14,10 @@ import {
   detectMermaid,
   mermaidToOps,
   DIAGRAM_KINDS,
+  compileSemanticPlan,
+  evaluateTopologyQuality,
   type Operation,
+  type SemanticPlan,
   type Workspace,
 } from "@lucent/core";
 
@@ -44,6 +47,28 @@ export function listTools(): McpTool[] {
       name: canvas.name,
       description: canvas.description,
       inputSchema: canvas.parameters,
+    },
+    {
+      name: "construct_diagram",
+      description:
+        "Construct, extend, or organize structured diagrams using Lucent's unified pipeline: " +
+        "compiles symbolic node/edge references deterministically, evaluates topology quality, " +
+        "and updates the board with automatic layout without manual coordinates.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          prompt: {
+            type: "string",
+            description: "What to diagram, connect, or extend on the canvas",
+          },
+          plan: {
+            type: "object",
+            description: "Optional structured SemanticPlan with symbolic references",
+          },
+        },
+        required: ["prompt"],
+        additionalProperties: false,
+      },
     },
     {
       name: "get_board",
@@ -346,6 +371,8 @@ export class BoardSession {
         if ("error" in plan) return errorResult(plan.error);
         return this.applyOps({ operations: plan.ops, explanation: "Imported from Mermaid." });
       }
+      case "construct_diagram":
+        return this.constructDiagram(args);
       case "export_mermaid":
         return text(boardToMermaid(this.ws));
       case "search_workspace":
@@ -411,6 +438,60 @@ export class BoardSession {
     const explanation = typeof args.explanation === "string" ? args.explanation : "";
     return text(
       `Applied ${operations.length} operation(s).${explanation ? ` ${explanation}` : ""}\n\n` +
+        JSON.stringify(summarizeBoard(this.ws), null, 2),
+    );
+  }
+
+  private constructDiagram(args: Record<string, unknown>): ToolResult {
+    const prompt = typeof args.prompt === "string" ? args.prompt.trim() : "";
+    if (!prompt) return errorResult("`prompt` must be a non-empty string.");
+
+    const plan = (args.plan as SemanticPlan | undefined) ?? {
+      intent: {
+        userObjective: prompt,
+        targetKind: this.ws.diagramKind,
+        expectedTopology:
+          this.ws.diagramKind === "flowchart"
+            ? "directed_flow"
+            : this.ws.diagramKind === "mindmap"
+              ? "tree_hierarchy"
+              : this.ws.diagramKind === "architecture" || this.ws.diagramKind === "er"
+                ? "relational_network"
+                : "independent_clusters",
+        mutationScope: Object.keys(this.ws.nodes).length === 0 ? "new_canvas" : "extend_region",
+        focusNodeIds: [],
+      },
+      nodes: [{ ref: "n1", label: prompt.slice(0, 40) }],
+      edges: [],
+      groups: [],
+      explanation: `Constructed diagram for: ${prompt}`,
+    };
+
+    const compiled = compileSemanticPlan(this.ws, plan);
+    if (!compiled.ok) {
+      return errorResult(
+        `Plan compilation failed: ${compiled.diagnostics.map((d) => d.message).join("; ")}`,
+      );
+    }
+
+    const quality = evaluateTopologyQuality(this.ws, plan, compiled.operations, false);
+    if (quality.outcome === "UNRESOLVED") {
+      return errorResult(`Topology quality check failed: ${quality.details}`);
+    }
+
+    const stamped = stampAuthorship(compiled.operations, ASSISTANT_AUTHOR);
+    const errors = validateOperations(this.ws, stamped);
+    if (errors.length > 0) {
+      return errorResult(
+        `Rejected ${errors.length} invalid operation(s):\n` +
+          errors.map((e) => `- ${e.message}`).join("\n"),
+      );
+    }
+
+    this.ws = applyOperations(this.ws, stamped);
+    return text(
+      `Constructed diagram via pipeline (${stamped.length} operations applied).\n` +
+        `Explanation: ${plan.explanation || prompt}\n\n` +
         JSON.stringify(summarizeBoard(this.ws), null, 2),
     );
   }

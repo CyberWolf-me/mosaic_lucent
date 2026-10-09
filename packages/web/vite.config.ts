@@ -37,9 +37,7 @@ export default defineConfig({
         "phc_vBhxMqMXBu7coEaZK7BAwpXetqaogvmu6cEfHbdBsyVH",
     ),
     "import.meta.env.VITE_POSTHOG_HOST": JSON.stringify(
-      process.env.LUCENT_POSTHOG_HOST ??
-        process.env.POSTHOG_HOST ??
-        "https://us.i.posthog.com",
+      process.env.LUCENT_POSTHOG_HOST ?? process.env.POSTHOG_HOST ?? "https://us.i.posthog.com",
     ),
   },
   server: {

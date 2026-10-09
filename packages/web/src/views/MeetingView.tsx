@@ -2756,7 +2756,8 @@ export function MeetingView({ onOpenSettings }: { onOpenSettings: (section?: str
             {
               recording,
               sttStatus,
-              ttsSpeaking: isTtsSpeaking() || leaseManagerRef.current.getState() === "ai_responding",
+              ttsSpeaking:
+                isTtsSpeaking() || leaseManagerRef.current.getState() === "ai_responding",
               conversation: leaseManagerRef.current.getState(),
               leaseRemainingSec,
               leaseSpeaker: activeLease?.speakerName ?? activeLease?.speakerId,

@@ -140,7 +140,9 @@ export function ShapeToolbar({
       const next = !prev;
       try {
         localStorage.setItem("lucent.toolbarMinimized", String(next));
-      } catch {}
+      } catch {
+        // localStorage unavailable
+      }
       return next;
     });
   };
@@ -149,31 +151,83 @@ export function ShapeToolbar({
     if (["select", "pen", "sticky", "frame"].includes(tool)) return null;
     switch (tool) {
       case "hand":
-        return <T id="hand" tip="Hand · H"><ToolIco.Hand /></T>;
+        return (
+          <T id="hand" tip="Hand · H">
+            <ToolIco.Hand />
+          </T>
+        );
       case "rect":
-        return <T id="rect" tip="Rectangle · R"><ToolIco.Rect /></T>;
+        return (
+          <T id="rect" tip="Rectangle · R">
+            <ToolIco.Rect />
+          </T>
+        );
       case "ellipse":
-        return <T id="ellipse" tip="Ellipse · O"><ToolIco.Ellipse /></T>;
+        return (
+          <T id="ellipse" tip="Ellipse · O">
+            <ToolIco.Ellipse />
+          </T>
+        );
       case "diamond":
-        return <T id="diamond" tip="Diamond · D"><ToolIco.Diamond /></T>;
+        return (
+          <T id="diamond" tip="Diamond · D">
+            <ToolIco.Diamond />
+          </T>
+        );
       case "triangle":
-        return <T id="triangle" tip="Triangle"><ToolIco.Triangle /></T>;
+        return (
+          <T id="triangle" tip="Triangle">
+            <ToolIco.Triangle />
+          </T>
+        );
       case "star":
-        return <T id="star" tip="Star"><ToolIco.Star /></T>;
+        return (
+          <T id="star" tip="Star">
+            <ToolIco.Star />
+          </T>
+        );
       case "text":
-        return <T id="text" tip="Text · T"><ToolIco.Text /></T>;
+        return (
+          <T id="text" tip="Text · T">
+            <ToolIco.Text />
+          </T>
+        );
       case "arrow":
-        return <T id="arrow" tip="Connect · A"><ToolIco.Connect /></T>;
+        return (
+          <T id="arrow" tip="Connect · A">
+            <ToolIco.Connect />
+          </T>
+        );
       case "highlighter":
-        return <T id="highlighter" tip="Highlighter · I"><ToolIco.Highlighter /></T>;
+        return (
+          <T id="highlighter" tip="Highlighter · I">
+            <ToolIco.Highlighter />
+          </T>
+        );
       case "eraser":
-        return <T id="eraser" tip="Eraser · E"><ToolIco.Eraser /></T>;
+        return (
+          <T id="eraser" tip="Eraser · E">
+            <ToolIco.Eraser />
+          </T>
+        );
       case "table":
-        return <T id="table" tip="Table"><ToolIco.Table /></T>;
+        return (
+          <T id="table" tip="Table">
+            <ToolIco.Table />
+          </T>
+        );
       case "chart":
-        return <T id="chart" tip="Chart"><ToolIco.Chart /></T>;
+        return (
+          <T id="chart" tip="Chart">
+            <ToolIco.Chart />
+          </T>
+        );
       case "comment":
-        return <T id="comment" tip="Comment · C"><ToolIco.Comment /></T>;
+        return (
+          <T id="comment" tip="Comment · C">
+            <ToolIco.Comment />
+          </T>
+        );
       default:
         return null;
     }

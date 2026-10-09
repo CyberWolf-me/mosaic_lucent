@@ -88,7 +88,7 @@ import {
   type VoicePhase,
 } from "../voiceConversation.js";
 import { getSttProvider, isAnyVoiceSupported, type VoiceSession } from "../stt/index.js";
-import { VoiceStateHud, type VoiceHudSnapshot } from "../meeting-room/VoiceStateHud.js";
+import { VoiceStateHud } from "../meeting-room/VoiceStateHud.js";
 import { VoiceAgentBar } from "../ui/VoiceAgentBar.js";
 import {
   startVoiceAgentSession,
@@ -982,7 +982,9 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
     // Selected images and file/text objects travel with the request, so
     // "turn this screenshot into a wireframe" has something to look at.
     const attachments = collectAttachments(workspace, sel);
-    const isWireframePrompt = /\b(?:wireframe|ui mockup|mockup|ui screen|ui prototype)\b/i.test(text);
+    const isWireframePrompt = /\b(?:wireframe|ui mockup|mockup|ui screen|ui prototype)\b/i.test(
+      text,
+    );
     const textToSend =
       isWireframePrompt && !/CREATE_WIREFRAME/i.test(text)
         ? `${text}. Emit a CREATE_WIREFRAME operation with root kind "screen".`
@@ -1396,8 +1398,10 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
       const carriedShapes = new Set<string>();
       const carriedNodes = new Set<string>();
       if (moving?.kind === "frame") {
-        for (const cid of shapesInFrame(moving, Object.values(workspace.shapes))) carriedShapes.add(cid);
-        for (const nid of nodesInFrame(moving, Object.values(workspace.nodes))) carriedNodes.add(nid);
+        for (const cid of shapesInFrame(moving, Object.values(workspace.shapes)))
+          carriedShapes.add(cid);
+        for (const nid of nodesInFrame(moving, Object.values(workspace.nodes)))
+          carriedNodes.add(nid);
       }
       if (moving?.groupId) {
         for (const s of Object.values(workspace.shapes)) {
@@ -2857,7 +2861,9 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
         a.download = `${projectName || "lucent-board"}${exportScope === "selection" ? "-selection" : ""}.png`;
         a.click();
         URL.revokeObjectURL(purl);
-        notify(exportScope === "selection" ? "Exported selection as PNG." : "Exported board as PNG.");
+        notify(
+          exportScope === "selection" ? "Exported selection as PNG." : "Exported board as PNG.",
+        );
       }, "image/png");
     };
     img.onerror = () => {
@@ -2869,7 +2875,9 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
 
   // Export the semantic workspace as JSON (round-trippable board data).
   const exportJson = useCallback(() => {
-    const blob = new Blob([JSON.stringify(targetExportWorkspace, null, 2)], { type: "application/json" });
+    const blob = new Blob([JSON.stringify(targetExportWorkspace, null, 2)], {
+      type: "application/json",
+    });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -2899,7 +2907,9 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
         boardToMarkdown(targetExportWorkspace),
         "md",
         "text/markdown",
-        exportScope === "selection" ? "Exported selection as Markdown." : "Exported board as Markdown.",
+        exportScope === "selection"
+          ? "Exported selection as Markdown."
+          : "Exported board as Markdown.",
       ),
     [targetExportWorkspace, exportScope, downloadText],
   );
@@ -2909,33 +2919,56 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
         generateBoardDigest(targetExportWorkspace, projectName),
         "md",
         "text/markdown",
-        exportScope === "selection" ? "Exported selection digest as Markdown." : "Exported executive board digest as Markdown.",
+        exportScope === "selection"
+          ? "Exported selection digest as Markdown."
+          : "Exported executive board digest as Markdown.",
       ),
     [targetExportWorkspace, projectName, exportScope, downloadText],
   );
   const copyDigest = useCallback(async () => {
     try {
       await navigator.clipboard.writeText(generateBoardDigest(targetExportWorkspace, projectName));
-      notify(exportScope === "selection" ? "Copied selection digest to clipboard." : "Copied board digest to clipboard.");
+      notify(
+        exportScope === "selection"
+          ? "Copied selection digest to clipboard."
+          : "Copied board digest to clipboard.",
+      );
     } catch {
       notify("Clipboard access was blocked. Use Export → Board Digest instead.");
     }
   }, [targetExportWorkspace, projectName, exportScope, notify]);
   const exportCsv = useCallback(
-    () => downloadText(boardToCsv(targetExportWorkspace), "csv", "text/csv", exportScope === "selection" ? "Exported selection as CSV." : "Exported board as CSV."),
+    () =>
+      downloadText(
+        boardToCsv(targetExportWorkspace),
+        "csv",
+        "text/csv",
+        exportScope === "selection" ? "Exported selection as CSV." : "Exported board as CSV.",
+      ),
     [targetExportWorkspace, exportScope, downloadText],
   );
   // Mermaid is the interchange format GitHub, GitLab, and Notion render inline,
   // so this is the practical "integration" path: paste the board into a README.
   const exportMermaid = useCallback(
     () =>
-      downloadText(boardToMermaid(targetExportWorkspace), "mmd", "text/plain", exportScope === "selection" ? "Exported selection as Mermaid." : "Exported board as Mermaid."),
+      downloadText(
+        boardToMermaid(targetExportWorkspace),
+        "mmd",
+        "text/plain",
+        exportScope === "selection"
+          ? "Exported selection as Mermaid."
+          : "Exported board as Mermaid.",
+      ),
     [targetExportWorkspace, exportScope, downloadText],
   );
   const copyMermaid = useCallback(async () => {
     try {
       await navigator.clipboard.writeText(boardToMermaid(targetExportWorkspace));
-      notify(exportScope === "selection" ? "Copied selected Mermaid to clipboard." : "Copied Mermaid to the clipboard — paste it into a README or ticket.");
+      notify(
+        exportScope === "selection"
+          ? "Copied selected Mermaid to clipboard."
+          : "Copied Mermaid to the clipboard — paste it into a README or ticket.",
+      );
     } catch {
       notify("Clipboard access was blocked. Use Export → Mermaid instead.");
     }
@@ -3942,13 +3975,13 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
                 });
               }}
             >
-              <Ico.Share /> Export {hasSelection && exportScope === "selection" ? `(${effectiveSelectedNodes.size})` : ""}
+              <Ico.Share /> Export{" "}
+              {hasSelection && exportScope === "selection"
+                ? `(${effectiveSelectedNodes.size})`
+                : ""}
             </button>
             <div className="export-pop" onClick={() => setExportOpen(false)}>
-              <div
-                className="export-scope-banner"
-                onClick={(e) => e.stopPropagation()}
-              >
+              <div className="export-scope-banner" onClick={(e) => e.stopPropagation()}>
                 <span className="export-scope-label">Scope</span>
                 {hasSelection ? (
                   <div className="export-scope-pills">
@@ -3983,9 +4016,15 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
               >
                 Code (TS / Prisma / SQL / Docker)…
               </button>
-              <button onClick={exportMermaid}>Mermaid ({exportScope === "selection" ? "Selection" : "All"})</button>
-              <button onClick={exportSvg}>SVG ({exportScope === "selection" ? "Selection" : "All"})</button>
-              <button onClick={exportPng}>PNG ({exportScope === "selection" ? "Selection" : "All"})</button>
+              <button onClick={exportMermaid}>
+                Mermaid ({exportScope === "selection" ? "Selection" : "All"})
+              </button>
+              <button onClick={exportSvg}>
+                SVG ({exportScope === "selection" ? "Selection" : "All"})
+              </button>
+              <button onClick={exportPng}>
+                PNG ({exportScope === "selection" ? "Selection" : "All"})
+              </button>
               <button onClick={exportPdf}>PDF</button>
               {slides.length > 0 && (
                 <button
@@ -3995,15 +4034,21 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
                   Slides PDF
                 </button>
               )}
-              <button onClick={exportJson}>JSON ({exportScope === "selection" ? "Selection" : "All"})</button>
-              <button onClick={exportMarkdown}>Markdown ({exportScope === "selection" ? "Selection" : "All"})</button>
+              <button onClick={exportJson}>
+                JSON ({exportScope === "selection" ? "Selection" : "All"})
+              </button>
+              <button onClick={exportMarkdown}>
+                Markdown ({exportScope === "selection" ? "Selection" : "All"})
+              </button>
               <button
                 onClick={exportDigest}
                 title="Executive digest with governance metrics, decisions, actions, risks and Mermaid diagram"
               >
                 Board Digest (.md)
               </button>
-              <button onClick={exportCsv}>CSV ({exportScope === "selection" ? "Selection" : "All"})</button>
+              <button onClick={exportCsv}>
+                CSV ({exportScope === "selection" ? "Selection" : "All"})
+              </button>
               <div className="export-sep" />
               <button onClick={() => void copyMermaid()}>Copy Mermaid</button>
               <button onClick={() => void copyDigest()}>Copy Board Digest</button>
@@ -4213,56 +4258,57 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
 
           {canvasPhase === "proposing" && <ProposalPanel />}
 
-          {voiceHud && (() => {
-            const isAgentActive =
-              voiceAgentState === "listening" ||
-              voiceAgentState === "thinking" ||
-              voiceAgentState === "agent_speaking";
-            return (
-              <VoiceStateHud
-                snapshot={{
-                  recording: listening || voicePhase === "listening" || isAgentActive,
-                  sttStatus: listening
-                    ? "listening"
-                    : voicePhase === "listening"
+          {voiceHud &&
+            (() => {
+              const isAgentActive =
+                voiceAgentState === "listening" ||
+                voiceAgentState === "thinking" ||
+                voiceAgentState === "agent_speaking";
+              return (
+                <VoiceStateHud
+                  snapshot={{
+                    recording: listening || voicePhase === "listening" || isAgentActive,
+                    sttStatus: listening
                       ? "listening"
-                      : isAgentActive
-                        ? voiceAgentState
-                        : "idle",
-                  ttsSpeaking:
-                    isTtsSpeaking() ||
-                    voicePhase === "speaking" ||
-                    voiceAgentState === "agent_speaking",
-                  conversation:
-                    voicePhase === "speaking" || voiceAgentState === "agent_speaking"
-                      ? "ai_responding"
-                      : voicePhase === "thinking" || voiceAgentState === "thinking"
-                        ? "invoked"
-                        : conversingRef.current && voicePhase === "listening"
-                          ? "waiting_for_followup"
-                          : "dormant",
-                  leaseRemainingSec: conversingRef.current && voicePhase === "listening" ? 15 : 0,
-                  turnCount: chat.length,
-                  micStatus: voiceAgentMuted
-                    ? "MUTED"
-                    : listening || voicePhase === "listening" || isAgentActive
-                      ? "ACTIVE"
-                      : "STANDBY",
-                  vadStatus:
-                    listening || voicePhase === "listening"
-                      ? "DETECTING"
-                      : isAgentActive
-                        ? "SPEECH"
-                        : "OFF",
-                  echoSuppressionActive:
-                    isTtsSpeaking() ||
-                    voicePhase === "speaking" ||
-                    voiceAgentState === "agent_speaking",
-                  lastTranscript: chat.length > 0 ? chat[chat.length - 1]?.text : undefined,
-                }}
-              />
-            );
-          })()}
+                      : voicePhase === "listening"
+                        ? "listening"
+                        : isAgentActive
+                          ? voiceAgentState
+                          : "idle",
+                    ttsSpeaking:
+                      isTtsSpeaking() ||
+                      voicePhase === "speaking" ||
+                      voiceAgentState === "agent_speaking",
+                    conversation:
+                      voicePhase === "speaking" || voiceAgentState === "agent_speaking"
+                        ? "ai_responding"
+                        : voicePhase === "thinking" || voiceAgentState === "thinking"
+                          ? "invoked"
+                          : conversingRef.current && voicePhase === "listening"
+                            ? "waiting_for_followup"
+                            : "dormant",
+                    leaseRemainingSec: conversingRef.current && voicePhase === "listening" ? 15 : 0,
+                    turnCount: chat.length,
+                    micStatus: voiceAgentMuted
+                      ? "MUTED"
+                      : listening || voicePhase === "listening" || isAgentActive
+                        ? "ACTIVE"
+                        : "STANDBY",
+                    vadStatus:
+                      listening || voicePhase === "listening"
+                        ? "DETECTING"
+                        : isAgentActive
+                          ? "SPEECH"
+                          : "OFF",
+                    echoSuppressionActive:
+                      isTtsSpeaking() ||
+                      voicePhase === "speaking" ||
+                      voiceAgentState === "agent_speaking",
+                    lastTranscript: chat.length > 0 ? chat[chat.length - 1]?.text : undefined,
+                  }}
+                />
+              );
+            })()}
 
           <VoiceAgentBar
             state={voiceAgentState}

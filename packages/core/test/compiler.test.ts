@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createWorkspace } from "../src/model.js";
 import { compileSemanticPlan } from "../src/compiler.js";
-import { SemanticPlan } from "../src/plan.js";
+import type { SemanticPlan } from "../src/plan.js";
 import { validateOperations } from "../src/validator.js";
 
 describe("compileSemanticPlan", () => {
@@ -27,9 +27,7 @@ describe("compileSemanticPlan", () => {
         { from: "n1", to: "n2", relation: "next" },
         { from: "n2", to: "n3", relation: "calls" },
       ],
-      groups: [
-        { ref: "g1", label: "Payment Subsystem", memberRefs: ["n2", "n3"] },
-      ],
+      groups: [{ ref: "g1", label: "Payment Subsystem", memberRefs: ["n2", "n3"] }],
       explanation: "Created checkout flow with payment subsystem",
     };
 
@@ -105,7 +103,7 @@ describe("compileSemanticPlan", () => {
     const res = compileSemanticPlan(ws, plan);
     expect(res.ok).toBe(false);
     expect(res.diagnostics).toHaveLength(1);
-    expect(res.diagnostics[0]!.code).toBe("UNRESOLVED_ENDPOINT");
+    expect(res.diagnostics[0]!.code).toBe("UNRESOLVED_REFERENCE");
 
     // Existing auth should be mapped to the actual canvas node ID
     expect(res.idMap.get("existing_auth")).toBe("node_auth");
@@ -128,9 +126,7 @@ describe("compileSemanticPlan", () => {
         { ref: "ambiguous_db", label: "Postgres Database" },
         { ref: "n_svc", label: "Analytics Service" },
       ],
-      edges: [
-        { from: "n_svc", to: "ambiguous_db", relation: "reads_writes" },
-      ],
+      edges: [{ from: "n_svc", to: "ambiguous_db", relation: "reads_writes" }],
       groups: [],
       explanation: "",
     };
@@ -153,9 +149,7 @@ describe("compileSemanticPlan", () => {
         mutationScope: "extend_region",
         focusNodeIds: [],
       },
-      nodes: [
-        { ref: "n1", label: "Missing Link", existingNodeId: "nonexistent_node_999" },
-      ],
+      nodes: [{ ref: "n1", label: "Missing Link", existingNodeId: "nonexistent_node_999" }],
       edges: [],
       groups: [],
       explanation: "",
@@ -230,4 +224,3 @@ describe("compileSemanticPlan", () => {
     });
   });
 });
-

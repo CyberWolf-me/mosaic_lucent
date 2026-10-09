@@ -61,16 +61,17 @@ describe("Speaker Attribution Adversarial Suite (Phase 2 / Task 2.1)", () => {
 
       // Alice asks to add a database
       manager.onExplicitInvocation("alice", "add a database", "Alice", t);
-      manager.onClarificationAsked("add a database", "Which database: Postgres or Redis?", t + 1000);
+      manager.onClarificationAsked(
+        "add a database",
+        "Which database: Postgres or Redis?",
+        t + 1000,
+      );
       expect(manager.getState()).toBe("waiting_for_user_response");
       expect(manager.getLease()?.speakerId).toBe("alice");
 
       // Bob speaks up instead of Alice
       t = 3000;
-      const turnB = manager.evaluateTurn(
-        { speaker: "bob", text: "Postgres for sure" },
-        t,
-      );
+      const turnB = manager.evaluateTurn({ speaker: "bob", text: "Postgres for sure" }, t);
 
       // Bob does not own the clarification answer
       expect(turnB.action).toBe("ignore");
@@ -145,10 +146,7 @@ describe("Speaker Attribution Adversarial Suite (Phase 2 / Task 2.1)", () => {
 
       // Speaker 02 chimes in
       t = 8000;
-      const res3 = manager.evaluateTurn(
-        { speaker: "spk_02", text: "That sounds fine with me" },
-        t,
-      );
+      const res3 = manager.evaluateTurn({ speaker: "spk_02", text: "That sounds fine with me" }, t);
       expect(res3.action).toBe("ignore");
       if (res3.action === "ignore") {
         expect(res3.reason).toBe("different_speaker");

@@ -134,17 +134,18 @@ async function run() {
     const users = await pMap(
       userIndices,
       async (idx) => {
-        const roleName = idx === 1 ? "Alice (Owner)" : idx === 2 ? "Bob (Partner)" : `User ${idx} (Collab)`;
+        const roleName =
+          idx === 1 ? "Alice (Owner)" : idx === 2 ? "Bob (Partner)" : `User ${idx} (Collab)`;
         return await createAccount(roleName, `usr${idx}_scale`);
       },
-      8
+      8,
     );
     const provDuration = Date.now() - tProv0;
     const allProvOk = users.every((u) => u && !!u.token);
     check(
       `All ${TOTAL_USERS} accounts provisioned on backend`,
       allProvOk,
-      `Completed in ${provDuration}ms (avg ${Math.round(provDuration / TOTAL_USERS)}ms/account)`
+      `Completed in ${provDuration}ms (avg ${Math.round(provDuration / TOTAL_USERS)}ms/account)`,
     );
 
     const owner = users[0];
@@ -183,7 +184,11 @@ async function run() {
       }),
     });
     const boardId = createBoardRes.data?.board?.id || createBoardRes.data?.id;
-    check("Board created successfully", createBoardRes.status === 201 && !!boardId, `Board ID: ${boardId}`);
+    check(
+      "Board created successfully",
+      createBoardRes.status === 201 && !!boardId,
+      `Board ID: ${boardId}`,
+    );
 
     // Mint editor share link
     const shareRes = await fetchJson(`${BASE_URL}/api/boards/${boardId}/share`, {
@@ -213,14 +218,14 @@ async function run() {
         });
         return res.status === 200;
       },
-      10
+      10,
     );
     const joinDuration = Date.now() - tJoin0;
     const allJoined = joinResults.every(Boolean);
     check(
       `All ${TOTAL_USERS - 1} collaborators joined board`,
       allJoined,
-      `Joined in ${joinDuration}ms`
+      `Joined in ${joinDuration}ms`,
     );
 
     // -------------------------------------------------------------------------
@@ -254,7 +259,7 @@ async function run() {
         localStorage.setItem("lucent.scope", user.id);
         localStorage.setItem("lucent.tour.seen.v1", "1");
       },
-      [owner.user, owner.token]
+      [owner.user, owner.token],
     );
 
     // Context B (Bob - User 2)
@@ -283,7 +288,7 @@ async function run() {
         localStorage.setItem("lucent.scope", user.id);
         localStorage.setItem("lucent.tour.seen.v1", "1");
       },
-      [user2.user, user2.token]
+      [user2.user, user2.token],
     );
 
     const pageA = await contextA.newPage();
@@ -305,8 +310,14 @@ async function run() {
 
     console.log("Navigating User 1 and User 2 browser windows to board...");
     await Promise.all([
-      pageA.goto(`${BASE_URL}/?view=canvas&board=${boardId}`, { waitUntil: "networkidle", timeout: 30000 }),
-      pageB.goto(`${BASE_URL}/?view=canvas&board=${boardId}`, { waitUntil: "networkidle", timeout: 30000 }),
+      pageA.goto(`${BASE_URL}/?view=canvas&board=${boardId}`, {
+        waitUntil: "networkidle",
+        timeout: 30000,
+      }),
+      pageB.goto(`${BASE_URL}/?view=canvas&board=${boardId}`, {
+        waitUntil: "networkidle",
+        timeout: 30000,
+      }),
     ]);
 
     const aNodeReady = await waitFor(async () => {
@@ -315,7 +326,10 @@ async function run() {
     const bNodeReady = await waitFor(async () => {
       return (await pageB.getByText("Shared High-Scale Architecture").count()) > 0;
     }, 15000);
-    check("Both visual browsers rendered live canvas & architecture node", !!aNodeReady && !!bNodeReady);
+    check(
+      "Both visual browsers rendered live canvas & architecture node",
+      !!aNodeReady && !!bNodeReady,
+    );
 
     await waitFor(() => aWsJoined && bWsJoined, 10000);
     check("Visual browser sessions established WebSocket join", aWsJoined && bWsJoined);
@@ -382,14 +396,14 @@ async function run() {
           };
         });
       },
-      8
+      8,
     );
     const wsDuration = Date.now() - tWs0;
 
     check(
       `All 50 users connected simultaneously to the realtime room`,
       socketClients.length === 48 && socketClients.every((c) => c.joined),
-      `Connected 48 sockets in ${wsDuration}ms (Total 50 concurrent connections active)`
+      `Connected 48 sockets in ${wsDuration}ms (Total 50 concurrent connections active)`,
     );
 
     // -------------------------------------------------------------------------
@@ -406,7 +420,7 @@ async function run() {
           type: "presence",
           cursor: { x, y },
           selection: [],
-        })
+        }),
       );
     });
 
@@ -418,17 +432,25 @@ async function run() {
 
     // Verify PresenceBar avatar stack shows +overflow bubble (e.g. +44 more)
     const extraBadgeCount = await waitFor(async () => {
-      const moreBadges = await pageA.locator(".presence-avatar.more, [class*='presence-avatar']").count();
+      const moreBadges = await pageA
+        .locator(".presence-avatar.more, [class*='presence-avatar']")
+        .count();
       return moreBadges > 0;
     }, 12000);
 
-    const presenceTitle = await pageA.locator(".presence-bar").getAttribute("title").catch(() => "");
-    const moreText = await pageA.locator(".presence-avatar.more").innerText().catch(() => "");
+    const presenceTitle = await pageA
+      .locator(".presence-bar")
+      .getAttribute("title")
+      .catch(() => "");
+    const moreText = await pageA
+      .locator(".presence-avatar.more")
+      .innerText()
+      .catch(() => "");
 
     check(
       "Presence bar avatar stack renders overflow bubble for 50 participants",
       !!extraBadgeCount,
-      `Badge text: "${moreText}", Title: "${presenceTitle}"`
+      `Badge text: "${moreText}", Title: "${presenceTitle}"`,
     );
 
     // Verify live remote cursors render on the visual canvas
@@ -440,7 +462,7 @@ async function run() {
     check(
       "Visual canvas renders live multi-user remote cursors",
       cursorsOnCanvas,
-      `Active cursors rendered on canvas: ${visibleCursorCount}`
+      `Active cursors rendered on canvas: ${visibleCursorCount}`,
     );
 
     // -------------------------------------------------------------------------
@@ -478,8 +500,14 @@ async function run() {
         return arrivals && arrivals.size >= 48;
       }, 10000);
 
-      const aGotNode = await waitFor(async () => (await pageA.getByText(nodeLabel).count()) > 0, 8000);
-      const bGotNode = await waitFor(async () => (await pageB.getByText(nodeLabel).count()) > 0, 8000);
+      const aGotNode = await waitFor(
+        async () => (await pageA.getByText(nodeLabel).count()) > 0,
+        8000,
+      );
+      const bGotNode = await waitFor(
+        async () => (await pageB.getByText(nodeLabel).count()) > 0,
+        8000,
+      );
 
       const arrivals = opBroadcasts.get(seq);
       const latencies = arrivals ? Array.from(arrivals.values()).map((t) => t - tStart) : [];
@@ -507,12 +535,12 @@ async function run() {
       "Alice",
       owner.token,
       "scale_node_1",
-      "High-Scale Ingestion Pipeline"
+      "High-Scale Ingestion Pipeline",
     );
     check(
       "Op 1 broadcast delivered to 50/50 concurrent participants",
       burst1.success,
-      `Received by ${burst1.receivedCount}/50 clients (min: ${burst1.minLat}ms, median: ${burst1.medianLat}ms, p95: ${burst1.p95Lat}ms, max: ${burst1.maxLat}ms)`
+      `Received by ${burst1.receivedCount}/50 clients (min: ${burst1.minLat}ms, median: ${burst1.medianLat}ms, p95: ${burst1.p95Lat}ms, max: ${burst1.maxLat}ms)`,
     );
 
     // Burst 2: Dispatched by User 25 (Collaborator in middle of swarm)
@@ -522,12 +550,12 @@ async function run() {
       "User 25",
       user25.token,
       "scale_node_2",
-      "Distributed Consensus Engine"
+      "Distributed Consensus Engine",
     );
     check(
       "Op 2 broadcast delivered to 50/50 concurrent participants",
       burst2.success,
-      `Received by ${burst2.receivedCount}/50 clients (min: ${burst2.minLat}ms, median: ${burst2.medianLat}ms, p95: ${burst2.p95Lat}ms, max: ${burst2.maxLat}ms)`
+      `Received by ${burst2.receivedCount}/50 clients (min: ${burst2.minLat}ms, median: ${burst2.medianLat}ms, p95: ${burst2.p95Lat}ms, max: ${burst2.maxLat}ms)`,
     );
 
     // Burst 3: Dispatched by User 50 (Collaborator at tail of swarm)
@@ -537,12 +565,12 @@ async function run() {
       "User 50",
       user50.token,
       "scale_node_3",
-      "Global Edge Telemetry"
+      "Global Edge Telemetry",
     );
     check(
       "Op 3 broadcast delivered to 50/50 concurrent participants",
       burst3.success,
-      `Received by ${burst3.receivedCount}/50 clients (min: ${burst3.minLat}ms, median: ${burst3.medianLat}ms, p95: ${burst3.p95Lat}ms, max: ${burst3.maxLat}ms)`
+      `Received by ${burst3.receivedCount}/50 clients (min: ${burst3.minLat}ms, median: ${burst3.medianLat}ms, p95: ${burst3.p95Lat}ms, max: ${burst3.maxLat}ms)`,
     );
 
     // -------------------------------------------------------------------------
@@ -566,7 +594,7 @@ async function run() {
 
     check(
       "Dual visual screenshots captured and verified for 50-user room",
-      fs.existsSync(shotPathOwner) && fs.existsSync(shotPathCollab)
+      fs.existsSync(shotPathOwner) && fs.existsSync(shotPathCollab),
     );
   } catch (err) {
     console.error("Test execution encountered an error:", err);

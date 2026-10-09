@@ -138,7 +138,11 @@ async function run() {
       }),
     });
     const boardId = createBoardRes.data?.board?.id || createBoardRes.data?.id;
-    check("Board created with initial architecture", createBoardRes.status === 201 && !!boardId, `Board ID: ${boardId}`);
+    check(
+      "Board created with initial architecture",
+      createBoardRes.status === 201 && !!boardId,
+      `Board ID: ${boardId}`,
+    );
 
     // User A mints editor share invite link
     const shareRes = await fetchJson(`${BASE_URL}/api/boards/${boardId}/share`, {
@@ -150,7 +154,10 @@ async function run() {
       body: JSON.stringify({ role: "editor" }),
     });
     const inviteToken = shareRes.data?.token;
-    check("Editor invite link minted", (shareRes.status === 200 || shareRes.status === 201) && !!inviteToken);
+    check(
+      "Editor invite link minted",
+      (shareRes.status === 200 || shareRes.status === 201) && !!inviteToken,
+    );
 
     // User B joins board as editor
     const joinRes = await fetchJson(`${BASE_URL}/api/boards/${boardId}/join`, {
@@ -161,7 +168,11 @@ async function run() {
       },
       body: JSON.stringify({ token: inviteToken }),
     });
-    check("User B accepted invite and joined board", joinRes.status === 200, `Role: ${joinRes.data?.role}`);
+    check(
+      "User B accepted invite and joined board",
+      joinRes.status === 200,
+      `Role: ${joinRes.data?.role}`,
+    );
 
     // 3. Launch Dual Browser Sessions
     console.log("\n3. Launching independent browser sessions for User A and User B...");
@@ -192,7 +203,7 @@ async function run() {
         localStorage.setItem("lucent.scope", user.id);
         localStorage.setItem("lucent.tour.seen.v1", "1");
       },
-      [userA.user, userA.token]
+      [userA.user, userA.token],
     );
 
     // Context B (Bob)
@@ -220,7 +231,7 @@ async function run() {
         localStorage.setItem("lucent.scope", user.id);
         localStorage.setItem("lucent.tour.seen.v1", "1");
       },
-      [userB.user, userB.token]
+      [userB.user, userB.token],
     );
 
     const pageA = await contextA.newPage();
@@ -285,12 +296,16 @@ async function run() {
     await pageB.waitForTimeout(300);
 
     const peerSeenOnA = await waitFor(async () => {
-      const avatars = await pageA.locator(".presence-avatar, .presence-bar, .presence-bar-slot").count();
+      const avatars = await pageA
+        .locator(".presence-avatar, .presence-bar, .presence-bar-slot")
+        .count();
       return avatars > 0;
     }, 10000);
 
     const peerSeenOnB = await waitFor(async () => {
-      const avatars = await pageB.locator(".presence-avatar, .presence-bar, .presence-bar-slot").count();
+      const avatars = await pageB
+        .locator(".presence-avatar, .presence-bar, .presence-bar-slot")
+        .count();
       return avatars > 0;
     }, 10000);
 
@@ -346,7 +361,7 @@ async function run() {
     check(
       "User B's canvas rendered User A's node with 0 reload",
       !!node1SeenByB,
-      `Observed latency: ${latencyAtoB}ms`
+      `Observed latency: ${latencyAtoB}ms`,
     );
 
     // 7. Realtime Canvas Sync: Bob adds a response node
@@ -380,7 +395,7 @@ async function run() {
     check(
       "User A's canvas rendered User B's response node with 0 reload",
       !!node2SeenByA,
-      `Observed latency: ${latencyBtoA}ms`
+      `Observed latency: ${latencyBtoA}ms`,
     );
 
     // Keep cursor visible for screenshot
@@ -401,7 +416,7 @@ async function run() {
 
     check(
       "Dual visual screenshots captured and verified",
-      fs.existsSync(shotPathA) && fs.existsSync(shotPathB)
+      fs.existsSync(shotPathA) && fs.existsSync(shotPathB),
     );
   } catch (err) {
     console.error("Test execution encountered an error:", err);

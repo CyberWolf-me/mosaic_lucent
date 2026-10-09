@@ -86,10 +86,7 @@ const DEFAULTS: LayoutOptionsResolved = {
  * geometry globally — primaryFlow (spine weighting) and emphasis (tier
  * promotion) are consumed by their own passes below.
  */
-function withIntentDefaults(
-  workspace: Workspace,
-  options: LayoutOptions,
-): LayoutOptionsResolved {
+function withIntentDefaults(workspace: Workspace, options: LayoutOptions): LayoutOptionsResolved {
   const merged = { ...DEFAULTS, ...options };
   const intentDirection = workspace.layoutIntent?.direction;
   if (!options.direction && intentDirection) merged.direction = intentDirection;
@@ -980,7 +977,8 @@ function layeredLayoutWithRoutes(
 
   for (let i = 0; i < normalizedLayouts.length; i++) {
     const comp = normalizedLayouts[i]!;
-    const neededWidth = currentItems.length === 0 ? comp.width : currentWidth + compGapX + comp.width;
+    const neededWidth =
+      currentItems.length === 0 ? comp.width : currentWidth + compGapX + comp.width;
     if (currentItems.length > 0 && neededWidth > targetShelfWidth) {
       shelves.push({
         items: currentItems,
@@ -1109,12 +1107,14 @@ export function extendRegionLayoutWithRoutes(
             0,
           ) / existingParents.length;
         anchorY =
-          Math.max(...existingParents.map((id) => layout[id]!.position.y + layout[id]!.size.height)) +
-          opts.layerGap;
+          Math.max(
+            ...existingParents.map((id) => layout[id]!.position.y + layout[id]!.size.height),
+          ) + opts.layerGap;
       } else {
         anchorX =
-          Math.max(...existingParents.map((id) => layout[id]!.position.x + layout[id]!.size.width)) +
-          opts.layerGap;
+          Math.max(
+            ...existingParents.map((id) => layout[id]!.position.x + layout[id]!.size.width),
+          ) + opts.layerGap;
         anchorY =
           existingParents.reduce(
             (sum, id) => sum + layout[id]!.position.y + layout[id]!.size.height / 2,
@@ -1211,10 +1211,7 @@ export const extendRegion = extendRegionLayout;
  * each breadth-first ring fans out around it. Deterministic — ring membership
  * and angle come from BFS order, so the same graph always lays out identically.
  */
-function radialLayout(
-  workspace: Workspace,
-  opts: LayoutOptionsResolved,
-): LayoutResult {
+function radialLayout(workspace: Workspace, opts: LayoutOptionsResolved): LayoutResult {
   const { nodeSize, ringGap, nodeGap } = opts;
   const nodeIds = Object.keys(workspace.nodes);
   const result: LayoutResult = {};
@@ -1345,10 +1342,7 @@ function radialLayout(
  * Cycles are impossible in a well-formed tree but can arrive from an edited
  * graph, so the walk tracks visited nodes and never recurses twice.
  */
-function treeLayout(
-  workspace: Workspace,
-  opts: LayoutOptionsResolved,
-): LayoutResult {
+function treeLayout(workspace: Workspace, opts: LayoutOptionsResolved): LayoutResult {
   const { nodeSize, layerGap, nodeGap } = opts;
   const nodeIds = Object.keys(workspace.nodes);
   const result: LayoutResult = {};
@@ -1472,10 +1466,7 @@ function treeLayout(
  * belong together" — an owner, a team, a stage. Ungrouped nodes share a trailing
  * lane rather than being dropped.
  */
-function swimlaneLayout(
-  workspace: Workspace,
-  opts: LayoutOptionsResolved,
-): LayoutResult {
+function swimlaneLayout(workspace: Workspace, opts: LayoutOptionsResolved): LayoutResult {
   const { nodeSize, layerGap, laneGap } = opts;
   const nodeIds = Object.keys(workspace.nodes);
   const result: LayoutResult = {};
@@ -1804,11 +1795,7 @@ function subWorkspaceFor(workspace: Workspace, ids: string[], kind: DiagramKind)
 }
 
 /** Dispatch one (sub-)workspace through the strategy for its kind. */
-function layoutSingle(
-  ws: Workspace,
-  kind: DiagramKind,
-  opts: LayoutOptionsResolved,
-): LayoutResult {
+function layoutSingle(ws: Workspace, kind: DiagramKind, opts: LayoutOptionsResolved): LayoutResult {
   const strategy = STRATEGY_FOR_KIND[kind] ?? "layered";
   if (strategy === "radial") return radialLayout(ws, opts);
   if (strategy === "tree") return treeLayout(ws, opts);
@@ -1825,10 +1812,7 @@ function layoutSingle(
  * regions run byte-identical code); this wrapper reaches it with the
  * strategy pinned, which skips the region partition and cannot recurse.
  */
-function layeredLayout(
-  workspace: Workspace,
-  opts: LayoutOptionsResolved,
-): LayoutResult {
+function layeredLayout(workspace: Workspace, opts: LayoutOptionsResolved): LayoutResult {
   return computeLayout(workspace, { ...opts, strategy: "layered" });
 }
 
@@ -2263,10 +2247,7 @@ function flowRank(workspace: Workspace): Map<string, number> {
  * workstream — and cards that would overlap in a lane drop into a sub-row.
  * With fewer than two dates, order alone spaces the cards.
  */
-function timelineLayout(
-  workspace: Workspace,
-  opts: LayoutOptionsResolved,
-): LayoutResult {
+function timelineLayout(workspace: Workspace, opts: LayoutOptionsResolved): LayoutResult {
   const { nodeSize, nodeGap, laneGap } = opts;
   const ids = Object.keys(workspace.nodes);
   const result: LayoutResult = {};
@@ -2331,10 +2312,7 @@ function timelineLayout(
  * cell's items are packed in rows at its centre. The model chooses the cell,
  * never a coordinate. Ungrouped items line up under the grid.
  */
-function gridLayout(
-  workspace: Workspace,
-  opts: LayoutOptionsResolved,
-): LayoutResult {
+function gridLayout(workspace: Workspace, opts: LayoutOptionsResolved): LayoutResult {
   const { nodeSize, nodeGap } = opts;
   const ids = Object.keys(workspace.nodes);
   const result: LayoutResult = {};
@@ -2646,10 +2624,7 @@ function storyMapGeometry(
  * reshuffles the map; `applyLayout` keeps the hand placement, as it does for
  * every strategy.
  */
-function storyMapLayout(
-  workspace: Workspace,
-  opts: LayoutOptionsResolved,
-): LayoutResult {
+function storyMapLayout(workspace: Workspace, opts: LayoutOptionsResolved): LayoutResult {
   return storyMapGeometry(workspace, opts).layout;
 }
 
