@@ -145,6 +145,10 @@ export interface WorkspaceState {
   history: OperationHistory;
   canUndo: boolean;
   canRedo: boolean;
+  /** A large undo/redo waiting for a yes (the canvas shows what it would remove). */
+  pendingUndo: PendingUndo | null;
+  confirmPendingUndo: () => void;
+  cancelPendingUndo: () => void;
 
   peers: Peer[];
   setPresence: (update: {
@@ -201,4 +205,17 @@ export interface WorkspaceState {
   clarification: ClarificationChoice | null;
   clearClarification: () => void;
   streamThinking: string;
+}
+
+/**
+ * An undo or redo big enough to ask first: it would take `objects` nodes,
+ * shapes or wireframes (and `links` connections) off the board.
+ */
+export interface PendingUndo {
+  direction: "undo" | "redo";
+  label: string;
+  objects: number;
+  nodes: number;
+  shapes: number;
+  links: number;
 }

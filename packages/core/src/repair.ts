@@ -66,6 +66,67 @@ const isCreate = (op: Operation): boolean =>
   op.op === "CREATE_SHAPE" ||
   op.op === "CREATE_WIREFRAME";
 
+function mapOpNodeIds(op: Operation, resolveId: (id: string) => string): Operation {
+  switch (op.op) {
+    case "CONNECT_NODES":
+      return {
+        ...op,
+        source: resolveId(op.source),
+        target: resolveId(op.target),
+      };
+    case "SET_STATEMENT":
+      return {
+        ...op,
+        id: resolveId(op.id),
+        statement: op.statement
+          ? {
+              ...op.statement,
+              ...(op.statement.supersedes
+                ? { supersedes: op.statement.supersedes.map(resolveId) }
+                : {}),
+            }
+          : op.statement,
+      };
+    case "UPDATE_STATEMENT":
+      return {
+        ...op,
+        id: resolveId(op.id),
+        ...(op.supersedes ? { supersedes: op.supersedes.map(resolveId) } : {}),
+      };
+    case "ADD_VOTE":
+    case "ADD_REACTION":
+    case "ADD_COMMENT":
+      return {
+        ...op,
+        targetId: resolveId(op.targetId),
+      };
+    case "CLEAR_VOTES":
+      return {
+        ...op,
+        ...(op.targetId !== undefined ? { targetId: resolveId(op.targetId) } : {}),
+      };
+    case "SET_ISSUE":
+    case "UPDATE_ISSUE":
+    case "DELETE_NODE":
+    case "MOVE_NODE":
+    case "CHANGE_TEXT":
+    case "CHANGE_NODE_TYPE":
+    case "SET_NODE_ICON":
+    case "SET_NODE_DETAILS":
+      return {
+        ...op,
+        id: resolveId(op.id),
+      };
+    case "CREATE_GROUP":
+      return {
+        ...op,
+        children: op.children ? op.children.map(resolveId) : [],
+      };
+    default:
+      return op;
+  }
+}
+
 export function repairOperations(rawOps: Operation[], workspace?: Workspace): Operation[] {
   let ops = [...rawOps];
 
@@ -87,6 +148,56 @@ export function repairOperations(rawOps: Operation[], workspace?: Workspace): Op
       ops = [...toPrepend, ...ops];
     }
   }
+
+  // Stage C3 / Finding B4: Symbolic ref and unique label alias resolution.
+  // Models frequently emit CONNECT_NODES, SET_STATEMENT, or ADD_VOTE using
+  // symbolic IDs (n1, n2) or natural-language node labels instead of opaque IDs.
+  const knownIds = new Set<string>();
+  const labelCounts = new Map<string, number>();
+  const singleLabelNode = new Map<string, string>();
+  const symbolicMap = new Map<string, string>();
+
+  if (workspace?.nodes) {
+    for (const node of Object.values(workspace.nodes)) {
+      knownIds.add(node.id);
+      const norm = node.label.trim().toLowerCase();
+      labelCounts.set(norm, (labelCounts.get(norm) ?? 0) + 1);
+      singleLabelNode.set(norm, node.id);
+    }
+  }
+
+  const createdNodes: Array<{ id: string; label: string }> = [];
+  for (const op of ops) {
+    if (op.op === "CREATE_NODE") {
+      knownIds.add(op.id);
+      createdNodes.push({ id: op.id, label: op.label });
+      const norm = op.label.trim().toLowerCase();
+      labelCounts.set(norm, (labelCounts.get(norm) ?? 0) + 1);
+      singleLabelNode.set(norm, op.id);
+    }
+  }
+
+  createdNodes.forEach((node, idx) => {
+    const num = idx + 1;
+    symbolicMap.set(`n${num}`, node.id);
+    symbolicMap.set(`node${num}`, node.id);
+    symbolicMap.set(`node_${num}`, node.id);
+    symbolicMap.set(`n_${num}`, node.id);
+  });
+
+  const resolveId = (id: string): string => {
+    if (!id || typeof id !== "string") return id;
+    if (knownIds.has(id)) return id;
+    if (symbolicMap.has(id)) return symbolicMap.get(id)!;
+    const norm = id.trim().toLowerCase();
+    if (labelCounts.get(norm) === 1 && singleLabelNode.has(norm)) {
+      return singleLabelNode.get(norm)!;
+    }
+    return id;
+  };
+
+  ops = ops.map((op) => mapOpNodeIds(op, resolveId));
+
   const bucket = (op: Operation): number => {
     switch (op.op) {
       case "CREATE_DIAGRAM":

@@ -5,15 +5,18 @@ import {
   starterFor,
   type DiagramKind,
   type Operation,
+  type SemanticPlan,
 } from "@lucent/core";
 import type {
   GenerateRequest,
   GenerateResult,
   LLMProvider,
+  PlanRequest,
   StreamCallbacks,
   WorkspaceSummary,
 } from "../provider.js";
 import type { AnswerCitation, AnswerRequest, AnswerResult } from "../answer.js";
+import { generateMockPlan } from "../planGenerator.js";
 import { fallbackNotesDraft, type NotesRequest, type NotesResult } from "../notes.js";
 import { fallbackThemes, type ThemesRequest, type ThemesResult } from "../themes.js";
 import { mockVectorEdit, type VectorEditRequest, type VectorEditResult } from "../vectorEdit.js";
@@ -1455,5 +1458,10 @@ export class MockProvider implements LLMProvider {
       await new Promise<void>((resolve) => setTimeout(resolve, 0).unref?.());
     }
     return result;
+  }
+
+  /** Intermediate semantic diagram plan generator (Finding B1). */
+  async generatePlan(request: PlanRequest): Promise<SemanticPlan> {
+    return generateMockPlan(request.prompt, request.workspace, request.intent);
   }
 }

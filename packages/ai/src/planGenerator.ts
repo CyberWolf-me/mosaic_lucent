@@ -15,47 +15,22 @@ export async function generateSemanticPlan(
 ): Promise<SemanticPlan> {
   const resolvedIntent = intentOverride ?? classifyIntentFastPath(prompt, workspace);
 
+  if (provider.generatePlan) {
+    return await provider.generatePlan({
+      prompt,
+      workspace,
+      intent: resolvedIntent,
+    });
+  }
+
   // Offline / Mock fallback for tests and offline development
   if (provider.name === "mock" || !("apiKey" in provider)) {
     return generateMockPlan(prompt, workspace, resolvedIntent);
   }
 
-  const systemInstructions = `You are Lucent, an AI visual workspace copilot.
-Construct a structured semantic diagram plan for the user's request.
-Use symbolic references ("n1", "n2", ...) for newly proposed nodes.
-If referencing an existing node already on the canvas, use its exact ID in "existingNodeId".
-Preserve semantic relationships ("calls", "reads_writes", "produces", "consumes", "contains", "depends_on", "next", "relates_to").
-${resolvedIntent ? `Target Diagram Kind: ${resolvedIntent.targetKind}\nExpected Topology: ${resolvedIntent.expectedTopology}\nMutation Scope: ${resolvedIntent.mutationScope}` : ""}`;
-
-  // Call provider through the standard tool call interface
-  const res = await provider.generateOperations({
-    message: prompt,
-    rules: systemInstructions,
-    summary: {
-      diagramKind: resolvedIntent?.targetKind ?? workspace.diagramKind,
-      nodes: Object.values(workspace.nodes).map((n) => ({
-        id: n.id,
-        label: n.label,
-        nodeType: n.nodeType,
-        groupId: n.groupId,
-      })),
-      edges: Object.values(workspace.edges).map((e) => ({
-        source: e.source,
-        target: e.target,
-        relationship: e.relationship,
-      })),
-    },
-  });
-
-  // If the provider returned a reply with tool/json content
-  if (res.explanation) {
-    const parsed = parseModelJson(res.explanation);
-    const valid = SemanticPlanSchema.safeParse(parsed);
-    if (valid.success) return valid.data;
-  }
-
-  // Fallback to mock plan if unparseable
-  return generateMockPlan(prompt, workspace, resolvedIntent);
+  throw new Error(
+    `Provider "${provider.name}" does not support generatePlan and implicit mock fallback is disabled.`,
+  );
 }
 
 /**
@@ -92,14 +67,32 @@ export async function requestBoundedEdgeRepair(
     };
   }
 
-  // On real providers, return the original plan if no repair was formulated
+  // On real providers with generatePlan, request a bounded repair pass with context
+  if (provider.generatePlan) {
+    try {
+      const repaired = await provider.generatePlan({
+        prompt: plan.intent.userObjective,
+        workspace,
+        intent: plan.intent,
+        repairContext: {
+          rejectedPlan: plan,
+          missingItemLabels,
+          feedback: `Missing edge relationships for disconnected items: ${missingItemLabels.join(", ")}`,
+        },
+      });
+      return repaired;
+    } catch {
+      return plan;
+    }
+  }
+
   return plan;
 }
 
 /**
  * Deterministic Mock Semantic Plan Generator for offline tests and predictable verification.
  */
-function generateMockPlan(
+export function generateMockPlan(
   prompt: string,
   workspace: Workspace,
   intentOverride?: DiagramIntent | null,

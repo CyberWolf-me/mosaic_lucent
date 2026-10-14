@@ -4,6 +4,7 @@ import {
   repairOperations,
   stampAuthorship,
   validateOperations,
+  computeProposalDiff,
   type Operation,
   type Workspace,
 } from "@lucent/core";
@@ -94,6 +95,10 @@ export class RemoteBoardSession {
         return this.importMermaid(args);
       case "construct_diagram":
         return this.constructDiagram(args);
+      case "create_proposal":
+        return this.createProposal(args);
+      case "get_proposal_diff":
+        return this.getProposalDiff(args);
       case "export_mermaid":
         return this.exportMermaid();
       case "search_workspace":
@@ -446,5 +451,85 @@ export class RemoteBoardSession {
       ],
       isError: true,
     };
+  }
+
+  private async createProposal(args: Record<string, unknown>): Promise<ToolResult> {
+    const title = typeof args.title === "string" ? args.title.trim() : "";
+    if (!title) return this.failure("`title` is required.");
+    const raw = args.operations;
+    if (!Array.isArray(raw)) return this.failure("`operations` must be an array.");
+    const explanation = typeof args.explanation === "string" ? args.explanation.trim() : "";
+
+    const candidate = raw.filter(
+      (op): op is Operation =>
+        op !== null &&
+        typeof op === "object" &&
+        typeof (op as { op?: unknown }).op === "string" &&
+        !isHumanOnlyOperation((op as { op: string }).op),
+    );
+
+    const res = await this.opts.fetchImpl(
+      `${this.opts.baseUrl}/api/boards/${this.opts.boardId}/proposals`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${this.opts.token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          proposal: {
+            title,
+            explanation,
+            operations: candidate,
+          },
+        }),
+      },
+    );
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      return this.failure(
+        `Server rejected proposal (${res.status}): ${JSON.stringify(err)}`,
+      );
+    }
+
+    const data = (await res.json()) as { proposal: { id: string } };
+    return {
+      content: [
+        {
+          type: "text",
+          text: `Created visual proposal **${data.proposal.id}** ("${title}"). Staged for human review on canvas.`,
+        },
+      ],
+    };
+  }
+
+  private async getProposalDiff(args: Record<string, unknown>): Promise<ToolResult> {
+    const raw = args.operations;
+    if (!Array.isArray(raw)) return this.failure("`operations` must be an array.");
+    const title = typeof args.title === "string" ? args.title : undefined;
+    let ws = this.cached;
+    if (!ws) {
+      const res = await this.opts.fetchImpl(
+        `${this.opts.baseUrl}/api/v1/boards/${this.opts.boardId}`,
+        {
+          headers: { Authorization: `Bearer ${this.opts.token}` },
+        },
+      );
+      if (res.ok) {
+        const body = (await res.json()) as { board: { workspace: Workspace } };
+        ws = body.board?.workspace;
+      }
+    }
+    if (!ws) {
+      return this.failure("Could not fetch current board state to compute diff.");
+    }
+    const diff = computeProposalDiff(ws, raw as Operation[], title);
+    if (!diff.valid) {
+      return this.failure(
+        `Proposal diff validation failed:\n${diff.errors?.map((e) => `- ${e}`).join("\n")}`,
+      );
+    }
+    return { content: [{ type: "text", text: diff.markdown }] };
   }
 }

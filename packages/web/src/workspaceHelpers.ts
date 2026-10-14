@@ -55,6 +55,29 @@ export function convertBoardOps(
 }
 
 /** Review-gate threshold from settings (UX-1): always=>0, large=>5, never=>Infinity. */
+/** An undo/redo that removes at least this many objects asks for a yes first. */
+export const LARGE_UNDO_OBJECTS = 5;
+
+/** What applying `ops` would take off the board — the size of an undo or redo. */
+export function removalOf(ops: readonly Operation[]): {
+  objects: number;
+  nodes: number;
+  shapes: number;
+  links: number;
+} {
+  let nodes = 0;
+  let shapes = 0;
+  let wireframes = 0;
+  let links = 0;
+  for (const op of ops) {
+    if (op.op === "DELETE_NODE") nodes++;
+    else if (op.op === "DELETE_SHAPE") shapes++;
+    else if (op.op === "DELETE_WIREFRAME") wireframes++;
+    else if (op.op === "DISCONNECT_NODES" || op.op === "DISCONNECT_SHAPES") links++;
+  }
+  return { objects: nodes + shapes + wireframes, nodes, shapes, links };
+}
+
 export function proposalThreshold(): number {
   const mode = settingsStore.get().approvalThreshold;
   if (mode === "always") return 0;

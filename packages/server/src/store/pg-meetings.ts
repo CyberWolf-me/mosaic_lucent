@@ -2,6 +2,7 @@ import { and, desc, eq, inArray, isNotNull, isNull, lt, lte, sql } from "drizzle
 import type { Db } from "../db/client.js";
 import { meetingTranscripts } from "../db/schema.js";
 import {
+  MAX_TURNS_PER_TRANSCRIPT,
   MEETING_LIST_LIMIT,
   lastActivity,
   newMeetingId,
@@ -209,29 +210,36 @@ export class PostgresMeetingStore implements MeetingStore {
   }
 
   /**
-   * Append to a RUNNING meeting: JSONB read-modify-write with the ended-null
-   * precondition enforced in the WHERE, so a concurrent "end this meeting"
-   * makes the append affect zero rows (and return undefined) rather than
-   * resurrecting closed minutes.
+   * Append to a RUNNING meeting in ONE statement: the new turns are
+   * concatenated onto whatever the row holds at write time (`turns || $new`),
+   * so concurrent appends from several devices all land. The old
+   * read-merge-write lost turns: two appends read the same array and the
+   * second write replaced the first's. Every precondition rides the WHERE —
+   * still open (a concurrent "end" makes this affect zero rows rather than
+   * resurrect closed minutes), started (a scheduled meeting starts through
+   * `start`), and within the turn cap (the in-memory store's rule, which this
+   * store didn't enforce) — and zero rows means undefined, as before.
    */
   async appendTo(
     boardId: string,
     id: string,
     turns: MeetingTurn[],
   ): Promise<MeetingTranscript | undefined> {
-    const existing = await this.get(boardId, id);
-    if (!existing || existing.endedAt !== null) return undefined;
-    // A scheduled meeting starts through `start`, which also sets the real start.
-    if (notStarted(existing)) return undefined;
-    const merged = [...existing.turns, ...turns];
+    if (turns.length === 0) {
+      const existing = await this.get(boardId, id);
+      return existing && existing.endedAt === null && !notStarted(existing) ? existing : undefined;
+    }
     const rows = await this.target.db
       .update(meetingTranscripts)
-      .set({ turns: merged })
+      .set({ turns: sql`${meetingTranscripts.turns} || ${JSON.stringify(turns)}::jsonb` })
       .where(
         and(
           eq(meetingTranscripts.boardId, boardId),
           eq(meetingTranscripts.id, id),
           isNull(meetingTranscripts.endedAt),
+          // Not a scheduled meeting that hasn't started (notStarted()).
+          sql`not (${meetingTranscripts.scheduledFor} is not null and ${meetingTranscripts.cancelledAt} is null and ${meetingTranscripts.turns} = '[]'::jsonb)`,
+          sql`jsonb_array_length(${meetingTranscripts.turns}) + ${turns.length} <= ${MAX_TURNS_PER_TRANSCRIPT}`,
         ),
       )
       .returning();

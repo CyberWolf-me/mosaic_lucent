@@ -3,7 +3,7 @@ import { THEME_LIMITS, themeCap, type ThemesRequest } from "./themes.js";
 import { VECTOR_EDIT_LIMITS, type VectorEditRequest } from "./vectorEdit.js";
 import { getPrompt } from "./registry.js";
 import { capChartSummary, capTableSummary, REQUEST_LIMITS } from "./provider.js";
-import type { ChartSummary, GenerateRequest, TableSummary } from "./provider.js";
+import type { ChartSummary, GenerateRequest, PlanRequest, TableSummary } from "./provider.js";
 import type { AnswerRequest } from "./answer.js";
 import type { ExternalPlanRequest } from "./externalPlan.js";
 import {
@@ -1094,3 +1094,56 @@ export function buildVectorEditUserPrompt(request: VectorEditRequest): string {
     `<untrusted-vector paths="${v.paths.length}">\n${escapeHarnessTags(drawing)}\n</untrusted-vector>`,
   ].join("\n\n");
 }
+
+export const PLAN_SYSTEM_PROMPT = `You are Lucent, an AI visual workspace copilot.
+Construct a structured semantic diagram plan with symbolic nodes and directed relationships for the user's request.
+Always call the construct_diagram_plan tool with the complete plan.
+Use symbolic references ("n1", "n2", ...) for newly proposed nodes.
+If referencing an existing node already on the canvas, use its exact ID in "existingNodeId" (and as from/to in edges).
+Preserve semantic relationships ("calls", "reads_writes", "produces", "consumes", "contains", "depends_on", "next", "relates_to").`;
+
+export function buildPlanUserPrompt(request: PlanRequest): string {
+  const parts: string[] = [];
+  parts.push(`The user's objective: ${escapeHarnessTags(request.prompt.trim())}`);
+
+  if (request.intent) {
+    parts.push(
+      `Target Diagram Kind: ${request.intent.targetKind}\n` +
+      `Expected Topology: ${request.intent.expectedTopology}\n` +
+      `Mutation Scope: ${request.intent.mutationScope}`,
+    );
+  }
+
+  const nodeCount = Object.keys(request.workspace.nodes).length;
+  if (nodeCount > 0) {
+    const existingNodes = Object.values(request.workspace.nodes).map(
+      (n) => `- ID: ${n.id}, Label: "${n.label}", Type: ${n.nodeType}${n.groupId ? `, Group: ${n.groupId}` : ""}`,
+    );
+    const existingEdges = Object.values(request.workspace.edges).map(
+      (e) => `- ${e.source} -> ${e.target} (${e.relationship})`,
+    );
+    parts.push(
+      `<canvas-context nodes="${nodeCount}" diagramKind="${request.workspace.diagramKind}">\n` +
+      `Existing Nodes:\n${existingNodes.join("\n")}\n\n` +
+      `Existing Edges:\n${existingEdges.join("\n")}\n` +
+      `</canvas-context>`,
+    );
+  }
+
+  if (request.repairContext) {
+    parts.push(
+      `REPAIR CONTEXT:\n` +
+      `The previous attempt was incomplete: ${request.repairContext.feedback ?? ""}\n` +
+      (request.repairContext.missingItemLabels?.length
+        ? `Disconnected or unlinked items: ${request.repairContext.missingItemLabels.join(", ")}\n`
+        : "") +
+      (request.repairContext.rejectedPlan
+        ? `Previous Plan:\n${JSON.stringify(request.repairContext.rejectedPlan, null, 2)}\n`
+        : "") +
+      `Please emit a corrected complete plan with all required relationships.`,
+    );
+  }
+
+  return parts.join("\n\n");
+}
+

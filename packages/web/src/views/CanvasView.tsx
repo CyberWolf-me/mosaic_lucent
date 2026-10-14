@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { resolveLocale, t } from "@lucent/i18n";
 import { applyLayout, applyRoutes, computeLayoutWithRoutes } from "@lucent/core";
 import { Ico } from "../ui/icons.js";
-import { AIPill } from "../ui/AIPill.js";
+import { AIPill, type ComposerScope } from "../ui/AIPill.js";
+import { plainText } from "../richText.js";
 import { TopBar, LeftRail, ZoomBadge, StatusBadge, type Crumb } from "../ui/Chrome.js";
 import { CanvasViewport, emitHaptic, type Camera, type ViewportControls } from "../ui/atoms.js";
 import { DiagramLayer } from "../ui/DiagramLayer.js";
@@ -331,6 +332,10 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
     projectName,
     undo,
     redo,
+    canRedo,
+    pendingUndo,
+    confirmPendingUndo,
+    cancelPendingUndo,
     peers,
     readOnly,
     canComment,
@@ -542,9 +547,29 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
       case "er":
         return "Add entities, attributes, relationships, or tables…";
       default:
-        return "Refine, add, or transform — type / for AI commands…";
+        return "Describe a change — add, connect, regroup… or type / for commands";
     }
   }, [canvasPhase, lens]);
+
+  // The ids a Build turn sends with the request (Phase C). Shared by submit
+  // and the composer's scope chip, so what the chip names is what is sent.
+  const aiSelection = useMemo(
+    () => [...selectedShapes, ...(selected ? [selected] : [])],
+    [selectedShapes, selected],
+  );
+  const composerScope = useMemo<ComposerScope>(
+    () => ({
+      names: aiSelection.map((id) => {
+        const node = workspace.nodes[id];
+        if (node) return node.label.trim() || "Untitled node";
+        const shape = workspace.shapes[id];
+        if (!shape) return "Object";
+        const line = shape.text ? plainText(shape.text).trim().split("\n")[0] : "";
+        return line || shape.kind.charAt(0).toUpperCase() + shape.kind.slice(1);
+      }),
+    }),
+    [aiSelection, workspace.nodes, workspace.shapes],
+  );
 
   // Typed turns: speak Lucent's reply aloud only when "AI sound" is on. A
   // voice conversation speaks its own replies (and listens again after).
@@ -978,7 +1003,7 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
       return;
     }
     // Pass current selection so the AI can resolve "this/these/that" (Phase C).
-    const sel = [...selectedShapes, ...(selected ? [selected] : [])];
+    const sel = aiSelection;
     // Selected images and file/text objects travel with the request, so
     // "turn this screenshot into a wireframe" has something to look at.
     const attachments = collectAttachments(workspace, sel);
@@ -997,8 +1022,7 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
     send,
     ask,
     pillMode,
-    selectedShapes,
-    selected,
+    aiSelection,
     workspace,
     generateImageShape,
     proposal,
@@ -3341,8 +3365,29 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
     Object.keys(workspace.shapes).length === 0 &&
     Object.keys(workspace.wireframes).length === 0;
   const heroGenerating = canvasPhase === "generating" && boardEmpty;
+  // A staged large undo: Escape keeps the board. Capture phase, so it runs
+  // before the canvas's own Escape (which would clear the selection).
+  useEffect(() => {
+    if (!pendingUndo) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.stopPropagation();
+      cancelPendingUndo();
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [pendingUndo, cancelPendingUndo]);
+
+  // Empty because the person undid everything is not a new board: the start
+  // screen used to take over the canvas, read as being sent home, and its
+  // prompt swallowed Ctrl+Y (the shortcut ignores text fields) — so the undone
+  // work looked gone with no way back. The canvas stays, with a way back.
+  const emptiedByUndo = boardEmpty && canRedo;
   const showHero =
-    (canvasPhase === "empty" || heroGenerating) && !drawingArmed && !blankBoardStarted;
+    (canvasPhase === "empty" || heroGenerating) &&
+    !drawingArmed &&
+    !blankBoardStarted &&
+    !emptiedByUndo;
 
   return (
     <div
@@ -4229,6 +4274,89 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
                 : "Offline — edits save locally and sync when the server is reachable."}
             </div>
           )}
+          {pendingUndo && canEdit && (
+            <div
+              className="undo-confirm-bar"
+              role="alertdialog"
+              aria-label={pendingUndo.direction === "undo" ? "Confirm undo" : "Confirm redo"}
+              style={{
+                position: "absolute",
+                top: "42%",
+                left: "50%",
+                transform: "translate(-50%, -50%)",
+                zIndex: 31,
+                display: "flex",
+                flexDirection: "column",
+                gap: 10,
+                maxWidth: 460,
+                padding: "16px 18px 14px",
+                borderRadius: 14,
+                border: "1px solid var(--stroke-2)",
+                background: "var(--paper-0)",
+                boxShadow: "var(--shadow-3)",
+                fontSize: 13.5,
+                color: "var(--ink-1)",
+              }}
+            >
+              <div>
+                {pendingUndo.direction === "undo" ? "Undo" : "Redo"}{" "}
+                <strong style={{ color: "var(--ink-0)" }}>
+                  {pendingUndo.label
+                    ? `“${pendingUndo.label.length > 60 ? `${pendingUndo.label.slice(0, 57)}…` : pendingUndo.label}”`
+                    : "the last change"}
+                </strong>
+                ? It takes {describeRemoval(pendingUndo)} off the board
+                {boardId ? " for everyone on it" : ""}.
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <button
+                  type="button"
+                  className="btn-atelier primary sm"
+                  onClick={confirmPendingUndo}
+                >
+                  {pendingUndo.direction === "undo" ? "Undo" : "Redo"}
+                </button>
+                <button type="button" className="btn-atelier ghost sm" onClick={cancelPendingUndo}>
+                  Keep
+                </button>
+                <span
+                  className="mono"
+                  style={{ marginLeft: "auto", fontSize: 11, color: "var(--ink-3)" }}
+                >
+                  {pendingUndo.direction === "undo" ? "Ctrl+Z" : "Ctrl+Y"} again to confirm · Esc
+                  keeps it
+                </span>
+              </div>
+            </div>
+          )}
+          {emptiedByUndo && canEdit && !pendingUndo && (
+            <div
+              className="undo-empty-banner"
+              role="status"
+              style={{
+                position: "absolute",
+                top: "42%",
+                left: "50%",
+                transform: "translate(-50%, -50%)",
+                zIndex: 30,
+                display: "flex",
+                alignItems: "center",
+                gap: 12,
+                padding: "10px 12px 10px 18px",
+                borderRadius: 999,
+                border: "1px solid var(--stroke-2)",
+                background: "var(--paper-0)",
+                boxShadow: "var(--shadow-2)",
+                fontSize: 13,
+                color: "var(--ink-1)",
+              }}
+            >
+              Everything on this board was undone.
+              <button type="button" className="btn-atelier primary sm" onClick={redo}>
+                Redo <span className="mono">Ctrl+Y</span>
+              </button>
+            </div>
+          )}
           {peerEditors.length > 0 && (
             <div
               className="peer-banner"
@@ -4352,6 +4480,7 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
               busy={busy}
               shifted={canvasPhase === "proposing"}
               readOnly={readOnly}
+              scope={composerScope}
             />
           )}
         </>
@@ -4432,11 +4561,14 @@ function EngagementAnchor({
   targetId: string;
   onApply: (ops: import("@lucent/core").Operation[], label: string) => boolean;
 }) {
-  const node = workspace.nodes[targetId];
   const shape = workspace.shapes[targetId];
+  // A node's width and height are the renderer's (scene.ts), never stored on
+  // the node — requiring `node.size` meant the bar could not appear under a
+  // single laid-out node.
+  const placed = workspace.nodes[targetId] ? diagramScene(workspace).byId.get(targetId) : undefined;
   const box =
-    node?.position && node.size
-      ? { x: node.position.x, y: node.position.y, width: node.size.width, height: node.size.height }
+    placed && workspace.nodes[targetId]?.position
+      ? { x: placed.cx - placed.w / 2, y: placed.cy - placed.h / 2, width: placed.w, height: placed.h }
       : shape
         ? {
             x: shape.position.x,
@@ -4495,4 +4627,22 @@ function ModeBar({
       </button>
     </div>
   );
+}
+
+/** "8 nodes and 7 connections" — what a staged undo would remove, in words. */
+function describeRemoval(p: {
+  nodes: number;
+  shapes: number;
+  links: number;
+  objects: number;
+}): string {
+  const parts: string[] = [];
+  if (p.nodes) parts.push(`${p.nodes} node${p.nodes === 1 ? "" : "s"}`);
+  if (p.shapes) parts.push(`${p.shapes} shape${p.shapes === 1 ? "" : "s"}`);
+  const rest = p.objects - p.nodes - p.shapes;
+  if (rest) parts.push(`${rest} wireframe${rest === 1 ? "" : "s"}`);
+  if (p.links) parts.push(`${p.links} connection${p.links === 1 ? "" : "s"}`);
+  return parts.length > 1
+    ? `${parts.slice(0, -1).join(", ")} and ${parts.at(-1)}`
+    : (parts[0] ?? "these objects");
 }

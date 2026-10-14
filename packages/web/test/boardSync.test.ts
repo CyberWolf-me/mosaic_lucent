@@ -213,3 +213,36 @@ describe("commit", () => {
     expect(socket.lastSent()).toMatchObject({ type: "op", label: "add z" });
   });
 });
+
+describe("entries that arrive out of order", () => {
+  it("holds an entry that arrives ahead of a gap, then applies both in seq order", async () => {
+    const h = await makeSync();
+    socket.deliver({ type: "welcome", version: 0, role: "editor", catchup: [], peers: [] });
+    socket.deliver({
+      type: "op",
+      entry: { seq: 2, ops: [{ op: "CHANGE_TEXT", id: "x", text: "second" }] },
+    });
+    expect(h.workspace.nodes.x).toBeUndefined();
+    socket.deliver({
+      type: "op",
+      entry: { seq: 1, ops: [{ op: "CREATE_NODE", id: "x", nodeType: "step", label: "first" }] },
+    });
+    expect(h.workspace.nodes.x?.label).toBe("second");
+  });
+
+  it("re-joins from its cursor when a gap does not fill", async () => {
+    await makeSync();
+    vi.useFakeTimers();
+    try {
+      socket.deliver({ type: "welcome", version: 0, role: "editor", catchup: [], peers: [] });
+      socket.deliver({
+        type: "op",
+        entry: { seq: 3, ops: [{ op: "CREATE_NODE", id: "z", nodeType: "step", label: "Z" }] },
+      });
+      vi.advanceTimersByTime(2100);
+      expect(socket.lastSent()).toMatchObject({ type: "join", boardId: "brd_1", fromSeq: 0 });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

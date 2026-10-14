@@ -18,6 +18,10 @@ export interface OrchestrateRequest {
   actor: OperationActor | "user" | "agent";
   requestId?: string;
   expectedSeq?: number;
+  /** Caller-supplied SemanticPlan (e.g. from agent or MCP). When provided, skips generation. */
+  plan?: SemanticPlan;
+  /** The role the route authorized (seeds the live room for a socket-less caller). */
+  role?: import("./identity.js").Role;
 }
 
 export type OrchestrateOutcome =
@@ -98,7 +102,7 @@ export async function orchestrateGeneration(
   }
 
   // 3. Single-Turn Structured Semantic Plan Generation
-  let plan = await generateSemanticPlan(services.provider, board.workspace, req.prompt);
+  let plan = req.plan ?? (await generateSemanticPlan(services.provider, board.workspace, req.prompt));
 
   // 4. Deterministic Operation Compilation
   let compileRes = compileSemanticPlan(board.workspace, plan);
@@ -187,6 +191,7 @@ export async function orchestrateGeneration(
     {
       expectedSeq: req.expectedSeq,
       requestId: req.requestId,
+      ...(req.role ? { role: req.role } : {}),
     },
   );
 

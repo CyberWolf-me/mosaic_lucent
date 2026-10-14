@@ -262,4 +262,54 @@ describe("sanitizeRawOperations tolerance", () => {
     const updatedWs = applyOperations(existingWs, repaired);
     expect(updatedWs.wireframes["wf-main"]?.title).toBe("New Wireframe");
   });
+
+  it("resolves symbolic aliases (n1, n2) to generated node IDs in CONNECT_NODES and SET_STATEMENT", () => {
+    const raw: Operation[] = [
+      { op: "CREATE_NODE", id: "node_usr", nodeType: "service", label: "User Service" },
+      { op: "CREATE_NODE", id: "node_db", nodeType: "database", label: "Primary DB" },
+      { op: "CONNECT_NODES", source: "n1", target: "n2", relationship: "queries" },
+      {
+        op: "SET_STATEMENT",
+        id: "n2",
+        statement: { kind: "decision", status: "accepted", body: "Use Postgres" },
+      },
+    ];
+    const repaired = repairOperations(raw);
+    const connect = repaired.find((o) => o.op === "CONNECT_NODES") as Extract<
+      Operation,
+      { op: "CONNECT_NODES" }
+    >;
+    expect(connect.source).toBe("node_usr");
+    expect(connect.target).toBe("node_db");
+    const stmt = repaired.find((o) => o.op === "SET_STATEMENT") as Extract<
+      Operation,
+      { op: "SET_STATEMENT" }
+    >;
+    expect(stmt.id).toBe("node_db");
+    expect(validateOperations(createWorkspace(), repaired)).toHaveLength(0);
+  });
+
+  it("resolves unique node labels to canonical node IDs on an existing workspace", () => {
+    const existingWs = applyOperations(createWorkspace(), [
+      { op: "CREATE_NODE", id: "node_auth_99", nodeType: "service", label: "Auth Gateway" },
+      { op: "CREATE_NODE", id: "node_redis_42", nodeType: "database", label: "Redis Cache" },
+    ]);
+    const raw: Operation[] = [
+      { op: "CONNECT_NODES", source: "Auth Gateway", target: "Redis Cache", relationship: "reads" },
+      { op: "ADD_VOTE", id: "vote_1", targetId: "Auth Gateway", by: "usr_lead" },
+    ];
+    const repaired = repairOperations(raw, existingWs);
+    const connect = repaired.find((o) => o.op === "CONNECT_NODES") as Extract<
+      Operation,
+      { op: "CONNECT_NODES" }
+    >;
+    expect(connect.source).toBe("node_auth_99");
+    expect(connect.target).toBe("node_redis_42");
+    const vote = repaired.find((o) => o.op === "ADD_VOTE") as Extract<
+      Operation,
+      { op: "ADD_VOTE" }
+    >;
+    expect(vote.targetId).toBe("node_auth_99");
+    expect(validateOperations(existingWs, repaired)).toHaveLength(0);
+  });
 });

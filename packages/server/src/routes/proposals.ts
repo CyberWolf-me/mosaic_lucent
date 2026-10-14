@@ -117,6 +117,9 @@ export const registerProposalRoutes: RegisterRoutes = (router, s) => {
     send(res, 200, { proposals: await proposals.forBoard(boardId) });
   });
 
+  /** Approvals in flight on this instance, per proposal (one at a time). */
+  const approving = new Map<string, Promise<void>>();
+
   const decide =
     (verdict: "approved" | "rejected") =>
     async (ctx: {
@@ -163,6 +166,30 @@ export const registerProposalRoutes: RegisterRoutes = (router, s) => {
         });
         return send(res, 200, { proposal: decided });
       }
+
+      // One approval at a time per proposal on this instance: a double click,
+      // or two people approving together, waits for the first and gets its
+      // answer instead of committing the batch a second time. (Across
+      // instances the per-proposal requestId below is the guard.) Released
+      // when this response is done, whichever way it ends.
+      const prior = approving.get(pid);
+      if (prior) {
+        await prior;
+        const fresh = await proposals.get(boardId, pid);
+        if (fresh && fresh.status !== "pending") {
+          send(res, 200, { proposal: fresh, duplicate: true });
+          return;
+        }
+      }
+      let release!: () => void;
+      const mine = new Promise<void>((resolve) => (release = resolve));
+      approving.set(pid, mine);
+      const done = () => {
+        release();
+        if (approving.get(pid) === mine) approving.delete(pid);
+      };
+      res.once("finish", done);
+      res.once("close", done);
 
       // APPROVED: re-validate against the CURRENT workspace and apply the valid
       // remainder. The ops were never validated against this board before (they
@@ -211,7 +238,7 @@ export const registerProposalRoutes: RegisterRoutes = (router, s) => {
         proposal.meetingId ? "agent" : "requested",
         guard.board.workspace,
       );
-      const repaired = repairOperations(trusted);
+      const repaired = repairOperations(trusted, guard.board.workspace);
       const partial = applyValidOperations(guard.board.workspace, repaired);
       if (partial.applied.length === 0) {
         send(res, 422, {
@@ -225,55 +252,81 @@ export const registerProposalRoutes: RegisterRoutes = (router, s) => {
       // Commit through the live room so peers receive the same sequenced entry
       // any edit produces — with the AI actor recording the accountability
       // chain: the model produced it, the proposer asked, this user approved.
-      // No room (nobody connected, or this decider has no socket): apply
-      // directly through the store; the entry lands in the log either way, and
-      // the next join replays it.
+      //
+      // One requestId per PROPOSAL, not per approver: two people approving at
+      // once used to both pass the pending check and both commit — the second
+      // as a direct store append the room never saw. With one key, the room's
+      // replay guard (and the store's, across instances) answers the second
+      // approval as the duplicate it is.
+      const requestId = `prp_${proposal.id}_${guard.user.id}`;
+      const actor = {
+        actorType: "ai" as const,
+        actorId: "lucent",
+        initiatedBy: proposal.createdBy,
+        approvedBy: guard.user.id,
+      };
+      const alreadyDecided = async () => {
+        const fresh = await proposals.get(boardId, pid);
+        return fresh && fresh.status !== "pending" ? fresh : null;
+      };
       let seq: number;
-      let persistedByRoom = false;
       const roomResult = await commitForBoard(boardId, guard.user.id, ok, "proposal approved", {
-        requestId: `prp_${proposal.id}_${guard.user.id}`,
-        actor: {
-          actorType: "ai",
-          actorId: "lucent",
-          initiatedBy: proposal.createdBy,
-          approvedBy: guard.user.id,
-        },
+        requestId,
+        actor,
+        role: guard.role,
       });
-      if (roomResult?.ok && roomResult.entry) {
-        seq = roomResult.entry.seq;
-        persistedByRoom = true;
-        // The broadcast + persistence the room's ordinary caller (realtime.ts)
-        // performs; this seam runs outside applyOp so the work is repeated here.
-        for (const absorbed of roomResult.absorbed ?? []) {
-          broadcastProposal(boardId, { type: "op", entry: absorbed });
+      if (roomResult) {
+        // A live room is the only writer while it lives: a refusal is the
+        // answer, never a cue to write behind its back (that append left the
+        // durable log holding an entry no socket received and the room never
+        // applied).
+        if (roomResult.duplicate) {
+          const fresh = await alreadyDecided();
+          send(res, 200, { proposal: fresh ?? proposal, duplicate: true });
+          return;
         }
-        broadcastProposal(boardId, { type: "op", entry: roomResult.entry });
+        if (!roomResult.ok || !roomResult.entry) {
+          const fresh = await alreadyDecided();
+          if (fresh) return send(res, 200, { proposal: fresh, duplicate: true });
+          send(res, 409, {
+            error: "the board changed under this proposal — review it again",
+            reason: roomResult.error,
+            ...(roomResult.detail ? { detail: roomResult.detail } : {}),
+            ...(roomResult.head !== undefined ? { head: roomResult.head } : {}),
+          });
+          return;
+        }
+        // commitForBoard broadcast the entry and saved the room's state.
+        seq = roomResult.entry.seq;
       } else {
-        const { applyOperations } = await import("@lucent/core");
+        // No live room (nobody connected): the store is the only writer, and
+        // the next join replays the entry.
         const append = await s.boardStore.appendOp({
           boardId,
           ops: ok,
           by: guard.user.id,
           label: "proposal approved",
           at: Date.now(),
-          requestId: `prp_${proposal.id}_${guard.user.id}`,
-          actor: {
-            actorType: "ai",
-            actorId: "lucent",
-            initiatedBy: proposal.createdBy,
-            approvedBy: guard.user.id,
-          },
+          requestId,
+          actor,
         });
         if (!append.ok) {
           send(res, 409, { error: "stale board", reason: append.reason, head: append.head });
           return;
         }
-        seq = append.seq;
-        persistedByRoom = append.duplicate === true;
-        if (!persistedByRoom) {
-          const updated = applyOperations(guard.board.workspace, ok);
-          await s.boardStore.put({ ...guard.board, workspace: updated, updatedAt: Date.now() });
+        if (append.duplicate) {
+          const fresh = await alreadyDecided();
+          send(res, 200, { proposal: fresh ?? proposal, duplicate: true });
+          return;
         }
+        seq = append.seq;
+        const { applyOperations } = await import("@lucent/core");
+        const current = (await s.boardStore.get(boardId)) ?? guard.board;
+        await s.boardStore.put({
+          ...current,
+          workspace: applyOperations(current.workspace, ok),
+          updatedAt: Date.now(),
+        });
       }
 
       const decided = await proposals.decide(boardId, pid, {

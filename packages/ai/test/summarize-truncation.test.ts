@@ -57,4 +57,52 @@ describe("summarizeWorkspace truncation", () => {
     const summary = summarizeWorkspace(ws);
     expect(summary.truncated).toBeUndefined();
   });
+
+  it("prioritizes selected nodes, 1-hop/2-hop neighbors, and active statements on large truncated boards", () => {
+    const ws = createWorkspace();
+    const total = SUMMARY_LIMITS.nodes + 50;
+    // Create background nodes
+    for (let i = 0; i < total; i++) {
+      ws.nodes[`node_${i}`] = {
+        id: `node_${i}`,
+        nodeType: "service",
+        label: `Service ${i}`,
+        position: { x: 0, y: 0 },
+      };
+    }
+
+    // Specialize a selected cluster at the very end of the array (would normally be truncated)
+    const selectedId = `node_${total - 1}`;
+    const neighbor1 = `node_${total - 2}`;
+    const neighbor2 = `node_${total - 3}`;
+    const statementNode = `node_${total - 4}`;
+
+    ws.edges["edge_hop1"] = {
+      id: "edge_hop1",
+      source: selectedId,
+      target: neighbor1,
+      relationship: "calls",
+    };
+    ws.edges["edge_hop2"] = {
+      id: "edge_hop2",
+      source: neighbor1,
+      target: neighbor2,
+      relationship: "calls",
+    };
+    ws.nodes[statementNode]!.statement = {
+      kind: "decision",
+      status: "accepted",
+      body: "High priority architectural decision",
+    };
+
+    const summary = summarizeWorkspace(ws, [selectedId]);
+    expect(summary.nodes).toHaveLength(SUMMARY_LIMITS.nodes);
+    expect(summary.truncated?.nodes).toBe(total);
+
+    const includedIds = new Set(summary.nodes.map((n) => n.id));
+    expect(includedIds.has(selectedId)).toBe(true);
+    expect(includedIds.has(neighbor1)).toBe(true);
+    expect(includedIds.has(neighbor2)).toBe(true);
+    expect(includedIds.has(statementNode)).toBe(true);
+  });
 });

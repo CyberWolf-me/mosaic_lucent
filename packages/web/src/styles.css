@@ -656,7 +656,11 @@ html[data-theme="light"] .rail-btn[data-tip]::after {
   margin: 6px 0;
 }
 
-/* ================= AI pill (bottom floating) ================= */
+/* ================= Board composer (bottom dock) =================
+   A paper card with index tabs on its top edge — the same Atelier language
+   as the empty-board hero (.empty-omnibar) and Home's composer: serif words,
+   hero chips, an ink primary button. Mode is a tab, not a toggle, so the
+   card always says which way a turn goes. */
 .ai-pill-wrap {
   position: absolute;
   bottom: 20px;
@@ -685,110 +689,230 @@ html[data-theme="light"] .rail-btn[data-tip]::after {
 .ai-pill-wrap.shifted {
   left: calc((100vw - 344px) / 2);
 }
+/* The zoom badge (left: 84px, ~230px wide, z-index 35) and the status badge
+   share the card's row. Where the centred card would reach under them — below
+   ~1360px, and always beside the review panel — it rises above that row. */
+@media (max-width: 1360px) {
+  .ai-pill-wrap {
+    bottom: 66px;
+  }
+}
+.ai-pill-wrap.shifted {
+  bottom: 66px;
+}
 .ai-pill-wrap.shifted .ai-pill {
   /* Centred in the space left of the panel, so it must clear the zoom badge on
      the left (ends ~180px) as well as the panel itself on the right. */
   min-width: min(420px, calc(100vw - 728px));
   width: min(680px, calc(100vw - 728px));
 }
+
+/* The tabs and the card move as one. */
+.ai-dock {
+  display: flex;
+  flex-direction: column;
+}
+
 .ai-pill {
   /* Reserve ~250px on each side: the pill shares its row with the zoom badge
      (bottom-left) and the status badge (bottom-right). */
-  min-width: min(560px, calc(100vw - 500px));
-  max-width: 780px;
-  width: min(780px, calc(100vw - 500px));
+  min-width: min(520px, calc(100vw - 500px));
+  max-width: 720px;
+  width: min(720px, calc(100vw - 500px));
+  /* Positioned so it paints over the inactive tabs tucked behind its edge. */
+  position: relative;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 10px 14px 10px 14px;
-  background: oklch(from var(--paper-0) l c h / 0.94);
-  backdrop-filter: blur(24px) saturate(1.5);
-  -webkit-backdrop-filter: blur(24px) saturate(1.5);
-  border: 1px solid var(--stroke-2);
-  border-radius: 18px;
-  box-shadow:
-    inset 0 1px 0 0 oklch(1 0 0 / 0.15),
-    var(--elev-3);
+  gap: 10px;
+  padding: 14px 12px 10px 18px;
+  background: var(--paper-0);
+  border: 1px solid oklch(from var(--paper-4) l c h / 0.7);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-3);
   transition:
-    box-shadow 0.25s var(--e-out),
-    border-color 0.25s var(--e-out),
+    border-color 0.2s var(--e-out),
+    box-shadow 0.2s var(--e-out),
     width 0.35s cubic-bezier(0.16, 1, 0.3, 1),
     min-width 0.35s cubic-bezier(0.16, 1, 0.3, 1);
 }
 .ai-pill:focus-within {
-  border-color: var(--amber-2);
+  border-color: var(--bloom-wash-2);
   box-shadow:
-    inset 0 1px 0 0 oklch(1 0 0 / 0.15),
-    0 0 0 1px var(--amber-2),
-    0 0 24px -6px var(--amber-glow),
-    var(--elev-3);
+    var(--shadow-3),
+    0 0 0 3px var(--bloom-wash);
 }
+/* Recording reads in madder, as the hero's Talk chip does. */
 .ai-pill.listening {
-  border-color: oklch(0.82 0.15 75 / 0.5);
+  border-color: oklch(from var(--madder) l c h / 0.45);
   box-shadow:
-    inset 0 1px 0 0 oklch(1 0 0 / 0.15),
-    var(--elev-3),
-    0 0 0 4px oklch(0.82 0.15 75 / 0.08),
-    0 0 40px -8px var(--amber-glow);
+    var(--shadow-3),
+    0 0 0 3px oklch(from var(--madder) l c h / 0.12);
 }
 .ai-pill.read-only {
-  background: var(--canvas-2);
+  background: var(--paper-1);
   border-style: dashed;
-  cursor: default;
+  box-shadow: var(--shadow-2);
 }
 
-/* Row 1: The spacious, prominent input area */
+/* ---- Index tabs: Build / Ask on the left, the conversation on the right ---- */
+.ai-tabs {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  /* Clear the card's corner radius, then sit on its top border. */
+  padding: 0 20px;
+  margin-bottom: -1px;
+  /* The gap between the two groups stays the canvas's. */
+  pointer-events: none;
+}
+.ai-tabs > * {
+  pointer-events: auto;
+}
+.ai-tabs-modes {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+}
+.ai-tab {
+  position: relative;
+  height: 28px;
+  padding: 0 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  background: var(--paper-2);
+  border: 1px solid oklch(from var(--paper-4) l c h / 0.7);
+  border-bottom: 0;
+  border-radius: 10px 10px 0 0;
+  /* Inactive tabs tuck a few px behind the card. */
+  transform: translateY(4px);
+  transition:
+    color 0.15s var(--e-out),
+    background 0.15s var(--e-out),
+    transform 0.15s var(--e-out);
+}
+.ai-tab:hover {
+  color: var(--ink-1);
+  transform: translateY(2px);
+}
+/* The active tab is the card's own paper: it covers the card's top border
+   where they meet, so the two read as one sheet. */
+.ai-tab.active,
+.ai-tab-log.open {
+  z-index: 1;
+  height: 30px;
+  color: var(--ink-0);
+  background: var(--paper-0);
+  transform: none;
+}
+/* Focus outlines the tab and the card as one sheet: the tab takes the same
+   ring, clipped at its foot where it meets the card. */
+.ai-dock:has(.ai-pill:focus-within) .ai-tab.active {
+  border-color: var(--bloom-wash-2);
+  box-shadow: 0 0 0 3px var(--bloom-wash);
+  clip-path: inset(-4px -4px 0 -4px);
+}
+.ai-tab.active::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: var(--bloom-2);
+}
+.ai-tab:focus-visible {
+  border-radius: 10px 10px 0 0;
+}
+.ai-tab-count {
+  min-width: 17px;
+  height: 17px;
+  padding: 0 5px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 999px;
+  font-size: 10px;
+  letter-spacing: 0;
+  color: var(--ink-1);
+  background: oklch(from var(--paper-4) l c h / 0.55);
+}
+.ai-tab-chev {
+  width: 11px;
+  height: 11px;
+  transition: transform 0.2s var(--e-out);
+}
+.ai-tab-log.open .ai-tab-chev {
+  transform: rotate(180deg);
+}
+
+/* ---- The conversation, opened inside the card above the field ---- */
+.ai-log {
+  max-height: min(320px, 42vh);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-right: 6px;
+  padding: 2px 6px 14px 0;
+  /* A perforation between what was said and what you're writing. */
+  border-bottom: 1px dashed oklch(from var(--paper-4) l c h / 0.9);
+  scrollbar-width: thin;
+  scrollbar-color: var(--paper-4) transparent;
+  animation: pill-child-in 0.18s var(--e-out) both;
+}
+
+/* ---- The field ---- */
 .ai-pill-input-row {
   display: flex;
-  align-items: flex-start;
-  gap: 10px;
   width: 100%;
-}
-.ai-pill-input-row .pill-icon {
-  width: 24px;
-  height: 24px;
-  margin-top: 2px;
-  display: grid;
-  place-items: center;
-  color: var(--ink-2);
-  flex-shrink: 0;
+  padding-right: 6px;
 }
 .ai-pill-input-row textarea {
   flex: 1;
   min-width: 0;
-  font-size: 14.5px;
-  font-family: inherit;
+  font-family: var(--font-serif);
+  font-size: 16.5px;
+  letter-spacing: -0.005em;
+  line-height: 1.5;
   color: var(--ink-0);
-  padding: 3px 0;
+  padding: 2px 0;
   margin: 0;
   border: none;
   outline: none;
   background: transparent;
-  line-height: 1.5;
   resize: none;
   display: block;
 }
+/* The card's focus-within ring is the focus indicator; a second one drawn
+   inside it reads as a rendering glitch. */
+.ai-pill-input-row textarea:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
 .ai-pill-input-row textarea::placeholder {
   color: var(--ink-3);
-  font-style: normal;
-  font-family: inherit;
+  font-style: italic;
 }
 
-/* Row 2: The balanced accessory toolbar */
+/* ---- Footer: what it reads, how it thinks · voice and the verb ---- */
 .ai-pill-toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  width: 100%;
   gap: 8px;
-  padding-top: 6px;
-  border-top: 1px solid oklch(from var(--stroke-1) l c h / 0.45);
+  width: 100%;
 }
 .ai-pill-toolbar-left {
   display: flex;
   align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
+  gap: 2px;
+  min-width: 0;
+  /* Pull the first chip's glyph onto the text's left edge. */
+  margin-left: -8px;
 }
 .ai-pill-toolbar-right {
   display: flex;
@@ -797,203 +921,331 @@ html[data-theme="light"] .rail-btn[data-tip]::after {
   flex-shrink: 0;
 }
 
+/* What a Build turn reads: the whole board, or the selection (in bloom, the
+   canvas's selection colour). Mono, like the canvas's own captions. */
+.ai-scope {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 200px;
+  height: 26px;
+  padding: 0 9px 0 8px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  color: var(--ink-2);
+  cursor: default;
+}
+.ai-scope svg {
+  width: 13px;
+  height: 13px;
+  flex-shrink: 0;
+  color: var(--ink-3);
+}
+.ai-scope-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ai-scope.on {
+  color: var(--bloom-2);
+  background: var(--bloom-wash);
+  border-color: var(--bloom-wash-2);
+}
+.ai-scope.on svg {
+  color: var(--bloom-2);
+}
+/* A hairline between "what it reads" and the controls. */
+.ai-sep {
+  width: 1px;
+  height: 14px;
+  margin: 0 6px 0 2px;
+  flex-shrink: 0;
+  background: oklch(from var(--paper-4) l c h / 0.9);
+}
+
+.ai-chip {
+  height: 28px;
+  padding: 0 9px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--ink-2);
+  background: transparent;
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    color 0.12s var(--e-out),
+    background 0.12s var(--e-out),
+    border-color 0.12s var(--e-out);
+}
+.ai-chip svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+.ai-chip:hover:not(:disabled),
+.ai-chip.pressed {
+  color: var(--ink-0);
+  background: oklch(from var(--paper-3) l c h / 0.6);
+}
+.ai-chip:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+/* The slash, set as a key cap. */
+.ai-slash {
+  width: 17px;
+  height: 17px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 5px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ink-1);
+  background: var(--paper-2);
+  border: 1px solid oklch(from var(--paper-4) l c h / 0.8);
+  box-shadow: 0 1px 0 oklch(from var(--paper-4) l c h / 0.8);
+}
+
+/* Talk and the live call are the hero's chips, verbatim in spirit. */
+.ai-chip.ai-talk,
+.ai-chip.icon {
+  height: 30px;
+  border-radius: 999px;
+  color: var(--ink-1);
+  background: oklch(from var(--paper-2) l c h / 0.8);
+  border-color: oklch(from var(--paper-4) l c h / 0.55);
+}
+.ai-chip.ai-talk {
+  padding: 0 12px 0 10px;
+}
+.ai-chip.icon {
+  width: 30px;
+  padding: 0;
+  justify-content: center;
+}
+.ai-chip.ai-talk:hover:not(:disabled),
+.ai-chip.icon:hover:not(:disabled) {
+  color: var(--ink-0);
+  background: oklch(from var(--paper-2) l c h / 0.8);
+  border-color: var(--ink-4);
+}
+.ai-chip.ai-talk.on,
+.ai-chip.ai-talk.on:hover {
+  color: var(--paper-0);
+  background: var(--madder);
+  border-color: var(--madder);
+}
+.ai-chip.icon.on,
+.ai-chip.icon.on:hover {
+  color: var(--paper-0);
+  background: var(--bloom-2);
+  border-color: var(--bloom-2);
+}
+.ai-wave {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  width: 14px;
+  height: 12px;
+}
+.ai-wave span {
+  width: 2px;
+  border-radius: 2px;
+  background: currentColor;
+  animation: wave 1s ease-in-out infinite;
+}
+
+.ai-send {
+  height: 32px;
+  padding: 0 12px 0 15px;
+  gap: 6px;
+}
+.ai-send svg {
+  width: 13px;
+  height: 13px;
+}
+/* Nothing to send yet: the button rests as paper, and inks in with the words. */
+.ai-send.primary:disabled {
+  opacity: 1;
+  color: var(--ink-3);
+  background: var(--paper-2);
+  border-color: oklch(from var(--paper-4) l c h / 0.6);
+}
+.ai-send.stop {
+  padding: 0 14px 0 12px;
+  color: var(--ink-0);
+  background: var(--paper-2);
+  border-color: oklch(from var(--paper-4) l c h / 0.8);
+}
+.ai-send.stop:hover {
+  border-color: var(--ink-3);
+}
+.ai-stop-mark {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  background: currentColor;
+}
+
+/* ---- Pace menu ---- */
+.ai-tier {
+  position: relative;
+}
+.ai-tier .ai-pace {
+  color: var(--ink-2);
+}
+.ai-tier .ai-chip:hover .ai-pace,
+.ai-tier .ai-chip.pressed .ai-pace {
+  color: var(--ink-0);
+}
+.context-menu.ai-tier-menu {
+  position: absolute;
+  top: auto;
+  left: 0;
+  bottom: calc(100% + 10px);
+  width: 300px;
+  padding: 6px;
+  border-radius: var(--r-sm);
+  background: var(--paper-0);
+  border: 1px solid oklch(from var(--paper-4) l c h / 0.7);
+  box-shadow: var(--shadow-3);
+  backdrop-filter: none;
+}
+.ai-tier-head {
+  padding: 6px 10px 6px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.ai-tier-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 8px;
+  text-align: left;
+  color: var(--ink-1);
+}
+.ai-tier-item:hover,
+.ai-tier-item:focus-visible {
+  outline: none;
+  box-shadow: none;
+  background: var(--paper-2);
+}
+.ai-tier-item .ai-pace {
+  margin-top: 2px;
+  flex-shrink: 0;
+  color: var(--ink-3);
+}
+.ai-tier-item.on .ai-pace {
+  color: var(--bloom-2);
+}
+.ai-tier-text {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+.ai-tier-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink-0);
+}
+.ai-tier-detail {
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: var(--ink-2);
+}
+.ai-tier-check {
+  width: 14px;
+  height: 14px;
+  margin-top: 2px;
+  flex-shrink: 0;
+  color: var(--bloom-2);
+  visibility: hidden;
+}
+.ai-tier-item.on .ai-tier-check {
+  visibility: visible;
+}
+
 /* Readonly banner row */
 .ai-pill-readonly-row {
   display: flex;
   align-items: center;
   gap: 10px;
   width: 100%;
-  padding: 4px 6px;
+  padding: 2px 0;
+  color: var(--ink-3);
 }
 .ai-pill .pill-notice {
   flex: 1;
-  font-size: 13.5px;
-  color: var(--ink-1);
+  font-family: var(--font-serif);
+  font-size: 15px;
   font-style: italic;
-}
-
-/* Build / Ask Segmented Mode Switcher in AIPill */
-.ai-pill .ai-mode-toggle {
-  display: inline-flex;
-  align-items: center;
-  padding: 2px;
-  background: var(--canvas-3);
-  border-radius: 999px;
-  border: 1px solid var(--stroke-1);
-  gap: 2px;
-}
-.ai-pill .ai-mode-toggle button {
-  padding: 3px 10px;
-  font-size: 11.5px;
-  font-weight: 500;
-  border-radius: 999px;
-  color: var(--ink-2);
-  background: transparent;
-  border: none;
-  cursor: pointer;
-  transition: all 0.15s var(--e-out);
-  white-space: nowrap;
-}
-.ai-pill .ai-mode-toggle button:hover {
-  color: var(--ink-0);
-  background: var(--canvas-4);
-}
-.ai-pill .ai-mode-toggle button.active {
-  background: var(--paper-0);
-  color: var(--ink-0);
-  box-shadow: 0 1px 3px oklch(0 0 0 / 0.1);
-  font-weight: 600;
-}
-
-/* Model Tier Selector in AIPill */
-.ai-pill .model-tier-selector {
-  border-radius: 999px;
-  background: var(--canvas-3);
-  border: 1px solid var(--stroke-1);
-  padding: 2px;
-  gap: 2px;
-  display: inline-flex;
-  align-items: center;
-}
-.ai-pill .model-tier-selector button {
-  font-size: 11px;
-  font-weight: 500;
-  padding: 3px 8px;
-  border-radius: 999px;
-  color: var(--ink-2);
-  background: transparent;
-  border: none;
-  cursor: pointer;
-  transition: all 0.15s var(--e-out);
-  white-space: nowrap;
-}
-.ai-pill .model-tier-selector button:hover {
-  color: var(--ink-0);
-  background: var(--canvas-4);
-}
-.ai-pill .model-tier-selector button.active {
-  background: var(--paper-0);
-  color: var(--ink-0);
-  box-shadow: 0 1px 3px oklch(0 0 0 / 0.1);
-  font-weight: 600;
-}
-
-/* Slash Trigger & Kbd hint */
-.slash-trigger-btn {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--ink-2);
-  background: var(--canvas-3);
-  border: 1px solid var(--stroke-1);
-  border-radius: 6px;
-  padding: 0;
-  width: 24px;
-  height: 24px;
-  display: grid;
-  place-items: center;
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-.slash-trigger-btn:hover {
-  background: var(--canvas-4);
-  color: var(--ink-0);
-  border-color: var(--stroke-2);
-}
-.ai-pill .kbd {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  color: var(--ink-3);
-  padding: 2px 6px;
-  border: 1px solid var(--stroke-1);
-  border-radius: 4px;
-  background: oklch(from var(--paper-3) l c h / 0.5);
-  line-height: 1.4;
-  user-select: none;
-}
-
-/* Circular Action Buttons: Mic, Phone, Send */
-.mic-btn {
-  width: 30px;
-  height: 30px;
-  border-radius: 999px;
-  background: var(--canvas-3);
-  border: 1px solid var(--stroke-1);
-  color: var(--ink-1);
-  display: grid;
-  place-items: center;
-  transition: all 0.15s var(--e-out);
-  flex-shrink: 0;
-  cursor: pointer;
-}
-.mic-btn svg {
-  width: 15px;
-  height: 15px;
-  pointer-events: none;
-}
-.mic-btn:hover {
-  background: var(--canvas-4);
-  color: var(--ink-0);
-  border-color: var(--stroke-2);
-}
-.mic-btn:active {
-  transform: scale(0.94);
-}
-.mic-btn.active {
-  background: linear-gradient(135deg, var(--amber-2), var(--amber-3));
-  color: var(--canvas-0);
-  border-color: var(--amber-2);
-  box-shadow:
-    0 0 0 2px oklch(0.82 0.15 75 / 0.15),
-    0 0 16px -4px var(--amber-glow);
-}
-.voice-call-btn {
-  border-color: oklch(from var(--sig-violet, #6366f1) l c h / 0.35);
   color: var(--ink-1);
 }
-.voice-call-btn svg {
-  pointer-events: none;
+
+/* Narrow rows keep every control and drop the optional words. The pill is
+   100vw - 500px wide, so below 1100px it is under 600px. */
+@media (max-width: 1100px) {
+  .ai-chip-label.is-optional {
+    display: none;
+  }
+  .ai-scope {
+    max-width: 150px;
+  }
 }
-.voice-call-btn:hover {
-  border-color: var(--sig-violet, #6366f1);
-  color: var(--sig-violet, #6366f1);
-  background: oklch(from var(--sig-violet, #6366f1) l c h / 0.08);
+@media (max-width: 1340px) {
+  .ai-pill-wrap.shifted .ai-chip-label.is-optional {
+    display: none;
+  }
 }
-.voice-call-btn.active {
-  background: var(--sig-violet, #6366f1);
-  color: #fff;
-  border-color: var(--sig-violet, #6366f1);
-  box-shadow: 0 0 12px oklch(from var(--sig-violet, #6366f1) l c h / 0.45);
+
+/* The question Lucent asks back when a request could mean two things. */
+.clarification-bar {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  max-width: 620px;
+  padding: 10px 14px;
+  background: var(--paper-0);
+  border: 1px solid var(--bloom-wash-2);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-2);
+  animation: pill-child-in 0.2s var(--e-out) both;
 }
-.send-btn {
-  width: 30px;
-  height: 30px;
-  border-radius: 999px;
-  background: var(--ink-0);
-  color: var(--canvas-0);
-  border: 1px solid var(--ink-0);
-  display: grid;
-  place-items: center;
-  transition: all 0.15s var(--e-out);
-  flex-shrink: 0;
-  cursor: pointer;
+.clarification-question {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--font-serif);
+  font-size: 14.5px;
+  color: var(--ink-0);
 }
-.send-btn svg {
+.clarification-question svg {
   width: 14px;
   height: 14px;
-  pointer-events: none;
+  color: var(--bloom-2);
 }
-.send-btn:hover:not(:disabled) {
-  background: var(--ink-1);
-  transform: scale(1.04);
-}
-.send-btn:active:not(:disabled) {
-  transform: scale(0.94);
-}
-.send-btn:disabled {
-  opacity: 0.35;
-  cursor: not-allowed;
-  transform: none;
+.clarification-options {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
 }
 
 @keyframes pill-child-in {
@@ -1150,20 +1402,20 @@ html[data-theme="light"] .rail-btn[data-tip]::after {
 }
 
 .slash-item-cat.cat-architecture {
-  background: oklch(from var(--accent-1, #3b82f6) l c h / 0.15);
-  color: var(--accent-1, #3b82f6);
+  background: var(--bloom-wash);
+  color: var(--bloom-2);
 }
 .slash-item-cat.cat-security {
-  background: oklch(0.65 0.2 25 / 0.15);
-  color: var(--sig-red, #f43f5e);
+  background: oklch(from var(--madder) l c h / 0.12);
+  color: var(--madder);
 }
 .slash-item-cat.cat-refine {
-  background: oklch(0.75 0.18 75 / 0.15);
-  color: var(--amber-1, #f59e0b);
+  background: oklch(from var(--saffron) l c h / 0.22);
+  color: oklch(from var(--saffron) calc(l - 0.3) c h);
 }
 .slash-item-cat.cat-transform {
-  background: oklch(0.65 0.18 300 / 0.15);
-  color: #a855f7;
+  background: oklch(from var(--moss) l c h / 0.14);
+  color: var(--moss);
 }
 
 .slash-item-desc {
@@ -1249,41 +1501,6 @@ html[data-theme="light"] .rail-btn[data-tip]::after {
 .slash-active-badge .badge-clear-btn:hover {
   color: var(--ink-0);
   background: var(--canvas-3);
-}
-
-.slash-trigger-btn {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--ink-2);
-  background: var(--canvas-3);
-  border: 1px solid var(--stroke-1);
-  border-radius: 4px;
-  padding: 2px 6px;
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-
-.slash-trigger-btn:hover {
-  background: var(--canvas-4);
-  color: var(--ink-0);
-  border-color: var(--stroke-2);
-}
-
-.ai-history-bubble {
-  background: oklch(from var(--paper-0) l c h / 0.92);
-  border: 1px solid var(--stroke-2);
-  box-shadow:
-    inset 0 1px 0 0 oklch(1 0 0 / 0.08),
-    var(--elev-3);
-}
-html[data-theme="light"] .ai-history-bubble {
-  background: oklch(0.98 0.005 82 / 0.94);
-  border-color: var(--stroke-1);
-}
-html[data-theme="light"] .ai-pill {
-  background: oklch(0.98 0.005 82 / 0.88);
-  border-color: var(--stroke-2);
 }
 
 /* AI pill status chip on top */
@@ -2667,7 +2884,6 @@ html[data-motion="reduced"] * {
 @media (prefers-reduced-transparency: reduce) {
   html .screen-switcher,
   html .left-rail,
-  html .ai-pill,
   html .pill-status,
   html .right-panel,
   html .shape-toolbar,
@@ -2676,16 +2892,13 @@ html[data-motion="reduced"] * {
   html .selection-hud,
   html .toast,
   html .context-menu,
-  html .chrome-badge,
-  html .ai-history-bubble,
-  html .ai-msg-count-btn {
+  html .chrome-badge {
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
     background: var(--canvas-2);
   }
   html[data-theme="light"] .screen-switcher,
   html[data-theme="light"] .left-rail,
-  html[data-theme="light"] .ai-pill,
   html[data-theme="light"] .pill-status,
   html[data-theme="light"] .right-panel,
   html[data-theme="light"] .shape-toolbar,
@@ -2694,9 +2907,7 @@ html[data-motion="reduced"] * {
   html[data-theme="light"] .selection-hud,
   html[data-theme="light"] .toast,
   html[data-theme="light"] .context-menu,
-  html[data-theme="light"] .chrome-badge,
-  html[data-theme="light"] .ai-history-bubble,
-  html[data-theme="light"] .ai-msg-count-btn {
+  html[data-theme="light"] .chrome-badge {
     background: var(--paper-0);
   }
 }
@@ -8231,9 +8442,6 @@ textarea:focus-visible {
 }
 .thinking-summary:hover {
   color: var(--ink-0);
-}
-.thinking-summary-icon {
-  font-size: 12px;
 }
 .thinking-summary-label {
   flex: 1;

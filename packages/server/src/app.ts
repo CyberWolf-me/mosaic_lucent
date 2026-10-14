@@ -2,6 +2,7 @@ import type { IncomingMessage, Server, ServerResponse } from "node:http";
 import { createServer } from "node:http";
 import type { LLMProvider, ImageProvider, VectorProvider } from "@lucent/ai";
 import { handleGenerate, handleGenerateStream } from "./generate.js";
+import { commitBatch } from "./commitBatch.js";
 import { assembleGenerationMemory } from "./generateMemory.js";
 import { createAutomations } from "./automation.js";
 import { readByoHeaders, resolveProvider, providerFact } from "./modelRouter.js";
@@ -696,7 +697,12 @@ export function createApp(deps: AppDeps): App {
       const role = board
         ? await boardStore.memberRole(board.id, userId, (uid) => orgRoleFor(uid, board.orgId))
         : undefined;
-      if (board && role && board.orgId === orgId) boardId = board.id;
+      // Any role on the board ties the run to it — not only a board in the
+      // billing org. A share-link editor is billed to their own workspace, so
+      // that test left their runs unattached, and committing the output under
+      // the run then logged the model's work as a manual edit (realtime.ts
+      // only honours a run recorded on the board being edited).
+      if (board && role) boardId = board.id;
     }
     return recordRun({
       orgId,
@@ -1788,13 +1794,13 @@ export function createApp(deps: AppDeps): App {
   async function resolveAiContext(
     userId: string | undefined,
     board: StoredBoard | undefined,
-  ): Promise<{ orgId: string | undefined; authoritative: boolean }> {
+  ): Promise<{ orgId: string | undefined; authoritative: boolean; role?: Role }> {
     if (board && userId) {
       const role = await boardStore.memberRole(board.id, userId, (uid) =>
         orgRoleFor(uid, board.orgId),
       );
       if (role && roleAtLeast(role, "editor")) {
-        return { orgId: board.orgId, authoritative: true };
+        return { orgId: board.orgId, authoritative: true, role };
       }
     }
     if (!userId) return { orgId: undefined, authoritative: false };
@@ -2618,6 +2624,8 @@ export function createApp(deps: AppDeps): App {
       const result = await handleGenerate(provider, { ...request, boardId: board.id }, undefined, {
         boardId: board.id,
         store: boardStore,
+        authorized: true,
+        proposeOnly: true,
       });
       if (result.status >= 400) {
         return {
@@ -4723,6 +4731,13 @@ export function createApp(deps: AppDeps): App {
             return;
           }
           await boardStore.setMember({ ...current, role: body.role });
+          // The open sockets follow at once: effective role = max(org, board),
+          // so a workspace member demoted on the board may keep editing.
+          realtime.refreshRole(
+            id,
+            targetUserId,
+            await boardStore.memberRole(id, targetUserId, (uid) => orgRoleFor(uid, board.orgId)),
+          );
           if (current.role !== body.role) {
             void services.auditRow(req, user.id, board.orgId, "board.member.role_changed", id, {
               userId: targetUserId,
@@ -4914,6 +4929,13 @@ export function createApp(deps: AppDeps): App {
       if (req.method === "DELETE" && targetUserId) {
         const removedGrant = (await boardStore.members(id)).find((m) => m.userId === targetUserId);
         await boardStore.removeMember(id, targetUserId);
+        // Whatever access is left (an org role may still reach the board) is
+        // what their open sockets keep; none left detaches them.
+        realtime.refreshRole(
+          id,
+          targetUserId,
+          await boardStore.memberRole(id, targetUserId, (uid) => orgRoleFor(uid, board.orgId)),
+        );
         if (removedGrant) {
           void services.auditRow(req, user.id, board.orgId, "board.member.removed", id, {
             userId: targetUserId,
@@ -5096,7 +5118,26 @@ export function createApp(deps: AppDeps): App {
         const aiCtx = await resolveAiContext(auth.userId, storedBoard);
         const authoritative =
           storedBoard && aiCtx.authoritative
-            ? { boardId: storedBoard.id, store: boardStore }
+            ? {
+                boardId: storedBoard.id,
+                store: boardStore,
+                authorized: true,
+                commitBatch: async (ops: import("@lucent/core").Operation[], label: string) => {
+                  return commitBatch(
+                    {
+                      commitForBoard: (bId, uId, batch, lbl, meta) =>
+                        realtime.commitForBoard(bId, uId, batch, lbl, meta),
+                      boardStore,
+                    },
+                    storedBoard,
+                    auth.userId ?? "system",
+                    ops,
+                    label,
+                    { actorType: "ai", actorId: "assistant", initiatedBy: auth.userId ?? "system" },
+                    { role: aiCtx.role ?? "editor" },
+                  );
+                },
+              }
             : undefined;
         // docs/23 S1: the classification gate, checked before any provider
         // spend so a refusal costs no token and no latency. An in-process
@@ -5278,7 +5319,26 @@ export function createApp(deps: AppDeps): App {
         const aiCtx = await resolveAiContext(auth.userId, storedBoard);
         const authoritative =
           storedBoard && aiCtx.authoritative
-            ? { boardId: storedBoard.id, store: boardStore }
+            ? {
+                boardId: storedBoard.id,
+                store: boardStore,
+                authorized: true,
+                commitBatch: async (ops: import("@lucent/core").Operation[], label: string) => {
+                  return commitBatch(
+                    {
+                      commitForBoard: (bId, uId, batch, lbl, meta) =>
+                        realtime.commitForBoard(bId, uId, batch, lbl, meta),
+                      boardStore,
+                    },
+                    storedBoard,
+                    auth.userId ?? "system",
+                    ops,
+                    label,
+                    { actorType: "ai", actorId: "assistant", initiatedBy: auth.userId ?? "system" },
+                    { role: aiCtx.role ?? "editor" },
+                  );
+                },
+              }
             : undefined;
         // docs/23 S1: the classification gate, checked against the RESOLVED
         // provider — a BYO key is exactly the external provider a restricted

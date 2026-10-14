@@ -264,6 +264,12 @@ describe("encoding", () => {
       { boardId: BOARD, kind: "op", seq: 12, userId: "usr_1" },
       { boardId: BOARD, kind: "presence", userId: "usr_2" },
       { boardId: BOARD, kind: "resync" },
+      {
+        boardId: BOARD,
+        kind: "proposal",
+        instanceId: "inst_1",
+        data: { type: "proposal-created", id: "prp_1" },
+      },
     ];
     for (const message of messages) {
       expect(decodeFanoutMessage(encodeFanoutMessage(message))).toEqual(message);

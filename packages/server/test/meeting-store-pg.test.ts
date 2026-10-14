@@ -21,6 +21,8 @@ describeIf("meeting store parity: titles and the workspace list", () => {
   const boardA = `brd_mtga_${tag}`;
   const boardB = `brd_mtgb_${tag}`;
   const boardC = `brd_mtgc_${tag}`;
+  /** Its own board, so the append race doesn't change the lists other tests read. */
+  const boardD = `brd_mtgd_${tag}`;
 
   beforeAll(async () => {
     if (!PG_URL) return;
@@ -31,7 +33,7 @@ describeIf("meeting store parity: titles and the workspace list", () => {
       "INSERT INTO users (id, email, name, password_hash, created_at) VALUES ($1, $2, $3, $4, 1) ON CONFLICT (id) DO NOTHING",
       [userId, `${userId}@example.com`, "Meetings", "x"],
     );
-    for (const id of [boardA, boardB, boardC]) {
+    for (const id of [boardA, boardB, boardC, boardD]) {
       await db.pool.query(
         "INSERT INTO boards (id, org_id, owner_id, name, workspace, created_at, updated_at) VALUES ($1, $2, $3, $4, '{}'::jsonb, 1, 1) ON CONFLICT (id) DO NOTHING",
         [id, orgId, userId, id],
@@ -45,7 +47,7 @@ describeIf("meeting store parity: titles and the workspace list", () => {
       .query("DELETE FROM meeting_transcripts WHERE org_id = $1", [orgId])
       .catch(() => {});
     await db.pool
-      .query("DELETE FROM boards WHERE id = ANY($1)", [[boardA, boardB, boardC]])
+      .query("DELETE FROM boards WHERE id = ANY($1)", [[boardA, boardB, boardC, boardD]])
       .catch(() => {});
     await db.pool.query("DELETE FROM organizations WHERE id = $1", [orgId]).catch(() => {});
     await db.pool.query("DELETE FROM users WHERE id = $1", [userId]).catch(() => {});
@@ -63,6 +65,40 @@ describeIf("meeting store parity: titles and the workspace list", () => {
       createdAt: startedAt,
       ...(title ? { title } : {}),
     });
+
+  it("keeps every turn when many devices append to one meeting at once, and enforces the cap", async () => {
+    for (const store of [new PostgresMeetingStore(db), new InMemoryMeetingStore()] as const) {
+      const live = await store.insert({
+        boardId: boardD,
+        orgId,
+        startedAt: 10_000,
+        endedAt: null,
+        turns: [{ speaker: "Keeper", at: 10_000, text: "start" }],
+        createdBy: userId,
+        createdAt: 10_000,
+      });
+      // Twelve appends in flight together: the old read-merge-write kept
+      // whichever wrote last and dropped the rest.
+      await Promise.all(
+        Array.from({ length: 12 }, (_, i) =>
+          store.appendTo(boardD, live.id, [
+            { speaker: `P${i}`, at: 10_001 + i, text: `line ${i}` },
+          ]),
+        ),
+      );
+      const after = await store.get(boardD, live.id);
+      expect(after?.turns).toHaveLength(13);
+      expect(new Set(after?.turns.map((t) => t.speaker)).size).toBe(13);
+      // The cap holds on append: a batch that would pass it is refused whole.
+      const big = Array.from({ length: 490 }, (_, i) => ({
+        speaker: "X",
+        at: 20_000 + i,
+        text: "x",
+      }));
+      expect(await store.appendTo(boardD, live.id, big)).toBeUndefined();
+      expect((await store.get(boardD, live.id))?.turns).toHaveLength(13);
+    }
+  });
 
   it("round-trips titles and lists several boards newest first, identically", async () => {
     const results: unknown[] = [];

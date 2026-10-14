@@ -470,6 +470,9 @@ export interface HandleResult {
 export interface AuthoritativeContext {
   boardId: string;
   store: BoardStore;
+  commitBatch?: (ops: Operation[], label: string) => Promise<unknown>;
+  authorized?: boolean;
+  proposeOnly?: boolean;
 }
 
 /**
@@ -806,8 +809,11 @@ async function runGeneratePipeline(
   const candidateBoard = authoritative
     ? await authoritative.store.get(authoritative.boardId)
     : undefined;
-  const authoritativeBoard =
-    candidateBoard && userId === candidateBoard.ownerId ? candidateBoard : undefined;
+  const isAuthorized = Boolean(
+    candidateBoard &&
+      (authoritative?.authorized || !userId || userId === candidateBoard.ownerId),
+  );
+  const authoritativeBoard = isAuthorized ? candidateBoard : undefined;
 
   const workspace = authoritativeBoard
     ? authoritativeBoard.workspace
@@ -1088,16 +1094,27 @@ async function runGeneratePipeline(
   const appliedOps = finalOps;
 
   // Persist the merged board so the next request validates against the new state.
-  if (authoritative && authoritativeBoard) {
-    // `mergedWorkspace` already reflects the partial application AND any
-    // connectivity edges added above, so it is the exact state the client will
-    // reach by applying `appliedOps`.
-    const updated = mergedWorkspace;
-    await authoritative.store.put({
-      ...authoritativeBoard,
-      workspace: updated,
-      updatedAt: Date.now(),
-    });
+  if (authoritative && authoritativeBoard && !authoritative.proposeOnly) {
+    if (authoritative.commitBatch) {
+      await authoritative.commitBatch(appliedOps, result.explanation ?? "AI Generation");
+    } else {
+      if (typeof authoritative.store.appendOp === "function") {
+        await authoritative.store.appendOp({
+          boardId: authoritativeBoard.id,
+          ops: appliedOps,
+          by: userId ?? "assistant",
+          label: result.explanation ?? "AI Generation",
+          at: Date.now(),
+          actor: { actorType: "ai", actorId: "assistant", initiatedBy: userId ?? "assistant" },
+        });
+      }
+      const updated = mergedWorkspace;
+      await authoritative.store.put({
+        ...authoritativeBoard,
+        workspace: updated,
+        updatedAt: Date.now(),
+      });
+    }
     const latencyMs = Date.now() - startTime;
     return {
       ok: true,
