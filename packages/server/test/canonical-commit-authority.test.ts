@@ -183,7 +183,7 @@ describe("Findings B2 & B3: Canonical Commit Authority & Room Synchronization", 
       "automation run",
     );
 
-    // Role was seeded, commit succeeded, and broadcast sent to room
+    // Role was seeded for system actor, commit succeeded, and broadcast sent to room
     expect(commitResult).not.toBeNull();
     expect(commitResult?.ok).toBe(true);
     expect(room.roleOf("system_automation")).toBe("editor");
@@ -195,5 +195,157 @@ describe("Findings B2 & B3: Canonical Commit Authority & Room Synchronization", 
     const parsed = JSON.parse(frameStr);
     expect(parsed.type).toBe("op");
     expect(parsed.entry.ops[0].id).toBe("auto_node");
+  });
+
+  it("Security: Unauthorized caller or viewer cannot elevate permissions via commitForBoard metadata", async () => {
+    const boardStore = new InMemoryBoardStore();
+    const ws = createWorkspace();
+    const board = {
+      id: newBoardId(),
+      orgId: "org_1",
+      ownerId: "usr_owner",
+      name: "Security Board",
+      workspace: ws,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    await boardStore.put(board);
+    // Explicitly add usr_viewer as viewer
+    await boardStore.setMember({
+      boardId: board.id,
+      userId: "usr_viewer",
+      role: "viewer",
+      invitedBy: board.ownerId,
+      createdAt: Date.now(),
+    });
+
+    const userStore = new InMemoryUserStore();
+    const tickets = new InMemoryTicketStore(60_000);
+    const server = new RealtimeServer({
+      userStore,
+      boardStore,
+      secret: "test-secret-at-least-32-characters-long",
+      tickets,
+      orgRoleFor: async () => undefined,
+    });
+
+    const room = new Room(board.id, board.workspace, board.ownerId);
+    (server as any).rooms.set(board.id, room);
+
+    // 1. Unregistered stranger claiming editor role in meta -> REFUSED
+    const strangerResult = await server.commitForBoard(
+      board.id,
+      "usr_stranger",
+      [{ op: "CREATE_NODE", id: "stranger_node", nodeType: "step", label: "Hack" }],
+      "exploit",
+      { role: "editor" },
+    );
+    expect(strangerResult).not.toBeNull();
+    expect(strangerResult?.ok).toBe(false);
+    expect(strangerResult?.error).toBe("permission");
+
+    // 2. Known viewer attempting to elevate to editor via meta -> REFUSED
+    const viewerResult = await server.commitForBoard(
+      board.id,
+      "usr_viewer",
+      [{ op: "CREATE_NODE", id: "viewer_node", nodeType: "step", label: "Hack" }],
+      "exploit",
+      { role: "editor" },
+    );
+    expect(viewerResult).not.toBeNull();
+    expect(viewerResult?.ok).toBe(false);
+    expect(viewerResult?.error).toBe("permission");
+
+    // Board in room remains clean
+    expect(room.current().nodes.stranger_node).toBeUndefined();
+    expect(room.current().nodes.viewer_node).toBeUndefined();
+  });
+
+  it("Cross-Worker Fanout: Two workers synchronize spotlight and summon events without local echo", async () => {
+    const busListeners: ((msg: any) => void)[] = [];
+    const mockBus = {
+      publish: vi.fn().mockImplementation(async (msg: any) => {
+        for (const l of busListeners) l(msg);
+      }),
+      subscribe: vi.fn().mockImplementation((_boardId: string, listener: any) => {
+        busListeners.push(listener);
+        return () => {
+          const idx = busListeners.indexOf(listener);
+          if (idx !== -1) busListeners.splice(idx, 1);
+        };
+      }),
+      close: async () => {},
+    };
+
+    const boardStore = new InMemoryBoardStore();
+    const ws = createWorkspace();
+    const board = {
+      id: newBoardId(),
+      orgId: "org_1",
+      ownerId: "usr_owner",
+      name: "Shared Board",
+      workspace: ws,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    await boardStore.put(board);
+
+    const userStore = new InMemoryUserStore();
+    const tickets = new InMemoryTicketStore(60_000);
+
+    // Worker 1
+    const server1 = new RealtimeServer({
+      userStore,
+      boardStore,
+      secret: "test-secret-at-least-32-characters-long",
+      tickets,
+      orgRoleFor: async () => "editor",
+      fanout: mockBus as any,
+      instanceId: "inst_1",
+    });
+
+    // Worker 2
+    const server2 = new RealtimeServer({
+      userStore,
+      boardStore,
+      secret: "test-secret-at-least-32-characters-long",
+      tickets,
+      orgRoleFor: async () => "editor",
+      fanout: mockBus as any,
+      instanceId: "inst_2",
+    });
+
+    const room1 = await (server1 as any).roomFor(board.id, board.workspace, board.ownerId);
+    const room2 = await (server2 as any).roomFor(board.id, board.workspace, board.ownerId);
+
+    // Socket on Worker 1 (Alice)
+    const aliceSocket = { readyState: 1, send: vi.fn() };
+    const aliceConn = { socket: aliceSocket as any, userId: "usr_alice", name: "Alice", boardId: board.id };
+    room1.setRole("usr_alice", "editor");
+    (server1 as any).connsByBoard.set(board.id, new Set([aliceConn]));
+
+    // Socket on Worker 2 (Bob)
+    const bobSocket = { readyState: 1, send: vi.fn() };
+    const bobConn = { socket: bobSocket as any, userId: "usr_bob", name: "Bob", boardId: board.id };
+    room2.setRole("usr_bob", "editor");
+    (server2 as any).connsByBoard.set(board.id, new Set([bobConn]));
+
+    // 1. Alice takes spotlight on Worker 1
+    (server1 as any).spotlight(aliceConn, true);
+    expect(room1.spotlight()).toEqual({ userId: "usr_alice", name: "Alice" });
+
+    // Worker 2 should receive fanout, update room2 spotlight, and notify Bob
+    expect(room2.spotlight()).toEqual({ userId: "usr_alice", name: "Alice" });
+    const bobSpotlightFrames = bobSocket.send.mock.calls.map(([raw]) => JSON.parse(raw));
+    expect(bobSpotlightFrames.some((f) => f.type === "spotlight" && f.spotlight?.userId === "usr_alice")).toBe(true);
+
+    // 2. Alice summons on Worker 1
+    (server1 as any).summon(aliceConn, { type: "summon", viewport: { x: 100, y: 200, zoom: 1 } });
+    const bobSummonFrames = bobSocket.send.mock.calls.map(([raw]) => JSON.parse(raw));
+    expect(bobSummonFrames.some((f) => f.type === "summon" && f.from.userId === "usr_alice" && f.viewport.x === 100)).toBe(true);
+
+    // Verify Worker 1 does not echo the message back to itself
+    const aliceFrames = aliceSocket.send.mock.calls.map(([raw]) => JSON.parse(raw));
+    expect(aliceFrames.filter((f) => f.type === "summon").length).toBe(0); // Alice was originator of summon, not recipient
   });
 });

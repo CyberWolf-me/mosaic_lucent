@@ -726,6 +726,17 @@ export class RealtimeServer {
       return;
     }
     this.broadcast(conn.boardId, { type: "spotlight", spotlight: room.spotlight() });
+    if (this.deps.fanout) {
+      void this.deps.fanout
+        .publish({
+          boardId: conn.boardId,
+          kind: "spotlight",
+          userId: conn.userId,
+          instanceId: this.deps.instanceId,
+          data: { type: "spotlight", spotlight: room.spotlight() },
+        })
+        .catch(() => {});
+    }
   }
 
   /** "Bring everyone here" (docs/28 S5): one move of everyone else's view to the sender's. */
@@ -740,11 +751,19 @@ export class RealtimeServer {
     }
     const viewport = cleanViewport(msg.viewport);
     if (!viewport) return;
-    this.broadcast(
-      conn.boardId,
-      { type: "summon", from: { userId: conn.userId, name: conn.name }, viewport },
-      conn,
-    );
+    const summonMsg = { type: "summon", from: { userId: conn.userId, name: conn.name }, viewport };
+    this.broadcast(conn.boardId, summonMsg, conn);
+    if (this.deps.fanout) {
+      void this.deps.fanout
+        .publish({
+          boardId: conn.boardId,
+          kind: "summon",
+          userId: conn.userId,
+          instanceId: this.deps.instanceId,
+          data: summonMsg,
+        })
+        .catch(() => {});
+    }
   }
 
   private leave(conn: Conn): void {
@@ -768,6 +787,17 @@ export class RealtimeServer {
         if (room.spotlight()?.userId === conn.userId) {
           room.setSpotlight(null);
           this.broadcast(boardId, { type: "spotlight", spotlight: null });
+          if (this.deps.fanout) {
+            void this.deps.fanout
+              .publish({
+                boardId,
+                kind: "spotlight",
+                userId: conn.userId,
+                instanceId: this.deps.instanceId,
+                data: { type: "spotlight", spotlight: null },
+              })
+              .catch(() => {});
+          }
         }
         // Drop the cross-instance row for this participant. The compare-and-
         // delete on `instanceId` keeps a sibling instance's live row safe if
@@ -927,6 +957,24 @@ export class RealtimeServer {
         }
         return;
       }
+      if (message.kind === "spotlight") {
+        if (this.deps.instanceId && message.instanceId === this.deps.instanceId) return;
+        const spotlightData = (message.data as { spotlight?: import("./room.js").Spotlight | null })?.spotlight;
+        if (spotlightData !== undefined) {
+          room.setSpotlight(spotlightData);
+        }
+        if (message.data) {
+          this.broadcast(boardId, message.data);
+        }
+        return;
+      }
+      if (message.kind === "summon") {
+        if (this.deps.instanceId && message.instanceId === this.deps.instanceId) return;
+        if (message.data) {
+          this.broadcast(boardId, message.data);
+        }
+        return;
+      }
       if (message.kind !== "op" && message.kind !== "resync") return;
       void room
         .pullRemote()
@@ -1036,10 +1084,25 @@ export class RealtimeServer {
   ): Promise<import("./room.js").CommitResult | null> {
     const room = this.rooms.get(boardId);
     if (!room) return null;
-    // The room's role map is the gate. A caller with no socket here is seeded
-    // with the role its HTTP route authorized; defaults to editor for authorized callers.
+    // The room's role map is the gate. A caller with no socket here is authorized
+    // strictly against authoritative store state: an internal system worker
+    // is granted its explicit system role, whereas user callers resolve through
+    // boardStore.memberRole so an unauthorized caller or viewer can never escalate
+    // permissions by passing unverified metadata.
     if (room.roleOf(userId) === undefined) {
-      room.setRole(userId, meta?.role ?? "editor");
+      if (userId.startsWith("system") || meta?.actor?.actorType === "system") {
+        room.setRole(userId, meta?.role ?? "editor");
+      } else {
+        const board = await this.deps.boardStore.get(boardId);
+        const storedRole = board
+          ? await this.deps.boardStore.memberRole(boardId, userId, (uid) =>
+              this.deps.orgRoleFor(uid, board.orgId),
+            )
+          : undefined;
+        if (storedRole) {
+          room.setRole(userId, storedRole);
+        }
+      }
     }
     const result = await room.commit(userId, ops, label, {
       ...(meta?.requestId !== undefined ? { requestId: meta.requestId } : {}),

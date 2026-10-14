@@ -375,3 +375,29 @@ describe("the resync contract", () => {
     expect(there.got).toEqual([{ boardId: OTHER, kind: "resync" }]);
   });
 });
+
+describe("proposal, spotlight and summon event encoding", () => {
+  it("encodes and decodes spotlight and summon messages with instanceId and payload data", () => {
+    const spotlightMsg: FanoutMessage = {
+      boardId: BOARD,
+      kind: "spotlight",
+      userId: "usr_alice",
+      instanceId: "inst_1",
+      data: { type: "spotlight", spotlight: { userId: "usr_alice", name: "Alice" } },
+    };
+    const encodedSpotlight = encodeFanoutMessage(spotlightMsg);
+    const decodedSpotlight = decodeFanoutMessage(encodedSpotlight);
+    expect(decodedSpotlight).toEqual(spotlightMsg);
+
+    const summonMsg: FanoutMessage = {
+      boardId: BOARD,
+      kind: "summon",
+      userId: "usr_bob",
+      instanceId: "inst_2",
+      data: { type: "summon", from: { userId: "usr_bob", name: "Bob" }, viewport: { x: 10, y: 20 } },
+    };
+    const encodedSummon = encodeFanoutMessage(summonMsg);
+    const decodedSummon = decodeFanoutMessage(encodedSummon);
+    expect(decodedSummon).toEqual(summonMsg);
+  });
+});
