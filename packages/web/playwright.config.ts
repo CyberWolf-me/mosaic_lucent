@@ -31,6 +31,36 @@ export default defineConfig({
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
   },
+  /**
+   * Two suites, because they have different prerequisites and must not be
+   * conflated by a single pass/fail.
+   *
+   * `app` is what runs unattended: everything that works against the mock
+   * provider, which is what CI boots. This is the default (`npm run test:e2e`).
+   *
+   * `scenarios` is `e2e/journeys/**`, the credentialed suite. It is *designed*
+   * to fail without a real model — a-first-minute.spec.ts asserts outright that
+   * "a run against a mock provider is not a pass", on the reasoning that a
+   * green mock run proves only the reducer. CI has no provider key, so running
+   * this suite there is a category error: it fails by construction, and a
+   * permanently red job is one nobody reads. It is run deliberately, with
+   * credentials, via `npm run test:e2e:scenarios`.
+   *
+   * Splitting them by project (rather than deleting the scenarios, or setting
+   * SCENARIOS_ALLOW_MOCK=1 to silence the guard) keeps the strict assertion
+   * intact and keeps the coverage. The guard still fires — just for the person
+   * who runs that command, which is exactly who it was written for.
+   */
+  projects: [
+    {
+      name: "app",
+      testIgnore: "**/journeys/**",
+    },
+    {
+      name: "scenarios",
+      testMatch: "**/journeys/**/*.spec.ts",
+    },
+  ],
   webServer: [
     {
       // dist, not `npm run start`: the workspace start script's prestart

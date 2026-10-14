@@ -14,28 +14,28 @@ ALLOW_DESTRUCTIVE_TESTS=true node scripts/load-test/runner.mjs --profile=resilie
 
 ## Result: all 18 scenarios + smoke + baseline PASS, 0 acknowledged-but-lost writes
 
-| Scenario | Result | Evidence |
-| :-- | :-- | :-- |
-| smoke (3u) | ✅ | fan-out both ways; 2/2 persisted |
-| baseline (10u) | ✅ | both boards persisted; fan-out p95 2 ms |
-| LT-01 target (50u / 10 boards) | ✅ | 50/50 WS joins; 50/50 persisted; convergence across 10 boards |
-| LT-02 hot board (50u / 1 board) | ✅ | 50/50 converged+persisted; op-ack p95 **33 s**, fan-out 7 ms |
-| LT-03 hot-object contention | ✅ | deterministic LWW → highest-seq writer; cold-client rebuild |
-| LT-04 AI storm + edits | ✅ | 3 mock gens + 12 manual edits all persisted |
-| LT-05 edit-during-AI | ✅ | manual edit survived AI completion |
-| LT-06 breakout → consolidate | ✅ | 10 consolidated; 0 cross-board leak |
-| LT-07 5,000-object board | ✅ | 5000 objects persisted; 25 clients joined |
-| LT-08 presence churn | ✅ | 3 churn waves; anchors stable |
-| LT-09 partition + reconnect storm | ✅ | reconnect converged 88 ms; state intact |
-| LT-10 live permission revoke | ✅ (REST only) | demoted member's REST edit 404'd — **see B23 caveat** |
-| LT-11 tenant isolation | ✅ | cross-tenant read / op / WS-join all rejected (404) |
-| LT-12 undo/redo races | ✅ | inverse reverted Node A; Node B preserved |
-| LT-13 board create/dup burst | ✅ | 30 creates, no collision; 10 dups |
-| LT-14 upload/import/export | ⚠️ | mutations fine; asset upload → 404, export → 402 (see findings) |
-| LT-15 **real** service restart | ✅ | `docker compose restart server`, back in 3.9 s; **durable state fully recovered, 0 lost** |
-| LT-16 soak | ✅ | no latency drift (first 281 ms → last 105 ms) |
-| LT-17 saturation ramp 10→100 | ✅ | all stages healthy; op-ack 12–26 ms; no knee to 100 |
-| LT-18 25×2 tabs (50 conns) | ✅ | Tab B synced from Tab A; survived Tab A close |
+| Scenario                          | Result         | Evidence                                                                                  |
+| :-------------------------------- | :------------- | :---------------------------------------------------------------------------------------- |
+| smoke (3u)                        | ✅             | fan-out both ways; 2/2 persisted                                                          |
+| baseline (10u)                    | ✅             | both boards persisted; fan-out p95 2 ms                                                   |
+| LT-01 target (50u / 10 boards)    | ✅             | 50/50 WS joins; 50/50 persisted; convergence across 10 boards                             |
+| LT-02 hot board (50u / 1 board)   | ✅             | 50/50 converged+persisted; op-ack p95 **33 s**, fan-out 7 ms                              |
+| LT-03 hot-object contention       | ✅             | deterministic LWW → highest-seq writer; cold-client rebuild                               |
+| LT-04 AI storm + edits            | ✅             | 3 mock gens + 12 manual edits all persisted                                               |
+| LT-05 edit-during-AI              | ✅             | manual edit survived AI completion                                                        |
+| LT-06 breakout → consolidate      | ✅             | 10 consolidated; 0 cross-board leak                                                       |
+| LT-07 5,000-object board          | ✅             | 5000 objects persisted; 25 clients joined                                                 |
+| LT-08 presence churn              | ✅             | 3 churn waves; anchors stable                                                             |
+| LT-09 partition + reconnect storm | ✅             | reconnect converged 88 ms; state intact                                                   |
+| LT-10 live permission revoke      | ✅ (REST only) | demoted member's REST edit 404'd — **see B23 caveat**                                     |
+| LT-11 tenant isolation            | ✅             | cross-tenant read / op / WS-join all rejected (404)                                       |
+| LT-12 undo/redo races             | ✅             | inverse reverted Node A; Node B preserved                                                 |
+| LT-13 board create/dup burst      | ✅             | 30 creates, no collision; 10 dups                                                         |
+| LT-14 upload/import/export        | ⚠️             | mutations fine; asset upload → 404, export → 402 (see findings)                           |
+| LT-15 **real** service restart    | ✅             | `docker compose restart server`, back in 3.9 s; **durable state fully recovered, 0 lost** |
+| LT-16 soak                        | ✅             | no latency drift (first 281 ms → last 105 ms)                                             |
+| LT-17 saturation ramp 10→100      | ✅             | all stages healthy; op-ack 12–26 ms; no knee to 100                                       |
+| LT-18 25×2 tabs (50 conns)        | ✅             | Tab B synced from Tab A; survived Tab A close                                             |
 
 ## Capacity read (machine-bound — 8 GB Docker VM, NOT a prod SLO)
 
