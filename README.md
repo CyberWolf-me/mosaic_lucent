@@ -2,7 +2,7 @@
 
 **AI-Native Voice Visual Workspace.** Describe an idea by voice or text and an AI agent constructs editable, structured visuals — flowcharts, architecture diagrams, user journeys, wireframes, mind maps. The canvas is semantic: every object has meaning and structured relationships, and one underlying model renders into many representations.
 
-> Status: **V1 slice implemented.** This monorepo implements the conversational-canvas vertical slice described in [`docs/10-getting-started.md`](./docs/10-getting-started.md). Realtime multiplayer has shipped — board membership, share links, and WebSocket rooms with per-role permissions — alongside Postgres persistence and the hardened security baseline (M0); S3 asset storage is the remaining MVP concern.
+> Status: **well past the V1 slice.** This monorepo implements the conversational canvas plus realtime multiplayer (board membership, share links, WebSocket rooms with per-role permissions), Postgres persistence, the hardened security baseline, meeting capture with provenance, the statement lifecycle, execution sync to Linear/GitHub/Jira, SSO/SCIM, and an asset gateway with memory/disk/**S3-compatible** backends (`POST /api/assets`). See [`docs/checklist.md`](./docs/checklist.md) for the audited feature status and [`docs/10-getting-started.md`](./docs/10-getting-started.md) to run it.
 
 ---
 
@@ -40,13 +40,17 @@ Copy `.env.example` to `.env` and fill in what you need. The full set of `LUCENT
 
 ## Workspaces
 
-| Package          | What it is                                                                                                          | Boundary                                                 |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------- |
-| `@lucent/core`   | Semantic model, zod operation schema, validator, pure reducer, layout engine, history                               | No React/DOM/network deps — the deterministic engine     |
-| `@lucent/ai`     | `LLMProvider` interface + prompt harness, `MockProvider` (offline), `AnthropicProvider`, `OpenAICompatibleProvider` | Model-independent harness, not tied to any vendor        |
-| `@lucent/server` | Framework-free HTTP + WebSocket server; auth, accounts, boards, op log                                              | Owns the API key, validates AI ops before returning them |
-| `@lucent/web`    | React + React Flow renderer of `core`; voice pipeline (`voice.ts`); localStorage projects                           | The browser app                                          |
-| `@lucent/mcp`    | MCP server that drives `core` directly for tool-call workflows                                                      | Talks to `core`, not the network server                  |
+| Package               | What it is                                                                                                                                      | Boundary                                                 |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------- |
+| `@lucent/core`        | Semantic model, zod operation schema, validator, pure reducer, layout engines, statements/issues/provenance, history                            | No React/DOM/network deps — the deterministic engine     |
+| `@lucent/ai`          | `LLMProvider` interface + prompt harness, `MockProvider` (offline), `AnthropicProvider`, `OpenAICompatibleProvider`                             | Model-independent harness, not tied to any vendor        |
+| `@lucent/server`      | Framework-free HTTP + WebSocket server: auth (OAuth/SAML/SCIM), boards, sequenced rooms, proposals, Ask/search, meetings, integrations, billing | Owns the API key, validates AI ops before returning them |
+| `@lucent/web`         | React app with a bespoke DOM + SVG canvas (no canvas library); lenses, STT providers, realtime sync                                             | The browser app                                          |
+| `@lucent/mcp`         | MCP stdio server (local session + live remote session) exposing the validated op contract to external agents                                    | Same contract the app uses — never a side channel        |
+| `@lucent/voice-agent` | LiveKit worker joining voice rooms with board-scoped grants                                                                                     | Speaks through `orchestrate`, like any agent             |
+| `@lucent/i18n`        | Localisation dictionaries (en + hu) with parity checks                                                                                          | Type-checked strings only                                |
+| `@lucent/load`        | k6 load-test profiles                                                                                                                           | Test tooling, not shipped                                |
+| `@lucent/site`        | Static marketing site + status page                                                                                                             | No app code                                              |
 
 ## Commands
 

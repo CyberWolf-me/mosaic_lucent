@@ -2,7 +2,7 @@
 
 > AI-Native Voice Visual Workspace. A conversational canvas where users describe ideas by voice or text and an AI agent constructs editable, structured visuals (flowcharts, architecture diagrams, user journeys, wireframes, mind maps).
 >
-> **Status: well past the V1 slice.** An npm-workspaces monorepo under `packages/` — six packages (`core`, `ai`, `server`, `web`, `mcp`, `i18n`) — implements the conversational canvas plus realtime multiplayer, auth, a full manual board, work tracking, agent access over MCP, SAML SSO, SCIM provisioning, meeting transcripts, and external execution (Linear/GitHub/Jira task sync, both directions, human-gated; connected by server key or OAuth with tokens sealed at rest, ADR 0050), plus org automation rules that propose rather than apply (ADR 0049) and Slack meeting summaries. See `docs/checklist.md` for audited feature status and `docs/10-getting-started.md` to run it. **Persistence is Postgres-backed when `LUCENT_DATABASE_URL` is set (accounts, boards, the realtime op log, and asset metadata survive a restart); in-memory otherwise. Assets upload through `POST /api/assets` to a configurable blob backend (memory / disk / S3-compatible), with asset metadata in Postgres when configured.**
+> **Status: well past the V1 slice.** An npm-workspaces monorepo under `packages/` — nine packages (`core`, `ai`, `server`, `web`, `mcp`, `voice-agent`, `i18n`, `load`, `site`) — implements the conversational canvas plus realtime multiplayer, auth, a full manual board, work tracking, agent access over MCP, SAML SSO, SCIM provisioning, meeting transcripts, and external execution (Linear/GitHub/Jira task sync, both directions, human-gated; connected by server key or OAuth with tokens sealed at rest, ADR 0050), plus org automation rules that propose rather than apply (ADR 0049) and Slack meeting summaries. See `docs/checklist.md` for audited feature status and `docs/10-getting-started.md` to run it. **Persistence is Postgres-backed when `LUCENT_DATABASE_URL` is set (accounts, boards, the realtime op log, and asset metadata survive a restart); in-memory otherwise. Assets upload through `POST /api/assets` to a configurable blob backend (memory / disk / S3-compatible), with asset metadata in Postgres when configured.**
 
 ## Build / test / run
 
@@ -25,8 +25,12 @@ a `postgres:16` service so they run there.
 - `@lucent/core` — semantic model, `zod` operation schema, validator, pure reducer, inverse operations, layout engine, history, tool-schema derivation. **No React/DOM/network deps.** This is the deterministic engine; keep it framework-agnostic.
 - `@lucent/ai` — `LLMProvider` interface + prompt harness + `MockProvider` (offline), `AnthropicProvider`, and an OpenAI-compatible provider; plus an `ImageProvider`. The moat lives here as a model-independent harness, not a specific vendor.
 - `@lucent/server` — framework-free HTTP + WebSocket server: `/api/generate`, `/api/image`, auth, boards, realtime rooms, usage limits, `/metrics`. Owns the API key, schema-parses input, validates AI operations before returning them. Never move key handling to the client.
-- `@lucent/web` — React renders `core` through a **bespoke DOM + SVG canvas** (not tldraw or React Flow — neither is installed); `stt/` (three speech providers), `boardSync.ts` (realtime), `persistence.ts` (localStorage projects).
-- `@lucent/mcp` — MCP stdio server exposing `apply_canvas_operations`, `get_board`, `list_external_links`, `import_mermaid`, `export_mermaid`, `reset_board`, derived from the same core Zod union so an agent can never send an operation the validator would reject. Mermaid (flowchart, state, mind map) converts in `core/src/mermaid.ts` and lands through the same validated operations.
+- `@lucent/web` — React renders `core` through a **bespoke DOM + SVG canvas** (not tldraw or React Flow — neither is installed); `stt/` (four speech providers: browser, whisper, hosted, livekit), `boardSync.ts` (realtime), `persistence.ts` (localStorage projects).
+- `@lucent/mcp` — MCP stdio server exposing 13 tools (`apply_canvas_operations`, `construct_diagram`, `create_proposal`, `get_proposal_diff`, `get_board`, `list_external_links`, `import_mermaid`, `export_mermaid`, `search_workspace`, `list_decisions`, `get_meeting`, `get_project`, `reset_board`), derived from the same core Zod union so an agent can never send an operation the validator would reject. Mermaid (flowchart, state, mind map) converts in `core/src/mermaid.ts` and lands through the same validated operations.
+- `@lucent/voice-agent` — LiveKit worker joining voice rooms with board-scoped agent grants; builds through `orchestrate` like any agent.
+- `@lucent/i18n` — type-checked localisation dictionaries (en + hu) with placeholder-parity tests.
+- `@lucent/load` — k6 load-test profiles (test tooling, not shipped).
+- `@lucent/site` — static marketing site + status page (no app code).
 
 ## Read before changing design or architecture
 
@@ -101,11 +105,18 @@ Do not introduce Rust or other languages unless the user asks.
 `Workspace` contains: Nodes, Edges, Groups, Shapes, ShapeLinks, Wireframes,
 Comments, Votes, Reactions. Nodes may carry Jira-style `issue` fields.
 
-Two documented aspirations are **not** built, so don't assume them: there is no
-`Knowledge` collection and no workspace-memory layer (goals/requirements/
-decisions), and **no object carries `created_by`/`created_at`/`updated_at`** —
-only comments have an author and timestamp. Reference resolution works by
-re-sending a board summary plus recent turns, not by durable memory.
+One documented aspiration is **not** built, so don't assume it: there is no
+separate `Knowledge` collection — by design (ADR 0021), statements live on
+nodes rather than in their own store. But a workspace-memory layer **does**
+exist: nodes carry `statement` (decision/proposal/question/action/
+requirement/risk), `issue`, `provenance`, and `trust` fields; the server
+assembles a `<workspace-memory>` digest per generation
+(`server/src/generateMemory.ts`) and maintains a cross-board
+`StatementIndexer` (`server/src/statementIndex.ts`) — a derived projection,
+not a goals/requirements/decisions store. Authorship is stamped on every
+committed op; of the workspace objects, only comment ops carry a timestamp
+(`core/src/authorship.ts`). Reference resolution uses the board summary plus
+recent turns **plus** this memory projection.
 
 ## MVP scope (keep V1 small)
 
