@@ -435,7 +435,19 @@ export interface RouteServices {
     userId: string,
     ops: Operation[],
     label: string,
-    meta?: { requestId?: string; actor?: import("../boards.js").OperationActor },
+    meta?: {
+      requestId?: string;
+      actor?: import("../boards.js").OperationActor;
+      /**
+       * The role the HTTP route already authorized. Seeds the live room when
+       * this caller has no socket in it (an agent, an MCP client, a review
+       * from another tab), so the batch still commits THROUGH the room
+       * instead of behind it.
+       */
+      role?: import("../identity.js").Role;
+      trustedSystem?: boolean;
+      expectedSeq?: number;
+    },
   ): Promise<import("../room.js").CommitResult | null>;
   /**
    * Stage B3: fan a proposal event out to the board's live sockets. False

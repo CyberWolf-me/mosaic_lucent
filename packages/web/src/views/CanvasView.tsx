@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { resolveLocale, t } from "@lucent/i18n";
-import { applyLayout, applyRoutes, computeLayoutWithRoutes } from "@lucent/core";
+import { applyLayout, applyRoutes, applyValidOperations, computeLayoutWithRoutes } from "@lucent/core";
 import { Ico } from "../ui/icons.js";
-import { AIPill } from "../ui/AIPill.js";
+import { AIPill, type ComposerScope } from "../ui/AIPill.js";
+import { plainText } from "../richText.js";
 import { TopBar, LeftRail, ZoomBadge, StatusBadge, type Crumb } from "../ui/Chrome.js";
 import { CanvasViewport, emitHaptic, type Camera, type ViewportControls } from "../ui/atoms.js";
 import { DiagramLayer } from "../ui/DiagramLayer.js";
@@ -331,6 +332,10 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
     projectName,
     undo,
     redo,
+    canRedo,
+    pendingUndo,
+    confirmPendingUndo,
+    cancelPendingUndo,
     peers,
     readOnly,
     canComment,
@@ -542,9 +547,29 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
       case "er":
         return "Add entities, attributes, relationships, or tables…";
       default:
-        return "Refine, add, or transform — type / for AI commands…";
+        return "Describe a change — add, connect, regroup… or type / for commands";
     }
   }, [canvasPhase, lens]);
+
+  // The ids a Build turn sends with the request (Phase C). Shared by submit
+  // and the composer's scope chip, so what the chip names is what is sent.
+  const aiSelection = useMemo(
+    () => [...selectedShapes, ...(selected ? [selected] : [])],
+    [selectedShapes, selected],
+  );
+  const composerScope = useMemo<ComposerScope>(
+    () => ({
+      names: aiSelection.map((id) => {
+        const node = workspace.nodes[id];
+        if (node) return node.label.trim() || "Untitled node";
+        const shape = workspace.shapes[id];
+        if (!shape) return "Object";
+        const line = shape.text ? plainText(shape.text).trim().split("\n")[0] : "";
+        return line || shape.kind.charAt(0).toUpperCase() + shape.kind.slice(1);
+      }),
+    }),
+    [aiSelection, workspace.nodes, workspace.shapes],
+  );
 
   // Typed turns: speak Lucent's reply aloud only when "AI sound" is on. A
   // voice conversation speaks its own replies (and listens again after).
@@ -978,7 +1003,7 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
       return;
     }
     // Pass current selection so the AI can resolve "this/these/that" (Phase C).
-    const sel = [...selectedShapes, ...(selected ? [selected] : [])];
+    const sel = aiSelection;
     // Selected images and file/text objects travel with the request, so
     // "turn this screenshot into a wireframe" has something to look at.
     const attachments = collectAttachments(workspace, sel);
@@ -997,8 +1022,7 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
     send,
     ask,
     pillMode,
-    selectedShapes,
-    selected,
+    aiSelection,
     workspace,
     generateImageShape,
     proposal,
@@ -3149,6 +3173,14 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
       )
     : undefined;
 
+  const deletedNodeIds = proposal
+    ? new Set(
+        proposal.operations.flatMap((op) =>
+          op.op === "DELETE_NODE" ? [op.id] : [],
+        ),
+      )
+    : undefined;
+
   // Preview workspace shows proposed nodes/edges alongside current state.
   // Memoised because applyPreview re-runs the layout engine: while a proposal is
   // open this used to recompute the whole layout on every pan frame and hover.
@@ -3341,8 +3373,29 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
     Object.keys(workspace.shapes).length === 0 &&
     Object.keys(workspace.wireframes).length === 0;
   const heroGenerating = canvasPhase === "generating" && boardEmpty;
+  // A staged large undo: Escape keeps the board. Capture phase, so it runs
+  // before the canvas's own Escape (which would clear the selection).
+  useEffect(() => {
+    if (!pendingUndo) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.stopPropagation();
+      cancelPendingUndo();
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [pendingUndo, cancelPendingUndo]);
+
+  // Empty because the person undid everything is not a new board: the start
+  // screen used to take over the canvas, read as being sent home, and its
+  // prompt swallowed Ctrl+Y (the shortcut ignores text fields) — so the undone
+  // work looked gone with no way back. The canvas stays, with a way back.
+  const emptiedByUndo = boardEmpty && canRedo;
   const showHero =
-    (canvasPhase === "empty" || heroGenerating) && !drawingArmed && !blankBoardStarted;
+    (canvasPhase === "empty" || heroGenerating) &&
+    !drawingArmed &&
+    !blankBoardStarted &&
+    !emptiedByUndo;
 
   return (
     <div
@@ -3468,6 +3521,7 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
                 selected={selected}
                 selectedNodes={selectedNodes}
                 proposedIds={proposedIds}
+                deletedNodeIds={deletedNodeIds}
                 onSelect={onNodeSelect}
                 frameLabel={`${projectName || "Untitled"} · ${DIAGRAM_LABELS[workspace.diagramKind]}`}
                 spotlightId={spotlightId}
@@ -4229,6 +4283,89 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
                 : "Offline — edits save locally and sync when the server is reachable."}
             </div>
           )}
+          {pendingUndo && canEdit && (
+            <div
+              className="undo-confirm-bar"
+              role="alertdialog"
+              aria-label={pendingUndo.direction === "undo" ? "Confirm undo" : "Confirm redo"}
+              style={{
+                position: "absolute",
+                top: "42%",
+                left: "50%",
+                transform: "translate(-50%, -50%)",
+                zIndex: 31,
+                display: "flex",
+                flexDirection: "column",
+                gap: 10,
+                maxWidth: 460,
+                padding: "16px 18px 14px",
+                borderRadius: 14,
+                border: "1px solid var(--stroke-2)",
+                background: "var(--paper-0)",
+                boxShadow: "var(--shadow-3)",
+                fontSize: 13.5,
+                color: "var(--ink-1)",
+              }}
+            >
+              <div>
+                {pendingUndo.direction === "undo" ? "Undo" : "Redo"}{" "}
+                <strong style={{ color: "var(--ink-0)" }}>
+                  {pendingUndo.label
+                    ? `“${pendingUndo.label.length > 60 ? `${pendingUndo.label.slice(0, 57)}…` : pendingUndo.label}”`
+                    : "the last change"}
+                </strong>
+                ? It takes {describeRemoval(pendingUndo)} off the board
+                {boardId ? " for everyone on it" : ""}.
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <button
+                  type="button"
+                  className="btn-atelier primary sm"
+                  onClick={confirmPendingUndo}
+                >
+                  {pendingUndo.direction === "undo" ? "Undo" : "Redo"}
+                </button>
+                <button type="button" className="btn-atelier ghost sm" onClick={cancelPendingUndo}>
+                  Keep
+                </button>
+                <span
+                  className="mono"
+                  style={{ marginLeft: "auto", fontSize: 11, color: "var(--ink-3)" }}
+                >
+                  {pendingUndo.direction === "undo" ? "Ctrl+Z" : "Ctrl+Y"} again to confirm · Esc
+                  keeps it
+                </span>
+              </div>
+            </div>
+          )}
+          {emptiedByUndo && canEdit && !pendingUndo && (
+            <div
+              className="undo-empty-banner"
+              role="status"
+              style={{
+                position: "absolute",
+                top: "42%",
+                left: "50%",
+                transform: "translate(-50%, -50%)",
+                zIndex: 30,
+                display: "flex",
+                alignItems: "center",
+                gap: 12,
+                padding: "10px 12px 10px 18px",
+                borderRadius: 999,
+                border: "1px solid var(--stroke-2)",
+                background: "var(--paper-0)",
+                boxShadow: "var(--shadow-2)",
+                fontSize: 13,
+                color: "var(--ink-1)",
+              }}
+            >
+              Everything on this board was undone.
+              <button type="button" className="btn-atelier primary sm" onClick={redo}>
+                Redo <span className="mono">Ctrl+Y</span>
+              </button>
+            </div>
+          )}
           {peerEditors.length > 0 && (
             <div
               className="peer-banner"
@@ -4352,6 +4489,7 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
               busy={busy}
               shifted={canvasPhase === "proposing"}
               readOnly={readOnly}
+              scope={composerScope}
             />
           )}
         </>
@@ -4360,63 +4498,32 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
   );
 }
 
-function applyPreview(
+export function applyPreview(
   workspace: import("@lucent/core").Workspace,
   operations: import("@lucent/core").Operation[],
 ) {
-  // Lightweight non-committing preview: layer proposed nodes/edges/groups on top.
-  const nodes = { ...workspace.nodes };
-  const edges = { ...workspace.edges };
-  const groups = { ...workspace.groups };
+  // Use applyValidOperations to simulate the proposed workspace faithfully:
+  // adds nodes, renames nodes, changes types, modifies groups, and removes edges/nodes.
+  const { workspace: simulated } = applyValidOperations(workspace, operations);
+
+  // Run the layout engine over the simulated workspace so new/remaining nodes
+  // are positioned and routed cleanly. Routes ride along so the preview draws
+  // the exact corridors the applied board will.
+  const { layout, routes } = computeLayoutWithRoutes(simulated);
+  const laidOut = applyRoutes(applyLayout(simulated, layout), routes);
+
+  // Keep deleted nodes in the preview so they render as ghost cards in their
+  // original positions, making removals visible to the user during proposal review.
   for (const op of operations) {
-    if (op.op === "CREATE_NODE" && !nodes[op.id]) {
-      nodes[op.id] = {
-        id: op.id,
-        nodeType: op.nodeType,
-        label: op.label,
-        ...(op.groupId ? { groupId: op.groupId } : {}),
-      };
-    }
-    if (op.op === "CONNECT_NODES") {
-      const id = `${op.source}->${op.target}:${op.relationship}`;
-      edges[id] = { id, source: op.source, target: op.target, relationship: op.relationship };
-    }
-    // Groups matter to the preview: without them a proposed swimlane/tier
-    // diagram previewed as an ungrouped wall of boxes, then rearranged on apply.
-    // The kind matters too: a proposed region previews under its own strategy.
-    if (op.op === "CREATE_GROUP" && !groups[op.id]) {
-      groups[op.id] = {
-        id: op.id,
-        label: op.label,
-        children: [...op.children],
-        ...(op.kind ? { kind: op.kind } : {}),
-      };
-    }
-    if (op.op === "SET_GROUP_KIND" && groups[op.id]) {
-      groups[op.id] =
-        op.kind === null
-          ? { ...groups[op.id]!, children: [...groups[op.id]!.children] }
-          : { ...groups[op.id]!, kind: op.kind };
+    if (op.op === "DELETE_NODE") {
+      const original = workspace.nodes[op.id];
+      if (original) {
+        laidOut.nodes[op.id] = { ...original };
+      }
     }
   }
-  // Attach proposed nodes to their proposed groups so the region has members.
-  for (const n of Object.values(nodes)) {
-    if (n.groupId && groups[n.groupId] && !groups[n.groupId]!.children.includes(n.id)) {
-      groups[n.groupId] = {
-        ...groups[n.groupId]!,
-        children: [...groups[n.groupId]!.children, n.id],
-      };
-    }
-  }
-  const merged = { ...workspace, nodes, edges, groups };
-  // Run the layout engine over the preview. Proposed nodes carry no position, so
-  // without this every one of them rendered at the origin, stacked on top of each
-  // other and on top of the existing board — the preview looked broken and then
-  // "fixed itself" on Apply. Routes ride along (V5): the preview draws the same
-  // corridors the applied board will. No direction passed (Phase 5): the
-  // board's layout intent resolves, so the preview previews the intent too.
-  const { layout, routes } = computeLayoutWithRoutes(merged);
-  return applyRoutes(applyLayout(merged, layout), routes);
+
+  return laidOut;
 }
 
 /**
@@ -4432,11 +4539,14 @@ function EngagementAnchor({
   targetId: string;
   onApply: (ops: import("@lucent/core").Operation[], label: string) => boolean;
 }) {
-  const node = workspace.nodes[targetId];
   const shape = workspace.shapes[targetId];
+  // A node's width and height are the renderer's (scene.ts), never stored on
+  // the node — requiring `node.size` meant the bar could not appear under a
+  // single laid-out node.
+  const placed = workspace.nodes[targetId] ? diagramScene(workspace).byId.get(targetId) : undefined;
   const box =
-    node?.position && node.size
-      ? { x: node.position.x, y: node.position.y, width: node.size.width, height: node.size.height }
+    placed && workspace.nodes[targetId]?.position
+      ? { x: placed.cx - placed.w / 2, y: placed.cy - placed.h / 2, width: placed.w, height: placed.h }
       : shape
         ? {
             x: shape.position.x,
@@ -4495,4 +4605,22 @@ function ModeBar({
       </button>
     </div>
   );
+}
+
+/** "8 nodes and 7 connections" — what a staged undo would remove, in words. */
+function describeRemoval(p: {
+  nodes: number;
+  shapes: number;
+  links: number;
+  objects: number;
+}): string {
+  const parts: string[] = [];
+  if (p.nodes) parts.push(`${p.nodes} node${p.nodes === 1 ? "" : "s"}`);
+  if (p.shapes) parts.push(`${p.shapes} shape${p.shapes === 1 ? "" : "s"}`);
+  const rest = p.objects - p.nodes - p.shapes;
+  if (rest) parts.push(`${rest} wireframe${rest === 1 ? "" : "s"}`);
+  if (p.links) parts.push(`${p.links} connection${p.links === 1 ? "" : "s"}`);
+  return parts.length > 1
+    ? `${parts.slice(0, -1).join(", ")} and ${parts.at(-1)}`
+    : (parts[0] ?? "these objects");
 }

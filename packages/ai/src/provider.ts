@@ -1,7 +1,7 @@
 import type { NotesRequest, NotesResult } from "./notes.js";
 import type { ThemesRequest, ThemesResult } from "./themes.js";
 import type { VectorEditRequest, VectorEditResult } from "./vectorEdit.js";
-import type { DiagramKind, Operation, Workspace } from "@lucent/core";
+import type { DiagramIntent, DiagramKind, Operation, SemanticPlan, Workspace } from "@lucent/core";
 import { commentThreads, compositionLine, reactionTally, voteRanking } from "@lucent/core";
 import type { AnswerRequest, AnswerResult } from "./answer.js";
 import type { ExternalPlanRequest, ExternalPlanResult } from "./externalPlan.js";
@@ -276,9 +276,23 @@ export interface StreamCallbacks {
   onThinkingDelta?(delta: string): void;
 }
 
+export interface PlanRequest {
+  prompt: string;
+  workspace: Workspace;
+  intent?: DiagramIntent | null;
+  systemInstructions?: string;
+  repairContext?: {
+    rejectedPlan?: SemanticPlan;
+    missingItemLabels?: string[];
+    feedback?: string;
+  };
+}
+
 export interface LLMProvider {
   readonly name: string;
   generateOperations(request: GenerateRequest): Promise<GenerateResult>;
+  /** Intermediate semantic diagram plan generator (finding B1). */
+  generatePlan?(request: PlanRequest): Promise<SemanticPlan>;
   /**
    * The answering call type (Stage C1): the same board, read instead of
    * written. Required, so a provider cannot compile as a silent gap where
@@ -608,9 +622,89 @@ export function summarizeWorkspace(workspace: Workspace, selection?: string[]): 
   const nodesTruncated = allNodes.length > SUMMARY_LIMITS.nodes;
   const edgesTruncated = allEdges.length > SUMMARY_LIMITS.edges;
 
+  let selectedNodesList = allNodes;
+  if (nodesTruncated) {
+    // Large-board priority summarization:
+    // Prioritize selected nodes + 1-hop / 2-hop neighbors + active statements + issues
+    const prioritizedIds = new Set<string>();
+    const nodeMap = new Map(allNodes.map((n) => [n.id, n]));
+
+    // 1. Undirected adjacency
+    const adj = new Map<string, Set<string>>();
+    for (const e of allEdges) {
+      if (!adj.has(e.source)) adj.set(e.source, new Set());
+      if (!adj.has(e.target)) adj.set(e.target, new Set());
+      adj.get(e.source)!.add(e.target);
+      adj.get(e.target)!.add(e.source);
+    }
+
+    // 2. Selected nodes
+    const validSelection = (selection ?? []).filter((id) => nodeMap.has(id));
+    for (const id of validSelection) prioritizedIds.add(id);
+
+    // 3. 1-hop neighbors of selection
+    const oneHop = new Set<string>();
+    for (const id of validSelection) {
+      for (const neighbor of adj.get(id) ?? []) {
+        if (!prioritizedIds.has(neighbor) && nodeMap.has(neighbor)) {
+          oneHop.add(neighbor);
+        }
+      }
+    }
+    for (const id of oneHop) prioritizedIds.add(id);
+
+    // 4. 2-hop neighbors of selection
+    const twoHop = new Set<string>();
+    for (const id of oneHop) {
+      for (const neighbor of adj.get(id) ?? []) {
+        if (!prioritizedIds.has(neighbor) && nodeMap.has(neighbor)) {
+          twoHop.add(neighbor);
+        }
+      }
+    }
+    for (const id of twoHop) prioritizedIds.add(id);
+
+    // 5. Active statements (non-superseded decisions, actions, questions)
+    for (const n of allNodes) {
+      if (n.statement && n.statement.status !== "superseded") {
+        prioritizedIds.add(n.id);
+      }
+    }
+    for (const n of allNodes) {
+      if (n.statement) prioritizedIds.add(n.id);
+    }
+
+    // 6. Nodes carrying issues
+    for (const n of allNodes) {
+      if (n.issue) prioritizedIds.add(n.id);
+    }
+
+    // 7. Remaining nodes
+    for (const n of allNodes) {
+      prioritizedIds.add(n.id);
+    }
+
+    selectedNodesList = Array.from(prioritizedIds)
+      .slice(0, SUMMARY_LIMITS.nodes)
+      .map((id) => nodeMap.get(id)!);
+  }
+
+  // Edge prioritization: internal edges between included nodes first
+  let selectedEdgesList = allEdges;
+  if (edgesTruncated) {
+    const includedNodeIds = new Set(selectedNodesList.map((n) => n.id));
+    const internalEdges = allEdges.filter(
+      (e) => includedNodeIds.has(e.source) && includedNodeIds.has(e.target),
+    );
+    const otherEdges = allEdges.filter(
+      (e) => !includedNodeIds.has(e.source) || !includedNodeIds.has(e.target),
+    );
+    selectedEdgesList = [...internalEdges, ...otherEdges].slice(0, SUMMARY_LIMITS.edges);
+  }
+
   return {
     diagramKind: workspace.diagramKind,
-    nodes: allNodes.slice(0, SUMMARY_LIMITS.nodes).map((n) => ({
+    nodes: selectedNodesList.map((n) => ({
       id: n.id,
       nodeType: n.nodeType,
       label: n.label,
@@ -644,7 +738,7 @@ export function summarizeWorkspace(workspace: Workspace, selection?: string[]): 
           }
         : {}),
     })),
-    edges: allEdges.slice(0, SUMMARY_LIMITS.edges).map((e) => ({
+    edges: selectedEdgesList.map((e) => ({
       source: e.source,
       target: e.target,
       relationship: e.relationship,

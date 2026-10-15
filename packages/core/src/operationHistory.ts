@@ -57,6 +57,30 @@ export class OperationHistory {
     return this.workspace;
   }
 
+  /**
+   * Record a batch that has ALREADY been applied elsewhere — a change the
+   * person caused but that reached this board through the room (approving a
+   * proposal commits server-side). `before` is the state the batch was applied
+   * to, so the inverses are exact; the current workspace is left alone because
+   * the remote delivery already moved it. Like `commit`, it is a new branch:
+   * the redo stack clears.
+   */
+  recordApplied(ops: Operation[], before: Workspace, label = ""): void {
+    if (ops.length === 0) return;
+    this.undoStack.push({ ops, inverses: inverseOperations(ops, before), label });
+    this.redoStack.length = 0;
+  }
+
+  /** The commit the next `undo()` would revert, without reverting it. */
+  peekUndo(): OpHistoryEntry | undefined {
+    return this.undoStack[this.undoStack.length - 1];
+  }
+
+  /** The commit the next `redo()` would re-apply, without applying it. */
+  peekRedo(): OpHistoryEntry | undefined {
+    return this.redoStack[this.redoStack.length - 1];
+  }
+
   canUndo(): boolean {
     return this.undoStack.length > 0;
   }

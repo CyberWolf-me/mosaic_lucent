@@ -1,11 +1,21 @@
+import { resolveEdgeOrigin } from "../_origin.js";
+
 interface Env {
   LUCENT_CACHE?: KVNamespace;
   LUCENT_DB?: D1Database;
+  LUCENT_ORIGIN?: string;
+  ENVIRONMENT?: string;
+  NODE_ENV?: string;
 }
 
 export const onRequest: PagesFunction<Env> = async (context) => {
   const url = new URL(context.request.url);
   const cache = context.env.LUCENT_CACHE;
+  const originResult = resolveEdgeOrigin(context.env);
+  if ("errorResponse" in originResult) {
+    return originResult.errorResponse;
+  }
+  const origin = originResult.origin;
 
   // Edge cache for public static templates
   if (context.request.method === "GET" && cache && url.pathname === "/api/templates/public") {
@@ -17,7 +27,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
     }
   }
 
-  const targetUrl = new URL(`https://161.33.167.15.sslip.io${url.pathname}${url.search}`);
+  const targetUrl = new URL(`${origin}${url.pathname}${url.search}`);
   const modifiedRequest = new Request(targetUrl.toString(), {
     method: context.request.method,
     headers: context.request.headers,

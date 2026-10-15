@@ -191,6 +191,9 @@ export type CallAdmission =
  * joining becomes a host too, so a call is never left without anyone who can
  * end it (Zoom hands the host on the same way).
  */
+/** How long a call's starter counts as "on their way in" to an empty room. */
+export const HOST_ARRIVAL_MS = 20_000;
+
 export function admitToCall(
   meta: CallMeta | null,
   present: readonly string[],
@@ -223,6 +226,17 @@ export function admitToCall(
     return { kind: "admitted", host: false, meta: current, changed: false };
   }
   if (hostHere) return { kind: "admitted", host: false, meta: current, changed: false };
+  // The host who just started the call may still be connecting — their token
+  // is being minted in the same instant. An EMPTY room a moment old is that,
+  // not a host who left: handing hosting on here made both of two people who
+  // started a call together its host. (Someone already in the room without
+  // the host is a host who left; the hand-off below applies.)
+  const hostArriving =
+    meta !== null &&
+    current.hosts.length > 0 &&
+    present.length === 0 &&
+    now - current.startedAt < HOST_ARRIVAL_MS;
+  if (hostArriving) return { kind: "admitted", host: false, meta: current, changed: false };
   return {
     kind: "admitted",
     host: true,

@@ -47,5 +47,9 @@
   "dependencies": {
     "@supabase/ssr": "^0.12.7",
     "@supabase/supabase-js": "^2.117.3"
+  },
+  "//": "overrides.shell-quote: pinned because 1.8.4-1.10.0 carry GHSA-pqg4-j6r4-53mv (critical command injection in quote()) and the resolved tree sat at 1.10.0, failing the CI `audit shipped dependencies` gate. It arrives transitively via drizzle-orm -> gel (drizzle's optional EdgeDB driver; this repo only ever uses pg) and @changesets/cli -> launch-editor. Forcing the patched release avoids the breaking drizzle-orm bump the audit report otherwise recommends.",
+  "overrides": {
+    "shell-quote": "^1.12.0"
   }
 }

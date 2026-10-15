@@ -243,7 +243,9 @@ async function run() {
       if (boardRes?.status === 201 && boardId && boardId.startsWith("brd_")) {
         break;
       }
-      console.warn(`[Retry ${attempt}/6] Board creation returned status ${boardRes?.status}, retrying...`);
+      console.warn(
+        `[Retry ${attempt}/6] Board creation returned status ${boardRes?.status}, retrying...`,
+      );
       await new Promise((r) => setTimeout(r, 1000 * attempt));
     }
     check("Shared board created", boardRes?.status === 201 && !!boardId, `Board ID: ${boardId}`);
@@ -620,7 +622,10 @@ async function run() {
 
     // Check canvas nodes loaded
     const canvasLoaded = await waitFor(async () => {
-      const byLocator = await pageCanvas.locator('.node, .diagram-node, [data-node-id]').filter({ hasText: 'Core Edge Ingestion Hub' }).count();
+      const byLocator = await pageCanvas
+        .locator(".node, .diagram-node, [data-node-id]")
+        .filter({ hasText: "Core Edge Ingestion Hub" })
+        .count();
       const byText = await pageCanvas.getByText("Core Edge Ingestion Hub").count();
       return byLocator > 0 || byText > 0;
     }, 20000);
@@ -628,7 +633,9 @@ async function run() {
 
     // Check that Alice's Canvas view renders the active Meeting Huddle dock
     const huddleDockLoaded = await waitFor(async () => {
-      const dock = await pageCanvas.locator(".meeting-huddle-dock, .call-stage, .call-tile").count();
+      const dock = await pageCanvas
+        .locator(".meeting-huddle-dock, .call-stage, .call-tile")
+        .count();
       return dock > 0;
     }, 15000);
     check(
@@ -958,7 +965,7 @@ async function run() {
           break;
         } else {
           console.warn(
-            `[AI Attempt ${attempt}/4] status ${res.status}: ${data?.error || data?.detail || 'No operations'}, waiting 15s for rate limit reset...`,
+            `[AI Attempt ${attempt}/4] status ${res.status}: ${data?.error || data?.detail || "No operations"}, waiting 15s for rate limit reset...`,
           );
         }
       } catch (err) {

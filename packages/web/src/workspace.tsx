@@ -21,6 +21,7 @@ import {
   stampTrust,
   withEditTrust,
   isConversationOnly,
+  isDestructiveOperation,
   lensFor,
   representationLabel,
   validateOperations,
@@ -44,6 +45,7 @@ import {
   decideServerProposal,
   fetchBoard,
   joinBoard,
+  listMembers,
   listServerProposals,
   saveBoardDetailed,
   askLucent,
@@ -100,6 +102,7 @@ import {
   type GenPhase,
   type SendOutcome,
   type WorkspaceState,
+  type PendingUndo,
   LEGACY_LENS_VIEWS,
 } from "./workspaceTypes.js";
 
@@ -117,6 +120,8 @@ import {
   serverProposalToPanel,
   stripInviteFromUrl,
   stripBoardFromUrl,
+  LARGE_UNDO_OBJECTS,
+  removalOf,
 } from "./workspaceHelpers.js";
 
 const Ctx = createContext<WorkspaceState | null>(null);
@@ -356,6 +361,11 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   // Live collaborators. Populated only when a server-side board is open and the
   // realtime socket is connected; empty in the offline/solo localStorage flow.
   const [peers, setPeers] = useState<Peer[]>([]);
+  /**
+   * Names of the board's members, so a comment, vote or history row by
+   * someone who isn't connected right now reads as a person, not an id.
+   */
+  const [memberNames, setMemberNames] = useState<ReadonlyMap<string, string>>(new Map());
   const [spotlight, setSpotlightState] = useState<Spotlight | null>(null);
   const [lastSummon, setLastSummon] = useState<{
     from: Spotlight;
@@ -389,6 +399,27 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const summon = useCallback((viewport: Viewport) => syncRef.current?.summon(viewport), []);
 
   /**
+   * Proposals approved from THIS tab. Approval commits server-side, so the
+   * change reaches this board as a remote entry; recognising our own approval
+   * (the approve route's requestId is `prp_<proposalId>_<userId>`) lets it
+   * join this person's undo history like any change they made.
+   */
+  const approvedHereRef = useRef(new Set<string>());
+
+  /**
+   * A large undo/redo waiting for confirmation. One Ctrl+Z that would remove
+   * a whole AI build (or any five-plus objects) asks first — a slip of the
+   * keyboard must never take the board away (AGENTS.md: major operations go
+   * behind human approval). Pressing it again, or the bar's button, confirms.
+   */
+  const [pendingUndo, setPendingUndo] = useState<PendingUndo | null>(null);
+  const pendingUndoRef = useRef<PendingUndo | null>(null);
+  const setPending = useCallback((p: PendingUndo | null) => {
+    pendingUndoRef.current = p;
+    setPendingUndo(p);
+  }, []);
+
+  /**
    * Attach a realtime session to a server-side board. The server is
    * authoritative: its broadcasts replace local state, and local commits are
    * sent for sequencing rather than applied twice.
@@ -400,6 +431,16 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       setSpotlightState(null);
       setLastSummon(null);
       const sync = new BoardSync(id, initial, {
+        onEntry: (entry, before) => {
+          // The approve route commits as `prp_<proposalId>` — one key per
+          // proposal, so a double approval is a duplicate. Ours if this tab
+          // approved that proposal.
+          const rid = entry.requestId ?? "";
+          if (!rid.startsWith("prp_")) return;
+          const proposalId = rid.slice("prp_".length);
+          if (!approvedHereRef.current.delete(proposalId)) return;
+          historyRef.current.recordApplied(entry.ops, before, "Approved AI proposal");
+        },
         onWorkspace: (ws) => {
           applyingRemote.current = true;
           // A remote broadcast is not a local commit: don't push it onto the
@@ -805,6 +846,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         ? laidOutScoped(next, touchedIdsOf(ops))
         : { ws: next, scope: null };
       historyRef.current.commit(ops, label);
+      setPending(null);
       setWorkspace(positioned);
       setTick((t) => t + 1);
       persist(positioned, conversation, name);
@@ -813,7 +855,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       }
       return positioned;
     },
-    [persist, refineLayout],
+    [persist, refineLayout, setPending],
   );
 
   /**
@@ -1239,7 +1281,19 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         );
 
         // The workspace after this batch, provenance and folded topics riding the ops.
-        const applyStamped = (): Workspace => applyOperations(workspace, foldedOps);
+        // Applied to the board as it is NOW, not as it was when the request
+        // went out: a shared board keeps moving while the model thinks, and
+        // the old base silently dropped every teammate's edit from this
+        // canvas — and, through updateWorkspace, from the sync's own copy —
+        // until a reload. Only the ops that still apply land (a node the
+        // batch points at may have been deleted meanwhile); the room
+        // re-validates them anyway.
+        const landing = (): { next: Workspace; ops: Operation[] } => {
+          const partial = applyValidOperations(workspaceRef.current, foldedOps);
+          return partial.applied.length > 0
+            ? { next: partial.workspace, ops: partial.applied }
+            : { next: applyOperations(workspaceRef.current, foldedOps), ops: foldedOps };
+        };
 
         // Partial-application report (M1): the server may have skipped ops
         // that failed validation while applying the rest. Attach them to the
@@ -1254,14 +1308,20 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           ...planSkippedNote,
         };
 
-        // Large batches on an existing diagram present as a proposal to review.
+        // Review gating on an existing diagram presents as a proposal to review.
         // Threshold is dynamic from settings (UX-1): always=>0 (everything
-        // proposes), large=>5, never=>Infinity (destructive/external still
-        // propose on the server path; kept simple here).
+        // proposes), large=>5, never=>Infinity.
+        // Invariant: Destructive operations (e.g. DELETE_NODE, DISCONNECT_NODES) on
+        // an existing diagram MUST require proposal review regardless of threshold (UX-1 / Stage A safety).
+        const existingNodeCount = Object.keys(workspace.nodes).length;
+        const hasDestructive = result.operations.some((op) => {
+          if (op.op === "TRANSFORM_DIAGRAM" && existingNodeCount === 0) return false;
+          return isDestructiveOperation(op);
+        });
         const isLarge =
           attachments?.propose === true ||
-          (result.operations.length > proposalThreshold() &&
-            Object.keys(workspace.nodes).length > 0);
+          (result.operations.length > proposalThreshold() && existingNodeCount > 0) ||
+          (hasDestructive && existingNodeCount > 0);
         setGenPhase("applying");
 
         if (isLarge) {
@@ -1328,13 +1388,13 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           persist(workspace, conversation, projectName);
           return { outcome: "answered", text: explanation, reply };
         } else {
-          const next = applyStamped();
+          const { next, ops: landedOps } = landing();
           // Google-Stitch-style reveal: sketch the new nodes in FLOW ORDER with
           // their connectors drawing in after each. The model emits CREATE_NODE
           // start→end, so creation order is flow order. Cleared on a timer so
           // later renders (pans, culling mounts, manual edits) stay instant —
           // only this freshly generated batch choreographs.
-          const createdIds = foldedOps.flatMap((op) => (op.op === "CREATE_NODE" ? [op.id] : []));
+          const createdIds = landedOps.flatMap((op) => (op.op === "CREATE_NODE" ? [op.id] : []));
           if (createdIds.length >= 2) {
             const order: Record<string, number> = {};
             createdIds.forEach((id, idx) => (order[id] = idx));
@@ -1352,7 +1412,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
               text: explanation,
               reply,
               ...skippedNote,
-              effect: turnEffect(foldedOps),
+              effect: turnEffect(landedOps),
               ...(result.thinking ? { thinking: result.thinking } : {}),
               ...(result.telemetry ? { telemetry: result.telemetry } : {}),
             },
@@ -1361,11 +1421,11 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           // The folded ops, not the raw model batch — the stamp and the
           // folded topic ride into history and the room with them (Stage C2
           // + C5).
-          commitAndShare(next, foldedOps, explanation, conversation, projectName, result.runId);
-          if (foldedOps.some((op) => op.op === "CREATE_WIREFRAME")) {
+          commitAndShare(next, landedOps, explanation, conversation, projectName, result.runId);
+          if (landedOps.some((op) => op.op === "CREATE_WIREFRAME")) {
             setLens("wireframe");
           }
-          return { outcome: "applied", ops: foldedOps.length, reply };
+          return { outcome: "applied", ops: landedOps.length, reply };
         }
       } catch (err) {
         setStreamThinking("");
@@ -1681,6 +1741,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       if (decidedRef.current === proposal.id) return;
       decidedRef.current = proposal.id;
       setProposal(null); // the panel closes immediately; the ops arrive via WS
+      approvedHereRef.current.add(server.id);
       void decideServerProposal(server.boardId, server.id, "approve").then((out) => {
         serverProposalRef.current = null;
         if (!out) {
@@ -1791,7 +1852,34 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     setProposal(null);
   }, [claimDecision, proposal]);
 
+  /**
+   * True when this step needs a yes first: it would take five or more objects
+   * off the board. The first press stages it; the second (same direction)
+   * confirms. Anything else in between drops the staging.
+   */
+  const needsConfirm = useCallback(
+    (direction: "undo" | "redo"): boolean => {
+      const entry =
+        direction === "undo" ? historyRef.current.peekUndo() : historyRef.current.peekRedo();
+      if (!entry) return false;
+      const removes = removalOf(direction === "undo" ? entry.inverses : entry.ops);
+      if (removes.objects < LARGE_UNDO_OBJECTS) {
+        setPending(null);
+        return false;
+      }
+      const staged = pendingUndoRef.current;
+      if (staged && staged.direction === direction) {
+        setPending(null);
+        return false; // the second press: confirmed
+      }
+      setPending({ direction, label: entry.label, ...removes });
+      return true;
+    },
+    [setPending],
+  );
+
   const undo = useCallback(() => {
+    if (needsConfirm("undo")) return;
     const { workspace: next, ops } = historyRef.current.undo();
     // History replays ops, and ops carry no coordinates — positions come only
     // from the layout pass. Relayout here or every node renders at (0,0)
@@ -1809,8 +1897,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         void refineLayout(positioned, { kind: "board" }, true);
       }
     }
-  }, [chat, persist, projectName, refineLayout]);
+  }, [chat, persist, projectName, refineLayout, needsConfirm]);
   const redo = useCallback(() => {
+    if (needsConfirm("redo")) return;
     const { workspace: next, ops } = historyRef.current.redo();
     // Same as undo: the replayed workspace has no positions of its own.
     const needsLayout = opsNeedLayout(ops);
@@ -1824,7 +1913,14 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         void refineLayout(positioned, { kind: "board" }, true);
       }
     }
-  }, [chat, persist, projectName, refineLayout]);
+  }, [chat, persist, projectName, refineLayout, needsConfirm]);
+  const confirmPendingUndo = useCallback(() => {
+    const staged = pendingUndoRef.current;
+    if (!staged) return;
+    if (staged.direction === "undo") undo();
+    else redo();
+  }, [undo, redo]);
+  const cancelPendingUndo = useCallback(() => setPending(null), [setPending]);
 
   const restoreVersion = useCallback(
     (index: number) => {
@@ -2155,11 +2251,30 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       for (const peer of peers) {
         if (peer.userId === userId) return peer.name;
       }
-      // 3. Unknown authors fall back to the raw id rather than disappearing.
+      // 3. The board's members, whether or not they are here right now.
+      const member = memberNames.get(userId);
+      if (member) return member;
+      // 4. Unknown authors fall back to the raw id rather than disappearing.
       return userId;
     },
-    [peers],
+    [peers, memberNames],
   );
+  useEffect(() => {
+    setMemberNames(new Map());
+    if (!boardId) return;
+    let live = true;
+    void listMembers(boardId)
+      .then((res) => {
+        if (!live || !res) return;
+        const names = new Map<string, string>();
+        for (const m of res.members) if (m.name) names.set(m.userId, m.name);
+        setMemberNames(names);
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [boardId]);
 
   const value: WorkspaceState = {
     view,
@@ -2212,6 +2327,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     cancelProposal,
     undo,
     redo,
+    pendingUndo,
+    confirmPendingUndo,
+    cancelPendingUndo,
     restoreVersion,
     selectDiagram,
     convertBoard,

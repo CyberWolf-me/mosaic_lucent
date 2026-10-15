@@ -1,12 +1,13 @@
 import { voicePhaseLabel, type VoicePhase } from "../voiceConversation.js";
-import { useId, useRef, useState } from "react";
-import { Ico } from "./icons.js";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { Ico, ToolIco } from "./icons.js";
+import { Menu } from "./primitives.js";
 import { GrowTextarea } from "./GrowTextarea.js";
 import { AllowanceNote } from "./Paywall.js";
 import type { ChatEntry } from "../persistence.js";
 import type { AskCitation } from "../boards.js";
 import { useWorkspace, useWorkspaceOptional } from "../workspace.js";
-import { useSettings } from "../settings.js";
+import { useSettings, type ModelTier } from "../settings.js";
 import { StatementGlyph } from "./StatementGlyph.js";
 import { KIND_LABEL } from "../statementUi.js";
 import { isEmptyEffect, type TurnEffect } from "../turnEffect.js";
@@ -108,8 +109,14 @@ function SlashIcon({ icon }: { icon: SlashCommandDef["icon"] }) {
 }
 
 /**
- * Floating conversational pill ported from reference/components/ai_pill.jsx.
- * Wired to real submit/mic callbacks instead of window.__lucentGo.
+ * The board's composer: a paper card docked at the bottom of the canvas, in
+ * the same Atelier language as the empty-board hero and Home's composer.
+ *
+ * Mode reads as an index tab on the card's edge rather than a toggle inside
+ * it, so the card always says which way a turn goes — Build changes the
+ * board, Ask only reads it. The footer names what a Build turn will look at
+ * (the whole board, or the selection), then the pace, voice, and a send
+ * button labelled with the verb it performs.
  */
 
 export interface PillStatus {
@@ -121,6 +128,15 @@ export type PillMode = "build" | "ask";
 /** UX-2 generation phase: the machine-readable half of the pill status. */
 export type AIPhase = "understanding" | "constructing" | "validating" | "applying";
 
+/**
+ * What a Build turn reads besides the words: the selection the canvas sends
+ * with the request (Phase C), so "this" and "these" resolve. Empty `names`
+ * means nothing is selected and the model works from the whole board.
+ */
+export interface ComposerScope {
+  names: string[];
+}
+
 // What is actually happening, in the user's terms — the old labels
 // ("Designing architecture…") named a diagram kind the request may not be.
 const PHASE_LABEL: Record<AIPhase, string> = {
@@ -129,6 +145,138 @@ const PHASE_LABEL: Record<AIPhase, string> = {
   validating: "Checking every change…",
   applying: "Placing it on the board…",
 };
+
+const VOICE_CHIP: Record<VoicePhase, string> = {
+  idle: "Talk",
+  listening: "Listening",
+  thinking: "Thinking",
+  speaking: "Answering",
+};
+
+/** The three model tiers, as a pace rather than a product name. */
+const TIERS: Array<{ id: ModelTier; label: string; detail: string; bars: number }> = [
+  { id: "fast", label: "Fast", detail: "Quickest — best for small edits", bars: 1 },
+  {
+    id: "balanced",
+    label: "Balanced",
+    detail: "Sound structure, quick enough to talk to",
+    bars: 2,
+  },
+  {
+    id: "reasoning",
+    label: "Think",
+    detail: "Reasons it through first — slower",
+    bars: 3,
+  },
+];
+
+/** Three rising bars, filled up to the tier: the pace at a glance. */
+function PaceGlyph({ bars }: { bars: number }) {
+  return (
+    <svg className="ai-pace" width="14" height="14" viewBox="0 0 14 14" aria-hidden>
+      {[0, 1, 2].map((i) => (
+        <rect
+          key={i}
+          x={1.5 + i * 4.25}
+          y={9 - i * 3}
+          width="2.5"
+          height={3 + i * 3}
+          rx="1"
+          fill="currentColor"
+          opacity={i < bars ? 1 : 0.25}
+        />
+      ))}
+    </svg>
+  );
+}
+
+/** A dashed marquee: the canvas's own selection mark. */
+function ScopeGlyph() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 14 14" aria-hidden>
+      <rect
+        x="1.5"
+        y="1.5"
+        width="11"
+        height="11"
+        rx="2.5"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.3"
+        strokeDasharray="2.4 1.8"
+      />
+      <circle cx="7" cy="7" r="1.6" fill="currentColor" />
+    </svg>
+  );
+}
+
+function TierPicker() {
+  const [settings, updateSettings] = useSettings();
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const current = TIERS.find((t) => t.id === settings.modelTier) ?? TIERS[1]!;
+  const close = useCallback(() => setOpen(false), []);
+
+  // Keyboard users land on the current tier, not on the menu's frame.
+  useEffect(() => {
+    if (open) wrapRef.current?.querySelector<HTMLElement>(".ai-tier-item.on")?.focus();
+  }, [open]);
+
+  return (
+    <div
+      className="ai-tier"
+      ref={wrapRef}
+      onKeyDown={(e) => {
+        if (e.key === "Escape" && open) triggerRef.current?.focus();
+      }}
+    >
+      <button
+        ref={triggerRef}
+        type="button"
+        className={`ai-chip${open ? " pressed" : ""}`}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label={`Pace: ${current.label}`}
+        title={`${current.label} — ${current.detail}`}
+        // The menu closes on any outside mousedown; this one is the toggle's.
+        onMouseDown={(e) => {
+          if (open) e.stopPropagation();
+        }}
+        onClick={() => setOpen((o) => !o)}
+      >
+        <PaceGlyph bars={current.bars} />
+        <span className="ai-chip-label is-optional">{current.label}</span>
+      </button>
+      {open && (
+        <Menu onClose={close} label="Pace" className="ai-tier-menu" origin="bottom left">
+          <div className="ai-tier-head">Pace</div>
+          {TIERS.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              role="menuitemradio"
+              aria-checked={t.id === current.id}
+              className={`ai-tier-item${t.id === current.id ? " on" : ""}`}
+              onClick={() => {
+                updateSettings({ modelTier: t.id });
+                setOpen(false);
+                triggerRef.current?.focus();
+              }}
+            >
+              <PaceGlyph bars={t.bars} />
+              <span className="ai-tier-text">
+                <span className="ai-tier-name">{t.label}</span>
+                <span className="ai-tier-detail">{t.detail}</span>
+              </span>
+              <Ico.Check className="ai-tier-check" />
+            </button>
+          ))}
+        </Menu>
+      )}
+    </div>
+  );
+}
 
 export function AIPill({
   placeholder,
@@ -155,6 +303,7 @@ export function AIPill({
   clarification = null,
   onSelectClarification,
   streamThinking,
+  scope,
 }: {
   /** Mode-aware callers pass one; the default stays the Build wording. */
   placeholder?: string;
@@ -164,8 +313,8 @@ export function AIPill({
   onSubmit?: () => void;
   /**
    * Stage C1's Build/Ask split. Both this and onModeChange must be present for
-   * the toggle to render — the pill stays presentation-only, so a mount that
-   * passes neither (BoardView, the document views) keeps its exact old shape.
+   * the mode tabs to render — the pill stays presentation-only, so a mount
+   * that passes neither (BoardView, the document views) has no tabs.
    * Build = "change my workspace" (operations); Ask = "understand my
    * workspace" (answers + citations, never a mutation).
    */
@@ -195,7 +344,7 @@ export function AIPill({
   phase?: AIPhase | null;
   /** UX-2 machine progress alongside the phase ("12 characters received"). */
   progressNote?: string | null;
-  /** UX-2 cancel. Rendered only while busy; the workspace owns the abort. */
+  /** UX-2 cancel. While busy the send button becomes Stop; the workspace owns the abort. */
   onCancel?: () => void;
   /** A voice conversation with Lucent, and where it is (voiceConversation.ts). */
   voicePhase?: VoicePhase;
@@ -205,16 +354,18 @@ export function AIPill({
   onSelectClarification?: (choice: string) => void;
   /** Live streaming chain-of-thought tokens while AI is reasoning. */
   streamThinking?: string;
+  /**
+   * What a Build turn reads besides the words. Only the canvas passes it —
+   * it is the mount whose submit actually sends the selection.
+   */
+  scope?: ComposerScope;
 }) {
-  const [settings, updateSettings] = useSettings();
   const ws = useWorkspaceOptional();
   const liveThinking = streamThinking ?? ws?.streamThinking ?? "";
   const [expanded, setExpanded] = useState(false);
-  // The prompt field grows with its text; when it passes one line the pill
-  // relaxes its fully-round corners so a tall box doesn't look like a capsule.
-  const [multiline, setMultiline] = useState(false);
-  const bars = useRef(Array.from({ length: 14 }, () => 20 + Math.random() * 60));
+  const bars = useRef(Array.from({ length: 5 }, () => 35 + Math.random() * 65));
   const inputId = useId();
+  const logId = useId();
   const hasMode = mode !== undefined && onModeChange !== undefined;
   const askMode = hasMode && mode === "ask";
   const phaseText = phase
@@ -223,6 +374,9 @@ export function AIPill({
   const statusText = phaseText ?? status?.text ?? null;
   const conversing = voicePhase !== "idle";
   const voiceLine = voicePhaseLabel(voicePhase);
+  const turns = history.filter((m) => m.role === "user").length;
+  const showLog = expanded && history.length > 0;
+  const verb = !hasMode ? "Send" : askMode ? "Ask" : "Build";
 
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [dismissedQuery, setDismissedQuery] = useState<string | null>(null);
@@ -265,6 +419,38 @@ export function AIPill({
     }
   };
 
+  // Ask has one wording on every lens — the canvas's per-lens placeholders
+  // all describe edits, which Ask never makes.
+  const fieldPlaceholder = listening
+    ? "Listening… say it the way you'd explain it to a colleague"
+    : askMode
+      ? "Ask about this board — what was decided, who owns what, and why…"
+      : (placeholder ?? "Describe a change — add, connect, regroup… or type / for commands");
+
+  const scopeChip = (() => {
+    if (!scope) return null;
+    if (askMode) {
+      return {
+        on: false,
+        text: "Board & history",
+        title: "Ask reads this board and its history. It never changes anything.",
+      };
+    }
+    const [first, ...rest] = scope.names;
+    if (!first) {
+      return {
+        on: false,
+        text: "Whole board",
+        title: "Nothing selected — Lucent works from the whole board. Select objects to aim it.",
+      };
+    }
+    return {
+      on: true,
+      text: rest.length ? `${first} +${rest.length}` : first,
+      title: `Lucent reads your selection — ${scope.names.join(", ")} — so “this” and “these” mean what you picked.`,
+    };
+  })();
+
   return (
     <div className={`ai-pill-wrap${shifted ? " shifted" : ""}`}>
       {/* The plan warning belongs to the composer rather than to each view that
@@ -274,29 +460,9 @@ export function AIPill({
           to say, which is most of the month. */}
       <AllowanceNote />
       {statusText && (
-        <div className="pill-status">
+        <div className="pill-status" role="status" aria-live="polite">
           <span className="pulse" />
           <span>{statusText}</span>
-          {busy && onCancel && (
-            <button
-              type="button"
-              aria-label="Cancel generation"
-              onClick={onCancel}
-              style={{
-                marginLeft: 4,
-                fontSize: 11,
-                fontFamily: "var(--font-mono)",
-                padding: "2px 8px",
-                borderRadius: 999,
-                border: "1px solid var(--stroke-2)",
-                background: "transparent",
-                color: "var(--ink-1)",
-                cursor: "pointer",
-              }}
-            >
-              Cancel
-            </button>
-          )}
         </div>
       )}
 
@@ -304,51 +470,9 @@ export function AIPill({
         <div className="live-thinking-accordion" role="status" aria-live="polite">
           <div className="live-thinking-header">
             <span className="live-thinking-pulse" />
-            <span className="live-thinking-title">🧠 Thinking…</span>
+            <span className="live-thinking-title">Thinking…</span>
           </div>
           <div className="live-thinking-body">{liveThinking}</div>
-        </div>
-      )}
-
-      {expanded && history.length > 0 && (
-        <div
-          className="ai-history-bubble"
-          style={{
-            width: 620,
-            maxHeight: 320,
-            overflowY: "auto",
-            padding: 14,
-            backdropFilter: "blur(24px) saturate(1.5)",
-            borderRadius: "var(--r-xl)",
-            boxShadow: "var(--elev-3)",
-            display: "flex",
-            flexDirection: "column",
-            gap: 10,
-            position: "relative",
-          }}
-        >
-          <button
-            onClick={() => setExpanded(false)}
-            title="Collapse"
-            style={{
-              position: "absolute",
-              top: 8,
-              right: 8,
-              width: 22,
-              height: 22,
-              borderRadius: 999,
-              display: "grid",
-              placeItems: "center",
-              color: "var(--ink-3)",
-              background: "var(--canvas-2)",
-              border: "1px solid var(--stroke-1)",
-            }}
-          >
-            <Ico.Down style={{ transform: "rotate(180deg)" }} />
-          </button>
-          {history.map((m, i) => (
-            <ConvoTurn key={i} entry={m} onCitation={onCitation} />
-          ))}
         </div>
       )}
 
@@ -360,66 +484,18 @@ export function AIPill({
       )}
 
       {clarification && (
-        <div
-          className="clarification-bar"
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            gap: 6,
-            padding: "8px 14px",
-            background: "oklch(from var(--paper-0) l c h / 0.94)",
-            backdropFilter: "blur(20px)",
-            borderRadius: 16,
-            border: "1px solid var(--amber-2)",
-            boxShadow: "var(--elev-2)",
-            animation: "pill-in 0.2s var(--e-out) both",
-            maxWidth: 620,
-          }}
-          role="region"
-          aria-label="Clarification options"
-        >
-          <div
-            style={{
-              fontSize: 12,
-              fontWeight: 500,
-              color: "var(--ink-0)",
-              display: "flex",
-              alignItems: "center",
-              gap: 6,
-            }}
-          >
-            <Ico.Sparkle style={{ color: "var(--amber-1)", width: 14, height: 14 }} />
+        <div className="clarification-bar" role="region" aria-label="Clarification options">
+          <div className="clarification-question">
+            <Ico.Sparkle />
             <span>{clarification.question}</span>
           </div>
-          <div
-            style={{
-              display: "flex",
-              flexWrap: "wrap",
-              gap: 6,
-              justifyContent: "center",
-            }}
-          >
+          <div className="clarification-options">
             {clarification.options.map((opt, i) => (
               <button
                 key={i}
                 type="button"
-                className="btn-atelier sm"
-                style={{
-                  fontSize: 11.5,
-                  padding: "3px 10px",
-                  borderRadius: 999,
-                  background: "var(--canvas-2)",
-                  border: "1px solid var(--stroke-2)",
-                  cursor: "pointer",
-                  color: "var(--ink-0)",
-                  transition: "all 0.15s ease",
-                }}
-                onClick={() => {
-                  if (onSelectClarification) {
-                    onSelectClarification(opt);
-                  }
-                }}
+                className="hero-chip"
+                onClick={() => onSelectClarification?.(opt)}
               >
                 {opt}
               </button>
@@ -430,10 +506,7 @@ export function AIPill({
       {showSlashMenu && (
         <div className="slash-menu" role="listbox" aria-label="AI Slash Commands">
           <div className="slash-menu-head">
-            <span className="slash-menu-title">
-              <Ico.Sparkle style={{ width: 13, height: 13, color: "var(--amber-1)" }} />
-              AI Command Presets
-            </span>
+            <span className="slash-menu-title">AI Command Presets</span>
             <div className="slash-menu-hints">
               <span>↑↓ Navigate</span>
               <span>↵ Select</span>
@@ -488,244 +561,204 @@ export function AIPill({
           </button>
         </div>
       )}
-      <div
-        className={`ai-pill ${listening ? "listening" : ""}${readOnly ? " read-only" : ""}${multiline ? " multiline" : ""}`}
-      >
-        {readOnly ? (
-          <div className="ai-pill-readonly-row">
-            <div className="pill-icon">
-              <Ico.Eye />
-            </div>
-            <span className="pill-notice">
-              You're viewing this board. Ask the owner for edit access to change it.
-            </span>
-          </div>
-        ) : (
-          <>
-            {/* Top Prompt Input Zone — Full width hero input */}
-            <div className="ai-pill-input-row">
-              <div className="pill-icon">
-                {listening ? (
-                  <Ico.Mic2 style={{ color: "var(--amber-1)" }} />
-                ) : askMode ? (
-                  <Ico.History />
-                ) : (
-                  <Ico.Sparkle />
-                )}
-              </div>
-              <label htmlFor={inputId} className="sr-only">
-                Ask Lucent
-              </label>
-              <GrowTextarea
-                id={inputId}
-                value={value}
-                onChange={(v) => onChange?.(v)}
-                onKeyDown={handleKeyDown}
-                onSubmit={() => onSubmit?.()}
-                onMultilineChange={setMultiline}
-                maxHeight={168}
-                placeholder={
-                  listening
-                    ? "Listening… speak your idea (tap mic or ↵ when done)"
-                    : (placeholder ??
-                      (askMode
-                        ? "Ask about this board's history…"
-                        : "Refine, add, or transform — type / for AI commands…"))
-                }
-              />
-            </div>
 
-            {/* Bottom Accessory Strip — Mode, Model tier, Commands, Voice, Send */}
-            <div className="ai-pill-toolbar">
-              <div className="ai-pill-toolbar-left">
-                {hasMode && (
-                  <div
-                    className="segmented ai-mode-toggle"
-                    role="radiogroup"
-                    aria-label="Build or Ask mode"
-                  >
-                    <button
-                      type="button"
-                      className={mode === "build" ? "active" : ""}
-                      onClick={() => onModeChange("build")}
-                      title="Describe what to build — Lucent changes the board"
-                      aria-pressed={mode === "build"}
-                      aria-label="Build mode"
-                    >
-                      Build
-                    </button>
-                    <button
-                      type="button"
-                      className={mode === "ask" ? "active" : ""}
-                      onClick={() => onModeChange("ask")}
-                      title="Ask about the board and its history — read-only, with citations"
-                      aria-pressed={mode === "ask"}
-                      aria-label="Ask mode"
-                    >
-                      Ask
-                    </button>
-                  </div>
-                )}
-
-                <div
-                  className="segmented model-tier-selector"
-                  role="radiogroup"
-                  aria-label="Model tier"
+      <div className="ai-dock">
+        {((hasMode && !readOnly) || history.length > 0) && (
+          <div className="ai-tabs">
+            {hasMode && !readOnly && (
+              <div className="ai-tabs-modes" role="group" aria-label="Build or Ask mode">
+                <button
+                  type="button"
+                  className={`ai-tab${mode === "build" ? " active" : ""}`}
+                  onClick={() => onModeChange("build")}
+                  title="Describe what to build — Lucent changes the board"
+                  aria-pressed={mode === "build"}
+                  aria-label="Build mode"
                 >
-                  <button
-                    type="button"
-                    className={settings.modelTier === "fast" ? "active" : ""}
-                    onClick={() => updateSettings({ modelTier: "fast" })}
-                    title="⚡ Fast — low latency, instant streaming"
-                    aria-pressed={settings.modelTier === "fast"}
-                    aria-label="Fast tier"
-                  >
-                    ⚡ Fast
-                  </button>
-                  <button
-                    type="button"
-                    className={settings.modelTier === "balanced" ? "active" : ""}
-                    onClick={() => updateSettings({ modelTier: "balanced" })}
-                    title="⚖️ Balanced — optimal balance between intelligence & speed"
-                    aria-pressed={settings.modelTier === "balanced"}
-                    aria-label="Balanced tier"
-                  >
-                    ⚖️ Balanced
-                  </button>
-                  <button
-                    type="button"
-                    className={settings.modelTier === "reasoning" ? "active" : ""}
-                    onClick={() => updateSettings({ modelTier: "reasoning" })}
-                    title="🧠 Reasoning — multi-step deep chain-of-thought analysis"
-                    aria-pressed={settings.modelTier === "reasoning"}
-                    aria-label="Reasoning tier"
-                  >
-                    🧠 Think
-                  </button>
+                  Build
+                </button>
+                <button
+                  type="button"
+                  className={`ai-tab${mode === "ask" ? " active" : ""}`}
+                  onClick={() => onModeChange("ask")}
+                  title="Ask about the board and its history — read-only, with citations"
+                  aria-pressed={mode === "ask"}
+                  aria-label="Ask mode"
+                >
+                  Ask
+                </button>
+              </div>
+            )}
+            {history.length > 0 && (
+              <button
+                type="button"
+                className={`ai-tab ai-tab-log${showLog ? " open" : ""}`}
+                onClick={() => setExpanded((e) => !e)}
+                aria-expanded={showLog}
+                aria-controls={logId}
+                title={showLog ? "Hide the conversation" : "Show the conversation"}
+              >
+                Conversation <span className="ai-tab-count">{turns}</span>
+                <ToolIco.ChevronUp className="ai-tab-chev" />
+              </button>
+            )}
+          </div>
+        )}
+
+        <div
+          className={`ai-pill${listening ? " listening" : ""}${readOnly ? " read-only" : ""}${askMode ? " ask" : ""}`}
+        >
+          {showLog && (
+            <div className="ai-log" id={logId} role="log" aria-label="Conversation">
+              {history.map((m, i) => (
+                <ConvoTurn key={i} entry={m} onCitation={onCitation} />
+              ))}
+            </div>
+          )}
+          {readOnly ? (
+            <div className="ai-pill-readonly-row">
+              <Ico.Eye />
+              <span className="pill-notice">
+                You're viewing this board. Ask the owner for edit access to change it.
+              </span>
+            </div>
+          ) : (
+            <>
+              <div className="ai-pill-input-row">
+                <label htmlFor={inputId} className="sr-only">
+                  Ask Lucent
+                </label>
+                <GrowTextarea
+                  id={inputId}
+                  value={value}
+                  onChange={(v) => onChange?.(v)}
+                  onKeyDown={handleKeyDown}
+                  onSubmit={() => onSubmit?.()}
+                  maxHeight={168}
+                  placeholder={fieldPlaceholder}
+                />
+              </div>
+
+              <div className="ai-pill-toolbar">
+                <div className="ai-pill-toolbar-left">
+                  {scopeChip && (
+                    <>
+                      <span
+                        className={`ai-scope${scopeChip.on ? " on" : ""}`}
+                        title={scopeChip.title}
+                      >
+                        {askMode ? <Ico.History /> : <ScopeGlyph />}
+                        <span className="ai-scope-text">{scopeChip.text}</span>
+                      </span>
+                      <span className="ai-sep" aria-hidden />
+                    </>
+                  )}
+                  {!askMode && (
+                    <button
+                      type="button"
+                      className="ai-chip slash-trigger-btn"
+                      title="Browse AI commands — or type / in the box"
+                      aria-label="Browse AI commands"
+                      onClick={() => {
+                        setDismissedQuery(null);
+                        onChange?.("/");
+                      }}
+                    >
+                      <span className="ai-slash" aria-hidden>
+                        /
+                      </span>
+                      <span className="ai-chip-label is-optional">Commands</span>
+                    </button>
+                  )}
+                  <TierPicker />
                 </div>
 
-                {listening && (
-                  <div
-                    className="waveform"
-                    style={{
-                      height: 18,
-                      padding: "0 6px",
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 3,
-                      flexShrink: 0,
-                    }}
-                    title="Microphone active — speaking…"
-                  >
-                    {bars.current.slice(0, 6).map((h, i) => (
-                      <span key={i} style={{ animationDelay: `${i * 60}ms`, height: `${h}%` }} />
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              <div className="ai-pill-toolbar-right">
-                <button
-                  type="button"
-                  className="slash-trigger-btn"
-                  title="Browse AI Slash Commands (/)"
-                  onClick={() => {
-                    setDismissedQuery(null);
-                    onChange?.("/");
-                  }}
-                >
-                  /
-                </button>
-                <span className="kbd">⌘K</span>
-
-                <button
-                  type="button"
-                  className={`mic-btn ${listening || conversing ? "active" : ""}`}
-                  onClick={onToggleMic}
-                  title={
-                    conversing
-                      ? listening && value.trim()
-                        ? "Send what you said"
-                        : "End the voice conversation"
-                      : voiceSupported
-                        ? "Talk with Lucent — it answers out loud and keeps listening"
-                        : "Voice not supported in this browser"
-                  }
-                  aria-label={
-                    conversing
-                      ? listening && value.trim()
-                        ? "Send what you said"
-                        : "End the voice conversation"
-                      : "Talk with Lucent"
-                  }
-                  aria-pressed={conversing}
-                  style={voiceSupported ? undefined : { opacity: 0.45 }}
-                >
-                  <Ico.Mic />
-                </button>
-
-                {onToggleVoiceAgent && (
+                <div className="ai-pill-toolbar-right">
                   <button
                     type="button"
-                    className={`mic-btn voice-call-btn ${voiceAgentActive ? "active" : ""}`}
-                    onClick={onToggleVoiceAgent}
+                    className={`ai-chip ai-talk${listening || conversing ? " on" : ""}`}
+                    onClick={onToggleMic}
+                    disabled={!voiceSupported && !conversing}
                     title={
-                      voiceAgentActive
-                        ? "End live duplex voice call"
-                        : "Live Duplex Call (requires @lucent/voice-agent worker & Deepgram key) — or use Mic button for instant browser voice"
+                      conversing
+                        ? listening && value.trim()
+                          ? "Send what you said"
+                          : "End the voice conversation"
+                        : voiceSupported
+                          ? "Talk with Lucent — it answers out loud and keeps listening"
+                          : "Voice isn't supported in this browser"
                     }
-                    aria-label="Live Voice Call"
-                    aria-pressed={voiceAgentActive}
-                    style={
-                      voiceAgentActive
-                        ? {
-                            background: "var(--sig-violet)",
-                            color: "var(--canvas-0)",
-                            borderColor: "var(--sig-violet)",
-                            boxShadow: "0 0 14px oklch(from var(--sig-violet) l c h / 0.45)",
-                          }
-                        : {
-                            borderColor: "oklch(from var(--sig-violet) l c h / 0.4)",
-                          }
+                    aria-label={
+                      conversing
+                        ? listening && value.trim()
+                          ? "Send what you said"
+                          : "End the voice conversation"
+                        : "Talk with Lucent"
                     }
+                    aria-pressed={conversing}
                   >
-                    <Ico.Phone />
+                    {listening ? (
+                      <span className="ai-wave" aria-hidden>
+                        {bars.current.map((h, i) => (
+                          <span
+                            key={i}
+                            style={{ animationDelay: `${i * 90}ms`, height: `${h}%` }}
+                          />
+                        ))}
+                      </span>
+                    ) : (
+                      <Ico.Mic2 />
+                    )}
+                    <span className="ai-chip-label">
+                      {VOICE_CHIP[listening && voicePhase === "idle" ? "listening" : voicePhase]}
+                    </span>
                   </button>
-                )}
 
-                <button
-                  type="button"
-                  className="send-btn"
-                  onClick={onSubmit}
-                  disabled={busy}
-                  title="Send"
-                  aria-label="Send message"
-                >
-                  <Ico.Send />
-                </button>
+                  {onToggleVoiceAgent && (
+                    <button
+                      type="button"
+                      className={`ai-chip icon${voiceAgentActive ? " on" : ""}`}
+                      onClick={onToggleVoiceAgent}
+                      title={
+                        voiceAgentActive
+                          ? "End the live call"
+                          : "Live call — a duplex voice call with Lucent (needs the voice-agent worker)"
+                      }
+                      aria-label={voiceAgentActive ? "End the live call" : "Live call"}
+                      aria-pressed={voiceAgentActive}
+                    >
+                      <Ico.Phone />
+                    </button>
+                  )}
+
+                  {busy && onCancel ? (
+                    <button
+                      type="button"
+                      className="btn-atelier ai-send stop"
+                      onClick={onCancel}
+                      aria-label="Cancel generation"
+                    >
+                      <span className="ai-stop-mark" aria-hidden />
+                      Stop
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className="btn-atelier primary ai-send"
+                      onClick={onSubmit}
+                      disabled={busy || !value.trim()}
+                      title={`${verb} — Enter`}
+                    >
+                      {verb}
+                      <Ico.Arrow />
+                    </button>
+                  )}
+                </div>
               </div>
-            </div>
-          </>
-        )}
+            </>
+          )}
+        </div>
       </div>
-      {history.length > 0 && !expanded && (
-        <button
-          onClick={() => setExpanded(true)}
-          style={{
-            fontSize: 11,
-            color: "var(--ink-2)",
-            fontFamily: "var(--font-mono)",
-            letterSpacing: "0.05em",
-            textTransform: "uppercase",
-            padding: "4px 10px",
-            borderRadius: 999,
-            border: "1px solid var(--stroke-1)",
-          }}
-          className="ai-msg-count-btn"
-        >
-          <Ico.Comment /> Conversation · {history.filter((m) => m.role === "user").length}
-        </button>
-      )}
     </div>
   );
 }
@@ -782,7 +815,6 @@ function ConvoTurn({
         {!isUser && entry.thinking && (
           <details className="thinking-accordion">
             <summary className="thinking-summary">
-              <span className="thinking-summary-icon">🧠</span>
               <span className="thinking-summary-label">
                 Thought{" "}
                 {entry.telemetry?.latencyMs
@@ -834,7 +866,7 @@ function ConvoTurn({
             className="telemetry-badge"
             title={`Provider: ${entry.telemetry.provider}\nModel: ${entry.telemetry.model}\nLatency: ${entry.telemetry.latencyMs}ms\nPrompt Tokens: ${entry.telemetry.promptTokens ?? "—"}\nCompletion Tokens: ${entry.telemetry.completionTokens ?? "—"}${entry.telemetry.reasoningTokens ? `\nReasoning Tokens: ${entry.telemetry.reasoningTokens}` : ""}`}
           >
-            <span className="telemetry-model">⚡ {entry.telemetry.model}</span>
+            <span className="telemetry-model">{entry.telemetry.model}</span>
             <span className="telemetry-sep">·</span>
             <span className="telemetry-stat">{(entry.telemetry.latencyMs / 1000).toFixed(1)}s</span>
             {entry.telemetry.completionTokens !== undefined && (

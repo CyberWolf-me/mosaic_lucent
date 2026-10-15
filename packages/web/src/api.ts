@@ -528,6 +528,7 @@ export async function streamGenerate(
         ...(turns.length ? { history: turns } : {}),
         ...(attachments?.images?.length ? { images: attachments.images } : {}),
         ...(attachments?.documents?.length ? { documents: attachments.documents } : {}),
+        ...(run?.boardId ? { boardId: run.boardId } : {}),
         ...(run ? { run } : {}),
         ...(rules ? { rules } : {}),
         ...(tier ? { tier } : {}),

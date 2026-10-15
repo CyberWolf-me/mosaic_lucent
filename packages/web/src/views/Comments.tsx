@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { Operation, Workspace } from "@lucent/core";
 import { Ico } from "../ui/icons.js";
+import { useWorkspaceOptional } from "../workspace.js";
 import {
   addCommentOps,
   commentAnchorLabel,
@@ -67,6 +68,8 @@ export function CommentPanel({
   const [replyDraft, setReplyDraft] = useState("");
   const threads = commentThreads(workspace, targetId);
   const names = knownMentionNames(workspace);
+  // The server stamps a comment's author as their user id; show the person.
+  const nameFor = useWorkspaceOptional()?.nameFor ?? ((id: string) => id);
 
   const submitThread = () => {
     const ops = addCommentOps(targetId, draft);
@@ -103,7 +106,7 @@ export function CommentPanel({
               <div className="cmt-avatar">{root.by.slice(0, 1).toUpperCase()}</div>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div className="cmt-meta">
-                  <span className="cmt-author">{root.by}</span>
+                  <span className="cmt-author">{nameFor(root.by)}</span>
                   <span className="mono cmt-time">{timeLabel(root.createdAt)}</span>
                   {root.resolved && <span className="cmt-resolved-tag">Resolved</span>}
                 </div>
@@ -116,7 +119,7 @@ export function CommentPanel({
                 <div className="cmt-avatar small">{r.by.slice(0, 1).toUpperCase()}</div>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div className="cmt-meta">
-                    <span className="cmt-author">{r.by}</span>
+                    <span className="cmt-author">{nameFor(r.by)}</span>
                     <span className="mono cmt-time">{timeLabel(r.createdAt)}</span>
                   </div>
                   <CommentBody body={r.body} />

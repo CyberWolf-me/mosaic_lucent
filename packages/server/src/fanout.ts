@@ -28,8 +28,11 @@
  * - `op` — the board advanced; read the log forward from your own cursor.
  * - `presence` — a peer joined, left or moved; re-read the `PresenceStore`.
  * - `resync` — you may have missed messages; reload from durable state.
+ * - `proposal` — a proposal was created or decided; fan out to connected peers.
+ * - `spotlight` — a participant took or released the spotlight across instances.
+ * - `summon` — a participant brought everyone to their viewport across instances.
  */
-export type FanoutKind = "op" | "presence" | "resync";
+export type FanoutKind = "op" | "presence" | "resync" | "proposal" | "spotlight" | "summon";
 
 /**
  * One notification. Small on purpose (rule 1 above) — this shape is the
@@ -52,6 +55,15 @@ export interface FanoutMessage {
    * names the author, which is enough for a receiver to recognise its own echo.
    */
   userId?: string;
+  /**
+   * The server instance that published the message, used by peers to recognize
+   * and ignore their own echo.
+   */
+  instanceId?: string;
+  /**
+   * For `kind: "proposal"`, the proposal event notification payload.
+   */
+  data?: unknown;
 }
 
 export type FanoutListener = (message: FanoutMessage) => void;
@@ -168,6 +180,8 @@ export function encodeFanoutMessage(message: FanoutMessage): string {
   const canonical: Record<string, unknown> = { boardId: message.boardId, kind: message.kind };
   if (message.seq !== undefined) canonical.seq = message.seq;
   if (message.userId !== undefined) canonical.userId = message.userId;
+  if (message.instanceId !== undefined) canonical.instanceId = message.instanceId;
+  if (message.data !== undefined) canonical.data = message.data;
   const json = JSON.stringify(canonical);
   const bytes = Buffer.byteLength(json, "utf8");
   if (bytes > FANOUT_MAX_PAYLOAD_BYTES) {
@@ -192,16 +206,28 @@ export function decodeFanoutMessage(raw: string): FanoutMessage | null {
     return null;
   }
   if (typeof parsed !== "object" || parsed === null) return null;
-  const { boardId, kind, seq, userId } = parsed as Record<string, unknown>;
+  const { boardId, kind, seq, userId, instanceId, data } = parsed as Record<string, unknown>;
   if (typeof boardId !== "string" || boardId.length === 0) return null;
-  if (kind !== "op" && kind !== "presence" && kind !== "resync") return null;
+  if (
+    kind !== "op" &&
+    kind !== "presence" &&
+    kind !== "resync" &&
+    kind !== "proposal" &&
+    kind !== "spotlight" &&
+    kind !== "summon"
+  ) {
+    return null;
+  }
   if (seq !== undefined && (typeof seq !== "number" || !Number.isInteger(seq) || seq < 0)) {
     return null;
   }
   if (userId !== undefined && typeof userId !== "string") return null;
+  if (instanceId !== undefined && typeof instanceId !== "string") return null;
   const message: FanoutMessage = { boardId, kind };
   if (typeof seq === "number") message.seq = seq;
   if (typeof userId === "string") message.userId = userId;
+  if (typeof instanceId === "string") message.instanceId = instanceId;
+  if (data !== undefined) message.data = data;
   return message;
 }
 

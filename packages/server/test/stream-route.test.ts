@@ -282,4 +282,51 @@ describe("POST /api/generate/stream", () => {
       await bare.close();
     }
   });
+
+  it("resolves authoritative board context via run.boardId fallback", async () => {
+    const h = await harness();
+    try {
+      const token = await signup(h.base, "runboard@example.com");
+      const boardRes = await fetch(`${h.base}/api/boards`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${token}`,
+          origin: ORIGIN,
+        },
+        body: JSON.stringify({ name: "Run Board", diagramKind: "flowchart" }),
+      });
+      const board = (await boardRes.json()) as { id: string };
+
+      const res = await fetch(`${h.base}/api/generate/stream`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${token}`,
+          origin: ORIGIN,
+        },
+        body: JSON.stringify({
+          message: "add an auth node",
+          run: { boardId: board.id },
+          summary: {
+            diagramKind: "flowchart",
+            nodes: [],
+            edges: [],
+            shapes: [],
+            shapeLinks: [],
+            groups: [],
+            comments: [],
+            reactions: [],
+            wireframes: [],
+          },
+        }),
+      });
+      expect(res.status).toBe(200);
+      const frames = parseSse(await res.text());
+      const done = frames.find((f) => f.event === "done");
+      expect(done).toBeDefined();
+    } finally {
+      await h.close();
+    }
+  });
 });

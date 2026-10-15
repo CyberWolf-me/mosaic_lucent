@@ -1,4 +1,11 @@
-import type { DiagramIntent, ExpectedTopology, MutationScope, Workspace } from "@lucent/core";
+import {
+  SemanticPlanSchema,
+  type DiagramIntent,
+  type ExpectedTopology,
+  type MutationScope,
+  type SemanticPlan,
+  type Workspace,
+} from "@lucent/core";
 
 /**
  * Deterministic Intent Classifier Fast-Path.
@@ -215,4 +222,52 @@ export function planToolSchema(): Record<string, unknown> {
     },
     required: ["intent", "nodes", "edges"],
   };
+}
+
+export const PLAN_TOOL_NAME = "construct_diagram_plan";
+export const PLAN_TOOL_DESCRIPTION =
+  "Construct a structured semantic diagram plan with symbolic nodes, directed relationships, and intent.";
+
+export function openAiPlanToolDefinition(): {
+  type: "function";
+  function: { name: string; description: string; parameters: Record<string, unknown> };
+} {
+  return {
+    type: "function",
+    function: {
+      name: PLAN_TOOL_NAME,
+      description: PLAN_TOOL_DESCRIPTION,
+      parameters: planToolSchema(),
+    },
+  };
+}
+
+export function anthropicPlanToolDefinition(): {
+  name: string;
+  description: string;
+  input_schema: Record<string, unknown>;
+} {
+  return {
+    name: PLAN_TOOL_NAME,
+    description: PLAN_TOOL_DESCRIPTION,
+    input_schema: planToolSchema(),
+  };
+}
+
+/** Parse tool arguments (object or JSON text) or a prose reply's JSON object into a SemanticPlan. */
+export function parsePlanDraft(raw: string | object): SemanticPlan {
+  let value: unknown = raw;
+  if (typeof raw === "string") {
+    const start = raw.indexOf("{");
+    const end = raw.lastIndexOf("}");
+    if (start === -1 || end < start) throw new Error("No JSON object found in model response");
+    try {
+      value = JSON.parse(raw.slice(start, end + 1));
+    } catch (err) {
+      throw new Error(`Model response was not valid JSON: ${(err as Error).message}`);
+    }
+  }
+  const parsed = SemanticPlanSchema.safeParse(value);
+  if (!parsed.success) throw new Error(`Plan did not match schema: ${parsed.error.message}`);
+  return parsed.data;
 }

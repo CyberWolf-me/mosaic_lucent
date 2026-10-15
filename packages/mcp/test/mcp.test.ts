@@ -309,3 +309,57 @@ describe("get_board derived execution (Stage D3)", () => {
     expect(implementation.derivedRisks).toEqual(["design"]);
   });
 });
+
+describe("Visual PR for coding agents (create_proposal and get_proposal_diff)", () => {
+  it("computes proposal diff without mutating current board", () => {
+    const s = new BoardSession();
+    s.callTool("apply_canvas_operations", {
+      operations: [{ op: "CREATE_NODE", id: "auth", nodeType: "service", label: "Auth Gateway" }],
+    });
+
+    const diffRes = s.callTool("get_proposal_diff", {
+      title: "Add Caching Layer",
+      operations: [
+        { op: "CREATE_NODE", id: "cache", nodeType: "database", label: "Redis Cache" },
+        { op: "CONNECT_NODES", source: "auth", target: "cache", relationship: "caches" },
+      ],
+    });
+
+    expect(diffRes.isError).toBeFalsy();
+    expect(diffRes.content[0]!.text).toContain("Visual Architecture Proposal: Add Caching Layer");
+    expect(diffRes.content[0]!.text).toContain("+ [database] Redis Cache");
+    expect(diffRes.content[0]!.text).toContain("+ Auth Gateway --[caches]--> Redis Cache");
+
+    // Board remains untouched
+    expect(Object.keys(s.workspace.nodes)).toEqual(["auth"]);
+  });
+
+  it("stages a proposal via create_proposal with validation and generated ID", () => {
+    const s = new BoardSession();
+    const createRes = s.callTool("create_proposal", {
+      title: "Introduce Microservices Architecture",
+      explanation: "Decompose monolithic core into services",
+      operations: [
+        { op: "CREATE_NODE", id: "svc1", nodeType: "service", label: "Orders Service" },
+        { op: "CREATE_NODE", id: "svc2", nodeType: "service", label: "Payments Service" },
+        { op: "CONNECT_NODES", source: "svc1", target: "svc2", relationship: "calls" },
+      ],
+    });
+
+    expect(createRes.isError).toBeFalsy();
+    expect(createRes.content[0]!.text).toContain("Created visual proposal **prp_");
+    expect(createRes.content[0]!.text).toContain("Introduce Microservices Architecture");
+    expect(createRes.content[0]!.text).toContain("Pending human review");
+
+    // Rejects invalid proposal that references missing node
+    const invalidRes = s.callTool("create_proposal", {
+      title: "Broken Proposal",
+      operations: [
+        { op: "CONNECT_NODES", source: "missing_1", target: "missing_2", relationship: "calls" },
+      ],
+    });
+    expect(invalidRes.isError).toBe(true);
+    expect(invalidRes.content[0]!.text).toContain("Proposal rejected due to validation errors");
+  });
+});
+

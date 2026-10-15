@@ -66,6 +66,13 @@ interface Conn {
   boardId: string | null;
   /** Epoch ms when the socket was accepted; the connection-duration SLO's clock. */
   openedAt: number;
+  /**
+   * Resolves when this socket's previous `op` has taken its place in the
+   * room's commit queue. Each op waits on it before its own pre-commit awaits
+   * (room build, role lookup, run lookup), so one socket's batches commit in
+   * the order they were sent — never just the order their lookups finished.
+   */
+  opGate: Promise<void>;
 }
 
 /** Shape the Room expects when reconstructing from a persisted op log. */
@@ -140,6 +147,8 @@ export interface RealtimeDeps {
    * rows and as a label in fanout messages. A short string per process.
    */
   instanceId?: string;
+  /** Durable proposals store for review-gated proposals lifecycle and catch-up. */
+  proposals?: import("./proposals.js").ProposalStore;
 }
 
 export class RealtimeServer {
@@ -248,7 +257,9 @@ export class RealtimeServer {
     }
     this.rooms.delete(boardId);
     this.pendingRooms.delete(boardId);
-    this.connsByBoard.delete(boardId);
+    // Defensive: a broadcast set with sockets in it is never dropped — those
+    // sockets would stay open but hear nothing more.
+    if ((this.connsByBoard.get(boardId)?.size ?? 0) === 0) this.connsByBoard.delete(boardId);
     const unsub = this.fanoutUnsubs.get(boardId);
     if (unsub) {
       unsub();
@@ -257,7 +268,14 @@ export class RealtimeServer {
   }
 
   private onConnection(socket: WebSocket, userId: string, name: string): void {
-    const conn: Conn = { socket, userId, name, boardId: null, openedAt: Date.now() };
+    const conn: Conn = {
+      socket,
+      userId,
+      name,
+      boardId: null,
+      openedAt: Date.now(),
+      opGate: Promise.resolve(),
+    };
 
     socket.on("message", (data) => {
       let msg: ClientMsg;
@@ -278,9 +296,15 @@ export class RealtimeServer {
       case "join":
         void this.join(conn, msg.boardId ?? "", msg.fromSeq ?? 0);
         break;
-      case "op":
-        void this.applyOp(conn, msg);
+      case "op": {
+        // Per-socket order (see Conn.opGate): wait for the previous op to be
+        // queued, then hold the gate until this one is.
+        const prior = conn.opGate;
+        let queued!: () => void;
+        conn.opGate = new Promise<void>((resolve) => (queued = resolve));
+        void prior.then(() => this.applyOp(conn, msg, queued)).finally(() => queued());
         break;
+      }
       case "presence":
         this.presence(conn, msg);
         break;
@@ -382,9 +406,21 @@ export class RealtimeServer {
     });
     // Tell everyone else this person is here.
     this.broadcast(boardId, { type: "peer-joined", presence }, conn);
+
+    // Durable proposal catchup: if a proposal is pending, deliver it to the joiner immediately
+    if (this.deps.proposals) {
+      void this.deps.proposals
+        .pendingForBoards([boardId])
+        .then(([pending]) => {
+          if (pending && conn.boardId === boardId) {
+            this.sendTo(conn, { type: "proposal-opened", proposal: pending });
+          }
+        })
+        .catch(() => {});
+    }
   }
 
-  private async applyOp(conn: Conn, msg: ClientMsg): Promise<void> {
+  private async applyOp(conn: Conn, msg: ClientMsg, queued: () => void = () => {}): Promise<void> {
     if (!conn.boardId) return;
     let room = this.rooms.get(conn.boardId);
     if (!room) {
@@ -444,7 +480,7 @@ export class RealtimeServer {
         : undefined;
     const ownRun =
       run && run.initiatedBy === conn.userId && run.boardId === conn.boardId ? run : undefined;
-    const result = await room.commit(conn.userId, parsed.data, msg.label ?? "", {
+    const committing = room.commit(conn.userId, parsed.data, msg.label ?? "", {
       ...(requestId !== undefined ? { requestId } : {}),
       ...(ownRun
         ? {
@@ -457,6 +493,9 @@ export class RealtimeServer {
           }
         : {}),
     });
+    // In the room's queue now: the socket's next op may start its lookups.
+    queued();
+    const result = await committing;
     if (!result.ok) {
       // Correlated refusal (Stage B): the client knows WHICH submit failed,
       // not merely that something did, and `head` names where the log actually
@@ -525,6 +564,7 @@ export class RealtimeServer {
           kind: "op",
           seq: result.entry.seq,
           userId: result.entry.by,
+          instanceId: this.deps.instanceId,
         })
         .catch(() => {});
     }
@@ -536,14 +576,8 @@ export class RealtimeServer {
     if (!result.persisted && result.entry) {
       await this.deps.boardStore.appendOp({ ...result.entry, boardId: conn.boardId });
     }
+    await this.persistRoom(conn.boardId, room);
     const board = await this.deps.boardStore.get(conn.boardId);
-    if (board) {
-      await this.deps.boardStore.put({
-        ...board,
-        workspace: room.current(),
-        updatedAt: Date.now(),
-      });
-    }
     // M2.6: emit comment notifications on the realtime path. This runs after
     // persistence so a notification never points at state the store has not
     // accepted, and after the broadcast so a slow mailer cannot delay the WS
@@ -682,6 +716,17 @@ export class RealtimeServer {
         })
         .catch(() => {});
     }
+    if (this.deps.fanout) {
+      void this.deps.fanout
+        .publish({
+          boardId: conn.boardId,
+          kind: "presence",
+          userId: conn.userId,
+          instanceId: this.deps.instanceId,
+          data: { type: "presence", presence },
+        })
+        .catch(() => {});
+    }
   }
 
   /**
@@ -707,6 +752,17 @@ export class RealtimeServer {
       return;
     }
     this.broadcast(conn.boardId, { type: "spotlight", spotlight: room.spotlight() });
+    if (this.deps.fanout) {
+      void this.deps.fanout
+        .publish({
+          boardId: conn.boardId,
+          kind: "spotlight",
+          userId: conn.userId,
+          instanceId: this.deps.instanceId,
+          data: { type: "spotlight", spotlight: room.spotlight() },
+        })
+        .catch(() => {});
+    }
   }
 
   /** "Bring everyone here" (docs/28 S5): one move of everyone else's view to the sender's. */
@@ -721,11 +777,19 @@ export class RealtimeServer {
     }
     const viewport = cleanViewport(msg.viewport);
     if (!viewport) return;
-    this.broadcast(
-      conn.boardId,
-      { type: "summon", from: { userId: conn.userId, name: conn.name }, viewport },
-      conn,
-    );
+    const summonMsg = { type: "summon", from: { userId: conn.userId, name: conn.name }, viewport };
+    this.broadcast(conn.boardId, summonMsg, conn);
+    if (this.deps.fanout) {
+      void this.deps.fanout
+        .publish({
+          boardId: conn.boardId,
+          kind: "summon",
+          userId: conn.userId,
+          instanceId: this.deps.instanceId,
+          data: summonMsg,
+        })
+        .catch(() => {});
+    }
   }
 
   private leave(conn: Conn): void {
@@ -735,49 +799,65 @@ export class RealtimeServer {
     // behaved worst.
     this.deps.observeConnectionDuration?.((Date.now() - conn.openedAt) / 1000);
     if (!conn.boardId) return;
-    const room = this.rooms.get(conn.boardId);
-    const set = this.connsByBoard.get(conn.boardId);
+    const boardId = conn.boardId;
+    const room = this.rooms.get(boardId);
+    const set = this.connsByBoard.get(boardId);
     set?.delete(conn);
     if (room) {
-      room.removePresence(conn.userId);
-      this.broadcast(conn.boardId, { type: "peer-left", userId: conn.userId }, conn);
-      // The spotlight goes with its holder, once none of their tabs is left.
+      // Another tab of the same person is still here: they haven't left.
       const stillHere = [...(set ?? [])].some((c) => c.userId === conn.userId);
-      if (!stillHere && room.spotlight()?.userId === conn.userId) {
-        room.setSpotlight(null);
-        this.broadcast(conn.boardId, { type: "spotlight", spotlight: null });
+      if (!stillHere) {
+        room.removePresence(conn.userId);
+        this.broadcast(boardId, { type: "peer-left", userId: conn.userId }, conn);
+        // The spotlight goes with its holder, once none of their tabs is left.
+        if (room.spotlight()?.userId === conn.userId) {
+          room.setSpotlight(null);
+          this.broadcast(boardId, { type: "spotlight", spotlight: null });
+          if (this.deps.fanout) {
+            void this.deps.fanout
+              .publish({
+                boardId,
+                kind: "spotlight",
+                userId: conn.userId,
+                instanceId: this.deps.instanceId,
+                data: { type: "spotlight", spotlight: null },
+              })
+              .catch(() => {});
+          }
+        }
+        // Drop the cross-instance row for this participant. The compare-and-
+        // delete on `instanceId` keeps a sibling instance's live row safe if
+        // (say) this instance died without a leave.
+        if (this.deps.presenceStore) {
+          void this.deps.presenceStore
+            .remove(boardId, conn.userId, this.deps.instanceId ?? "local")
+            .catch(() => {});
+        }
       }
-      // Evict an empty room; its state is already persisted in the board store.
-      // The cross-instance store is the authoritative "is anyone still here?"
-      // when it is wired — a peer on a sibling instance counts.
-      let stillHasPeer = false;
-      if (this.deps.presenceStore) {
-        // Capture boardId into a non-null local for the async callback below;
-        // the early-return above already proved it is a string.
-        const boardIdForEvict = conn.boardId;
-        // Best-effort: a stale "still has peer" because the store query
-        // failed is safer than the opposite (evicting a board with a live
-        // peer on another instance).
-        void this.deps.presenceStore
-          .peers(boardIdForEvict)
-          .then((peers) => {
-            if (peers.length === 0) {
-              this.evictRoom(boardIdForEvict, room);
-            }
-          })
-          .catch(() => {});
-        stillHasPeer = true;
-      }
-      if (!stillHasPeer && room.isEmpty()) {
-        this.evictRoom(conn.boardId, room);
-      }
-      // Drop the cross-instance row for this participant. The compare-and-
-      // delete on `instanceId` keeps a sibling instance's live row safe if
-      // (say) this instance died without a leave.
-      if (this.deps.presenceStore) {
-        void this.deps.presenceStore
-          .remove(conn.boardId, conn.userId, this.deps.instanceId ?? "local")
-          .catch(() => {});
+      // Evict a room only when NOBODY on this instance is still connected to
+      // it. The cross-instance store used to be the only test: its rows expire
+      // 45 s after a person's last cursor move, so a quiet participant read as
+      // gone — and one tab closing evicted the room, which drops the broadcast
+      // set, cutting every still-open socket off the board without a word.
+      // Local sockets are the ground truth here; the store only answers
+      // whether a SIBLING instance still serves someone, and the answer is
+      // re-checked against this instance when it arrives.
+      const localLeft = () => (this.connsByBoard.get(boardId)?.size ?? 0) > 0;
+      if (!localLeft()) {
+        if (this.deps.presenceStore) {
+          void this.deps.presenceStore
+            .peers(boardId)
+            .then((peers) => {
+              if (peers.length === 0 && !localLeft() && this.rooms.get(boardId) === room) {
+                this.evictRoom(boardId, room);
+              }
+            })
+            .catch(() => {
+              // Best-effort: a failed query keeps the room — the safe side.
+            });
+        } else {
+          this.evictRoom(boardId, room);
+        }
       }
     }
     conn.boardId = null;
@@ -896,7 +976,52 @@ export class RealtimeServer {
     if (!fanout || this.fanoutUnsubs.has(boardId)) return;
     const listener = (message: FanoutMessage): void => {
       if (message.boardId !== boardId) return; // one channel, many boards
+      if (message.kind === "proposal") {
+        if (this.deps.instanceId && message.instanceId === this.deps.instanceId) return;
+        if (message.data) {
+          this.broadcast(boardId, message.data);
+        }
+        return;
+      }
+      if (message.kind === "spotlight") {
+        if (this.deps.instanceId && message.instanceId === this.deps.instanceId) return;
+        const spotlightData = (message.data as { spotlight?: import("./room.js").Spotlight | null })?.spotlight;
+        if (spotlightData !== undefined) {
+          room.setSpotlight(spotlightData);
+        }
+        if (message.data) {
+          this.broadcast(boardId, message.data);
+        }
+        return;
+      }
+      if (message.kind === "summon") {
+        if (this.deps.instanceId && message.instanceId === this.deps.instanceId) return;
+        if (message.data) {
+          this.broadcast(boardId, message.data);
+        }
+        return;
+      }
+      if (message.kind === "presence") {
+        if (this.deps.instanceId && message.instanceId === this.deps.instanceId) return;
+        if (message.data) {
+          this.broadcast(boardId, message.data);
+        }
+        return;
+      }
       if (message.kind !== "op" && message.kind !== "resync") return;
+      if (message.kind === "op" && this.deps.instanceId && message.instanceId === this.deps.instanceId) {
+        return;
+      }
+      if (message.kind === "resync" && this.deps.proposals) {
+        void this.deps.proposals
+          .pendingForBoards([boardId])
+          .then(([pending]) => {
+            if (pending) {
+              this.broadcast(boardId, { type: "proposal-opened", proposal: pending });
+            }
+          })
+          .catch(() => {});
+      }
       void room
         .pullRemote()
         .then((absorbed) => {
@@ -969,6 +1094,26 @@ export class RealtimeServer {
   }
 
   /**
+   * A person's effective role on a board changed (a board grant was edited or
+   * removed). The room caches the role it resolved at join, so without this
+   * a demoted editor's open socket kept committing and a removed member kept
+   * editing until they reconnected. No role left means no access: detach.
+   * Their open sockets are told the new role so the client can go read-only.
+   */
+  refreshRole(boardId: string, userId: string, role: Role | undefined): void {
+    if (!role) {
+      this.detachUser(boardId, userId);
+      return;
+    }
+    const room = this.rooms.get(boardId);
+    if (!room) return;
+    room.setRole(userId, role);
+    for (const conn of this.connsByBoard.get(boardId) ?? []) {
+      if (conn.userId === userId) this.sendTo(conn, { type: "role", role });
+    }
+  }
+
+  /**
    * Commit a batch into a board's room on behalf of a user (Stage B3). The
    * proposal-approval path uses this so an applied proposal broadcasts through
    * the ordinary pipeline — peers receive the same sequenced entry any edit
@@ -981,14 +1126,57 @@ export class RealtimeServer {
     userId: string,
     ops: Operation[],
     label: string,
-    meta?: { requestId?: string; actor?: import("./boards.js").OperationActor },
+    meta?: {
+      requestId?: string;
+      actor?: import("./boards.js").OperationActor;
+      role?: Role;
+      trustedSystem?: boolean;
+      expectedSeq?: number;
+    },
   ): Promise<import("./room.js").CommitResult | null> {
     const room = this.rooms.get(boardId);
     if (!room) return null;
-    // The room's role map is the gate: a user who has not joined (or holds no
-    // role on the board) cannot commit through this seam at all.
-    if (room.roleOf(userId) === undefined) return null;
-    const result = await room.commit(userId, ops, label, meta);
+    // The room's role map is the gate. A caller with no socket here is authorized
+    // strictly against authoritative store state: an internal system worker
+    // is granted its explicit system role ONLY with verified trustedSystem: true,
+    // whereas user callers and untrusted system claims resolve through boardStore.memberRole.
+    // An external caller claiming actorType: "system" or userId: "system*" without
+    // the internal trustedSystem capability can never elevate privileges.
+    if (room.roleOf(userId) === undefined) {
+      if (
+        meta?.trustedSystem === true &&
+        (userId === "system" || userId.startsWith("system_") || meta?.actor?.actorType === "system")
+      ) {
+        room.setRole(userId, meta?.role ?? "editor");
+      } else {
+        const board = await this.deps.boardStore.get(boardId);
+        const storedRole = board
+          ? await this.deps.boardStore.memberRole(boardId, userId, (uid) =>
+              this.deps.orgRoleFor(uid, board.orgId),
+            )
+          : undefined;
+        if (storedRole) {
+          room.setRole(userId, storedRole);
+        }
+      }
+    }
+    const result = await room.commit(userId, ops, label, {
+      ...(meta?.requestId !== undefined ? { requestId: meta.requestId } : {}),
+      ...(meta?.actor !== undefined ? { actor: meta.actor } : {}),
+      ...(meta?.expectedSeq !== undefined ? { expectedSeq: meta.expectedSeq } : {}),
+    });
+    // Broadcast NOW, before any await: the room has assigned the seq, and a
+    // socket commit right behind this one is broadcast by applyOp without
+    // waiting on anything. Leaving it to the HTTP caller (after this method's
+    // persistence awaits) delivered seq N after N+1 — and the web client,
+    // which advances by seq, dropped N: an approved proposal never appeared
+    // for anyone. Callers must not broadcast it again.
+    if (result.ok && result.entry) {
+      for (const absorbed of result.absorbed ?? []) {
+        this.broadcast(boardId, { type: "op", entry: absorbed });
+      }
+      this.broadcast(boardId, { type: "op", entry: result.entry });
+    }
     // The caller has no store access, so this seam also performs the two
     // post-commit steps applyOp owns: persist the room's workspace into the
     // board row (unless the allocator already did) and publish the fanout.
@@ -996,37 +1184,92 @@ export class RealtimeServer {
       await this.deps.boardStore.appendOp({ ...result.entry, boardId });
     }
     if (result.ok && result.entry) {
-      const board = await this.deps.boardStore.get(boardId);
-      if (board) {
-        await this.deps.boardStore.put({
-          ...board,
-          workspace: room.current(),
-          updatedAt: Date.now(),
-        });
-      }
+      await this.persistRoom(boardId, room);
       if (this.deps.fanout) {
         void this.deps.fanout
-          .publish({ boardId, kind: "op", seq: result.entry.seq, userId: result.entry.by })
+          .publish({
+            boardId,
+            kind: "op",
+            seq: result.entry.seq,
+            userId: result.entry.by,
+            instanceId: this.deps.instanceId,
+          })
           .catch(() => {});
       }
     }
     return result;
   }
 
+  /** Per-board chain of projection saves, and the newest save requested. */
+  private readonly persistChains = new Map<string, Promise<void>>();
+  private readonly persistWanted = new Map<string, number>();
+
+  /**
+   * Save the room's CURRENT workspace into the board row — one save at a time
+   * per board, each reading the room when it runs, so a slow older save can
+   * never land after a newer one and roll the stored board back (the stored
+   * copy is what reloads, exports, Ask, MCP and the AI's own validation
+   * read). A save that has a newer one queued behind it is skipped: the newer
+   * one writes the same, fresher state.
+   */
+  persistRoom(boardId: string, room: Room): Promise<void> {
+    const ticket = (this.persistWanted.get(boardId) ?? 0) + 1;
+    this.persistWanted.set(boardId, ticket);
+    const prior = this.persistChains.get(boardId) ?? Promise.resolve();
+    const next = prior
+      .then(async () => {
+        if (this.persistWanted.get(boardId) !== ticket) return;
+        const board = await this.deps.boardStore.get(boardId);
+        if (!board) return;
+        await this.deps.boardStore.put({ ...board, workspace: room.current(), updatedAt: Date.now() });
+      })
+      .catch(() => {
+        // Best-effort like before: the log is the record; the next save, or
+        // the next cold start's replay, repairs the projection.
+      });
+    this.persistChains.set(boardId, next);
+    void next.then(() => {
+      if (this.persistChains.get(boardId) === next) {
+        this.persistChains.delete(boardId);
+        this.persistWanted.delete(boardId);
+      }
+    });
+    return next;
+  }
+
+  /** The live room for a board, when one is open (HTTP commit paths persist through it). */
+  roomOf(boardId: string): Room | undefined {
+    return this.rooms.get(boardId);
+  }
+
   /**
    * Broadcast a proposal event to everyone connected to a board (Stage B3).
    * The proposal review panel opens on every browser as one fact: the panel
    * state is per-board, so the create and the decision both fan out here.
-   * Returns false when nobody is connected — the event is still durable in
+   * Cross-instance fanout publishes over the bus if configured.
+   * Returns false when nobody is locally connected — the event is still durable in
    * the store, and the next join reads it from GET /proposals.
    */
-  broadcastProposal(boardId: string, event: unknown): boolean {
+  broadcastProposal(boardId: string, event: unknown, fromFanout = false): boolean {
     const set = this.connsByBoard.get(boardId);
-    if (!set || set.size === 0) return false;
-    for (const conn of set) {
-      if (conn.boardId === boardId) this.sendTo(conn, event);
+    let delivered = false;
+    if (set && set.size > 0) {
+      for (const conn of set) {
+        if (conn.boardId === boardId) this.sendTo(conn, event);
+      }
+      delivered = true;
     }
-    return true;
+    if (!fromFanout && this.deps.fanout) {
+      void this.deps.fanout
+        .publish({
+          boardId,
+          kind: "proposal",
+          ...(this.deps.instanceId ? { instanceId: this.deps.instanceId } : {}),
+          data: event,
+        })
+        .catch(() => {});
+    }
+    return delivered;
   }
 
   /** Testing/metrics: how many rooms are live. */

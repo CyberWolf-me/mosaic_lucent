@@ -1061,7 +1061,11 @@ export async function runLT10(baseUrl, metrics, config) {
       openSocketRefused = /permission|editor role required/i.test(msg);
       b23Detail = openSocketRefused ? "refused (permission)" : `refused/other: ${msg}`;
     }
-    metrics.recordCheck("Demoted member's open WebSocket is refused (B23)", openSocketRefused, b23Detail);
+    metrics.recordCheck(
+      "Demoted member's open WebSocket is refused (B23)",
+      openSocketRefused,
+      b23Detail,
+    );
     const afterWs = await getBoard(baseUrl, owner.token, boardId);
     metrics.recordCheck(
       "No B23 open-socket edit leaked into persisted state",

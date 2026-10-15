@@ -67,8 +67,7 @@ class MultiWorkerCluster {
             LUCENT_WORKER_ID: workerId,
             LUCENT_DATABASE_POOL_MAX: "2",
             LUCENT_SESSION_SECRET:
-              process.env.LUCENT_SESSION_SECRET ||
-              "lucent-shared-cluster-secret-verification-2026",
+              process.env.LUCENT_SESSION_SECRET || "lucent-shared-cluster-secret-verification-2026",
           },
           stdio: ["ignore", "pipe", "pipe"],
         },
@@ -149,8 +148,7 @@ class MultiWorkerCluster {
           LUCENT_WORKER_ID: w.id,
           LUCENT_DATABASE_POOL_MAX: "2",
           LUCENT_SESSION_SECRET:
-            process.env.LUCENT_SESSION_SECRET ||
-            "lucent-shared-cluster-secret-verification-2026",
+            process.env.LUCENT_SESSION_SECRET || "lucent-shared-cluster-secret-verification-2026",
         },
         stdio: ["ignore", "pipe", "pipe"],
       },

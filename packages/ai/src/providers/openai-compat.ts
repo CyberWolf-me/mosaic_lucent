@@ -1,7 +1,8 @@
-import { openAiToolDefinition, TOOL_NAME } from "@lucent/core";
-import type { GenerateRequest, GenerateResult, LLMProvider, StreamCallbacks } from "../provider.js";
+import { openAiToolDefinition, TOOL_NAME, type SemanticPlan } from "@lucent/core";
+import type { GenerateRequest, GenerateResult, LLMProvider, PlanRequest, StreamCallbacks } from "../provider.js";
 import type { AnswerRequest, AnswerResult } from "../answer.js";
 import { ANSWER_TOOL_NAME, openAiAnswerToolDefinition } from "../answer.js";
+import { openAiPlanToolDefinition, parsePlanDraft } from "../intent.js";
 import type { ExternalPlanRequest, ExternalPlanResult } from "../externalPlan.js";
 import { EXTERNAL_PLAN_TOOL_NAME, openAiExternalPlanToolDefinition } from "../externalPlan.js";
 import {
@@ -34,9 +35,11 @@ import { sseEvents } from "./sse.js";
 import {
   ANSWER_SYSTEM_PROMPT,
   EXTERNAL_PLAN_SYSTEM_PROMPT,
+  PLAN_SYSTEM_PROMPT,
   SYSTEM_PROMPT,
   buildAnswerUserPrompt,
   buildExternalPlanUserPrompt,
+  buildPlanUserPrompt,
   buildUserPrompt,
 } from "../prompt.js";
 import {
@@ -521,7 +524,19 @@ export class OpenAICompatibleProvider implements LLMProvider {
    * in. Same no-repair/no-streaming posture — a dropped selection is a
    * human-decided retry, not worth re-asking.
    */
-  /** docs/27 N1: enhance a person's meeting notes — placements plus cited lines. */
+  /** Intermediate semantic diagram plan generator (Finding B1). */
+  async generatePlan(request: PlanRequest): Promise<SemanticPlan> {
+    const system = request.systemInstructions ?? PLAN_SYSTEM_PROMPT;
+    const user = buildPlanUserPrompt(request);
+    return this.forcedTool(
+      system,
+      user,
+      openAiPlanToolDefinition(),
+      parsePlanDraft,
+      4096,
+    );
+  }
+
   /** docs/27 N1: enhance a person's meeting notes — placements plus cited lines. */
   async generateNotes(request: NotesRequest): Promise<NotesResult> {
     return this.forcedTool(

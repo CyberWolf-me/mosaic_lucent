@@ -21,10 +21,20 @@ import type { Role } from "../src/identity.js";
  * collaboration survive a deploy.
  *
  * Gated on LUCENT_TEST_DATABASE_URL, same as pg-store.test.ts.
+ *
+ * Timeouts are raised here because the default 5 s test / 10 s hook budget
+ * describes a unit test, and this is not one. The single `it` below closes the
+ * server, boots a second one, and re-runs `migrate()` against Postgres — every
+ * step a real network round trip to the service container. On CI that measured
+ * at 5.007 s against the 5 s default, so the suite failed on the clock while
+ * asserting a property that actually held. 30 s is the budget for the work,
+ * not a raised bar for a flaky assertion: nothing here is retried, and a real
+ * regression still fails, just later.
  */
-
 const URL = process.env.LUCENT_TEST_DATABASE_URL;
 const describeIf = URL ? describe : describe.skip;
+/** Comfortably above the measured CI cost without hiding a hang. */
+const BOOT_TIMEOUT_MS = 60_000;
 const SECRET = "test-secret-at-least-16-chars";
 /**
  * Unique per run. This file used to TRUNCATE the shared tables so its fixed
@@ -111,7 +121,7 @@ async function join(
 /** Resolve on the next frame of a given `type`. */
 function waitFor<T>(socket: WebSocket, type: string): Promise<T> {
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(`timed out waiting for ${type}`)), 5000);
+    const timer = setTimeout(() => reject(new Error(`timed out waiting for ${type}`)), 20000);
     const onMessage = (data: unknown) => {
       const msg = JSON.parse(String(data)) as { type: string };
       if (msg.type !== type) return;
@@ -163,45 +173,49 @@ describeIf("server cold-restart with Postgres", () => {
       createdAt: Date.now(),
       updatedAt: Date.now(),
     });
-  });
+  }, BOOT_TIMEOUT_MS);
 
   afterAll(async () => {
     if (instance) await instance.close().catch(() => {});
   });
 
-  it("replays the persisted op log to a joiner after a full restart", async () => {
-    // --- First instance: join as owner, commit one op. ---
-    const owner = await join(instance.wsUrl, boardId, userId);
-    expect(owner.welcome.role).toBe("owner");
-    expect(owner.welcome.version).toBe(0);
+  it(
+    "replays the persisted op log to a joiner after a full restart",
+    async () => {
+      // --- First instance: join as owner, commit one op. ---
+      const owner = await join(instance.wsUrl, boardId, userId);
+      expect(owner.welcome.role).toBe("owner");
+      expect(owner.welcome.version).toBe(0);
 
-    const applied = waitFor<{ entry: { seq: number } }>(owner.socket, "op");
-    owner.socket.send(
-      JSON.stringify({
-        type: "op",
-        ops: [{ op: "CREATE_NODE", id: "n1", nodeType: "step", label: "N1" }],
-        label: "create n1",
-      }),
-    );
-    expect((await applied).entry.seq).toBe(1);
-    owner.socket.close();
+      const applied = waitFor<{ entry: { seq: number } }>(owner.socket, "op");
+      owner.socket.send(
+        JSON.stringify({
+          type: "op",
+          ops: [{ op: "CREATE_NODE", id: "n1", nodeType: "step", label: "N1" }],
+          label: "create n1",
+        }),
+      );
+      expect((await applied).entry.seq).toBe(1);
+      owner.socket.close();
 
-    // The op is durable before the server goes away.
-    const persisted = await new PostgresBoardStore(instance.db).loadLog(boardId);
-    expect(persisted).toHaveLength(1);
+      // The op is durable before the server goes away.
+      const persisted = await new PostgresBoardStore(instance.db).loadLog(boardId);
+      expect(persisted).toHaveLength(1);
 
-    // --- Restart: tear the whole server down, boot a fresh one. ---
-    await instance.close();
-    instance = await boot();
+      // --- Restart: tear the whole server down, boot a fresh one. ---
+      await instance.close();
+      instance = await boot();
 
-    // --- Second instance: a joiner gets the op from the rebuilt log. ---
-    const rejoin = await join(instance.wsUrl, boardId, userId);
-    expect(rejoin.welcome.version).toBe(1);
-    expect(rejoin.welcome.catchup).toHaveLength(1);
-    expect((rejoin.welcome.catchup[0]?.ops[0] as { id?: string }).id).toBe("n1");
-    // The workspace snapshot survived too, so the board isn't rebuilt from zero.
-    const board = await new PostgresBoardStore(instance.db).get(boardId);
-    expect(Object.keys(board!.workspace.nodes)).toContain("n1");
-    rejoin.socket.close();
-  });
+      // --- Second instance: a joiner gets the op from the rebuilt log. ---
+      const rejoin = await join(instance.wsUrl, boardId, userId);
+      expect(rejoin.welcome.version).toBe(1);
+      expect(rejoin.welcome.catchup).toHaveLength(1);
+      expect((rejoin.welcome.catchup[0]?.ops[0] as { id?: string }).id).toBe("n1");
+      // The workspace snapshot survived too, so the board isn't rebuilt from zero.
+      const board = await new PostgresBoardStore(instance.db).get(boardId);
+      expect(Object.keys(board!.workspace.nodes)).toContain("n1");
+      rejoin.socket.close();
+    },
+    BOOT_TIMEOUT_MS,
+  );
 });

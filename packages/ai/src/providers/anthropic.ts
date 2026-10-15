@@ -1,7 +1,8 @@
-import { anthropicToolDefinition, TOOL_NAME } from "@lucent/core";
-import type { GenerateRequest, GenerateResult, LLMProvider, StreamCallbacks } from "../provider.js";
+import { anthropicToolDefinition, TOOL_NAME, type SemanticPlan } from "@lucent/core";
+import type { GenerateRequest, GenerateResult, LLMProvider, PlanRequest, StreamCallbacks } from "../provider.js";
 import type { AnswerRequest, AnswerResult } from "../answer.js";
 import { ANSWER_TOOL_NAME, anthropicAnswerToolDefinition } from "../answer.js";
+import { anthropicPlanToolDefinition, parsePlanDraft } from "../intent.js";
 import type { ExternalPlanRequest, ExternalPlanResult } from "../externalPlan.js";
 import { EXTERNAL_PLAN_TOOL_NAME, anthropicExternalPlanToolDefinition } from "../externalPlan.js";
 import {
@@ -33,9 +34,11 @@ import {
 import {
   ANSWER_SYSTEM_PROMPT,
   EXTERNAL_PLAN_SYSTEM_PROMPT,
+  PLAN_SYSTEM_PROMPT,
   SYSTEM_PROMPT,
   buildAnswerUserPrompt,
   buildExternalPlanUserPrompt,
+  buildPlanUserPrompt,
   buildUserPrompt,
 } from "../prompt.js";
 import {
@@ -367,6 +370,19 @@ export class AnthropicProvider implements LLMProvider {
       return parseExternalPlanModelJson(text, meta);
     }
     throw new Error(`Anthropic request failed (${lastStatus}): ${lastDetail}`);
+  }
+
+  /** Intermediate semantic diagram plan generator (Finding B1). */
+  async generatePlan(request: PlanRequest): Promise<SemanticPlan> {
+    const system = request.systemInstructions ?? PLAN_SYSTEM_PROMPT;
+    const user = buildPlanUserPrompt(request);
+    return this.forcedTool(
+      system,
+      user,
+      anthropicPlanToolDefinition(),
+      parsePlanDraft,
+      4096,
+    );
   }
 
   /** docs/27 N1: enhance a person's meeting notes — placements plus cited lines. */

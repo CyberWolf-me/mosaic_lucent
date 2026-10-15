@@ -84,14 +84,22 @@ export async function applyInboundChange(
   const roomResult = await s.commitForBoard(board.id, decider.by, ops, label, {
     requestId,
     actor,
+    // The accepting editor, or the automation acting for the workspace.
+    role: "editor",
+    trustedSystem: decider.by === "system",
   });
-  if (roomResult?.ok && roomResult.entry) {
-    seq = roomResult.entry.seq;
+  if (roomResult?.ok && (roomResult.entry || roomResult.duplicate)) {
+    // commitForBoard broadcast the entry and saved the room's state.
+    seq = roomResult.entry?.seq ?? roomResult.head ?? 0;
     persistedByRoom = true;
-    for (const absorbed of roomResult.absorbed ?? []) {
-      s.broadcastProposal(board.id, { type: "op", entry: absorbed });
-    }
-    s.broadcastProposal(board.id, { type: "op", entry: roomResult.entry });
+  } else if (roomResult) {
+    return {
+      ok: false,
+      status: 409,
+      error: "stale board",
+      reason: roomResult.detail ?? roomResult.error ?? "refused",
+      ...(roomResult.head !== undefined ? { head: roomResult.head } : {}),
+    };
   } else {
     const append = await s.boardStore.appendOp({
       boardId: board.id,
@@ -114,8 +122,12 @@ export async function applyInboundChange(
     seq = append.seq;
     persistedByRoom = append.duplicate === true;
     if (!persistedByRoom) {
-      const updated = applyOperations(board.workspace, ops);
-      await s.boardStore.put({ ...board, workspace: updated, updatedAt: Date.now() });
+      const current = (await s.boardStore.get(board.id)) ?? board;
+      await s.boardStore.put({
+        ...current,
+        workspace: applyOperations(current.workspace, ops),
+        updatedAt: Date.now(),
+      });
     }
   }
 

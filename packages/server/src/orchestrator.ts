@@ -11,6 +11,8 @@ import { commitBatch, type CommitOutcome } from "./commitBatch.js";
 import { aiActor, userActor, type OperationActor } from "./boards.js";
 import type { RouteServices } from "./routes/context.js";
 
+import { evaluateProposalPolicy, type ProposalPolicyMode } from "./proposalPolicy.js";
+
 export interface OrchestrateRequest {
   boardId: string;
   userId: string;
@@ -18,6 +20,14 @@ export interface OrchestrateRequest {
   actor: OperationActor | "user" | "agent";
   requestId?: string;
   expectedSeq?: number;
+  /** Caller-supplied SemanticPlan (e.g. from agent or MCP). When provided, skips generation. */
+  plan?: SemanticPlan;
+  /** The role the route authorized (seeds the live room for a socket-less caller). */
+  role?: import("./identity.js").Role;
+  /** Policy mode: "auto" | "propose" | "never" | "always". */
+  mode?: ProposalPolicyMode;
+  /** Explicit override to apply directly without proposal gating. */
+  forceApply?: boolean;
 }
 
 export type OrchestrateOutcome =
@@ -29,6 +39,15 @@ export type OrchestrateOutcome =
       plan: SemanticPlan;
       explanation: string;
       duplicate?: boolean;
+    }
+  | {
+      ok: true;
+      outcome: "proposed";
+      proposalId: string;
+      operations: Operation[];
+      plan: SemanticPlan;
+      explanation: string;
+      reason: string;
     }
   | {
       ok: false;
@@ -69,6 +88,19 @@ export async function orchestrateGeneration(
     };
   }
 
+  // 1.5 Optimistic Concurrency Pre-check: if caller specified expectedSeq, verify before expensive generation
+  if (req.expectedSeq !== undefined) {
+    const headSeq = await services.boardStore.latestSeq(req.boardId);
+    if (req.expectedSeq !== headSeq) {
+      return {
+        ok: false,
+        outcome: "conflict",
+        reason: `Board sequence conflict: expected ${req.expectedSeq}, but current sequence is ${headSeq}`,
+        headSeq,
+      };
+    }
+  }
+
   // 2. Idempotency Check: if this requestId was already processed, return original outcome
   if (req.requestId) {
     const prior = await services.boardStore.findRequest(req.boardId, req.requestId);
@@ -98,7 +130,7 @@ export async function orchestrateGeneration(
   }
 
   // 3. Single-Turn Structured Semantic Plan Generation
-  let plan = await generateSemanticPlan(services.provider, board.workspace, req.prompt);
+  let plan = req.plan ?? (await generateSemanticPlan(services.provider, board.workspace, req.prompt));
 
   // 4. Deterministic Operation Compilation
   let compileRes = compileSemanticPlan(board.workspace, plan);
@@ -169,6 +201,48 @@ export async function orchestrateGeneration(
     };
   }
 
+  // 8.5 Risk-based proposal policy evaluation (destructive and high-impact operations gate behind proposals)
+  const existingNodeCount = Object.keys(board.workspace.nodes).length;
+  const isAgentActor = req.actor === "agent" || (typeof req.actor === "object" && req.actor.actorType === "ai");
+  const isAuthorizedOwner = req.role === "owner" && !isAgentActor;
+  const authorizedForceApply = Boolean(req.forceApply && isAuthorizedOwner);
+  const policy = evaluateProposalPolicy({
+    operations: stampedOps,
+    plan,
+    mode: req.mode,
+    existingNodeCount,
+    forceApply: authorizedForceApply,
+  });
+
+  if (policy.requiresProposal && services.proposals) {
+    const record = await services.proposals.create({
+      boardId: req.boardId,
+      orgId: board.orgId,
+      request: req.prompt,
+      explanation: plan.explanation || "AI Proposed Changes",
+      operations: stampedOps,
+      createdBy: req.userId,
+      createdAt: Date.now(),
+    });
+
+    if (services.broadcastProposal) {
+      services.broadcastProposal(req.boardId, {
+        type: "proposal-opened",
+        proposal: record.proposal,
+      });
+    }
+
+    return {
+      ok: true,
+      outcome: "proposed",
+      proposalId: record.proposal.id,
+      operations: stampedOps,
+      plan,
+      explanation: plan.explanation || "AI Proposed Changes",
+      reason: policy.reason ?? "Gated behind review",
+    };
+  }
+
   // 9. Commit via the Canonical Mutation Path (Room.commit -> Op Log -> Store, ADR 0041)
   const opActor: OperationActor =
     typeof req.actor === "object" && "actorType" in req.actor
@@ -187,6 +261,7 @@ export async function orchestrateGeneration(
     {
       expectedSeq: req.expectedSeq,
       requestId: req.requestId,
+      ...(req.role ? { role: req.role } : {}),
     },
   );
 
@@ -206,5 +281,6 @@ export async function orchestrateGeneration(
     operations: stampedOps,
     plan,
     explanation: plan.explanation || "Applied diagram updates.",
+    ...(outcome.duplicate ? { duplicate: true } : {}),
   };
 }

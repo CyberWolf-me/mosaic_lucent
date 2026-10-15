@@ -40,6 +40,15 @@ export interface Spotlight {
 export interface BoardSyncCallbacks {
   /** The authoritative workspace changed (catchup or a broadcast op). */
   onWorkspace: (workspace: Workspace) => void;
+  /**
+   * One live entry, with the board as it was just before it — called before
+   * `onWorkspace` for that entry. Live broadcasts only, never the welcome
+   * catchup: a reload must not re-attribute old entries to this tab.
+   */
+  onEntry?: (
+    entry: { seq: number; ops: Operation[]; requestId?: string },
+    before: Workspace,
+  ) => void;
   /** Peer presence changed (join/leave/cursor/selection). */
   onPeers: (peers: Peer[]) => void;
   /** A local edit was refused by the server. The requestId (Stage B) names
@@ -97,6 +106,15 @@ export class BoardSync {
   private socket: WebSocket | null = null;
   private version = 0;
   private workspace: Workspace;
+  /**
+   * Entries that arrived ahead of a gap (seq > version + 1), held until the
+   * missing ones arrive. Applying them at once and advancing the cursor used
+   * to make the late entry look like a duplicate (seq <= version) — and it
+   * was dropped for good: an approved proposal broadcast after the edit that
+   * followed it simply never appeared on this canvas.
+   */
+  private ahead = new Map<number, { seq: number; ops: Operation[]; requestId?: string }>();
+  private gapTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly peers = new Map<string, Peer>();
   private closed = false;
   private reconnectAttempts = 0;
@@ -189,9 +207,12 @@ export class BoardSync {
         // Replay everything we missed while away.
         const catchup = (msg.catchup ?? []) as Array<{ seq: number; ops: Operation[] }>;
         for (const entry of catchup) {
+          if (entry.seq <= this.version) continue;
           this.workspace = applyOperations(this.workspace, entry.ops);
           this.version = entry.seq;
         }
+        // Anything that arrived ahead of the gap the catchup just filled.
+        this.drainAhead({ notify: false });
         this.peers.clear();
         for (const p of (msg.peers ?? []) as Peer[]) this.peers.set(p.userId, p);
         this.cb.onWorkspace(this.workspace);
@@ -218,6 +239,7 @@ export class BoardSync {
         if (msg.role) this.cb.onRole?.(msg.role as BoardRole);
         this.workspace = msg.workspace as Workspace;
         this.version = Number(msg.version ?? 0);
+        this.drainAhead({ notify: false });
         this.peers.clear();
         for (const p of (msg.peers ?? []) as Peer[]) this.peers.set(p.userId, p);
         this.cb.onWorkspace(this.workspace);
@@ -233,6 +255,13 @@ export class BoardSync {
         }
         break;
       }
+      case "role": {
+        // The owner changed this person's access mid-session (server
+        // refreshRole): the same callback the welcome's role feeds, so the
+        // canvas goes read-only (or editable) without a reconnect.
+        if (msg.role) this.cb.onRole?.(msg.role as BoardRole);
+        break;
+      }
       case "error": {
         // Stage B4: server-level errors were silently dropped — "board
         // deleted" from an eviction left a zombie client editing nothing.
@@ -241,12 +270,11 @@ export class BoardSync {
         break;
       }
       case "op": {
-        const entry = msg.entry as { seq: number; ops: Operation[] };
+        const entry = msg.entry as { seq: number; ops: Operation[]; requestId?: string };
         // Ignore anything we've already applied (a reconnect can re-send).
         if (entry.seq <= this.version) break;
-        this.workspace = applyOperations(this.workspace, entry.ops);
-        this.version = entry.seq;
-        this.cb.onWorkspace(this.workspace);
+        this.ahead.set(entry.seq, entry);
+        this.drainAhead();
         break;
       }
       case "op-ack":
@@ -384,8 +412,40 @@ export class BoardSync {
     }
   }
 
+  /**
+   * Apply held entries in seq order while the next one is here. A gap that
+   * stays open for two seconds is repaired by re-joining from the cursor:
+   * the room answers with exactly the missing entries.
+   */
+  private drainAhead({ notify = true }: { notify?: boolean } = {}): void {
+    let moved = false;
+    for (const seq of [...this.ahead.keys()]) if (seq <= this.version) this.ahead.delete(seq);
+    for (let next = this.ahead.get(this.version + 1); next; next = this.ahead.get(this.version + 1)) {
+      this.ahead.delete(next.seq);
+      const before = this.workspace;
+      this.workspace = applyOperations(this.workspace, next.ops);
+      this.version = next.seq;
+      this.cb.onEntry?.(next, before);
+      moved = true;
+    }
+    if (moved && notify) this.cb.onWorkspace(this.workspace);
+    if (this.ahead.size === 0) {
+      if (this.gapTimer) clearTimeout(this.gapTimer);
+      this.gapTimer = null;
+    } else if (!this.gapTimer) {
+      this.gapTimer = setTimeout(() => {
+        this.gapTimer = null;
+        if (this.ahead.size > 0) {
+          this.send({ type: "join", boardId: this.boardId, fromSeq: this.version });
+        }
+      }, 2000);
+    }
+  }
+
   disconnect(): void {
     this.closed = true;
+    if (this.gapTimer) clearTimeout(this.gapTimer);
+    this.gapTimer = null;
     this.socket?.close();
     this.socket = null;
   }

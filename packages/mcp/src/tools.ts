@@ -16,6 +16,8 @@ import {
   DIAGRAM_KINDS,
   compileSemanticPlan,
   evaluateTopologyQuality,
+  SemanticPlanSchema,
+  computeProposalDiff,
   type Operation,
   type SemanticPlan,
   type Workspace,
@@ -67,6 +69,44 @@ export function listTools(): McpTool[] {
           },
         },
         required: ["prompt"],
+        additionalProperties: false,
+      },
+    },
+    {
+      name: "create_proposal",
+      description:
+        "Propose visual architecture changes to the board as a human-reviewable Visual PR. " +
+        "Validates operations against the current board and stages them for human approval " +
+        "with an attached title, explanation, and visual diff.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          title: { type: "string", description: "Title of the visual architecture proposal" },
+          explanation: { type: "string", description: "Rationale explaining the proposed changes" },
+          operations: {
+            type: "array",
+            description: "Array of Lucent operations to propose",
+          },
+        },
+        required: ["title", "operations"],
+        additionalProperties: false,
+      },
+    },
+    {
+      name: "get_proposal_diff",
+      description:
+        "Compute a human-readable visual diff between the current board and candidate operations. " +
+        "Summarizes added, removed, and modified entities, connections, and statements without applying changes.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          title: { type: "string", description: "Optional title for the diff report" },
+          operations: {
+            type: "array",
+            description: "Array of candidate Lucent operations to evaluate",
+          },
+        },
+        required: ["operations"],
         additionalProperties: false,
       },
     },
@@ -343,6 +383,10 @@ export function summarizeBoard(ws: Workspace): Record<string, unknown> {
  */
 export class BoardSession {
   private ws: Workspace;
+  private pendingProposals = new Map<
+    string,
+    { id: string; title: string; explanation: string; operations: Operation[]; createdAt: number }
+  >();
 
   constructor(initial?: Workspace) {
     this.ws = initial ?? createWorkspace();
@@ -373,6 +417,10 @@ export class BoardSession {
       }
       case "construct_diagram":
         return this.constructDiagram(args);
+      case "create_proposal":
+        return this.createProposal(args);
+      case "get_proposal_diff":
+        return this.getProposalDiff(args);
       case "export_mermaid":
         return text(boardToMermaid(this.ws));
       case "search_workspace":
@@ -446,26 +494,107 @@ export class BoardSession {
     const prompt = typeof args.prompt === "string" ? args.prompt.trim() : "";
     if (!prompt) return errorResult("`prompt` must be a non-empty string.");
 
-    const plan = (args.plan as SemanticPlan | undefined) ?? {
-      intent: {
-        userObjective: prompt,
-        targetKind: this.ws.diagramKind,
-        expectedTopology:
-          this.ws.diagramKind === "flowchart"
-            ? "directed_flow"
-            : this.ws.diagramKind === "mindmap"
-              ? "tree_hierarchy"
-              : this.ws.diagramKind === "architecture" || this.ws.diagramKind === "er"
-                ? "relational_network"
-                : "independent_clusters",
-        mutationScope: Object.keys(this.ws.nodes).length === 0 ? "new_canvas" : "extend_region",
-        focusNodeIds: [],
-      },
-      nodes: [{ ref: "n1", label: prompt.slice(0, 40) }],
-      edges: [],
-      groups: [],
-      explanation: `Constructed diagram for: ${prompt}`,
-    };
+    let plan: SemanticPlan;
+    if (args.plan) {
+      const valid = SemanticPlanSchema.safeParse(args.plan);
+      if (!valid.success) {
+        return errorResult(`Invalid plan: ${valid.error.message}`);
+      }
+      plan = valid.data;
+    } else {
+      const targetKind = this.ws.diagramKind;
+      const topology =
+        targetKind === "flowchart"
+          ? "directed_flow"
+          : targetKind === "mindmap"
+            ? "tree_hierarchy"
+            : targetKind === "architecture" || targetKind === "er"
+              ? "relational_network"
+              : "independent_clusters";
+
+      if (topology === "directed_flow") {
+        plan = {
+          intent: {
+            userObjective: prompt,
+            targetKind,
+            expectedTopology: "directed_flow",
+            mutationScope: Object.keys(this.ws.nodes).length === 0 ? "new_canvas" : "extend_region",
+            focusNodeIds: [],
+          },
+          nodes: [
+            { ref: "n1", label: prompt.slice(0, 36) || "Start", role: "start" },
+            { ref: "n2", label: "Process Step", role: "step" },
+            { ref: "n3", label: "Outcome", role: "end" },
+          ],
+          edges: [
+            { from: "n1", to: "n2", relation: "next" },
+            { from: "n2", to: "n3", relation: "next" },
+          ],
+          groups: [],
+          explanation: `Constructed workflow for: ${prompt}`,
+        };
+      } else if (topology === "relational_network") {
+        plan = {
+          intent: {
+            userObjective: prompt,
+            targetKind,
+            expectedTopology: "relational_network",
+            mutationScope: Object.keys(this.ws.nodes).length === 0 ? "new_canvas" : "extend_region",
+            focusNodeIds: [],
+          },
+          nodes: [
+            { ref: "n1", label: "Client Application", role: "client" },
+            { ref: "n2", label: prompt.slice(0, 36) || "Service Engine", role: "service" },
+            { ref: "n3", label: "Database Store", role: "database" },
+          ],
+          edges: [
+            { from: "n1", to: "n2", relation: "calls" },
+            { from: "n2", to: "n3", relation: "reads_writes" },
+          ],
+          groups: [],
+          explanation: `Constructed architecture for: ${prompt}`,
+        };
+      } else if (topology === "tree_hierarchy") {
+        plan = {
+          intent: {
+            userObjective: prompt,
+            targetKind,
+            expectedTopology: "tree_hierarchy",
+            mutationScope: Object.keys(this.ws.nodes).length === 0 ? "new_canvas" : "extend_region",
+            focusNodeIds: [],
+          },
+          nodes: [
+            { ref: "root", label: prompt.slice(0, 36) || "Root Concept", role: "root" },
+            { ref: "b1", label: "Branch Aspect 1", role: "branch" },
+            { ref: "b2", label: "Branch Aspect 2", role: "branch" },
+          ],
+          edges: [
+            { from: "root", to: "b1", relation: "contains" },
+            { from: "root", to: "b2", relation: "contains" },
+          ],
+          groups: [],
+          explanation: `Constructed hierarchy for: ${prompt}`,
+        };
+      } else {
+        plan = {
+          intent: {
+            userObjective: prompt,
+            targetKind,
+            expectedTopology: "independent_clusters",
+            mutationScope: Object.keys(this.ws.nodes).length === 0 ? "new_canvas" : "extend_region",
+            focusNodeIds: [],
+          },
+          nodes: [
+            { ref: "n1", label: prompt.slice(0, 36) || "Idea 1", role: "concept" },
+            { ref: "n2", label: "Idea 2", role: "concept" },
+            { ref: "n3", label: "Idea 3", role: "concept" },
+          ],
+          edges: [],
+          groups: [],
+          explanation: `Constructed brainstorming cards for: ${prompt}`,
+        };
+      }
+    }
 
     const compiled = compileSemanticPlan(this.ws, plan);
     if (!compiled.ok) {
@@ -493,6 +622,60 @@ export class BoardSession {
       `Constructed diagram via pipeline (${stamped.length} operations applied).\n` +
         `Explanation: ${plan.explanation || prompt}\n\n` +
         JSON.stringify(summarizeBoard(this.ws), null, 2),
+    );
+  }
+
+  private getProposalDiff(args: Record<string, unknown>): ToolResult {
+    const raw = args.operations;
+    if (!Array.isArray(raw)) return errorResult("`operations` must be an array.");
+    const title = typeof args.title === "string" ? args.title : undefined;
+    const diff = computeProposalDiff(this.ws, raw as Operation[], title);
+    if (!diff.valid) {
+      return errorResult(
+        `Proposal diff validation failed:\n${diff.errors?.map((e) => `- ${e}`).join("\n")}`,
+      );
+    }
+    return text(diff.markdown);
+  }
+
+  private createProposal(args: Record<string, unknown>): ToolResult {
+    const title = typeof args.title === "string" ? args.title.trim() : "";
+    if (!title) return errorResult("`title` is required.");
+    const raw = args.operations;
+    if (!Array.isArray(raw)) return errorResult("`operations` must be an array.");
+    const explanation = typeof args.explanation === "string" ? args.explanation.trim() : "";
+
+    const candidate = raw.filter(
+      (op): op is Operation =>
+        op !== null &&
+        typeof op === "object" &&
+        typeof (op as { op?: unknown }).op === "string" &&
+        !isHumanOnlyOperation((op as { op: string }).op),
+    );
+
+    const diff = computeProposalDiff(this.ws, candidate, title);
+    if (!diff.valid) {
+      return errorResult(
+        `Proposal rejected due to validation errors:\n${diff.errors?.map((e) => `- ${e}`).join("\n")}`,
+      );
+    }
+
+    const proposalId = `prp_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+    const repaired = repairOperations(candidate, this.ws);
+    const stamped = stampAuthorship(repaired, ASSISTANT_AUTHOR);
+
+    this.pendingProposals.set(proposalId, {
+      id: proposalId,
+      title,
+      explanation,
+      operations: stamped,
+      createdAt: Date.now(),
+    });
+
+    return text(
+      `Created visual proposal **${proposalId}** ("${title}"). Pending human review.\n\n` +
+        (explanation ? `> ${explanation}\n\n` : "") +
+        diff.markdown,
     );
   }
 }

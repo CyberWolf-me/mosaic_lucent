@@ -271,11 +271,15 @@ export const registerReviewRoutes: RegisterRoutes = (router, s) => {
           : action === "edit"
             ? "Edited a suggestion"
             : "Assigned a suggestion";
-    const outcome = await commitBatch(s, guard.board, guard.user.id, operations, label, {
-      actorType: "user",
-      actorId: guard.user.id,
-      initiatedBy: guard.user.id,
-    });
+    const outcome = await commitBatch(
+      s,
+      guard.board,
+      guard.user.id,
+      operations,
+      label,
+      { actorType: "user", actorId: guard.user.id, initiatedBy: guard.user.id },
+      { role: guard.role },
+    );
     if (!outcome.ok) {
       return send(res, 409, { error: "stale board", reason: outcome.reason, head: outcome.head });
     }

@@ -27,15 +27,55 @@ export type CanvasState = {
 /** True while a generation is still streaming/revealing. */
 const isWorking = (t: string) => /Building the model|Working…|Thinking|generating/i.test(t);
 
+/**
+ * Every role the canvas can render, from `TYPE_STYLE` in web/src/scene.ts — the
+ * single source of truth for the meta label a node shows.
+ *
+ * The alternation this replaced was
+ * `START|PROCESS|END|DECISION|DATA|ACTOR|SYSTEM|TERMINAL|MERGE`, which is not
+ * that vocabulary: it omitted STEP altogether. STEP is what the reducer assigns
+ * every intermediate node of a linear flow, so a perfectly correct seven-node
+ * journey (START, five STEPs, END) scored two matches and failed the suite's
+ * ">= 3 semantic roles" assertion — the test calling the diagram "a picture,
+ * not a model" while the model sat in the DOM the whole time. GOAL, OUTCOME,
+ * SCREEN, SERVICE and DATABASE were missing too; DATA, TERMINAL and MERGE
+ * appear nowhere in the app.
+ *
+ * Passed into `page.evaluate` as a source string because a RegExp does not
+ * survive the serialisation to the browser context.
+ */
+const ROLE_SOURCE =
+  "^(ACTOR|SCREEN|SERVICE|EXTERNAL|SYSTEM|DATABASE|CACHE|QUEUE|DECISION|NOTE|IDEA|STEP|CONDITION|OUTCOME|START|END|PROCESS|TASK|ROLE|PERSON|TEAM|DEPARTMENT|GOAL)$";
+
 export class Journey {
   constructor(readonly page: Page) {}
 
-  /** Land on the app as an anonymous visitor — the user's first minute. */
+  /**
+   * Land on the app as an anonymous visitor — the user's first minute.
+   *
+   * `waitUntil` is deliberately `domcontentloaded`, not `networkidle`. The auth
+   * screen embeds a Cloudflare Turnstile widget (AuthView's bot gate), and
+   * Turnstile keeps a long-lived script/poll open on `challenges.cloudflare.com`
+   * for as long as the widget is mounted. `networkidle` is defined as "no
+   * in-flight requests for 500 ms", so on this page it is unsatisfiable by
+   * construction and every caller died on the 30 s goto timeout while the page
+   * itself had rendered in well under a second.
+   *
+   * Waiting on the app's own DOM is also the stronger assertion: it proves the
+   * auth card mounted, which is what "the user's first minute" actually means.
+   * A network-quiescence check proved nothing about the product and broke the
+   * moment a third party changed its polling.
+   */
   async open() {
     await this.page.goto(BASE ? `${BASE}/signup` : "/signup", {
-      waitUntil: "networkidle",
+      waitUntil: "domcontentloaded",
       timeout: 30_000,
     });
+    // The signup form is on screen: the same affordance the smoke spec asserts.
+    await this.page
+      .getByRole("button", { name: /create an account|create account|sign up/i })
+      .first()
+      .waitFor({ state: "visible", timeout: 30_000 });
   }
 
   /** Sign up a brand-new user. Returns the credentials for cross-client scenarios. */
@@ -64,26 +104,29 @@ export class Journey {
     return { email, password };
   }
 
-  /** Read the rendered canvas. One evaluate, no layout thrash from the runner. */
+  /**
+   * Read the rendered canvas. One evaluate, no layout thrash from the runner.
+   */
   async canvas(): Promise<CanvasState> {
-    return this.page.evaluate(() => {
+    return this.page.evaluate((roleSource: string) => {
+      const rolesRe = new RegExp(roleSource, "i");
       const els = [...document.querySelectorAll(".node")] as HTMLElement[];
-      const pick = (re: RegExp) =>
+      // The meta line is icon + role text (atoms.tsx renders `.node-meta` as a
+      // dot/icon followed by the label), so the text is matched as a whole
+      // rather than scanned for a substring: "STEP" must not be found inside an
+      // unrelated label, and a node whose meta is absent contributes nothing.
+      const pick = () =>
         els
-          .map((e) => {
-            const metaText = e.querySelector(".node-meta")?.textContent?.trim() || "";
-            const m = re.exec(metaText) || re.exec(e.textContent || "");
-            return (m?.[1] || "").trim();
-          })
-          .filter(Boolean);
+          .map((e) => e.querySelector(".node-meta")?.textContent?.trim() ?? "")
+          .filter((t) => rolesRe.test(t));
       return {
         nodes: els.length,
         labels: els.map((e) => (e.textContent || "").replace(/\s+/g, " ").trim()),
-        roles: pick(/(START|PROCESS|END|DECISION|DATA|ACTOR|SYSTEM|TERMINAL|MERGE)/i),
+        roles: pick(),
         selected: document.querySelectorAll(".node.selected").length,
         bodyText: (document.body.textContent || "").replace(/\s+/g, " ").slice(0, 4_000),
       };
-    });
+    }, ROLE_SOURCE);
   }
 
   /**
@@ -153,6 +196,22 @@ export function trackErrors(page: Page) {
     if (m.type() !== "error") return;
     const t = m.text();
     if (/status of 401/.test(t)) return; // pre-login session poll
+
+    // Third-party console noise is not a Lucent defect, and asserting on it
+    // makes the suite fail whenever Cloudflare changes its internals. Filtered
+    // by the emitting *script's origin*, not by message text, so the filter
+    // cannot accidentally swallow a genuine error from our own bundle:
+    //
+    //   - challenges.cloudflare.com  Turnstile's bot-gate. It logs
+    //     `%c%d font-size:0;color:transparent NaN` — a malformed console format
+    //     string of its own — plus WebGL/font warnings on the auth screen.
+    //     Verified by reading ConsoleMessage.location().url: the message
+    //     originates in the Turnstile iframe, never in the app.
+    //
+    // A same-origin error, or one from our own chunks, still fails the test.
+    const origin = m.location()?.url ?? "";
+    if (/^https?:\/\/challenges\.cloudflare\.com\//.test(origin)) return;
+
     errors.push(t);
   });
   return errors;

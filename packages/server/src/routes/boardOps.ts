@@ -1,10 +1,11 @@
-import type { Operation } from "@lucent/core";
+import type { Operation, SemanticPlan } from "@lucent/core";
 import {
   existingTopics,
   foldStatementTopics,
   isHumanOnlyOperation,
   repairOperations,
   safeParseProgrammaticOperations,
+  SemanticPlanSchema,
   stampAuthorship,
   stampTrust,
   validateOperations,
@@ -200,7 +201,7 @@ export const registerBoardOpsRoutes: RegisterRoutes = (router, s) => {
     // generate path folds to 'pricing' — the divergence the four-boundary
     // rule exists to close.
     const folded = foldStatementTopics(stamped, existingTopics(guard.board.workspace));
-    const operations = repairOperations(folded);
+    const operations = repairOperations(folded, guard.board.workspace);
     const errors = validateOperations(guard.board.workspace, operations);
     if (errors.length > 0) {
       send(res, 422, { error: "operations failed validation", errors });
@@ -221,6 +222,7 @@ export const registerBoardOpsRoutes: RegisterRoutes = (router, s) => {
     // dual-path pattern); the store-only path is the fallback when no room
     // is live or the caller has no role in it.
     const outcome = await commitBatch(s, guard.board, user.id, operations, label, actor, {
+      role: guard.role,
       ...(typeof body.expectedSeq === "number" ? { expectedSeq: body.expectedSeq } : {}),
       ...(requestId !== undefined ? { requestId } : {}),
     });
@@ -330,6 +332,9 @@ export const registerBoardOpsRoutes: RegisterRoutes = (router, s) => {
       prompt?: unknown;
       requestId?: unknown;
       expectedSeq?: unknown;
+      plan?: unknown;
+      mode?: unknown;
+      forceApply?: unknown;
     };
     try {
       const raw = await readBody(req);
@@ -339,7 +344,22 @@ export const registerBoardOpsRoutes: RegisterRoutes = (router, s) => {
       return;
     }
 
-    if (typeof body.prompt !== "string" || !body.prompt.trim()) {
+    let plan: SemanticPlan | undefined;
+    if (body.plan !== undefined) {
+      const parsedPlan = SemanticPlanSchema.safeParse(body.plan);
+      if (!parsedPlan.success) {
+        send(res, 400, { error: "invalid plan", detail: parsedPlan.error.message });
+        return;
+      }
+      plan = parsedPlan.data;
+    }
+
+    const promptText =
+      typeof body.prompt === "string" && body.prompt.trim()
+        ? body.prompt.trim()
+        : plan?.intent.userObjective ?? "";
+
+    if (!promptText) {
       send(res, 400, { error: "prompt must be a non-empty string" });
       return;
     }
@@ -350,17 +370,47 @@ export const registerBoardOpsRoutes: RegisterRoutes = (router, s) => {
         : undefined;
 
     const expectedSeq = typeof body.expectedSeq === "number" ? body.expectedSeq : undefined;
+    if (body.forceApply === true) {
+      if (guard.role !== "owner" || viaAgent || viaMcp) {
+        send(res, 403, {
+          error: "forbidden",
+          detail: "forceApply is restricted to board owners and cannot be invoked by agents, MCP clients, or non-owners",
+        });
+        return;
+      }
+    }
+    const forceApply = body.forceApply === true && guard.role === "owner" && !viaAgent && !viaMcp;
+    const mode =
+      body.mode === "always" || body.mode === "never" || body.mode === "propose" || body.mode === "auto"
+        ? body.mode
+        : undefined;
 
     const outcome = await orchestrateGeneration(s, {
       boardId,
       userId: user.id,
-      prompt: body.prompt.trim(),
+      prompt: promptText,
+      plan,
       actor,
       requestId,
       expectedSeq,
+      role: guard.role,
+      mode,
+      forceApply,
     });
 
     if (outcome.ok) {
+      if (outcome.outcome === "proposed") {
+        send(res, 200, {
+          ok: true,
+          outcome: "proposed",
+          proposalId: outcome.proposalId,
+          operations: outcome.operations,
+          plan: outcome.plan,
+          explanation: outcome.explanation,
+          reason: outcome.reason,
+        });
+        return;
+      }
       send(res, 200, {
         ok: true,
         outcome: "committed",

@@ -356,6 +356,11 @@ export class Room {
     label = "",
     meta?: { requestId?: string; actor?: OperationActor },
   ): Promise<CommitResult> {
+    // Every refusal names the request it refuses, so the submitter knows WHICH
+    // edit failed (Stage B's correlated refusal) — permission and empty used
+    // to come back anonymous, and a client could only time the submit out.
+    const requestId = meta?.requestId;
+    const withRequest = requestId !== undefined ? { requestId } : {};
     const role = this.roles.get(userId);
     if (!role || !roleAtLeast(role, "editor")) {
       // docs/26 F8: a commenter may converse on the board without editing it.
@@ -365,61 +370,67 @@ export class Room {
           ok: false,
           error: "permission",
           detail: refused ?? "editor role required",
-        };
-      }
-    }
-    // The replay guard runs BEFORE validation, on the queue: the world has
-    // moved since the original landed, so recognizing a retry by re-checking
-    // its ops would answer a retried CREATE with "already exists" and
-    // double-apply a retried MOVE. The KEY is the identity of the request;
-    // its outcome is already in the log, and the answer is that outcome.
-    // The map is the fast path; the store's findRequest is the truth for a
-    // request whose entry left the replayed log (snapshotted and pruned).
-    // (The allocator's own duplicate handling stays as the durable backstop
-    // for a two-instance race this room cannot see.)
-    if (meta?.requestId !== undefined) {
-      const known = this.committedRequests.get(meta.requestId);
-      const seq = known ?? (await this.findRequest(this.boardId, meta.requestId))?.seq;
-      if (seq !== undefined) {
-        if (known === undefined) {
-          // Seed the map so subsequent replays of the same key are answered
-          // from memory.
-          this.committedRequests.set(meta.requestId, seq);
-        }
-        return {
-          ok: true,
-          persisted: true,
-          duplicate: true,
-          head: seq,
-          requestId: meta.requestId,
+          ...withRequest,
         };
       }
     }
     // The AI-only guard also applies to humans: coordinates come from layout,
     // except MOVE_NODE which is explicitly a human op and allowed here.
     const filtered = ops.filter((op) => op.op === "MOVE_NODE" || !isHumanOnlyOperation(op.op));
-    if (filtered.length === 0) return { ok: false, error: "empty" };
+    if (filtered.length === 0) return { ok: false, error: "empty", ...withRequest };
 
-    // Stamp authorship: the connection's user owns every authored op in the
-    // batch, whatever `by` the client sent, so comments/votes/reactions are
-    // attributable end-to-end and nobody can post as a peer (M0.4).
-    // The topic fold (Stage C5, ADR 0025) — ai-actor batches ONLY: the
-    // actor model already tells machine output from human hands at this
-    // boundary, which is exactly the discriminator the fold needs. A human's
-    // topic stays exactly as typed (rule 2); a model's variant converges on
-    // the board's existing authored key. The meeting-extraction path (a
-    // user-actor batch carrying model ops) folds client-side before send
-    // (web, Batch 4) — never here.
-    const machineAuthored = meta?.actor?.actorType === "ai";
-    const folded = machineAuthored
-      ? foldStatementTopics(filtered, existingTopics(this.workspace))
-      : filtered;
-    const authored = stampAuthorship(folded, userId);
+    // The durable replay lookup starts now — lookups for many submits overlap
+    // — but its answer is only READ on the queue, below. Awaiting it here
+    // (as this used to) let a later batch from the same socket overtake an
+    // earlier one whose lookup happened to be slower: a "connect to the node I
+    // just made" arrived before the node and was refused, and two drags of
+    // one node could land in the wrong order.
+    const lookup =
+      requestId !== undefined && !this.committedRequests.has(requestId)
+        ? this.findRequest(this.boardId, requestId).catch(() => undefined)
+        : Promise.resolve(undefined);
 
-    // One commit at a time: between the validation and the append the room's
-    // state must not move under us. The chain keeps commits in arrival order;
-    // a rejected commit must not poison the chain, hence the catch-and-drop.
-    const run = this.queue.then(() => this.commitQueued(authored, userId, label, meta));
+    // One commit at a time, in ARRIVAL order: enqueued synchronously, so
+    // nothing between a submit's arrival and its place in line can reorder
+    // it. Between the validation and the append the room's state must not
+    // move under us. A rejected commit must not poison the chain, hence the
+    // catch-and-drop.
+    const run = this.queue.then(async (): Promise<CommitResult> => {
+      // The replay guard runs BEFORE validation, on the queue: the world has
+      // moved since the original landed, so recognizing a retry by
+      // re-checking its ops would answer a retried CREATE with "already
+      // exists" and double-apply a retried MOVE. The KEY is the identity of
+      // the request; its outcome is already in the log, and the answer is
+      // that outcome. Checked here, a retry sent while the original was still
+      // queued finds the original's seq in the map instead of being
+      // validated against the state the original just produced. The store's
+      // findRequest is the truth for a request whose entry left the replayed
+      // log (snapshotted and pruned); the allocator's own duplicate handling
+      // stays the durable backstop for a two-instance race.
+      if (requestId !== undefined) {
+        const known = this.committedRequests.get(requestId);
+        const seq = known ?? (await lookup)?.seq;
+        if (seq !== undefined) {
+          if (known === undefined) this.committedRequests.set(requestId, seq);
+          return { ok: true, persisted: true, duplicate: true, head: seq, requestId };
+        }
+      }
+      // Stamp authorship: the connection's user owns every authored op in the
+      // batch, whatever `by` the client sent, so comments/votes/reactions are
+      // attributable end-to-end and nobody can post as a peer (M0.4).
+      // The topic fold (Stage C5, ADR 0025) — ai-actor batches ONLY: the
+      // actor model already tells machine output from human hands at this
+      // boundary, which is exactly the discriminator the fold needs. A human's
+      // topic stays exactly as typed (rule 2); a model's variant converges on
+      // the board's existing authored key. Folded against the state the batch
+      // actually lands on, now that it is on the queue.
+      const machineAuthored = meta?.actor?.actorType === "ai";
+      const folded = machineAuthored
+        ? foldStatementTopics(filtered, existingTopics(this.workspace))
+        : filtered;
+      const authored = stampAuthorship(folded, userId);
+      return this.commitQueued(authored, userId, label, meta);
+    });
     this.queue = run.then(
       () => undefined,
       () => undefined,

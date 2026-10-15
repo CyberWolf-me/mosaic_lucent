@@ -45,6 +45,7 @@ export function DiagramLayer({
   selected,
   selectedNodes,
   proposedIds,
+  deletedNodeIds,
   onSelect,
   frameLabel,
   spotlightId,
@@ -73,6 +74,8 @@ export function DiagramLayer({
   /** All nodes in a multi-selection; `selected` is the focused one within it. */
   selectedNodes?: Set<string>;
   proposedIds?: Set<string>;
+  /** Nodes slated for deletion in a proposal, rendered as ghost cards. */
+  deletedNodeIds?: Set<string>;
   onSelect?: (id: string, additive: boolean) => void;
   frameLabel?: string;
   /** When set, dim every node except this one (Presentation/Focus mode, docs/12). */
@@ -702,7 +705,8 @@ export function DiagramLayer({
       {finalNodes.map((base, i) => {
         const n = withDrag(base, dragOverride);
         let state: NodeState = "";
-        if (proposedIds?.has(n.id)) state = "proposed";
+        if (deletedNodeIds?.has(n.id)) state = "ghost";
+        else if (proposedIds?.has(n.id)) state = "proposed";
         else if (selected === n.id || selectedNodes?.has(n.id)) state = "selected";
         const dimmed = spotlightId != null && spotlightId !== n.id;
         const lit = spotlightId != null && spotlightId === n.id;

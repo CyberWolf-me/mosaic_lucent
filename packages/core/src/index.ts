@@ -40,3 +40,7 @@ export * from "./voice.js";
 export * from "./plan.js";
 export * from "./compiler.js";
 export * from "./qualityGate.js";
+export * from "./lens.js";
+export * from "./linter.js";
+export * from "./meetingBrief.js";
+export * from "./proposalDiff.js";

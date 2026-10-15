@@ -45,6 +45,43 @@ test.describe("Workflow: 5-User Multiplayer Team Collaboration", () => {
   // Generous timeout for 5 concurrent browser contexts
   test.setTimeout(240_000);
 
+  /**
+   * Click a canvas node, fitting the board into view first.
+   *
+   * The canvas is an infinite, pannable surface: a node the layout engine
+   * places below the fold is present and passes Playwright's visibility check,
+   * yet still sits outside the *viewport*, and `click()` refuses it with
+   * "Element is outside of the viewport". `force: true` does not help — force
+   * skips actionability (stability, hit-target, enabled) but never the viewport
+   * requirement, which is exactly the check that was failing.
+   *
+   * `scrollIntoViewIfNeeded()` is not the answer either: the node lives in a
+   * transformed plane, not a scroll container, so scrolling does nothing. The
+   * app's own **Shift+1 = fit the whole board to the viewport** (CanvasView.tsx,
+   * Figma parity) is the real user affordance for this, and it is what a person
+   * does when a card is off-screen. Driving the keyboard rather than synthesising
+   * a pointer drag keeps the test on the product's public surface and out of
+   * camera internals.
+   */
+  async function clickCanvasNode(page: Page, text: RegExp) {
+    // Shift+1 is bound on `window` (CanvasView.tsx), so no pointer target is
+    // involved and the top bar cannot intercept it. Blur first: the handler
+    // deliberately ignores keystrokes that originate in a text field, and the
+    // preceding steps leave the AI prompt focused.
+    await page
+      .locator("body")
+      .click({ position: { x: 2, y: 2 } })
+      .catch(() => {});
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    await page.keyboard.press("Shift+1");
+    await page.waitForTimeout(600);
+
+    const node = page.locator(".node").filter({ hasText: text }).first();
+    // An honest failure here beats a confusing viewport error below.
+    await expect(node).toBeVisible({ timeout: 20_000 });
+    await node.click({ force: true });
+  }
+
   async function signUp(page: Page, name: string): Promise<string> {
     const slug = name.toLowerCase().replace(/[^a-z0-9]/g, "");
     const email = `${slug}_${Date.now()}_${Math.floor(Math.random() * 1e5)}@lucent.test`;
@@ -282,9 +319,18 @@ test.describe("Workflow: 5-User Multiplayer Team Collaboration", () => {
     await expect(page3).toHaveURL(/lens=kanban/);
     await expect(page3.locator(".crumb.current")).toContainText("Kanban");
 
-    // Charlie sees either the Action cards in Kanban columns or the "Convert/Add to To Do" button
+    // Charlie sees either the Action cards in Kanban columns or the
+    // "Convert Diagram to Kanban" empty state.
+    //
+    // The button copy is `Convert all {n} nodes to cards` (BoardView.tsx), so
+    // it is matched on the stable stem and the trailing noun, not on a
+    // remembered full sentence: the previous `'Convert all nodes to Kanban
+    // cards'` matched nothing the app has ever rendered. The mismatch was
+    // silent — the `if` guard swallowed it — so the conversion never ran, no
+    // columns were ever created, and the assertion below failed on a modal
+    // that was working exactly as designed.
     const convertBtn = page3.locator(
-      "button:has-text('Convert all nodes to Kanban cards'), button:has-text('Add to To Do')",
+      "button:has-text('Convert all'), button:has-text('Add to To Do')",
     );
     if (
       await convertBtn
@@ -297,7 +343,7 @@ test.describe("Workflow: 5-User Multiplayer Team Collaboration", () => {
 
     // Verify Kanban work board columns are present
     await expect(page3.locator(".board-column, .board-columns").first()).toBeVisible({
-      timeout: 10_000,
+      timeout: 15_000,
     });
 
     // Verify contextual AI Dock placeholder for Kanban
@@ -338,12 +384,16 @@ test.describe("Workflow: 5-User Multiplayer Team Collaboration", () => {
     await diagramLensBtn4.click();
     await expect(page4).toHaveURL(/view=canvas/);
 
-    // Dana selects a visible node to view the Engagement Bar
-    const danaNode = page4
-      .locator(".node")
-      .filter({ hasText: /Order|Shipping|Cart|PostgreSQL/i })
-      .first();
-    await danaNode.click({ force: true });
+    // Dana selects a visible node to view the Engagement Bar.
+    //
+    // Matched against the labels Alice's prompt actually produced. The old
+    // `/Order|Shipping|Cart|PostgreSQL/` described an e-commerce *commerce*
+    // diagram, but line 130 asks for an architecture one — API Gateway, Auth
+    // Service, Database, Payment Gateway — and "PostgreSQL" only ever appears
+    // on a recap card added later. The filter therefore matched nothing, and
+    // `.first()` fell through to an arbitrary node whose position the test
+    // never controlled; that is what put it outside the viewport.
+    await clickCanvasNode(page4, /Gateway|Auth|Database|Payment/i);
 
     // Dana casts a reaction on the selected node
     const reactBtn = page4.locator(".eng-react").first();
@@ -380,12 +430,8 @@ test.describe("Workflow: 5-User Multiplayer Team Collaboration", () => {
     await diagramLensBtn5.click();
     await expect(page5).toHaveURL(/view=canvas/);
 
-    // Evan casts a vote on a node
-    const evanNode = page5
-      .locator(".node")
-      .filter({ hasText: /Order|Shipping|Cart|PostgreSQL/i })
-      .first();
-    await evanNode.click({ force: true });
+    // Evan casts a vote on a node (same architecture labels as above).
+    await clickCanvasNode(page5, /Gateway|Auth|Database|Payment/i);
     const voteBtn = page5.locator(".eng-vote");
     if (await voteBtn.isVisible({ timeout: 5_000 }).catch(() => false)) {
       await voteBtn.click();
