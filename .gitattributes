@@ -1,0 +1,4 @@
+# Normalize line endings to LF on checkout (ENG-004): without this,
+# core.autocrlf=true machines materialize CRLF working copies and Prettier's
+# endOfLine default flags every touched Markdown file. Blobs stay LF.
+* text=auto eol=lf
