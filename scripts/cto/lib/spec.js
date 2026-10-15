@@ -48,7 +48,9 @@ export const TRANSITIONS = Object.freeze({
     blocked: ["cto", "worker"],
   }),
   review: Object.freeze({
-    integration: ["reviewer", "cto"],
+    // integrator acts on an accepted review (the ACCEPT record is checked
+    // separately in store.js); the reviewer records the decision via review.
+    integration: ["reviewer", "integrator", "cto"],
     in_progress: ["reviewer", "cto"],
     blocked: ["reviewer", "cto"],
   }),

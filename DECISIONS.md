@@ -97,6 +97,22 @@
   test rows), extend the adversarial suite (37 tests), re-verify, and
   seek a second review before integration.
 
+## D-008 — Review records decisions; integrator owns the transition
+
+- Date: 2026-10-15. Owner: CTO agent (micro-reviewed, ACCEPT). Status:
+  accepted.
+- Context: `task.mjs review` auto-advanced ACCEPT straight to
+  `integration`, letting a decision skip the integration pre-checks;
+  meanwhile the `integrator` role could not execute the
+  `review→integration` transition its own command needs.
+- Decision: review records ACCEPT/CHANGES_REQUIRED/BLOCKED only (returns
+  to work on non-accept); `integrate.mjs` performs `review→integration`
+  after its pre-checks; the role list gains `integrator` while the
+  attempt-scoped ACCEPT-record guard is unchanged (a stale ACCEPT on a
+  prior attempt authorizes nothing).
+- Consequences: no stuck ACCEPT states (integrator/cto/reviewer can all
+  advance); no gate skipped.
+
 ## Open risks
 
 - R-001: `node:sqlite` experimental status (see D-002).

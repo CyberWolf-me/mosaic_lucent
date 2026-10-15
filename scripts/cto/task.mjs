@@ -143,12 +143,13 @@ async function main() {
           decision: args.decision,
           findings: args.findings ?? "",
         });
-        // ACCEPT advances toward integration; other decisions return to work.
-        if (args.decision === "ACCEPT") {
-          transition(db, specs, { taskId: id, to: "integration", actor: "reviewer", by: args.reviewer, reason: "review ACCEPT" });
-        } else if (args.decision === "CHANGES_REQUIRED") {
+        // The review records the DECISION only. State advances are owned by
+        // their actors: integrate.mjs moves review->integration (after its
+        // pre-checks), the worker resumes on CHANGES_REQUIRED. A review
+        // command that auto-advanced would skip the integration gates.
+        if (args.decision === "CHANGES_REQUIRED") {
           transition(db, specs, { taskId: id, to: "in_progress", actor: "reviewer", by: args.reviewer, reason: args.findings ?? "" });
-        } else {
+        } else if (args.decision === "BLOCKED") {
           transition(db, specs, { taskId: id, to: "blocked", actor: "reviewer", by: args.reviewer, reason: args.findings ?? "" });
         }
         console.log(JSON.stringify({ reviewed: id, decision: args.decision }, null, 2));

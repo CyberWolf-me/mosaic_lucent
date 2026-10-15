@@ -65,7 +65,10 @@ describe("central transition table", () => {
     assert.equal(checkTransition("review", "integration", "reviewer"), null);
     assert.equal(checkTransition("review", "in_progress", "reviewer"), null);
     assert.equal(checkTransition("integration", "verified", "integrator"), null);
-    assert.ok(checkTransition("review", "integration", "integrator"));
+    // The integrator executes an accepted review; the ACCEPT record itself
+    // is still required (store.js guard, pinned in store.test.mjs).
+    assert.equal(checkTransition("review", "integration", "integrator"), null);
+    assert.ok(checkTransition("review", "integration", "worker"));
   });
 
   it("unknown states and jumps fail closed", () => {
