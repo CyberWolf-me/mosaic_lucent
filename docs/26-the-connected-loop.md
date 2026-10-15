@@ -70,44 +70,46 @@ Added by this plan:
 ## 3. Where we are
 
 Legend: ✅ exists · 🟡 partial · ❌ missing. File references are in the audit
-notes; the headline status per area:
+notes; the headline status per area. **Re-verified 2026-10-15 (ENG-004):**
+rows below carry the file that proves the current status; untouched rows
+were not re-audited.
 
-| Spec area                  | Status | Reality in the code                                                                                                     |
-| -------------------------- | :----: | ----------------------------------------------------------------------------------------------------------------------- |
-| Orgs, personal org, roles  |   🟡   | Org → boards only. Roles owner/editor/viewer. No teams, projects, commenter, guests-as-type                             |
-| Favorites, trash, activity |   ❌   | Board delete is hard and cascading; no favorites; no user activity feed                                                 |
-| Infinite canvas            |   🟡   | Pan/zoom/fit/minimap/marquee/snap/align ✅; no rotate handle, lasso, back/forward, zoom-to-frame, system clipboard      |
-| Object kinds               |   🟡   | 12 shape kinds; no tables, code, rich text, icons, **vector/SVG**                                                       |
-| Diagram intelligence       |   ✅   | 8 kinds, regions, 4 layout strategies + ELK, sequence/ER lenses, statements, provenance, typed edges                    |
-| AI copilot (generate/edit) |   ✅   | One prompt, 38 ops, validated; inspection ("find contradictions") only through free-form chat                           |
-| AI conversation            |   🟡   | Chat is per board in localStorage, 8 turns; no threads, no scopes beyond the board                                      |
-| Native meetings (A/V)      |   🟡   | LiveKit room works; no lobby preview, device choice, roles, chat, hands, captions, reconnect; **token route unguarded** |
-| Voice                      |   🟡   | 4 STT providers, TTS, wake phrase, conversational lease ✅; barge-in mostly unreachable; hosted STT drops finals        |
-| Transcript                 |   🟡   | Labels, search, jump ✅; no correction, confidence not stored, speakers not mapped to people                            |
-| Meeting intelligence       |   🟡   | Live differential extraction + Meeting brief ✅; no end-of-meeting pass, summary, review step                           |
-| Memory (cross-meeting)     |   🟡   | Within one board only (ADR 0023); nothing crosses boards                                                                |
-| Search                     |   🟡   | One board, keyword; comments not searched; no workspace search                                                          |
-| Ask                        |   🟡   | One shared board, verified citations ✅; no confidence, no scopes, not on local boards                                  |
-| History                    |   🟡   | Server op log with actors ✅; no compare, AI model not recorded on changes                                              |
-| Human review               |   🟡   | One pending proposal per board; external actions and inbound changes each have their own gate; no unified center        |
-| Execution                  |   🟡   | Actions with issues, rollups, blockers, drives-chain ✅; no project/workstream entity                                   |
-| Integrations               |   🟡   | Linear/GitHub/Jira out + human-gated; inbound status only; env-var credentials, no OAuth, no degraded state             |
-| External meeting adapters  |   🟡   | Seam + mock only; capability model written but unused                                                                   |
-| Collaboration              |   🟡   | Presence, comments, mentions ✅; **viewers can't comment**; no follow/spotlight across users                            |
-| Templates                  |   🟡   | 4 board templates; no meeting templates; templates carry no extraction rules                                            |
-| Lenses                     |   🟡   | Diagram, Kanban, Document, Wireframe, Sequence, ER; no timeline, dependency, decision lens                              |
-| Semantic zoom              |   ✅   | Density ladder (§6.5): count+zoom presentation modes; regions auto-summarize into cards at scale                        |
-| Files / assets             |   🟡   | Upload API exists but **no web client**; every image lives as a data URL in the op log                                  |
-| AI images / vectors        |   🟡   | Raster image generation ✅; **no vector/SVG creation**; SVG import is a naive regex                                     |
-| Notifications              |   🟡   | 7 kinds (invites/mentions/replies); none for approvals, meetings, decisions, blocked work                               |
-| Command palette            |   🟡   | Navigation + a few actions; no canvas commands                                                                          |
-| Mobile                     |   🟡   | Read-only board + comments; no approvals, meetings, Ask                                                                 |
-| Security / classification  |   ✅   | Classification floors, provider policy, SSO/SAML/SCIM users/TOTP, sessions                                              |
-| Audit                      |   🟡   | Append-only log ✅; invites, role changes, share links, approvals, integration connects **not audited**                 |
-| AI governance              |   🟡   | Actor model ✅; which model/provider ran lives only in usage metering                                                   |
-| Billing / usage            |   ✅   | 4 plans, Stripe, metering; analytics are usage-only                                                                     |
-| Automation                 |   ❌   | Job queue ✅; outbox has **no consumers**; 3 job types are stubs; no user rules                                         |
-| MCP / API                  |   🟡   | 4 MCP tools, one board, session token; no API tokens, no versioned API                                                  |
+| Spec area                  | Status | Reality in the code                                                                                                                                                                                                           |
+| -------------------------- | :----: | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Orgs, personal org, roles  |   🟡   | Org → boards only. Roles owner/editor/viewer **+ commenter** (`server/src/identity.ts`, docs/26 F8); teams, projects, guests shipped (`server/src/teams.ts`, `routes/projects.ts`, `routes/guests.ts`)                        |
+| Favorites, trash, activity |   🟡   | Favorites + trash shipped (`server/src/favorites.ts`, `trash.ts`); board delete still cascading; no user activity feed                                                                                                        |
+| Infinite canvas            |   🟡   | Pan/zoom/fit/minimap/marquee/snap/align + rotate handle, lasso select, camera back/forward, zoom-to-frame (`board/geometry.ts` lasso/resize, `ShapeToolbar.tsx:406`, `CanvasView.tsx:2067,2742`); system clipboard still open |
+| Object kinds               |   🟡   | 12 shape kinds + tables, charts, vectors, icons, rich text (`core/src/table.ts`, `chart.ts`, `vector.ts`, `web/src/ui/icons.tsx`); code listings still import-only                                                            |
+| Diagram intelligence       |   ✅   | **18 kinds** (`core/src/model.ts` DIAGRAM_KINDS), regions, layout strategies + ELK, sequence/ER lenses, statements, provenance, typed edges                                                                                   |
+| AI copilot (generate/edit) |   ✅   | One prompt, 38 ops, validated; inspection ("find contradictions") only through free-form chat                                                                                                                                 |
+| AI conversation            |   🟡   | Chat per board in localStorage, 8 turns, **plus server-side conversation threads** (`server/src/threads.ts`, docs/26 J7); no scopes beyond the board                                                                          |
+| Native meetings (A/V)      |   🟡   | LiveKit room works; no lobby preview, device choice, roles, chat, hands, captions, reconnect; token route now role-guarded (docs/26 F1, `agentGrant.ts`)                                                                      |
+| Voice                      |   🟡   | 4 STT providers, TTS, wake phrase, conversational lease ✅; barge-in mostly unreachable; hosted-STT finals fixed (docs/26 F3)                                                                                                 |
+| Transcript                 |   🟡   | Labels, search, jump, **corrections** (`server/src/meetings.ts` `correctedTurns`) ✅; confidence not stored, speakers not mapped to people                                                                                    |
+| Meeting intelligence       |   🟡   | Live differential extraction + Meeting brief ✅; no end-of-meeting pass, summary, review step                                                                                                                                 |
+| Memory (cross-meeting)     |   🟡   | Cross-board `StatementIndexer` + per-generation memory digest (`server/src/statementIndex.ts`, `generateMemory.ts`); still a projection, not a store                                                                          |
+| Search                     |   🟡   | Server board search + scoped ask (`routes/search.ts`, `scopedAsk.ts`); comments not searched; no workspace-wide full-text                                                                                                     |
+| Ask                        |   🟡   | One shared board, verified citations ✅; no confidence, no scopes, not on local boards                                                                                                                                        |
+| History                    |   🟡   | Server op log with actors ✅; no compare, AI model not recorded on changes                                                                                                                                                    |
+| Human review               |   🟡   | One pending proposal per board; external actions and inbound changes each have their own gate; no unified center                                                                                                              |
+| Execution                  |   🟡   | Actions with issues, rollups, blockers, drives-chain ✅; project entity exists (`routes/projects.ts`), workstreams are plan-board regions                                                                                     |
+| Integrations               |   🟡   | Linear/GitHub/Jira out + human-gated; inbound status only; env-var credentials, **OAuth added** (`routes/integrationOAuth.ts`), no degraded state                                                                             |
+| External meeting adapters  |   🟡   | Seam + mock only; capability model written but unused                                                                                                                                                                         |
+| Collaboration              |   🟡   | Presence, comments, mentions ✅; **commenter role can comment** (docs/26 F8); no follow/spotlight across users                                                                                                                |
+| Templates                  |   🟡   | 4 board templates; no meeting templates; templates carry no extraction rules                                                                                                                                                  |
+| Lenses                     |   🟡   | Diagram, Kanban, Document, Wireframe, Sequence, ER + timeline/dependency kinds (`model.ts`, `layout.ts` timeline geometry); no decision lens                                                                                  |
+| Semantic zoom              |   ✅   | Density ladder (§6.5): count+zoom presentation modes; regions auto-summarize into cards at scale                                                                                                                              |
+| Files / assets             |   🟡   | Upload API **plus web client** (`web/src/assets.ts`: shared boards upload once, op carries `asset:` ref; data-URL fallback offline); local boards still inline                                                                |
+| AI images / vectors        |   🟡   | Raster image generation ✅; **vector creation via Vector Studio** (`core/src/vector.ts`); SVG import yields editable shapes                                                                                                   |
+| Notifications              |   🟡   | 7 kinds (invites/mentions/replies); none for approvals, meetings, decisions, blocked work                                                                                                                                     |
+| Command palette            |   🟡   | Navigation + actions + slash commands (`core/src/slashCommands.ts`); deep canvas commands still open                                                                                                                          |
+| Mobile                     |   🟡   | Read-only board + comments; no approvals, meetings, Ask                                                                                                                                                                       |
+| Security / classification  |   ✅   | Classification floors, provider policy, SSO/SAML/SCIM users/TOTP, sessions                                                                                                                                                    |
+| Audit                      |   ✅   | Append-only log ✅ **plus audit rows** for shares, joins, role changes, proposal decisions, invites, integration connects (docs/26 F9, `audit-coverage.test.ts`)                                                              |
+| AI governance              |   🟡   | Actor model ✅; which model/provider ran lives only in usage metering                                                                                                                                                         |
+| Billing / usage            |   ✅   | 4 plans, Stripe, metering; analytics are usage-only                                                                                                                                                                           |
+| Automation                 |   🟡   | Outbox + job runner + automations (meeting recap/extract, decision planning) with human gates (`server/src/outbox.ts`, `automation.ts`); user rules still open                                                                |
+| MCP / API                  |   ✅   | **13 MCP tools** (canvas ops, diagram construction, proposals + diffs, board/meeting/project reads, Mermaid, search), API tokens (`apiTokens.ts`), versioned API (`apiVersion.ts`)                                            |
 
 ## 4. Fix first — defects the audit found (Phase 0)
 
