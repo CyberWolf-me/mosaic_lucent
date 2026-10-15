@@ -5106,12 +5106,15 @@ export function createApp(deps: AppDeps): App {
         const parsed = raw ? JSON.parse(raw) : {};
         // Authoritative mode: a boardId backed by server storage makes
         // validation run against real state instead of the client's summary.
-        const requestedBoardId =
-          typeof parsed.boardId === "string"
-            ? parsed.boardId
-            : typeof parsed.run?.boardId === "string"
-              ? parsed.run.boardId
-              : undefined;
+        // A top-level boardId is an explicit server-commit request; a
+        // run.boardId fallback is the client's generate-then-commit flow
+        // (the socket commits under the run) — validate authoritatively
+        // but do NOT auto-commit, or the client's commit double-applies.
+        const topLevelBoardId = typeof parsed.boardId === "string" ? parsed.boardId : undefined;
+        const runBoardId =
+          typeof parsed.run?.boardId === "string" ? parsed.run.boardId : undefined;
+        const requestedBoardId = topLevelBoardId ?? runBoardId;
+        const fromRunFallback = topLevelBoardId === undefined && runBoardId !== undefined;
         const storedBoard = requestedBoardId ? await boardStore.get(requestedBoardId) : undefined;
         // The old test here was `storedBoard.ownerId === auth.userId`, which
         // quietly downgraded every collaborator to advisory validation: an editor's
@@ -5127,6 +5130,7 @@ export function createApp(deps: AppDeps): App {
                 boardId: storedBoard.id,
                 store: boardStore,
                 authorized: true,
+                ...(fromRunFallback ? { proposeOnly: true as const } : {}),
                 commitBatch: async (ops: import("@lucent/core").Operation[], label: string) => {
                   return commitBatch(
                     {
@@ -5319,12 +5323,13 @@ export function createApp(deps: AppDeps): App {
       try {
         const raw = await readBody(req);
         const parsed = raw ? JSON.parse(raw) : {};
-        const requestedBoardId =
-          typeof parsed.boardId === "string"
-            ? parsed.boardId
-            : typeof parsed.run?.boardId === "string"
-              ? parsed.run.boardId
-              : undefined;
+        // Same contract as /api/generate above: run.boardId validates
+        // authoritatively without auto-committing the client's run flow.
+        const topLevelBoardId = typeof parsed.boardId === "string" ? parsed.boardId : undefined;
+        const runBoardId =
+          typeof parsed.run?.boardId === "string" ? parsed.run.boardId : undefined;
+        const requestedBoardId = topLevelBoardId ?? runBoardId;
+        const fromRunFallback = topLevelBoardId === undefined && runBoardId !== undefined;
         const storedBoard = requestedBoardId ? await boardStore.get(requestedBoardId) : undefined;
         const aiCtx = await resolveAiContext(auth.userId, storedBoard);
         const authoritative =
@@ -5333,6 +5338,7 @@ export function createApp(deps: AppDeps): App {
                 boardId: storedBoard.id,
                 store: boardStore,
                 authorized: true,
+                ...(fromRunFallback ? { proposeOnly: true as const } : {}),
                 commitBatch: async (ops: import("@lucent/core").Operation[], label: string) => {
                   return commitBatch(
                     {
