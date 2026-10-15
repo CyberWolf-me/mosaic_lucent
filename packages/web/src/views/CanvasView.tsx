@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { resolveLocale, t } from "@lucent/i18n";
-import { applyLayout, applyRoutes, computeLayoutWithRoutes } from "@lucent/core";
+import { applyLayout, applyRoutes, applyValidOperations, computeLayoutWithRoutes } from "@lucent/core";
 import { Ico } from "../ui/icons.js";
 import { AIPill, type ComposerScope } from "../ui/AIPill.js";
 import { plainText } from "../richText.js";
@@ -3173,6 +3173,14 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
       )
     : undefined;
 
+  const deletedNodeIds = proposal
+    ? new Set(
+        proposal.operations.flatMap((op) =>
+          op.op === "DELETE_NODE" ? [op.id] : [],
+        ),
+      )
+    : undefined;
+
   // Preview workspace shows proposed nodes/edges alongside current state.
   // Memoised because applyPreview re-runs the layout engine: while a proposal is
   // open this used to recompute the whole layout on every pan frame and hover.
@@ -3513,6 +3521,7 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
                 selected={selected}
                 selectedNodes={selectedNodes}
                 proposedIds={proposedIds}
+                deletedNodeIds={deletedNodeIds}
                 onSelect={onNodeSelect}
                 frameLabel={`${projectName || "Untitled"} · ${DIAGRAM_LABELS[workspace.diagramKind]}`}
                 spotlightId={spotlightId}
@@ -4489,63 +4498,32 @@ export function CanvasView({ onOpenSettings }: { onOpenSettings: (section?: stri
   );
 }
 
-function applyPreview(
+export function applyPreview(
   workspace: import("@lucent/core").Workspace,
   operations: import("@lucent/core").Operation[],
 ) {
-  // Lightweight non-committing preview: layer proposed nodes/edges/groups on top.
-  const nodes = { ...workspace.nodes };
-  const edges = { ...workspace.edges };
-  const groups = { ...workspace.groups };
+  // Use applyValidOperations to simulate the proposed workspace faithfully:
+  // adds nodes, renames nodes, changes types, modifies groups, and removes edges/nodes.
+  const { workspace: simulated } = applyValidOperations(workspace, operations);
+
+  // Run the layout engine over the simulated workspace so new/remaining nodes
+  // are positioned and routed cleanly. Routes ride along so the preview draws
+  // the exact corridors the applied board will.
+  const { layout, routes } = computeLayoutWithRoutes(simulated);
+  const laidOut = applyRoutes(applyLayout(simulated, layout), routes);
+
+  // Keep deleted nodes in the preview so they render as ghost cards in their
+  // original positions, making removals visible to the user during proposal review.
   for (const op of operations) {
-    if (op.op === "CREATE_NODE" && !nodes[op.id]) {
-      nodes[op.id] = {
-        id: op.id,
-        nodeType: op.nodeType,
-        label: op.label,
-        ...(op.groupId ? { groupId: op.groupId } : {}),
-      };
-    }
-    if (op.op === "CONNECT_NODES") {
-      const id = `${op.source}->${op.target}:${op.relationship}`;
-      edges[id] = { id, source: op.source, target: op.target, relationship: op.relationship };
-    }
-    // Groups matter to the preview: without them a proposed swimlane/tier
-    // diagram previewed as an ungrouped wall of boxes, then rearranged on apply.
-    // The kind matters too: a proposed region previews under its own strategy.
-    if (op.op === "CREATE_GROUP" && !groups[op.id]) {
-      groups[op.id] = {
-        id: op.id,
-        label: op.label,
-        children: [...op.children],
-        ...(op.kind ? { kind: op.kind } : {}),
-      };
-    }
-    if (op.op === "SET_GROUP_KIND" && groups[op.id]) {
-      groups[op.id] =
-        op.kind === null
-          ? { ...groups[op.id]!, children: [...groups[op.id]!.children] }
-          : { ...groups[op.id]!, kind: op.kind };
+    if (op.op === "DELETE_NODE") {
+      const original = workspace.nodes[op.id];
+      if (original) {
+        laidOut.nodes[op.id] = { ...original };
+      }
     }
   }
-  // Attach proposed nodes to their proposed groups so the region has members.
-  for (const n of Object.values(nodes)) {
-    if (n.groupId && groups[n.groupId] && !groups[n.groupId]!.children.includes(n.id)) {
-      groups[n.groupId] = {
-        ...groups[n.groupId]!,
-        children: [...groups[n.groupId]!.children, n.id],
-      };
-    }
-  }
-  const merged = { ...workspace, nodes, edges, groups };
-  // Run the layout engine over the preview. Proposed nodes carry no position, so
-  // without this every one of them rendered at the origin, stacked on top of each
-  // other and on top of the existing board — the preview looked broken and then
-  // "fixed itself" on Apply. Routes ride along (V5): the preview draws the same
-  // corridors the applied board will. No direction passed (Phase 5): the
-  // board's layout intent resolves, so the preview previews the intent too.
-  const { layout, routes } = computeLayoutWithRoutes(merged);
-  return applyRoutes(applyLayout(merged, layout), routes);
+
+  return laidOut;
 }
 
 /**

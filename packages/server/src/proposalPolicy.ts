@@ -1,18 +1,11 @@
-import type { Operation, SemanticPlan } from "@lucent/core";
+import {
+  type Operation,
+  type SemanticPlan,
+  DESTRUCTIVE_OPS,
+  isDestructiveOperation,
+} from "@lucent/core";
 
-export const DESTRUCTIVE_OPS: ReadonlySet<string> = new Set([
-  "DELETE_NODE",
-  "DELETE_GROUP",
-  "DELETE_SHAPE",
-  "DELETE_WIREFRAME",
-  "TRANSFORM_DIAGRAM",
-  "DISCONNECT_NODES",
-  "DISCONNECT_SHAPES",
-  "CLEAR_VOTES",
-  "REMOVE_VOTE",
-  "REMOVE_REACTION",
-  "DELETE_COMMENT",
-]);
+export { DESTRUCTIVE_OPS, isDestructiveOperation };
 
 export const HIGH_IMPACT_SCOPES: ReadonlySet<string> = new Set([
   "reorganize_only",
@@ -38,10 +31,6 @@ export interface ProposalPolicyDecision {
   riskLevel: "low" | "medium" | "high" | "critical";
   destructiveOps: string[];
   isHighImpact: boolean;
-}
-
-export function isDestructiveOperation(op: Operation): boolean {
-  return DESTRUCTIVE_OPS.has(op.op);
 }
 
 export function isHighImpactOperation(op: Operation): boolean {

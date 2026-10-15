@@ -21,6 +21,7 @@ import {
   stampTrust,
   withEditTrust,
   isConversationOnly,
+  isDestructiveOperation,
   lensFor,
   representationLabel,
   validateOperations,
@@ -1307,14 +1308,20 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           ...planSkippedNote,
         };
 
-        // Large batches on an existing diagram present as a proposal to review.
+        // Review gating on an existing diagram presents as a proposal to review.
         // Threshold is dynamic from settings (UX-1): always=>0 (everything
-        // proposes), large=>5, never=>Infinity (destructive/external still
-        // propose on the server path; kept simple here).
+        // proposes), large=>5, never=>Infinity.
+        // Invariant: Destructive operations (e.g. DELETE_NODE, DISCONNECT_NODES) on
+        // an existing diagram MUST require proposal review regardless of threshold (UX-1 / Stage A safety).
+        const existingNodeCount = Object.keys(workspace.nodes).length;
+        const hasDestructive = result.operations.some((op) => {
+          if (op.op === "TRANSFORM_DIAGRAM" && existingNodeCount === 0) return false;
+          return isDestructiveOperation(op);
+        });
         const isLarge =
           attachments?.propose === true ||
-          (result.operations.length > proposalThreshold() &&
-            Object.keys(workspace.nodes).length > 0);
+          (result.operations.length > proposalThreshold() && existingNodeCount > 0) ||
+          (hasDestructive && existingNodeCount > 0);
         setGenPhase("applying");
 
         if (isLarge) {

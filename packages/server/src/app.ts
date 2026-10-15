@@ -5106,7 +5106,12 @@ export function createApp(deps: AppDeps): App {
         const parsed = raw ? JSON.parse(raw) : {};
         // Authoritative mode: a boardId backed by server storage makes
         // validation run against real state instead of the client's summary.
-        const requestedBoardId = typeof parsed.boardId === "string" ? parsed.boardId : undefined;
+        const requestedBoardId =
+          typeof parsed.boardId === "string"
+            ? parsed.boardId
+            : typeof parsed.run?.boardId === "string"
+              ? parsed.run.boardId
+              : undefined;
         const storedBoard = requestedBoardId ? await boardStore.get(requestedBoardId) : undefined;
         // The old test here was `storedBoard.ownerId === auth.userId`, which
         // quietly downgraded every collaborator to advisory validation: an editor's
@@ -5314,7 +5319,12 @@ export function createApp(deps: AppDeps): App {
       try {
         const raw = await readBody(req);
         const parsed = raw ? JSON.parse(raw) : {};
-        const requestedBoardId = typeof parsed.boardId === "string" ? parsed.boardId : undefined;
+        const requestedBoardId =
+          typeof parsed.boardId === "string"
+            ? parsed.boardId
+            : typeof parsed.run?.boardId === "string"
+              ? parsed.run.boardId
+              : undefined;
         const storedBoard = requestedBoardId ? await boardStore.get(requestedBoardId) : undefined;
         const aiCtx = await resolveAiContext(auth.userId, storedBoard);
         const authoritative =

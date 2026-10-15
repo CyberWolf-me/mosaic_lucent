@@ -1153,3 +1153,23 @@ export function attachPlanProvenance(
     return op;
   });
 }
+
+/** Operations that mutate or delete existing visual elements or relationships. */
+export const DESTRUCTIVE_OPS: ReadonlySet<string> = new Set([
+  "DELETE_NODE",
+  "DELETE_GROUP",
+  "DELETE_SHAPE",
+  "DELETE_WIREFRAME",
+  "TRANSFORM_DIAGRAM",
+  "DISCONNECT_NODES",
+  "DISCONNECT_SHAPES",
+  "CLEAR_VOTES",
+  "REMOVE_VOTE",
+  "REMOVE_REACTION",
+  "DELETE_COMMENT",
+]);
+
+/** Returns true if an operation deletes or destructively transforms canvas elements. */
+export function isDestructiveOperation(op: { op: string; [key: string]: unknown }): boolean {
+  return DESTRUCTIVE_OPS.has(op.op);
+}
