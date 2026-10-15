@@ -550,6 +550,7 @@ export class RealtimeServer {
           kind: "op",
           seq: result.entry.seq,
           userId: result.entry.by,
+          instanceId: this.deps.instanceId,
         })
         .catch(() => {});
     }
@@ -698,6 +699,17 @@ export class RealtimeServer {
           instanceId: this.deps.instanceId ?? "local",
           cursor: msg.cursor ?? null,
           selection: msg.selection,
+        })
+        .catch(() => {});
+    }
+    if (this.deps.fanout) {
+      void this.deps.fanout
+        .publish({
+          boardId: conn.boardId,
+          kind: "presence",
+          userId: conn.userId,
+          instanceId: this.deps.instanceId,
+          data: { type: "presence", presence },
         })
         .catch(() => {});
     }
@@ -975,7 +987,17 @@ export class RealtimeServer {
         }
         return;
       }
+      if (message.kind === "presence") {
+        if (this.deps.instanceId && message.instanceId === this.deps.instanceId) return;
+        if (message.data) {
+          this.broadcast(boardId, message.data);
+        }
+        return;
+      }
       if (message.kind !== "op" && message.kind !== "resync") return;
+      if (message.kind === "op" && this.deps.instanceId && message.instanceId === this.deps.instanceId) {
+        return;
+      }
       void room
         .pullRemote()
         .then((absorbed) => {
@@ -1080,17 +1102,27 @@ export class RealtimeServer {
     userId: string,
     ops: Operation[],
     label: string,
-    meta?: { requestId?: string; actor?: import("./boards.js").OperationActor; role?: Role },
+    meta?: {
+      requestId?: string;
+      actor?: import("./boards.js").OperationActor;
+      role?: Role;
+      trustedSystem?: boolean;
+      expectedSeq?: number;
+    },
   ): Promise<import("./room.js").CommitResult | null> {
     const room = this.rooms.get(boardId);
     if (!room) return null;
     // The room's role map is the gate. A caller with no socket here is authorized
     // strictly against authoritative store state: an internal system worker
-    // is granted its explicit system role, whereas user callers resolve through
-    // boardStore.memberRole so an unauthorized caller or viewer can never escalate
-    // permissions by passing unverified metadata.
+    // is granted its explicit system role ONLY with verified trustedSystem: true,
+    // whereas user callers and untrusted system claims resolve through boardStore.memberRole.
+    // An external caller claiming actorType: "system" or userId: "system*" without
+    // the internal trustedSystem capability can never elevate privileges.
     if (room.roleOf(userId) === undefined) {
-      if (userId.startsWith("system") || meta?.actor?.actorType === "system") {
+      if (
+        meta?.trustedSystem === true &&
+        (userId === "system" || userId.startsWith("system_") || meta?.actor?.actorType === "system")
+      ) {
         room.setRole(userId, meta?.role ?? "editor");
       } else {
         const board = await this.deps.boardStore.get(boardId);
@@ -1107,6 +1139,7 @@ export class RealtimeServer {
     const result = await room.commit(userId, ops, label, {
       ...(meta?.requestId !== undefined ? { requestId: meta.requestId } : {}),
       ...(meta?.actor !== undefined ? { actor: meta.actor } : {}),
+      ...(meta?.expectedSeq !== undefined ? { expectedSeq: meta.expectedSeq } : {}),
     });
     // Broadcast NOW, before any await: the room has assigned the seq, and a
     // socket commit right behind this one is broadcast by applyOp without
@@ -1130,7 +1163,13 @@ export class RealtimeServer {
       await this.persistRoom(boardId, room);
       if (this.deps.fanout) {
         void this.deps.fanout
-          .publish({ boardId, kind: "op", seq: result.entry.seq, userId: result.entry.by })
+          .publish({
+            boardId,
+            kind: "op",
+            seq: result.entry.seq,
+            userId: result.entry.by,
+            instanceId: this.deps.instanceId,
+          })
           .catch(() => {});
       }
     }

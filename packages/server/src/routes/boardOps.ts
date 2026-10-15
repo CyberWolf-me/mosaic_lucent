@@ -333,6 +333,8 @@ export const registerBoardOpsRoutes: RegisterRoutes = (router, s) => {
       requestId?: unknown;
       expectedSeq?: unknown;
       plan?: unknown;
+      mode?: unknown;
+      forceApply?: unknown;
     };
     try {
       const raw = await readBody(req);
@@ -368,6 +370,8 @@ export const registerBoardOpsRoutes: RegisterRoutes = (router, s) => {
         : undefined;
 
     const expectedSeq = typeof body.expectedSeq === "number" ? body.expectedSeq : undefined;
+    const mode = typeof body.mode === "string" ? (body.mode as any) : undefined;
+    const forceApply = typeof body.forceApply === "boolean" ? body.forceApply : undefined;
 
     const outcome = await orchestrateGeneration(s, {
       boardId,
@@ -378,9 +382,23 @@ export const registerBoardOpsRoutes: RegisterRoutes = (router, s) => {
       requestId,
       expectedSeq,
       role: guard.role,
+      mode,
+      forceApply,
     });
 
     if (outcome.ok) {
+      if (outcome.outcome === "proposed") {
+        send(res, 200, {
+          ok: true,
+          outcome: "proposed",
+          proposalId: outcome.proposalId,
+          operations: outcome.operations,
+          plan: outcome.plan,
+          explanation: outcome.explanation,
+          reason: outcome.reason,
+        });
+        return;
+      }
       send(res, 200, {
         ok: true,
         outcome: "committed",

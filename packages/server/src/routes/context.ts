@@ -445,6 +445,8 @@ export interface RouteServices {
        * instead of behind it.
        */
       role?: import("../identity.js").Role;
+      trustedSystem?: boolean;
+      expectedSeq?: number;
     },
   ): Promise<import("../room.js").CommitResult | null>;
   /**

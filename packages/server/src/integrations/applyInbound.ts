@@ -86,6 +86,7 @@ export async function applyInboundChange(
     actor,
     // The accepting editor, or the automation acting for the workspace.
     role: "editor",
+    trustedSystem: decider.by === "system",
   });
   if (roomResult?.ok && (roomResult.entry || roomResult.duplicate)) {
     // commitForBoard broadcast the entry and saved the room's state.

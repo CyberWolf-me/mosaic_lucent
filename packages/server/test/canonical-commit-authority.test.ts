@@ -181,9 +181,10 @@ describe("Findings B2 & B3: Canonical Commit Authority & Room Synchronization", 
       "system_automation",
       [{ op: "CREATE_NODE", id: "auto_node", nodeType: "step", label: "Automated Step" }],
       "automation run",
+      { trustedSystem: true },
     );
 
-    // Role was seeded for system actor, commit succeeded, and broadcast sent to room
+    // Role was seeded for trusted system actor, commit succeeded, and broadcast sent to room
     expect(commitResult).not.toBeNull();
     expect(commitResult?.ok).toBe(true);
     expect(room.roleOf("system_automation")).toBe("editor");
@@ -256,9 +257,35 @@ describe("Findings B2 & B3: Canonical Commit Authority & Room Synchronization", 
     expect(viewerResult?.ok).toBe(false);
     expect(viewerResult?.error).toBe("permission");
 
-    // Board in room remains clean
+    // 3. External-boundary spoofing: caller passes userId: "system" without trustedSystem capability -> REFUSED
+    const spoofSystemIdResult = await server.commitForBoard(
+      board.id,
+      "system",
+      [{ op: "CREATE_NODE", id: "spoof_system_node", nodeType: "step", label: "Hack" }],
+      "exploit",
+      { role: "editor" }, // no trustedSystem: true!
+    );
+    expect(spoofSystemIdResult).not.toBeNull();
+    expect(spoofSystemIdResult?.ok).toBe(false);
+    expect(spoofSystemIdResult?.error).toBe("permission");
+
+    // 4. External-boundary spoofing: caller passes actorType: "system" without trustedSystem capability -> REFUSED
+    const spoofActorResult = await server.commitForBoard(
+      board.id,
+      "usr_attacker",
+      [{ op: "CREATE_NODE", id: "spoof_actor_node", nodeType: "step", label: "Hack" }],
+      "exploit",
+      { actor: { actorType: "system", actorId: "fake_webhook" }, role: "editor" }, // no trustedSystem: true!
+    );
+    expect(spoofActorResult).not.toBeNull();
+    expect(spoofActorResult?.ok).toBe(false);
+    expect(spoofActorResult?.error).toBe("permission");
+
+    // Board in room remains completely clean
     expect(room.current().nodes.stranger_node).toBeUndefined();
     expect(room.current().nodes.viewer_node).toBeUndefined();
+    expect(room.current().nodes.spoof_system_node).toBeUndefined();
+    expect(room.current().nodes.spoof_actor_node).toBeUndefined();
   });
 
   it("Cross-Worker Fanout: Two workers synchronize spotlight and summon events without local echo", async () => {

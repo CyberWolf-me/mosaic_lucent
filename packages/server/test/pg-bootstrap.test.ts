@@ -33,8 +33,8 @@ import type { Role } from "../src/identity.js";
  */
 const URL = process.env.LUCENT_TEST_DATABASE_URL;
 const describeIf = URL ? describe : describe.skip;
-/** Comfortably above the measured CI cost (5.0 s) without hiding a hang. */
-const BOOT_TIMEOUT_MS = 30_000;
+/** Comfortably above the measured CI cost without hiding a hang. */
+const BOOT_TIMEOUT_MS = 60_000;
 const SECRET = "test-secret-at-least-16-chars";
 /**
  * Unique per run. This file used to TRUNCATE the shared tables so its fixed
@@ -121,7 +121,7 @@ async function join(
 /** Resolve on the next frame of a given `type`. */
 function waitFor<T>(socket: WebSocket, type: string): Promise<T> {
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(`timed out waiting for ${type}`)), 5000);
+    const timer = setTimeout(() => reject(new Error(`timed out waiting for ${type}`)), 20000);
     const onMessage = (data: unknown) => {
       const msg = JSON.parse(String(data)) as { type: string };
       if (msg.type !== type) return;

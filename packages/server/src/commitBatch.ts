@@ -26,7 +26,7 @@ export async function commitBatch(
   operations: Operation[],
   label: string,
   actor: OperationActor,
-  options: { expectedSeq?: number; requestId?: string; role?: Role } = {},
+  options: { expectedSeq?: number; requestId?: string; role?: Role; trustedSystem?: boolean } = {},
 ): Promise<CommitOutcome> {
   // Room-first (found live: 2026-09-10): a batch written only to the store
   // bypassed every live socket, and a later room eviction snapshotted the
@@ -34,10 +34,13 @@ export async function commitBatch(
   // own head, fresher than anything the HTTP caller read. The route's
   // authorized role seeds the room for a caller with no socket in it (an
   // agent, an MCP client), so their batch goes through the room too.
+  const isTrustedSystem = options.trustedSystem ?? (userId === "system");
   const roomResult = await s.commitForBoard(board.id, userId, operations, label, {
+    ...(options.expectedSeq !== undefined ? { expectedSeq: options.expectedSeq } : {}),
     ...(options.requestId !== undefined ? { requestId: options.requestId } : {}),
     actor,
     ...(options.role ? { role: options.role } : {}),
+    ...(isTrustedSystem ? { trustedSystem: true } : {}),
   });
   if (roomResult) {
     // The room broadcast the entry and saved ITS state — the board as it is

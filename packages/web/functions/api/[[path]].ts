@@ -1,13 +1,21 @@
+import { resolveEdgeOrigin } from "../_origin.js";
+
 interface Env {
   LUCENT_CACHE?: KVNamespace;
   LUCENT_DB?: D1Database;
   LUCENT_ORIGIN?: string;
+  ENVIRONMENT?: string;
+  NODE_ENV?: string;
 }
 
 export const onRequest: PagesFunction<Env> = async (context) => {
   const url = new URL(context.request.url);
   const cache = context.env.LUCENT_CACHE;
-  const origin = (context.env.LUCENT_ORIGIN || "http://127.0.0.1:4387").replace(/\/+$/, "");
+  const originResult = resolveEdgeOrigin(context.env);
+  if ("errorResponse" in originResult) {
+    return originResult.errorResponse;
+  }
+  const origin = originResult.origin;
 
   // Edge cache for public static templates
   if (context.request.method === "GET" && cache && url.pathname === "/api/templates/public") {
