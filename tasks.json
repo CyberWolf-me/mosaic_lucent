@@ -1,0 +1,189 @@
+{
+  "spec_version": 1,
+  "note": "Canonical task SPECIFICATIONS (what each task requires). Mutable execution status lives in .cto/state.sqlite, never here. See scripts/cto/lib/spec.js.",
+  "tasks": [
+    {
+      "id": "ENG-001",
+      "title": "Verify unified semantic pipeline remainder (B6)",
+      "description": "Trace the two AI generation dialects (SemanticPlan compiler vs direct 38-op pipeline) and the large-board summary path; confirm which B6 gaps remain open and fix or record them with evidence.",
+      "owner_role": "implementation",
+      "source_refs": ["AUDIT.md", "packages/core/src/compiler.ts", "packages/core/src/repair.ts", "packages/ai/src/provider.ts", "packages/server/src/generate.ts"],
+      "dependencies": [],
+      "scope": {
+        "allowed_paths": ["packages/core/src/**", "packages/core/test/**", "packages/ai/src/**", "packages/ai/test/**", "packages/server/src/generate.ts", "packages/server/test/generate*.test.ts"],
+        "prohibited_paths": [".env", ".env.*", "packages/server/migrations/**"]
+      },
+      "acceptance_criteria": [
+        "Every live generation path is named with its entry route and compiler/repair stages.",
+        "Label-as-ID alias recovery (repairOperations) is pinned by test or the gap is recorded.",
+        "Large-board (>200 node) summary slicing keeps selection neighborhoods; verified or recorded."
+      ],
+      "verification": {
+        "commands": [
+          { "command": "npm run typecheck", "cwd": "." },
+          { "command": "npm run test -w @lucent/core -- --run test/repair.test.ts", "cwd": "." }
+        ],
+        "required_gates": ["typecheck", "relevant_tests", "diff_review"]
+      },
+      "deliverables": ["Findings with file:line evidence, or code + tests"],
+      "risk": "medium",
+      "required_approvals": [],
+      "retry_policy": { "max_automatic_attempts": 2 }
+    },
+    {
+      "id": "ENG-002",
+      "title": "Resolve lint-gate timeout",
+      "description": "`npm run lint` (eslint .) exceeded 300s on the dev machine. Determine whether this is environment-specific (Windows/power), a config scope problem, or a real gate failure; make the gate runnable and record the outcome.",
+      "owner_role": "qa",
+      "source_refs": ["eslint.config.js", ".github/workflows/ci.yml"],
+      "dependencies": [],
+      "scope": {
+        "allowed_paths": ["eslint.config.js", "docs/**"],
+        "prohibited_paths": [".env", ".env.*", "packages/**", "scripts/cto/**"]
+      },
+      "acceptance_criteria": [
+        "Root cause of the timeout is identified with timing evidence.",
+        "`npm run lint` completes in under 10 minutes on the dev machine, or a concrete approved deferral is recorded."
+      ],
+      "verification": {
+        "commands": [{ "command": "npm run lint", "cwd": "." }],
+        "required_gates": ["lint", "diff_review"]
+      },
+      "deliverables": ["Timing evidence and fix, or approved deferral record"],
+      "risk": "low",
+      "required_approvals": [],
+      "retry_policy": { "max_automatic_attempts": 2 }
+    },
+    {
+      "id": "ENG-003",
+      "title": "Verify generation direct-write hardening",
+      "description": "Confirm the generate.ts authoritative-commit path cannot bypass the op log: the store.put fallback (generate.ts ~1101-1116) must be unreachable when authoritative.commitBatch is provided (app.ts always provides it), and run.boardId fallback stays proposeOnly (app.ts:5133,5341). Pin with a regression test or record the gap.",
+      "owner_role": "security",
+      "source_refs": ["packages/server/src/generate.ts", "packages/server/src/app.ts", "docs/adr/0041-one-mutation-path.md"],
+      "dependencies": [],
+      "scope": {
+        "allowed_paths": ["packages/server/src/generate.ts", "packages/server/src/app.ts", "packages/server/test/**"],
+        "prohibited_paths": [".env", ".env.*", "packages/server/migrations/**"]
+      },
+      "acceptance_criteria": [
+        "A test proves run.boardId generations validate authoritatively without auto-committing.",
+        "A test proves top-level boardId generations commit through commitBatch (room/op log), never a bare store.put."
+      ],
+      "verification": {
+        "commands": [
+          { "command": "npm run typecheck -w @lucent/server", "cwd": "." },
+          { "command": "npm run test -w @lucent/server -- --run test/trust-review.test.ts test/scenarios/s6-ai-ask-presence.test.ts", "cwd": "." }
+        ],
+        "required_gates": ["typecheck", "relevant_tests", "diff_review"]
+      },
+      "deliverables": ["Regression tests + evidence"],
+      "risk": "high",
+      "required_approvals": [],
+      "retry_policy": { "max_automatic_attempts": 2 }
+    },
+    {
+      "id": "ENG-004",
+      "title": "Repair documentation drift (README / AGENTS / docs-26)",
+      "description": "Fix the verified doc-vs-code discrepancies from AUDIT.md A4: README claims V1 slice + React Flow renderer; AGENTS.md denies the statement/workspace-memory layer that stages C2-C6 shipped; docs/26-the-connected-loop.md status table has stale entries fixed by later commits.",
+      "owner_role": "product",
+      "source_refs": ["AUDIT.md", "README.md", "AGENTS.md", "docs/26-the-connected-loop.md", "docs/checklist.md"],
+      "dependencies": [],
+      "scope": {
+        "allowed_paths": ["README.md", "AGENTS.md", "docs/**", ".changeset/**"],
+        "prohibited_paths": ["packages/**", ".env", ".env.*"]
+      },
+      "acceptance_criteria": [
+        "README describes the actual 9-package workspace and bespoke DOM+SVG renderer.",
+        "AGENTS.md data-model section matches the shipped statement/StatementIndexer/memory substrate.",
+        "docs/26 status table no longer contradicts shipped code, or deltas are explicitly listed."
+      ],
+      "verification": {
+        "commands": [{ "command": "npm run format:check", "cwd": "." }],
+        "required_gates": ["diff_review"]
+      },
+      "deliverables": ["Doc edits with per-claim code citations"],
+      "risk": "low",
+      "required_approvals": [],
+      "retry_policy": { "max_automatic_attempts": 1 }
+    },
+    {
+      "id": "ENG-005",
+      "title": "Implement CTO-agent control plane (scripts/cto + docs)",
+      "description": "Build the local-first engineering control plane per the CTO-agent system spec: versioned task specs, SQLite operational state, isolated worktree execution, evidence-bound verification, independent review, controlled integration, generated reports. This task covers the implementation itself.",
+      "owner_role": "cto",
+      "source_refs": ["tasks.json", "PRODUCT.md", "ARCHITECTURE.md", "DECISIONS.md"],
+      "dependencies": [],
+      "scope": {
+        "allowed_paths": ["scripts/cto/**", "tasks.json", "PRODUCT.md", "ARCHITECTURE.md", "DECISIONS.md", "docs/agent-team.md", "docs/agent-policy.md", "docs/tasks.md", "docs/execution-log.md", "docs/reports/**", ".gitignore"],
+        "prohibited_paths": ["packages/**", ".env", ".env.*"]
+      },
+      "acceptance_criteria": [
+        "All section-11 acceptance conditions of the system spec hold, evidenced by Phase-6 adversarial tests.",
+        "No remote push or deployment occurs during the build."
+      ],
+      "verification": {
+        "commands": [
+          { "command": "node --test scripts/cto/test/*.test.mjs", "cwd": "." },
+          { "command": "node scripts/cto/task.mjs validate", "cwd": "." }
+        ],
+        "required_gates": ["adversarial_tests", "spec_validation", "diff_review"]
+      },
+      "deliverables": ["Working control plane + green adversarial suite + founder report"],
+      "risk": "medium",
+      "required_approvals": [],
+      "retry_policy": { "max_automatic_attempts": 2 }
+    },
+    {
+      "id": "ENG-006",
+      "title": "Final local integration of control plane",
+      "description": "Merge the control-plane branch into local main after review acceptance: scope check, base revision check, post-merge typecheck + control-plane tests + relevant repo suites, stale-evidence invalidation, generated docs regenerated.",
+      "owner_role": "cto",
+      "source_refs": ["docs/agent-policy.md"],
+      "dependencies": ["ENG-005"],
+      "scope": {
+        "allowed_paths": ["scripts/cto/**", "tasks.json", "PRODUCT.md", "ARCHITECTURE.md", "DECISIONS.md", "docs/**", ".gitignore"],
+        "prohibited_paths": ["packages/**", ".env", ".env.*"]
+      },
+      "acceptance_criteria": [
+        "Review ACCEPT recorded by a reviewer distinct from the implementer.",
+        "Post-merge checks green on the integrated commit; integrated SHA recorded.",
+        "Generated docs match sources (stale check passes)."
+      ],
+      "verification": {
+        "commands": [
+          { "command": "npm run typecheck", "cwd": "." },
+          { "command": "node --test scripts/cto/test/*.test.mjs", "cwd": "." }
+        ],
+        "required_gates": ["typecheck", "adversarial_tests", "diff_review"]
+      },
+      "deliverables": ["Integrated commit SHA + verification evidence"],
+      "risk": "medium",
+      "required_approvals": [],
+      "retry_policy": { "max_automatic_attempts": 1 }
+    },
+    {
+      "id": "ENG-007",
+      "title": "Founder-authorized remote push of main",
+      "description": "Push local main (control-plane merge + prior integrity convergence merge) to origin. Blocked until ENG-006 is done AND the founder grants explicit approval for this exact operation.",
+      "owner_role": "cto",
+      "source_refs": [],
+      "dependencies": ["ENG-006"],
+      "scope": {
+        "allowed_paths": [],
+        "prohibited_paths": ["**"]
+      },
+      "acceptance_criteria": [
+        "Founder approval recorded for operation push target origin/main.",
+        "Push succeeds; remote SHA matches local integrated SHA."
+      ],
+      "verification": {
+        "commands": [{ "command": "git log --oneline -3", "cwd": "." }],
+        "required_gates": ["founder_approval"]
+      },
+      "deliverables": ["Approval record + push receipt"],
+      "risk": "high",
+      "required_approvals": ["founder:push-origin-main"],
+      "retry_policy": { "max_automatic_attempts": 0 }
+    }
+  ]
+}
