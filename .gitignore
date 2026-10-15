@@ -32,3 +32,6 @@ playwright-report/
 .load-artifacts/
 Microsoft VS Code/
 video/
+# CTO control plane: transactional runtime state + raw log artifacts.
+# Task specs (tasks.json) and generated reports (docs/reports/) are tracked.
+.cto/
