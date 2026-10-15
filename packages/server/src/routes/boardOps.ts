@@ -370,8 +370,20 @@ export const registerBoardOpsRoutes: RegisterRoutes = (router, s) => {
         : undefined;
 
     const expectedSeq = typeof body.expectedSeq === "number" ? body.expectedSeq : undefined;
-    const mode = typeof body.mode === "string" ? (body.mode as any) : undefined;
-    const forceApply = typeof body.forceApply === "boolean" ? body.forceApply : undefined;
+    if (body.forceApply === true) {
+      if (guard.role !== "owner" || viaAgent || viaMcp) {
+        send(res, 403, {
+          error: "forbidden",
+          detail: "forceApply is restricted to board owners and cannot be invoked by agents, MCP clients, or non-owners",
+        });
+        return;
+      }
+    }
+    const forceApply = body.forceApply === true && guard.role === "owner" && !viaAgent && !viaMcp;
+    const mode =
+      body.mode === "always" || body.mode === "never" || body.mode === "propose" || body.mode === "auto"
+        ? body.mode
+        : undefined;
 
     const outcome = await orchestrateGeneration(s, {
       boardId,

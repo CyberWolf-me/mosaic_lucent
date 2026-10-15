@@ -34,7 +34,10 @@ export async function commitBatch(
   // own head, fresher than anything the HTTP caller read. The route's
   // authorized role seeds the room for a caller with no socket in it (an
   // agent, an MCP client), so their batch goes through the room too.
-  const isTrustedSystem = options.trustedSystem ?? (userId === "system");
+  // Only explicitly authorized internal workers with trustedSystem: true can exercise
+  // system-level capabilities; caller-supplied user identities (e.g. userId: "system")
+  // alone NEVER confer trusted system authority.
+  const isTrustedSystem = options.trustedSystem === true;
   const roomResult = await s.commitForBoard(board.id, userId, operations, label, {
     ...(options.expectedSeq !== undefined ? { expectedSeq: options.expectedSeq } : {}),
     ...(options.requestId !== undefined ? { requestId: options.requestId } : {}),

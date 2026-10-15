@@ -203,12 +203,15 @@ export async function orchestrateGeneration(
 
   // 8.5 Risk-based proposal policy evaluation (destructive and high-impact operations gate behind proposals)
   const existingNodeCount = Object.keys(board.workspace.nodes).length;
+  const isAgentActor = req.actor === "agent" || (typeof req.actor === "object" && req.actor.actorType === "ai");
+  const isAuthorizedOwner = req.role === "owner" && !isAgentActor;
+  const authorizedForceApply = Boolean(req.forceApply && isAuthorizedOwner);
   const policy = evaluateProposalPolicy({
     operations: stampedOps,
     plan,
     mode: req.mode,
     existingNodeCount,
-    forceApply: req.forceApply,
+    forceApply: authorizedForceApply,
   });
 
   if (policy.requiresProposal && services.proposals) {

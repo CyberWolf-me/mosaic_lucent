@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import { applyOperations, createWorkspace, type Operation } from "@lucent/core";
 import { summarizeWorkspace, type LLMProvider } from "@lucent/ai";
 import { InMemoryBoardStore, newBoardId } from "../src/boards.js";
+import { commitBatch } from "../src/commitBatch.js";
 import { InMemoryUserStore } from "../src/accounts.js";
 import { InMemoryTicketStore } from "../src/realtimeTicket.js";
 import { handleGenerate } from "../src/generate.js";
@@ -374,5 +375,128 @@ describe("Findings B2 & B3: Canonical Commit Authority & Room Synchronization", 
     // Verify Worker 1 does not echo the message back to itself
     const aliceFrames = aliceSocket.send.mock.calls.map(([raw]) => JSON.parse(raw));
     expect(aliceFrames.filter((f) => f.type === "summon").length).toBe(0); // Alice was originator of summon, not recipient
+  });
+
+  it("adversarially tests external HTTP and WebSocket boundaries cannot forge system authority", async () => {
+    const boardStore = new InMemoryBoardStore();
+    const userStore = new InMemoryUserStore();
+    const tickets = new InMemoryTicketStore(60_000);
+
+    const owner = {
+      id: "usr_owner_ext",
+      email: "owner_ext@test.com",
+      name: "Owner",
+      passwordHash: "x",
+      tokenVersion: 0,
+      emailVerifiedAt: Date.now(),
+      createdAt: Date.now(),
+    };
+    const viewer = {
+      id: "usr_viewer_ext",
+      email: "viewer_ext@test.com",
+      name: "Viewer",
+      passwordHash: "x",
+      tokenVersion: 0,
+      emailVerifiedAt: Date.now(),
+      createdAt: Date.now(),
+    };
+    await userStore.insert(owner);
+    await userStore.insert(viewer);
+
+    const board = {
+      id: newBoardId(),
+      orgId: "org_sec",
+      ownerId: owner.id,
+      name: "Secured Board",
+      workspace: createWorkspace(),
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    await boardStore.put(board);
+    await boardStore.setMember({
+      boardId: board.id,
+      userId: viewer.id,
+      role: "viewer",
+      invitedBy: owner.id,
+      createdAt: Date.now(),
+    });
+
+    const server = new RealtimeServer({
+      userStore,
+      boardStore,
+      secret: "test-secret-at-least-32-characters-long",
+      tickets,
+      orgRoleFor: async () => undefined,
+    });
+    const room = new Room(board.id, board.workspace, board.ownerId);
+    (server as any).rooms.set(board.id, room);
+
+    // 1. External viewer attempts to commit via commitBatch with forged trustedSystem or actorType="system"
+    const viewerSpoofResult = await commitBatch(
+      {
+        commitForBoard: (bId, uId, ops, lbl, meta) => server.commitForBoard(bId, uId, ops, lbl, meta),
+        boardStore,
+      },
+      board,
+      viewer.id,
+      [{ op: "CREATE_NODE", id: "hack_node_1", nodeType: "step", label: "Viewer Hack" }],
+      "spoof",
+      { actorType: "system", actorId: "attacker", initiatedBy: viewer.id },
+      { role: "viewer" }, // Caller is viewer; no trustedSystem capability
+    );
+    expect(viewerSpoofResult.ok).toBe(false);
+    expect(room.current().nodes.hack_node_1).toBeUndefined();
+
+    // 2. Caller attempting to pass userId="system" to commitBatch without trustedSystem: true is REFUSED
+    const systemIdWithoutCapResult = await commitBatch(
+      {
+        commitForBoard: (bId, uId, ops, lbl, meta) => server.commitForBoard(bId, uId, ops, lbl, meta),
+        boardStore,
+      },
+      board,
+      "system",
+      [{ op: "CREATE_NODE", id: "hack_node_2", nodeType: "step", label: "Unprivileged System" }],
+      "unauthorized-system",
+      { actorType: "system", actorId: "untrusted", initiatedBy: "system" },
+      { role: "editor" }, // No trustedSystem: true!
+    );
+    expect(systemIdWithoutCapResult.ok).toBe(false);
+    expect(room.current().nodes.hack_node_2).toBeUndefined();
+
+    // 3. Legitimate internal worker with explicit trustedSystem: true capability SUCCEEDS
+    const internalWorkerResult = await commitBatch(
+      {
+        commitForBoard: (bId, uId, ops, lbl, meta) => server.commitForBoard(bId, uId, ops, lbl, meta),
+        boardStore,
+      },
+      board,
+      "system",
+      [{ op: "CREATE_NODE", id: "valid_node", nodeType: "step", label: "Automation Added" }],
+      "inbound-automation",
+      { actorType: "system", actorId: "inbound-integration", initiatedBy: "system" },
+      { role: "editor", trustedSystem: true }, // Explicit verified capability
+    );
+    expect(internalWorkerResult.ok).toBe(true);
+    expect(room.current().nodes.valid_node).toBeDefined();
+    expect(room.current().nodes.valid_node?.label).toBe("Automation Added");
+
+    // 4. WebSocket applyOp boundary: client cannot forge actorType="system"
+    const socket = { readyState: 1, send: vi.fn() };
+    const conn = { socket: socket as any, userId: owner.id, name: "Owner", boardId: board.id };
+    room.setRole(owner.id, "owner");
+
+    await (server as any).applyOp(conn, {
+      type: "op",
+      ops: [{ op: "CREATE_NODE", id: "ws_node", nodeType: "step", label: "WS Node" }],
+      label: "ws add",
+      actor: { actorType: "system", actorId: "forged" }, // Hostile client frame attempting system actor
+    });
+
+    // Check durable op log: actor recorded MUST be owner's identity, never forged system actor
+    const log = await boardStore.loadLog(board.id);
+    const wsEntry = log.find((e) => e.ops.some((o) => (o as any).id === "ws_node"));
+    expect(wsEntry).toBeDefined();
+    expect(wsEntry?.actor?.actorType).toBe("user");
+    expect(wsEntry?.actor?.actorId).toBe(owner.id);
   });
 });

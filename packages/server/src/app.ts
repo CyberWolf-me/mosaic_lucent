@@ -5801,6 +5801,7 @@ export function createApp(deps: AppDeps): App {
     tickets,
     orgRoleFor,
     notify: notifyUser,
+    proposals: proposalStore,
     // M3: optional cross-instance wiring. When present, the realtime path
     // publishes commits and presence updates to the bus / store so a sibling
     // instance's subscribers see the same state. main.ts is the only caller

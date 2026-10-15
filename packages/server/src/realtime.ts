@@ -147,6 +147,8 @@ export interface RealtimeDeps {
    * rows and as a label in fanout messages. A short string per process.
    */
   instanceId?: string;
+  /** Durable proposals store for review-gated proposals lifecycle and catch-up. */
+  proposals?: import("./proposals.js").ProposalStore;
 }
 
 export class RealtimeServer {
@@ -404,6 +406,18 @@ export class RealtimeServer {
     });
     // Tell everyone else this person is here.
     this.broadcast(boardId, { type: "peer-joined", presence }, conn);
+
+    // Durable proposal catchup: if a proposal is pending, deliver it to the joiner immediately
+    if (this.deps.proposals) {
+      void this.deps.proposals
+        .pendingForBoards([boardId])
+        .then(([pending]) => {
+          if (pending && conn.boardId === boardId) {
+            this.sendTo(conn, { type: "proposal-opened", proposal: pending });
+          }
+        })
+        .catch(() => {});
+    }
   }
 
   private async applyOp(conn: Conn, msg: ClientMsg, queued: () => void = () => {}): Promise<void> {
@@ -997,6 +1011,16 @@ export class RealtimeServer {
       if (message.kind !== "op" && message.kind !== "resync") return;
       if (message.kind === "op" && this.deps.instanceId && message.instanceId === this.deps.instanceId) {
         return;
+      }
+      if (message.kind === "resync" && this.deps.proposals) {
+        void this.deps.proposals
+          .pendingForBoards([boardId])
+          .then(([pending]) => {
+            if (pending) {
+              this.broadcast(boardId, { type: "proposal-opened", proposal: pending });
+            }
+          })
+          .catch(() => {});
       }
       void room
         .pullRemote()

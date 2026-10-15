@@ -221,4 +221,185 @@ describe("Cross-Worker Fanout: Complete Coverage for All 6 Declared Categories",
     expect(absorbedSeqs).toContain(3);
     expect(absorbedSeqs).toContain(4);
   });
+
+  it("proves durable proposal recovery after lost notifications, reconnect catchup, duplicate idempotency, and tenant isolation", async () => {
+    const busListeners: ((msg: FanoutMessage) => void)[] = [];
+    let dropProposals = false;
+
+    const mockBus = {
+      publish: vi.fn().mockImplementation(async (msg: FanoutMessage) => {
+        if (dropProposals && msg.kind === "proposal") {
+          // Simulate lost proposal notification over network / dropped bus message
+          return;
+        }
+        for (const l of [...busListeners]) l(msg);
+      }),
+      subscribe: vi.fn().mockImplementation((_boardId: string, listener: (msg: FanoutMessage) => void) => {
+        busListeners.push(listener);
+        return () => {
+          const idx = busListeners.indexOf(listener);
+          if (idx !== -1) busListeners.splice(idx, 1);
+        };
+      }),
+      close: async () => {},
+    };
+
+    const boardStore = new InMemoryBoardStore();
+    const proposalStore = new (await import("../src/proposals.js")).InMemoryProposalStore();
+    const userStore = new InMemoryUserStore();
+    const tickets = new InMemoryTicketStore(60_000);
+
+    // Tenant 1: Board A in Org 1
+    const boardA = {
+      id: "brd_tenant_A",
+      orgId: "org_alpha",
+      ownerId: "usr_alice",
+      name: "Board A",
+      workspace: createWorkspace(),
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    await boardStore.put(boardA);
+
+    // Tenant 2: Board B in Org 2
+    const boardB = {
+      id: "brd_tenant_B",
+      orgId: "org_beta",
+      ownerId: "usr_charlie",
+      name: "Board B",
+      workspace: createWorkspace(),
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    await boardStore.put(boardB);
+
+    // Worker 1
+    const worker1 = new RealtimeServer({
+      userStore,
+      boardStore,
+      secret: "test-secret-at-least-32-characters-long",
+      tickets,
+      orgRoleFor: async () => "editor",
+      fanout: mockBus as any,
+      instanceId: "worker_1",
+      proposals: proposalStore,
+    });
+
+    // Worker 2
+    const worker2 = new RealtimeServer({
+      userStore,
+      boardStore,
+      secret: "test-secret-at-least-32-characters-long",
+      tickets,
+      orgRoleFor: async () => "editor",
+      fanout: mockBus as any,
+      instanceId: "worker_2",
+      proposals: proposalStore,
+    });
+
+    const roomA1 = await (worker1 as any).roomFor(boardA.id, boardA.workspace, boardA.ownerId);
+    const roomA2 = await (worker2 as any).roomFor(boardA.id, boardA.workspace, boardA.ownerId);
+    const roomB2 = await (worker2 as any).roomFor(boardB.id, boardB.workspace, boardB.ownerId);
+
+    // Sockets
+    const aliceSocket = { readyState: 1, send: vi.fn() };
+    const aliceConn = { socket: aliceSocket as any, userId: "usr_alice", name: "Alice", boardId: boardA.id };
+    roomA1.setRole("usr_alice", "editor");
+    (worker1 as any).connsByBoard.set(boardA.id, new Set([aliceConn]));
+
+    const bobSocket = { readyState: 1, send: vi.fn() };
+    const bobConn = { socket: bobSocket as any, userId: "usr_bob", name: "Bob", boardAId: boardA.id, boardId: boardA.id };
+    roomA2.setRole("usr_bob", "editor");
+    (worker2 as any).connsByBoard.set(boardA.id, new Set([bobConn]));
+
+    const charlieSocket = { readyState: 1, send: vi.fn() };
+    const charlieConn = { socket: charlieSocket as any, userId: "usr_charlie", name: "Charlie", boardId: boardB.id };
+    roomB2.setRole("usr_charlie", "editor");
+    (worker2 as any).connsByBoard.set(boardB.id, new Set([charlieConn]));
+
+    // 1. TENANT ISOLATION: Proposal created on Board A must NEVER leak to Board B
+    const createdA = await proposalStore.create({
+      boardId: boardA.id,
+      orgId: boardA.orgId,
+      request: "Reorganize auth on Board A",
+      operations: [{ op: "CREATE_NODE", id: "auth_A", nodeType: "step", label: "Auth A" }],
+      createdBy: "usr_alice",
+      createdAt: Date.now(),
+    });
+
+    worker1.broadcastProposal(boardA.id, {
+      type: "proposal-opened",
+      proposal: createdA.proposal,
+    });
+
+    await new Promise((r) => setTimeout(r, 50));
+
+    // Bob on Board A on Worker 2 received proposal
+    const bobFrames1 = bobSocket.send.mock.calls.map(([raw]) => JSON.parse(raw));
+    expect(bobFrames1.some((f) => f.type === "proposal-opened" && f.proposal?.id === createdA.proposal.id)).toBe(true);
+
+    // Charlie on Board B (Org Beta) on Worker 2 received ZERO proposal frames! Tenant isolation holds!
+    const charlieFrames = charlieSocket.send.mock.calls.map(([raw]) => JSON.parse(raw));
+    expect(charlieFrames.filter((f) => f.type === "proposal-opened").length).toBe(0);
+
+    // 2. LOCAL-ECHO SUPPRESSION: Alice on Worker 1 received the broadcast only once, no duplicate echo
+    const aliceFrames = aliceSocket.send.mock.calls.map(([raw]) => JSON.parse(raw));
+    expect(aliceFrames.filter((f) => f.type === "proposal-opened").length).toBe(1);
+
+    // 3. LOST PROPOSAL NOTIFICATION & DURABLE CATCHUP
+    // Simulate: Proposal created in durable ProposalStore while network notification is dropped
+    dropProposals = true;
+    bobSocket.send.mockClear();
+
+    const createdA2 = await proposalStore.create({
+      boardId: boardA.id,
+      orgId: boardA.orgId,
+      request: "Add billing microservice",
+      operations: [{ op: "CREATE_NODE", id: "billing_A", nodeType: "step", label: "Billing A" }],
+      createdBy: "usr_alice",
+      createdAt: Date.now(),
+    });
+
+    // Worker 1 attempts to broadcast, but bus drops it
+    worker1.broadcastProposal(boardA.id, {
+      type: "proposal-opened",
+      proposal: createdA2.proposal,
+    });
+    await new Promise((r) => setTimeout(r, 50));
+
+    // Bob received NOTHING because notification was dropped
+    expect(bobSocket.send).not.toHaveBeenCalled();
+
+    // DURABLE RECOVERY VIA RESYNC:
+    // When bus fires "resync" or a client reconnects, Worker 2 reconciles with durable ProposalStore
+    await mockBus.publish({ boardId: boardA.id, kind: "resync" });
+    await new Promise((r) => setTimeout(r, 50));
+
+    // Bob's socket on Worker 2 now received the authoritative pending proposal!
+    const bobCatchupFrames = bobSocket.send.mock.calls.map(([raw]) => JSON.parse(raw));
+    expect(bobCatchupFrames.some((f) => f.type === "proposal-opened" && f.proposal?.id === createdA2.proposal.id)).toBe(true);
+
+    // DURABLE RECOVERY VIA RECONNECT JOIN:
+    // A new joiner on Worker 2 joining after lost notifications receives the pending proposal on join
+    const davidSocket = { readyState: 1, send: vi.fn() };
+    const davidConn: any = { socket: davidSocket as any, userId: "usr_david", name: "David" };
+    await (worker2 as any).join(davidConn, boardA.id, 0);
+
+    const davidFrames = davidSocket.send.mock.calls.map(([raw]) => JSON.parse(raw));
+    expect(davidFrames.some((f) => f.type === "welcome")).toBe(true);
+    expect(davidFrames.some((f) => f.type === "proposal-opened" && f.proposal?.id === createdA2.proposal.id)).toBe(true);
+
+    // 4. DUPLICATE NOTIFICATION IDEMPOTENCY:
+    // Replayed proposal notification causes zero state mutation or error
+    dropProposals = false;
+    worker1.broadcastProposal(boardA.id, {
+      type: "proposal-opened",
+      proposal: createdA2.proposal,
+    });
+    await new Promise((r) => setTimeout(r, 50));
+    // Proposals store remains with exactly 1 pending proposal
+    const pendingList = await proposalStore.pendingForBoards([boardA.id]);
+    expect(pendingList).toHaveLength(1);
+    expect(pendingList[0]?.id).toBe(createdA2.proposal.id);
+  });
 });

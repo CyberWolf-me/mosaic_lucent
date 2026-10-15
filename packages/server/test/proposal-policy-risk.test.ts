@@ -6,7 +6,7 @@ import {
   isHighImpactOperation,
 } from "../src/proposalPolicy.js";
 import { orchestrateGeneration } from "../src/orchestrator.js";
-import { InMemoryBoardStore } from "../src/boards.js";
+import { InMemoryBoardStore, newBoardId } from "../src/boards.js";
 import { InMemoryProposalStore } from "../src/proposals.js";
 import { InMemoryUserStore } from "../src/accounts.js";
 import { InMemoryTicketStore } from "../src/realtimeTicket.js";
@@ -371,5 +371,114 @@ describe("Risk-Based Proposal Gating in Orchestrator (Integration Tests)", () =>
     expect(nodeKeys.length).toBe(1);
     const createdNode = Object.values(room.current().nodes)[0];
     expect(createdNode?.label).toBe("Stripe Gateway");
+  });
+
+  it("orchestrator strictly forbids editors or agents from using forceApply on destructive plans", async () => {
+    const boardStore = new InMemoryBoardStore();
+    const proposalStore = new InMemoryProposalStore();
+
+    const ws = createWorkspace();
+    ws.nodes.victim_node = {
+      id: "victim_node",
+      label: "Critical Service",
+      nodeType: "step",
+    };
+
+    const board = {
+      id: newBoardId(),
+      orgId: "org_test",
+      name: "Destructive Test Board",
+      ownerId: "usr_owner_real",
+      workspace: ws,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    await boardStore.put(board);
+
+    const room = new Room(board.id, board.workspace, board.ownerId);
+    const userStore = new InMemoryUserStore();
+    const tickets = new InMemoryTicketStore(60_000);
+    const server = new RealtimeServer({
+      userStore,
+      boardStore,
+      secret: "test-secret-at-least-32-characters-long",
+      tickets,
+      orgRoleFor: async () => undefined,
+    });
+    (server as any).rooms.set(board.id, room);
+
+    const services: any = {
+      boardStore,
+      proposals: proposalStore,
+      provider: new MockProvider(),
+      realtimeServer: server,
+      commitForBoard: (bId: string, uId: string, ops: any[], lbl: string, meta: any) =>
+        server.commitForBoard(bId, uId, ops, lbl, meta),
+    };
+
+    const destructivePlan: SemanticPlan = {
+      intent: {
+        userObjective: "Reorganize architecture with new edge gateway",
+        targetKind: "flowchart",
+        expectedTopology: "directed_flow",
+        mutationScope: "reorganize_only",
+        focusNodeIds: [],
+      },
+      nodes: [
+        {
+          ref: "edge_gw",
+          label: "New Edge Gateway",
+          role: "step",
+        },
+      ],
+      edges: [
+        {
+          from: "edge_gw",
+          to: "victim_node",
+          relation: "calls",
+        },
+      ],
+      groups: [],
+      explanation: "Restructure architecture with edge gateway",
+    };
+
+    // 1. Editor passes forceApply: true -> MUST NOT BYPASS! Gated behind proposal!
+    const editorOutcome = await orchestrateGeneration(services, {
+      boardId: board.id,
+      userId: "usr_editor_1",
+      prompt: "Delete critical service",
+      actor: "user",
+      role: "editor", // Editor is NOT owner!
+      forceApply: true,
+      plan: destructivePlan,
+    });
+    expect(editorOutcome.ok).toBe(true);
+    expect(editorOutcome.outcome).toBe("proposed"); // Must be proposed, NOT committed!
+
+    // 2. Agent passes forceApply: true -> MUST NOT BYPASS! Gated behind proposal!
+    const agentOutcome = await orchestrateGeneration(services, {
+      boardId: board.id,
+      userId: "usr_owner_real",
+      prompt: "Delete critical service",
+      actor: "agent", // AI/agent actor cannot force-apply!
+      role: "owner",
+      forceApply: true,
+      plan: destructivePlan,
+    });
+    expect(agentOutcome.ok).toBe(true);
+    expect(agentOutcome.outcome).toBe("proposed");
+
+    // 3. Authenticated Human Owner passes forceApply: true -> Authorized! Directly committed!
+    const ownerOutcome = await orchestrateGeneration(services, {
+      boardId: board.id,
+      userId: "usr_owner_real",
+      prompt: "Delete critical service with owner confirmation",
+      actor: "user",
+      role: "owner", // Owner human
+      forceApply: true,
+      plan: destructivePlan,
+    });
+    expect(ownerOutcome.ok).toBe(true);
+    expect(ownerOutcome.outcome).toBe("committed");
   });
 });
